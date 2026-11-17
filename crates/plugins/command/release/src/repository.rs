@@ -96,12 +96,11 @@ impl<'a> Repository<'a> {
             };
 
             let log = self.history.log_between(&main, &tip)?;
-            let (started, picked) = releases::parse_line(&log)?;
+            let started = releases::parse_line(&log)?;
             lines.insert(key, Line {
                 branch: branch.name,
                 tip,
                 started,
-                picked,
             });
         }
 

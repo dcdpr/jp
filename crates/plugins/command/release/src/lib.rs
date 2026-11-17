@@ -15,8 +15,8 @@
 //!   with `.comfort.toml` when `format_on_write` is enabled).
 //! - `options` parses `plugins.command.release.options`.
 //! - `definitions` scaffolds the `changelog_add` tool definition.
-//! - `cut`, `pick`, `finalize`, `build`, `abandon`, `due`, and `status`
-//!   implement the release pipeline over `releases` and `repository`.
+//! - `cut`, `finalize`, `build`, `abandon`, `due`, and `status` implement the
+//!   release pipeline over `releases` and `repository`.
 //!
 //! See `docs/rfd/121-changelog-fragments-and-validation.md` and
 //! `docs/rfd/122-release-pipeline.md`.
@@ -30,7 +30,6 @@ mod edit;
 mod entry;
 mod finalize;
 mod options;
-mod pick;
 mod pipeline;
 mod releases;
 mod repository;
@@ -159,31 +158,6 @@ enum Command {
         at: Option<String>,
     },
 
-    /// Pick commits from `main` into a release in preparation, or start the
-    /// next patch release with them.
-    ///
-    /// Cherry-picks the commits, from the first-parent line of the commit you
-    /// have checked out, onto the release branch, leaving out the fragments
-    /// directory.
-    /// Files the fragments and highlights they added into the release's
-    /// directory on `release-notes/v<version>`, merging `main` into it first.
-    /// Pushes nothing: it prints the push that publishes both.
-    /// A conflict stops the pick in a worktree it names; resolve it there and
-    /// run `jp release pick --continue`.
-    Pick {
-        /// The release, such as `0.3.1`.
-        #[arg(value_parser = parse_version, required_unless_present = "resume")]
-        version: Option<Version>,
-
-        /// The commits to pick, from `main`.
-        #[arg(value_name = "COMMIT", required_unless_present = "resume")]
-        commits: Vec<String>,
-
-        /// Finish the pick a conflict stopped, once it is resolved.
-        #[arg(long = "continue", conflicts_with_all = ["version", "commits"])]
-        resume: bool,
-    },
-
     /// Tag a release in preparation: the tip of its release branch, as
     /// `v<version>`, with its release notes and upgrade guide as the tag's
     /// message.
@@ -224,8 +198,7 @@ enum Command {
     ///
     /// Refuses a release origin has tagged, and one older than another release:
     /// releases are abandoned newest first.
-    /// Deletes its tag and notes branch here, and its release branch, or for a
-    /// patch release the commits from the one that started it.
+    /// Deletes its tag, notes branch, and release branch here.
     /// Moves the fragments and highlights its notes filed back to the top of
     /// the fragments directory on `release-notes/abandon-v<version>`, with
     /// their wording as edited, for merging into `main`.
@@ -249,8 +222,8 @@ enum Command {
     /// Say where the releases stand, and what to run next.
     ///
     /// Reads the release branches, notes branches, and tags here and on
-    /// `origin`, and the commit checked out, which stands for `main`, as `cut`,
-    /// `pick`, and `finalize` do.
+    /// `origin`, and the commit checked out, which stands for `main`, as `cut`
+    /// and `finalize` do.
     /// Changes nothing.
     Status,
 
@@ -481,14 +454,6 @@ fn dispatch(
         Command::Cut { version, at } => make_release(root, options, |pipeline| {
             cut::cut(pipeline, version.as_ref(), at.as_deref())
         }),
-        Command::Pick {
-            version: Some(version),
-            commits,
-            resume: false,
-        } => make_release(root, options, |pipeline| {
-            pick::pick(pipeline, &version, &commits)
-        }),
-        Command::Pick { .. } => make_release(root, options, pick::resume),
         Command::Finalize { version } => make_release(root, options, |pipeline| {
             finalize::finalize(pipeline, &version)
         }),

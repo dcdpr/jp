@@ -785,7 +785,6 @@ fn making_a_release_needs_a_git_repository() {
         &["cut"][..],
         &["cut", "--at", "HEAD"],
         &["finalize", "0.1.0"],
-        &["pick", "--continue"],
         &["abandon", "0.1.0"],
         &["due"],
         &["status"],
@@ -926,22 +925,6 @@ fn a_build_prints_its_progress_as_chrome_and_what_it_built_as_content() {
 }
 
 #[test]
-fn pick_takes_a_version_and_commits_or_continue() {
-    let root = workspace();
-
-    for args in [
-        &["pick"][..],
-        &["pick", "0.1.1"],
-        &["pick", "--continue", "0.1.1", "4e1f0a2"],
-        &["pick", "v0.1", "4e1f0a2"],
-    ] {
-        let messages = command(root.path(), args, &[]);
-
-        assert_eq!(exit(&messages).code, 1, "{args:?}");
-    }
-}
-
-#[test]
 fn status_prints_where_the_releases_stand() {
     let fixture = Fixture::new();
     fixture.fragment("retry", "fixed", "Retried.");
@@ -956,18 +939,6 @@ fn status_prints_where_the_releases_stand() {
          cut\n"
     );
     assert_eq!(exit(&messages).code, 0);
-}
-
-#[test]
-fn continue_without_a_stopped_pick_has_nothing_to_do() {
-    let fixture = Fixture::new();
-
-    let messages = command(fixture.root(), &["pick", "--continue"], &[]);
-
-    assert_eq!(
-        exit(&messages).reason.as_deref(),
-        Some("No pick is stopped, so there is nothing to continue.")
-    );
 }
 
 #[test]

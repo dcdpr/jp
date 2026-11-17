@@ -5,14 +5,13 @@
 //! `v<version>` tags alongside the current checkout, reporting in order:
 //!
 //! 1. Whether the current checkout is behind `origin/main`.
-//! 2. Any paused `jp release pick` awaiting conflict resolution.
-//! 3. Unpushed local release branches, unmerged notes branches, and
+//! 2. Unpushed local release branches, unmerged notes branches, and
 //!    `v<version>` tags (plus any diverged notes branches).
-//! 4. Each release currently in preparation, its notes status, and the next
+//! 3. Each release currently in preparation, its notes status, and the next
 //!    action.
-//! 5. Finalized releases that do not yet have a publishable `release`-profile
+//! 4. Finalized releases that do not yet have a publishable `release`-profile
 //!    build in user-local storage.
-//! 6. Whether the next minor or major release is due (when none is currently in
+//! 5. Whether the next minor or major release is due (when none is currently in
 //!    preparation).
 
 use camino::Utf8Path;
@@ -22,7 +21,6 @@ use crate::{
     build::{self, Kept},
     due,
     finalize::{self, Notes},
-    pick,
     pipeline::{Pipeline, counted, listed, push},
     releases::{self, Line, NOTES_BRANCH, RELEASE_BRANCH, Releases, Standing},
     repository::{Branch, Checkout, MAIN, ORIGIN, Tags, Worktree},
@@ -43,12 +41,6 @@ pub(crate) fn status(
     let mut paragraphs = vec![];
     if repo.origin.lacks_main(&checkout)? {
         paragraphs.push(checkout.behind());
-    }
-    if let Some((version, worktree)) = pick::stopped(pipeline)? {
-        paragraphs.push(format!(
-            "A pick into {version} stopped at a conflict in {worktree}; resolve it there, then \
-             run:\n\n    jp release pick --continue"
-        ));
     }
     paragraphs.extend(unpublished(pipeline, &checkout, &tags)?);
 

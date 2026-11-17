@@ -16,13 +16,9 @@ fn version(text: &str) -> Version {
     Version::parse(text).unwrap()
 }
 
-fn release_branch(fixture: &Fixture, picked: &str) -> String {
+fn release_branch(fixture: &Fixture) -> String {
     fixture.git(&["checkout", "--quiet", "-b", "release/0.3"]);
-    fixture.commit("Start release 0.3.0\n\nStarts-Release: 0.3.0");
-    fixture.write("src/fix.rs", "// A fix.\n");
-    let tip = fixture.commit(&format!(
-        "Fix a bug\n\n(cherry picked from commit {picked})"
-    ));
+    let tip = fixture.commit("Start release 0.3.0\n\nStarts-Release: 0.3.0");
     fixture.publish(&["release/0.3"]);
     fixture.git(&["checkout", "--quiet", "main"]);
 
@@ -66,25 +62,27 @@ fn paths_are_relative_to_a_workspace_below_the_top_of_the_work_tree() {
     let fixture = Fixture::new();
     fixture.write("sub/project/changelog.d/fix.fixed.md", "Fixed.\n");
     let notes = fixture.commit("Fix a bug");
-    fixture.write("sub/project/src/fix.rs", "// A fix.\n");
-    let code = fixture.commit("Fix it in the code");
     let shell = fixture.shell();
 
     let top = Repository::open(&shell, fixture.root()).unwrap();
     let below = Repository::open(&shell, &fixture.root().join("sub/project")).unwrap();
-    let worktree = below.worktrees.add("test", &code).unwrap();
+    let worktree = below.worktrees.add("test", &notes).unwrap();
 
-    assert_eq!(worktree.workspace(), worktree.top().join("sub/project/"));
-    assert_eq!(
-        below.history.changes_outside(&notes, "changelog.d"),
-        Ok(false)
+    assert!(
+        worktree
+            .workspace()
+            .join("changelog.d/fix.fixed.md")
+            .exists()
     );
     assert_eq!(
-        below.history.changes_outside(&code, "changelog.d"),
-        Ok(true)
+        below.history.files_at(&notes, "changelog.d"),
+        Ok(BTreeSet::from(["changelog.d/fix.fixed.md".to_owned()]))
     );
-    // From the top, the fragments directory is elsewhere.
-    assert_eq!(top.history.changes_outside(&notes, "changelog.d"), Ok(true));
+    // From the top, the fragments directory is the project's own.
+    assert_eq!(
+        top.history.files_at(&notes, "changelog.d"),
+        Ok(BTreeSet::from(["changelog.d/README.md".to_owned()]))
+    );
 }
 
 /// A tag only this repository has finalizes its release too, but isn't
@@ -93,7 +91,7 @@ fn paths_are_relative_to_a_workspace_below_the_top_of_the_work_tree() {
 fn releases_are_read_from_the_tags_and_release_branches_here_and_on_origin() {
     let fixture = Fixture::new();
     let main = fixture.hash("HEAD");
-    let tip = release_branch(&fixture, &main);
+    let tip = release_branch(&fixture);
     fixture.git(&["tag", "--annotate", "v0.3.0", "--message", "v0.3.0", &tip]);
     fixture.publish(&["v0.3.0"]);
     fixture.git(&["tag", "--annotate", "v0.4.0", "--message", "v0.4.0"]);
@@ -103,9 +101,8 @@ fn releases_are_read_from_the_tags_and_release_branches_here_and_on_origin() {
     repository.origin.fetch().unwrap();
     let releases = repository.releases().unwrap();
 
-    // The commit that starts 0.3.0 is the one below the tip.
     let started_at = fixture
-        .git(&["log", "-1", "--format=%ct", "release/0.3~1"])
+        .git(&["log", "-1", "--format=%ct", "release/0.3"])
         .trim()
         .parse()
         .unwrap();
@@ -120,10 +117,9 @@ fn releases_are_read_from_the_tags_and_release_branches_here_and_on_origin() {
         tip,
         started: vec![Started {
             version: version("0.3.0"),
-            hash: fixture.hash("release/0.3~1"),
+            hash: fixture.hash("release/0.3"),
             at: started_at,
         }],
-        picked: BTreeSet::from([main.clone()]),
     });
     assert_eq!(repository.origin.main(), Ok(main));
 }
@@ -133,8 +129,7 @@ fn releases_are_read_from_the_tags_and_release_branches_here_and_on_origin() {
 #[test]
 fn a_release_branch_origin_lacks_is_read_from_here() {
     let fixture = Fixture::new();
-    let main = fixture.hash("HEAD");
-    release_branch(&fixture, &main);
+    release_branch(&fixture);
     let shell = fixture.shell();
     let repository = Repository::open(&shell, fixture.root()).unwrap();
     repository.origin.fetch().unwrap();
@@ -148,24 +143,22 @@ fn a_release_branch_origin_lacks_is_read_from_here() {
     assert_eq!(repository.releases().unwrap().lines.len(), 1);
 }
 
-/// What a release branch started and picked is read from the trailers git
-/// reads: a trailer next to a sign-off counts, one in a paragraph of prose
-/// doesn't, and neither does one that a blank line separates from the last
-/// paragraph.
+/// What a release branch started is read from the trailers git reads: a trailer
+/// next to a sign-off counts, one in a paragraph of prose doesn't, and neither
+/// does one that a blank line separates from the last paragraph.
 #[test]
 fn releases_are_read_from_the_trailers_git_reads() {
     let fixture = Fixture::new();
-    let main = fixture.hash("HEAD");
     fixture.git(&["checkout", "--quiet", "-b", "release/0.3"]);
     let start = fixture.commit(
         "Start release 0.3.0\n\nStarts-Release: 0.3.0\nSigned-off-by: Jane Doe <jane@example.com>",
     );
     fixture
         .commit("Document the trailer\n\nStarts-Release: 0.3.1 starts a release.\n\nSee the RFD.");
-    fixture.commit(&format!(
-        "Fix a bug\n\n(cherry picked from commit {main})\n\nSigned-off-by: Jane Doe \
-         <jane@example.com>"
-    ));
+    fixture.commit(
+        "Start release 0.3.2\n\nStarts-Release: 0.3.2\n\nSigned-off-by: Jane Doe \
+         <jane@example.com>",
+    );
     fixture.git(&["checkout", "--quiet", "main"]);
     let shell = fixture.shell();
     let repository = Repository::open(&shell, fixture.root()).unwrap();
@@ -180,14 +173,12 @@ fn releases_are_read_from_the_trailers_git_reads() {
         .map(|started| (started.version.to_string(), started.hash.as_str()))
         .collect();
     assert_eq!(started, [("0.3.0".to_owned(), start.as_str())]);
-    assert_eq!(line.picked, BTreeSet::new());
 }
 
 #[test]
 fn a_branch_stands_against_origins_by_which_has_the_others_commits() {
     let fixture = Fixture::new();
-    let main = fixture.hash("HEAD");
-    release_branch(&fixture, &main);
+    release_branch(&fixture);
     let shell = fixture.shell();
     let repository = Repository::open(&shell, fixture.root()).unwrap();
     repository.origin.fetch().unwrap();
@@ -205,19 +196,19 @@ fn a_branch_stands_against_origins_by_which_has_the_others_commits() {
         (Some(Standing::Published), Ok(Some(published.clone())))
     );
 
-    let ahead = commit_on(&fixture, "release/0.3", "Pick another fix");
+    let ahead = commit_on(&fixture, "release/0.3", "Bump the version");
     assert_eq!(standing(), (Some(Standing::Ahead), Ok(Some(ahead))));
 
     fixture.git(&["update-ref", "refs/heads/release/0.3", &published]);
     fixture.publish(&["release/0.3"]);
     let behind = published.clone();
-    let newer = commit_on(&fixture, "release/0.3", "Pick a fix elsewhere");
+    let newer = commit_on(&fixture, "release/0.3", "Bump the version elsewhere");
     fixture.publish(&["release/0.3"]);
     fixture.git(&["update-ref", "refs/heads/release/0.3", &behind]);
     repository.origin.fetch().unwrap();
     assert_eq!(standing(), (Some(Standing::Behind), Ok(Some(newer))));
 
-    commit_on(&fixture, "release/0.3", "Pick a fix here");
+    commit_on(&fixture, "release/0.3", "Bump the version here");
     assert_eq!(
         standing(),
         (
@@ -238,7 +229,7 @@ fn a_branch_stands_against_origins_by_which_has_the_others_commits() {
 fn the_release_branches_holding_a_commit_are_listed() {
     let fixture = Fixture::new();
     let main = fixture.hash("HEAD");
-    release_branch(&fixture, &main);
+    release_branch(&fixture);
     fixture.write("src/later.rs", "// Merged after the cut.\n");
     let later = fixture.commit("A later change");
     fixture.push();
@@ -406,25 +397,20 @@ fn a_commit_is_named_by_any_revision() {
 }
 
 #[test]
-fn a_worktree_is_removed_when_dropped_unless_kept() {
+fn a_worktree_is_removed_when_dropped() {
     let fixture = Fixture::new();
     let head = fixture.hash("HEAD");
     let shell = fixture.shell();
     let repository = Repository::open(&shell, fixture.root()).unwrap();
 
     let worktree = repository.worktrees.add("test", &head).unwrap();
-    let top = worktree.top().to_owned();
-    assert_eq!(worktree.head(), Ok(head.clone()));
+    let top = worktree.workspace();
+    assert_eq!(worktree.head(), Ok(head));
     assert!(top.join("changelog.d/README.md").exists());
     drop(worktree);
 
     assert!(!top.exists());
     assert!(!fixture.git(&["worktree", "list"]).contains(top.as_str()));
-
-    let kept = repository.worktrees.add("test", &head).unwrap().keep();
-    assert!(kept.exists());
-    drop(repository.worktrees.reopen(&kept).unwrap());
-    assert!(!kept.exists());
 }
 
 /// A release tagged by hand, without a release branch, is dated by its tag,

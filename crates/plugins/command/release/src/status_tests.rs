@@ -1,12 +1,11 @@
-use std::{fs, slice};
+use std::fs;
 
 use camino_tempfile::Utf8TempDir;
 use serde_json::{Value, json};
 
 use super::*;
 use crate::{
-    cut::cut, finalize::finalize, options::Options, pick::pick, repository_testing::Fixture,
-    shell::Shell,
+    cut::cut, finalize::finalize, options::Options, repository_testing::Fixture, shell::Shell,
 };
 
 /// 2026-10-01 12:00:00 UTC in seconds since the Unix epoch.
@@ -225,37 +224,6 @@ fn a_finalized_release_with_a_publishable_build_needs_nothing_more() {
         "0.1.0 was cut on 2026-10-01, and the cadence is 2w, so the next release is due at \
          2026-10-15 12:00 UTC.\n"
     );
-}
-
-#[test]
-fn a_stopped_pick_says_how_to_continue() {
-    let fixture = cut_on_october_1();
-    fixture.write("src/lib.rs", "two\n");
-    fixture.commit("Change the library");
-    fixture.write("src/lib.rs", "three\n");
-    fixture.fragment("three", "fixed", "Three.");
-    let hash = fixture.commit("fix: Change the library again (#10)");
-    fixture.push();
-    run(&fixture, &fixture.shell(), |pipeline| {
-        pick(
-            pipeline,
-            &Version::parse("0.1.0").unwrap(),
-            slice::from_ref(&hash),
-        )
-    })
-    .unwrap_err();
-    let (version, worktree) = {
-        let shell = fixture.shell();
-        let options = options();
-        let pipeline = Pipeline::new(&shell, fixture.root(), &options).unwrap();
-        pick::stopped(&pipeline).unwrap().unwrap()
-    };
-
-    assert_eq!(version, "0.1.0");
-    assert!(status_at(&fixture, OCTOBER_1).starts_with(&format!(
-            "A pick into 0.1.0 stopped at a conflict in {worktree}; resolve it there, then \
-             run:\n\n    jp release pick --continue\n\n"
-        )));
 }
 
 /// `cut` and `finalize` refuse a checkout behind `origin`'s `main`, so that

@@ -30,12 +30,6 @@ impl<'a> History<'a> {
         self.git.is_ancestor(ancestor, descendant)
     }
 
-    pub(crate) fn subject(&self, hash: &str) -> Result<String, String> {
-        let subject = self.git.git(&["log", "-1", "--format=%s", hash])?;
-
-        Ok(subject.trim().to_owned())
-    }
-
     /// Return the first-parent commit hashes of `hash`, newest first.
     pub(crate) fn first_parents(&self, hash: &str) -> Result<Vec<String>, String> {
         let listing = self.git.git(&["rev-list", "--first-parent", hash])?;
@@ -79,26 +73,6 @@ impl<'a> History<'a> {
         }
 
         Err(format!("`git diff` failed: {}", ran.said()))
-    }
-
-    /// Return whether `hash` (diffed against its first parent) modifies any
-    /// path outside `dir`.
-    pub(crate) fn changes_outside(&self, hash: &str, dir: &str) -> Result<bool, String> {
-        let changed = self.git.git(&[
-            "log",
-            "-1",
-            "-z",
-            "--format=",
-            "--name-only",
-            "--diff-merges=first-parent",
-            hash,
-        ])?;
-        let inside = format!("{}{dir}/", self.git.prefix);
-
-        Ok(changed
-            .split('\0')
-            .map(|path| path.trim_start_matches('\n'))
-            .any(|path| !path.is_empty() && !path.starts_with(&inside)))
     }
 
     /// Return the names of all local and `origin` release branches whose

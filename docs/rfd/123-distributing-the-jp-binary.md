@@ -194,10 +194,10 @@ do not generate heading anchors ([GitHub discussion 48311]).
 When `upgrade_guide` is unset, the upgrade guide is appended inline after the
 release notes.
 
-Because publishing a patch release on an older line would otherwise cause GitHub
-to mark that patch as the repository's `latest` release, `publish` explicitly
-sets `make_latest` on the highest non-prerelease version across all published
-releases.
+Because publishing an older release after a newer one, such as when correcting
+its files, would otherwise cause GitHub to mark it as the repository's `latest`
+release, `publish` explicitly sets `make_latest` on the highest non-prerelease
+version across all published releases.
 
 `publish` authenticates via `JP_GITHUB_TOKEN` or `GITHUB_TOKEN` using
 `jp_github`.
@@ -442,8 +442,8 @@ and branch protection rulesets in T-1f2jmb7.
   by `jp release github`.
 - [RFD 121: Changelog Fragments and Validation][RFD 121]: `Credits` metadata
   used when backfilling historical fragments.
-- [RFD 122: Release Pipeline][RFD 122]: `cut`, `pick`, `finalize`, `abandon`,
-  and `build`.
+- [RFD 122: Release Pipeline][RFD 122]: `cut`, `finalize`, `abandon`, and
+  `build`.
 - [GitHub discussion 48311]: why GitHub Release descriptions lack heading
   anchors.
 - [rust-lang/rust#162928] and [rust-lang/rust#140872]: linker issues handled by

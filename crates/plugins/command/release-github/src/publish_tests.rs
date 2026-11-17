@@ -343,8 +343,8 @@ async fn a_new_release_is_drafted_given_its_files_and_published_as_the_latest() 
     publish_it.assert();
 }
 
-/// A patch release to an older line, published after a newer release, leaves
-/// the newer one the latest.
+/// An older release, published after a newer one, leaves the newer one the
+/// latest.
 #[tokio::test]
 async fn an_older_release_is_published_without_becoming_the_latest() {
     let server = MockServer::start_async().await;

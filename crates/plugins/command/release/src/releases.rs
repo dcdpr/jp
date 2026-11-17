@@ -2,11 +2,9 @@
 //! branches, and release tags.
 //!
 //! - A `v<version>` tag finalizes a release (e.g. `v0.3.0`).
-//! - A release branch (`release/<major>.<minor>`) holds all `<major>.<minor>.x`
-//!   releases.
-//!   Each release on the branch starts with a commit carrying a
-//!   `Starts-Release: <version>` trailer, followed by any commits cherry-picked
-//!   from `main` (`(cherry picked from commit <hash>)`).
+//! - A release branch (`release/<major>.<minor>`) holds the `<major>.<minor>.0`
+//!   release: `main` at its cut point, then a commit carrying a
+//!   `Starts-Release: <version>` trailer.
 //! - A release is in preparation from its `Starts-Release` commit until its
 //!   `v<version>` tag is created.
 //! - Release notes are prepared on `release-notes/v<version>` and merged into
@@ -21,9 +19,6 @@ use semver::Version;
 
 /// Commit trailer marking the start of a release on a release branch.
 pub(crate) const STARTS_RELEASE: &str = "Starts-Release";
-
-/// Prefix written by `git cherry-pick -x` before `<hash>)`.
-const PICKED_FROM: &str = "(cherry picked from commit ";
 
 pub(crate) const RELEASE_BRANCH: &str = "release/";
 pub(crate) const NOTES_BRANCH: &str = "release-notes/";
@@ -50,9 +45,6 @@ pub(crate) struct Line {
     /// Releases started on this branch (`Starts-Release` commits), ordered from
     /// oldest to newest.
     pub started: Vec<Started>,
-
-    /// Hashes of `main` commits cherry-picked onto this branch.
-    pub picked: BTreeSet<String>,
 }
 
 /// A `Starts-Release` commit on a release branch.
@@ -63,17 +55,6 @@ pub(crate) struct Started {
 
     /// Commit timestamp in seconds since the Unix epoch.
     pub at: i64,
-}
-
-/// Target release branch for `jp release pick`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Target<'a> {
-    pub line: &'a Line,
-
-    /// Whether `pick` must create a new `Starts-Release` commit before
-    /// cherry-picking (starting a new patch release after the previous release
-    /// on `line` was tagged).
-    pub start: bool,
 }
 
 /// Relationship between a local branch and its remote-tracking branch on
@@ -175,13 +156,12 @@ pub(crate) fn versions<'a>(names: impl IntoIterator<Item = &'a String>) -> BTree
         .collect()
 }
 
-/// Parse `Starts-Release` commits (oldest first) and cherry-picked commit
-/// hashes from `git log -z --format=%H%n%ct%n%(trailers)` output.
-pub(crate) fn parse_line(log: &str) -> Result<(Vec<Started>, BTreeSet<String>), String> {
+/// Parse `Starts-Release` commits (oldest first) from `git log -z
+/// --format=%H%n%ct%n%(trailers)` output.
+pub(crate) fn parse_line(log: &str) -> Result<Vec<Started>, String> {
     const FIELDS: usize = 3;
 
     let mut started = vec![];
-    let mut picked = BTreeSet::new();
 
     for record in log.split('\0') {
         let record = record.trim_start_matches('\n');
@@ -208,53 +188,30 @@ pub(crate) fn parse_line(log: &str) -> Result<(Vec<Started>, BTreeSet<String>), 
                     at,
                 });
             }
-
-            let hash = line
-                .strip_prefix(PICKED_FROM)
-                .and_then(|rest| rest.strip_suffix(')'));
-            if let Some(hash) = hash {
-                picked.insert(hash.to_owned());
-            }
         }
     }
     started.reverse();
 
-    Ok((started, picked))
+    Ok(started)
 }
 
-/// Verify that git parsed the expected trailers from the newly created commits
-/// in `log` (`Starts-Release: <version>` for `started`, and `(cherry picked
-/// from commit <hash>)` for each commit in `picked`).
-pub(crate) fn check_written(
-    log: &str,
-    started: Option<&Version>,
-    picked: &[&str],
-) -> Result<(), String> {
-    let (read_started, read_picked) = parse_line(log)?;
-
-    let unread = if let Some(version) =
-        started.filter(|version| !read_started.iter().any(|start| start.version == **version))
+/// Verify that git reads `Starts-Release: <version>` among the trailers of the
+/// commit in `log` that starts `version`.
+pub(crate) fn check_written(log: &str, version: &Version) -> Result<(), String> {
+    if parse_line(log)?
+        .iter()
+        .any(|start| start.version == *version)
     {
-        format!(
-            "`{STARTS_RELEASE}: {version}` among the trailers of the commit that would start \
-             {version}, so no command would find the release"
-        )
-    } else if let Some(hash) = picked.iter().find(|hash| !read_picked.contains(**hash)) {
-        format!(
-            "the `{PICKED_FROM}<hash>)` line of the pick of {} among its trailers, so a later \
-             release would ship the change again",
-            hash.get(..7).unwrap_or(hash)
-        )
-    } else {
         return Ok(());
-    };
+    }
 
     Err(format!(
-        "git doesn't read {unread}, and no branch was changed. A `prepare-commit-msg` or \
-         `commit-msg` hook that puts a blank line before the lines it adds, such as a sign-off, \
-         causes this: git reads trailers from the last paragraph of a message only. Have the hook \
-         add its lines to the trailer block, such as with `git interpret-trailers`, and run this \
-         again."
+        "git doesn't read `{STARTS_RELEASE}: {version}` among the trailers of the commit that \
+         would start {version}, so no command would find the release, and no branch was changed. \
+         A `prepare-commit-msg` or `commit-msg` hook that puts a blank line before the lines it \
+         adds, such as a sign-off, causes this: git reads trailers from the last paragraph of a \
+         message only. Have the hook add its lines to the trailer block, such as with `git \
+         interpret-trailers`, and run this again."
     ))
 }
 
@@ -321,12 +278,12 @@ impl Releases {
         self.lines.get(&(version.major, version.minor))
     }
 
-    /// Return all release branches that contain `hash` either in their branch
-    /// ancestry (`containing`) or via cherry-pick.
-    pub(crate) fn shipping(&self, hash: &str, containing: &[String]) -> Vec<&Line> {
+    /// Return the release branches among `containing`, the branches whose
+    /// history holds a change.
+    pub(crate) fn shipping(&self, containing: &[String]) -> Vec<&Line> {
         self.lines
             .values()
-            .filter(|line| line.picked.contains(hash) || containing.contains(&line.branch))
+            .filter(|line| containing.contains(&line.branch))
             .collect()
     }
 
@@ -353,8 +310,8 @@ impl Releases {
         }
         if version.patch != 0 {
             return Err(format!(
-                "{version} is a patch release, which `jp release pick {version} <commit>...` \
-                 starts on its release branch; a cut starts a minor or major release."
+                "{version} is a patch release, and `jp release` makes minor and major releases \
+                 only."
             ));
         }
         if let Some(latest) = latest
@@ -369,49 +326,6 @@ impl Releases {
         }
 
         Ok(version)
-    }
-
-    /// Resolve and validate the target release branch for `jp release pick
-    /// <version>`.
-    pub(crate) fn pick_target(&self, version: &Version) -> Result<Target<'_>, String> {
-        let Some(line) = self.line(version) else {
-            return Err(if version.patch == 0 {
-                format!(
-                    "{version} hasn't been cut; cut it with `jp release cut --version {version}`."
-                )
-            } else {
-                format!(
-                    "There is no {}, so {version} has no release branch to pick onto.",
-                    branch(version)
-                )
-            });
-        };
-
-        if let Some(prepared) = self.in_preparation(line) {
-            if prepared == version {
-                return Ok(Target { line, start: false });
-            }
-            return Err(format!(
-                "{prepared} is in preparation on {}; pick into it, or finalize it before starting \
-                 another release there.",
-                line.branch
-            ));
-        }
-
-        let Some(next) = self.next_patch(line) else {
-            return Err(format!(
-                "{} has no release started on it, so it holds no release to pick into.",
-                line.branch
-            ));
-        };
-        if next != *version {
-            return Err(format!(
-                "The next release on {} is {next}, so pick into that.",
-                line.branch
-            ));
-        }
-
-        Ok(Target { line, start: true })
     }
 
     /// Resolve and validate the release branch to tag for `jp release finalize
@@ -442,22 +356,10 @@ impl Releases {
                 line.branch
             )),
             None => Err(format!(
-                "{version} isn't in preparation on {}; pick a commit into it with `jp release \
-                 pick {version} <commit>` to start it.",
+                "{version} isn't in preparation on {}, and `jp release` makes no patch releases.",
                 line.branch
             )),
         }
-    }
-
-    fn next_patch(&self, line: &Line) -> Option<Version> {
-        let last = line
-            .started
-            .iter()
-            .map(|started| &started.version)
-            .filter(|version| self.tagged.contains(*version))
-            .max()?;
-
-        Some(Version::new(last.major, last.minor, last.patch + 1))
     }
 
     fn started(&self) -> impl Iterator<Item = &Version> {

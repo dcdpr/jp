@@ -1,11 +1,7 @@
-use std::slice;
-
 use serde_json::{Value, json};
 
 use super::*;
-use crate::{
-    cut::cut, finalize::finalize, options::Options, pick::pick, repository_testing::Fixture,
-};
+use crate::{cut::cut, finalize::finalize, options::Options, repository_testing::Fixture};
 
 const BUMP: &str = "git config --file VERSION version.current {version}";
 
@@ -233,83 +229,6 @@ fn releases_are_abandoned_newest_first() {
     assert_eq!(
         run(&fixture, |pipeline| abandon(pipeline, &version("0.3.0"))),
         Err("0.3.0 hasn't been cut, so there is nothing to abandon.".to_owned())
-    );
-}
-
-/// A patch release's commits come off its branch, which is back where the
-/// release before it left it.
-#[test]
-fn abandoning_a_patch_release_takes_its_commits_off_its_branch() {
-    let fixture = filed_0_1_0();
-    run(&fixture, |pipeline| finalize(pipeline, &version("0.1.0"))).unwrap();
-    fixture.publish(&["v0.1.0"]);
-    let tagged = fixture.hash("v0.1.0^{commit}");
-    fixture.write("src/fix.rs", "// A fix.\n");
-    fixture.fragment("fix", "fixed", "A fix.");
-    let hash = fixture.commit("fix: A fix (#3)");
-    fixture.push();
-    run(&fixture, |pipeline| {
-        pick(pipeline, &version("0.1.1"), slice::from_ref(&hash))
-    })
-    .unwrap();
-
-    let said = run(&fixture, |pipeline| abandon(pipeline, &version("0.1.1"))).unwrap();
-
-    assert_eq!(
-        said,
-        format!(
-            "Abandoned 0.1.1: took its commits off release/0.1, which is back at {}, and deleted \
-             release-notes/v0.1.1 here.\nNone of the notes of 0.1.1 has to come back to the top \
-             of changelog.d/.\n\n0.1.1 can be picked into again.\n",
-            &tagged[..7]
-        )
-    );
-    assert_eq!(fixture.hash("release/0.1"), tagged);
-    assert_eq!(fixture.branches(), [
-        "main",
-        "release-notes/v0.1.0",
-        "release/0.1"
-    ]);
-}
-
-/// A file `pick` copied into the release, because a later release ships its
-/// change too, goes, and the original stays where it is.
-#[test]
-fn a_copy_pick_made_is_removed() {
-    let fixture = filed_0_1_0();
-    run(&fixture, |pipeline| finalize(pipeline, &version("0.1.0"))).unwrap();
-    fixture.publish(&["v0.1.0"]);
-    fixture.write("src/fix.rs", "// A fix.\n");
-    fixture.fragment("fix", "fixed", "A fix.");
-    let hash = fixture.commit("fix: A fix (#3)");
-    fixture.push();
-    let github = options_for("github");
-    // 0.2.0 ships the fix, so picking it into 0.1.1 copies its fragment.
-    run_with(&fixture, &github, |pipeline| cut(pipeline, None, None)).unwrap();
-    run_with(&fixture, &github, |pipeline| {
-        pick(pipeline, &version("0.1.1"), slice::from_ref(&hash))
-    })
-    .unwrap();
-    fixture.merge_notes("0.1.1", "chore(release): Pick a fix into release 0.1.1");
-    run(&fixture, |pipeline| abandon(pipeline, &version("0.2.0"))).unwrap();
-
-    let said = run(&fixture, |pipeline| abandon(pipeline, &version("0.1.1"))).unwrap();
-
-    assert!(
-        said.contains(
-            "On release-notes/abandon-v0.1.1, removed 1 file `jp release pick` copied from other \
-             releases.\n"
-        ),
-        "{said}"
-    );
-    let branch = "release-notes/abandon-v0.1.1";
-    assert_eq!(
-        fixture.show(&format!("{branch}:changelog.d/0.1.1/fix.fixed.md")),
-        None
-    );
-    assert_eq!(
-        fixture.show(&format!("{branch}:changelog.d/fix.fixed.md")),
-        Some("A fix.\n".to_owned())
     );
 }
 

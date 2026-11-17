@@ -7,17 +7,14 @@
 //! merged from a branch are attributed to the merge or squash commit on the
 //! default branch.
 //!
-//! [`History::read`] loads the commit log once and answers queries about file
-//! origins ([`History::origins`]), files added by a commit
-//! ([`History::added_by`]), and credits ([`History::credits`]).
+//! [`History::read`] loads the commit log once and answers which commit first
+//! brought each file to the top level ([`History::origins`]).
 
 use std::collections::HashMap;
 
 use camino::Utf8Path;
 
-use crate::{
-    directory::is_unreleased, document::ListedCredit, forge::Forge, git, release::ReleaseError,
-};
+use crate::{directory::is_unreleased, git, release::ReleaseError};
 
 /// Commit header prefix in `git::log` output, followed by `<hash>\n<message>`.
 pub(crate) const HEADER: &str = "commit ";
@@ -27,20 +24,6 @@ pub(crate) const HEADER: &str = "commit ";
 pub struct History {
     /// Commits ordered from newest to oldest.
     commits: Vec<Commit>,
-}
-
-/// A fragment or highlight added at the top level of the fragments directory by
-/// a commit.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Added {
-    /// Path relative to the fragments directory when the commit added it (e.g.
-    /// `retry-idle-turns.fixed.md` or `highlights/fan-out.md`).
-    pub path: String,
-
-    /// Current path at `HEAD` after following subsequent renames (e.g.
-    /// `0.3.0/retry-idle-turns.fixed.md`), or `None` if a later commit deleted
-    /// the file.
-    pub now: Option<String>,
 }
 
 impl History {
@@ -78,78 +61,6 @@ impl History {
                 Some(self.commits.get(*oldest)?.hash.clone())
             })
             .collect()
-    }
-
-    /// Return the top-level fragments and highlights added by commit `hash`,
-    /// along with their current paths at `HEAD`.
-    ///
-    /// Returns an empty vector if `hash` is not on the first-parent history or
-    /// added no top-level files.
-    #[must_use]
-    pub fn added_by(&self, hash: &str) -> Vec<Added> {
-        let Some(index) = self.commits.iter().position(|commit| commit.hash == hash) else {
-            return vec![];
-        };
-
-        self.commits[index]
-            .changes
-            .iter()
-            .filter_map(|change| match change {
-                Change::Added(path) if is_unreleased(path) => Some(Added {
-                    path: path.clone(),
-                    now: self.follow(index, path),
-                }),
-                _ => None,
-            })
-            .collect()
-    }
-
-    /// Return the deduplicated credits for `path` (relative to the fragments
-    /// directory at `HEAD`), ordered from oldest to newest commit that touched
-    /// the file at the top level.
-    ///
-    /// Each commit is credited as its change request on `forge`, or as its
-    /// commit hash when the commit message references no change request.
-    #[must_use]
-    pub fn credits(&self, path: &str, forge: Forge) -> Vec<ListedCredit> {
-        let indices = credited(&self.commits, &[path]).pop().unwrap_or_default();
-
-        let mut credits = vec![];
-        for index in indices {
-            let Some(commit) = self.commits.get(index) else {
-                continue;
-            };
-            let credit = match forge.change_request(&commit.message) {
-                Some(number) => ListedCredit::ChangeRequest(number),
-                None => ListedCredit::Commit(commit.hash.clone()),
-            };
-            if !credits.contains(&credit) {
-                credits.push(credit);
-            }
-        }
-
-        credits
-    }
-
-    /// Track `path` forward from `commits[index]` to `HEAD` across renames,
-    /// returning `None` if a newer commit deleted the file.
-    fn follow(&self, index: usize, path: &str) -> Option<String> {
-        let mut path = path.to_owned();
-
-        for commit in self.commits[..index].iter().rev() {
-            for change in &commit.changes {
-                match change {
-                    Change::Renamed { from, to } if *from == path => {
-                        path.clone_from(to);
-                        break;
-                    }
-                    Change::Deleted(deleted) if *deleted == path => return None,
-                    _ => {}
-                }
-            }
-        }
-
-        Some(path)
     }
 }
 

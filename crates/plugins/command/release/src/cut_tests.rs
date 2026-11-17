@@ -231,7 +231,7 @@ fn from_1_0_on_a_breaking_change_cuts_a_major_release() {
     );
 }
 
-/// A requested version is held to the same rule a picked one is: from 1.0 on,
+/// A requested version is held to the same rule as a computed one: from 1.0 on,
 /// only a major release ships a change that requires users to act.
 #[test]
 fn a_requested_minor_release_from_1_0_on_refuses_a_breaking_change() {

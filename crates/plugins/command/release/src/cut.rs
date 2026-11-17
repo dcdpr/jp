@@ -85,7 +85,7 @@ pub(crate) fn cut(
     )?;
     let started = start_branch(pipeline, &at, &cut.version)?;
     let written = repo.history.log_between(&at, &started)?;
-    releases::check_written(&written, Some(&cut.version), &[])?;
+    releases::check_written(&written, &cut.version)?;
     repo.refs.set_branch(&cut.branch, &started, None)?;
     if let Err(error) = repo.refs.set_branch(&cut.notes_branch, &noted, None) {
         drop(repo.refs.delete_branch(&cut.branch, &started));
@@ -507,7 +507,7 @@ impl<'p> Changes<'p> {
                     let containing = self.pipeline.repo.history.containing(unknown.key())?;
                     let branches = self
                         .releases
-                        .shipping(unknown.key(), &containing)
+                        .shipping(&containing)
                         .into_iter()
                         .map(|line| line.branch.clone())
                         .collect();

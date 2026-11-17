@@ -1988,7 +1988,6 @@ chat-take HOST DIR WORKTREE="../jp-chat-take":
 #
 #   just release status
 #   just release cut
-#   just release pick 0.3.1 4e1f0a2
 #   just release finalize 0.3.0
 #   just release github publish 0.3.0
 #
@@ -1996,8 +1995,8 @@ chat-take HOST DIR WORKTREE="../jp-chat-take":
 # this checkout's `jp-release` and `jp-release-github`, as `release-due` and
 # `release-sync` do: `jp` refuses a command two plugin binaries claim, so each
 # plugin replaces any other installed copy rather than sitting beside it on
-# `PATH`. Also installs `cargo set-version` from cargo-edit, which `cut` and
-# `pick` run to write the new version.
+# `PATH`. Also installs `cargo set-version` from cargo-edit, which `cut` runs
+# to write the new version.
 #
 # Cargo is asked where the target directory is: a Cargo configuration file can
 # move it, and `CARGO_TARGET_DIR` doesn't say so.

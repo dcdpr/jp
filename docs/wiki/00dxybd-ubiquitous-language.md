@@ -500,11 +500,10 @@ Each implements the `Provider` trait in `jp_llm`.
 
 ### Release Branch
 
-The long-lived branch `release/<major>.<minor>` holding the code for all
-`<major>.<minor>.x` releases.
-Each release on the branch begins with a `Starts-Release: <version>` commit
-(placing the release **in preparation**) followed by any commits cherry-picked
-from `main`, and is **finalized** by an annotated `v<version>` tag.
+The branch `release/<major>.<minor>` holding the code of the `<major>.<minor>.0`
+release: `main` at the cut, then a `Starts-Release: <version>` commit, which
+places the release **in preparation**.
+An annotated `v<version>` tag **finalizes** it.
 Modeled as `Line` in `jp_release::releases`.
 See [RFD-122].
 

@@ -1,55 +1,46 @@
-//! `jp release abandon`: retract an unpublished release so it can be cut or
-//! picked again.
+//! `jp release abandon`: retract an unpublished release so it can be cut again.
 //!
 //! Releases must be abandoned from newest to oldest, and any release whose tag
 //! has been pushed to `origin` cannot be abandoned.
 //!
 //! Abandoning a release:
 //!
-//! - Deletes the local tag `v<version>` and local notes branch
-//!   `release-notes/v<version>`.
-//! - Deletes `release/<major>.<minor>` for a minor or major release, or resets
-//!   the branch to the commit preceding `Starts-Release: <version>` for a patch
-//!   release.
+//! - Deletes the local tag `v<version>`, notes branch
+//!   `release-notes/v<version>`, and release branch `release/<major>.<minor>`.
 //! - Creates `release-notes/abandon-v<version>` moving the release's fragments
-//!   and highlights back to the top level of the fragments directory (removing
-//!   any files copied by `pick` from another release and leaving `overview.md`
-//!   and `.order.json` in place).
+//!   and highlights back to the top level of the fragments directory (leaving
+//!   `overview.md` and `.order.json` in place).
 //!   If `main` already has the files at the top level unedited, no abandon
 //!   branch is created.
 //! - Prints the `git push` commands needed to remove the remote branches.
 
-use std::{fs, iter};
+use std::fs;
 
 use camino::Utf8Path;
 use changelog::{
     Place,
     directory::{self, Contents, Part, ReadError},
-    fragment, highlight,
 };
 use semver::Version;
 
 use crate::{
-    pick,
-    pipeline::{Pipeline, counted, files, listed, problems, short},
-    releases::{self, Line, Releases},
+    pipeline::{Pipeline, files, listed, problems},
+    releases::{self, Releases},
     repository::{MAIN, ORIGIN, Repository, Worktree},
 };
 
-/// Counts of files moved or removed on `release-notes/abandon-v<version>`.
+/// Counts of files moved on `release-notes/abandon-v<version>`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct Moved {
     fragments: usize,
     highlights: usize,
-    copies: usize,
 }
 
 struct Move {
     from: String,
 
-    /// Destination path relative to the fragments directory, or `None` to
-    /// delete a file copied by `pick`.
-    to: Option<String>,
+    /// Destination path relative to the fragments directory.
+    to: String,
 
     highlight: bool,
 }
@@ -59,9 +50,7 @@ struct Move {
 #[derive(Debug, Default)]
 struct TakenBack {
     deleted: Vec<String>,
-    reset: Option<(String, String)>,
     remove: Vec<String>,
-    force: Option<String>,
 }
 
 /// Abandon release `version` locally and return a summary with the `git push`
@@ -113,15 +102,6 @@ fn refuse(pipeline: &Pipeline<'_>, releases: &Releases, version: &Version) -> Re
         ));
     }
 
-    if let Some((stopped, worktree)) = pick::stopped(pipeline)?
-        && stopped == version.to_string()
-    {
-        return Err(format!(
-            "A pick into {version} stopped at a conflict in {worktree}; finish it with `jp \
-             release pick --continue`, or remove that worktree, before abandoning {version}."
-        ));
-    }
-
     let name = releases::abandon_branch(version);
     let existing = pipeline.repo.refs.branch(&name)?;
     if existing.local.is_some() || existing.origin.is_some() {
@@ -158,9 +138,10 @@ fn return_notes(
     }
     let message = format!(
         "chore(release): Abandon release {version}\n\n`jp release abandon` took back release \
-         {version}, so it can be {}.\n\nThis {}.\n",
-        again(version),
-        moved.changes(pipeline)
+         {version}, so it can be cut again.\n\nThis moves the {} its notes filed back to the top \
+         of `{}/`.\n",
+        files(moved.fragments, moved.highlights),
+        pipeline.fragments
     );
     let commit = worktree.commit(&message)?;
 
@@ -216,11 +197,6 @@ fn plan_moves(
     version: &Version,
     contents: &Contents,
 ) -> Result<Vec<Move>, String> {
-    let others: Vec<Version> = directory::releases(dir)
-        .map_err(|error| error.to_string())?
-        .into_iter()
-        .filter(|other| other != version)
-        .collect();
     let paths = contents
         .fragments
         .iter()
@@ -238,48 +214,24 @@ fn plan_moves(
         let Some(place) = Place::parse(path) else {
             continue;
         };
-        let text = fs::read_to_string(dir.join(path))
-            .map_err(|error| format!("failed to read {}/{path}: {error}", pipeline.fragments))?;
         let top = Place {
             part: Part::Unreleased,
-            ..place.clone()
+            ..place
         };
 
-        let to = if is_copy(dir, &place, &others, highlight, &text) {
-            None
-        } else if dir.join(top.path()).exists() {
+        if dir.join(top.path()).exists() {
             taken.push(format!("{}/{}", pipeline.fragments, top.path()));
             continue;
-        } else {
-            Some(top.path())
-        };
+        }
         plan.push(Move {
             from: path.to_owned(),
-            to,
+            to: top.path(),
             highlight,
         });
     }
     refuse_taken(version, &taken)?;
 
     Ok(plan)
-}
-
-/// Return whether the file at `place` with contents `text` is a copy created by
-/// `pick` of an identical file at the top level or in another release.
-fn is_copy(dir: &Utf8Path, place: &Place, others: &[Version], highlight: bool, text: &str) -> bool {
-    let top = Place {
-        part: Part::Unreleased,
-        ..place.clone()
-    };
-    let mut originals = iter::once(top).chain(others.iter().map(|other| Place {
-        part: Part::Release(other.clone()),
-        ..place.clone()
-    }));
-
-    originals.any(|original| {
-        fs::read_to_string(dir.join(original.path()))
-            .is_ok_and(|other| alike(&place.name, highlight, text, &other))
-    })
 }
 
 fn refuse_taken(version: &Version, taken: &[String]) -> Result<(), String> {
@@ -313,12 +265,6 @@ fn apply_moves(
     } in plan
     {
         let from = format!("{}/{from}", pipeline.fragments);
-        let Some(to) = to else {
-            worktree.git(&["rm", "--quiet", "--", &from])?;
-            moved.copies += 1;
-            continue;
-        };
-
         let to = format!("{}/{to}", pipeline.fragments);
         if let Some(parent) = worktree.workspace().join(&to).parent() {
             fs::create_dir_all(parent)
@@ -344,7 +290,7 @@ fn take_back(
     let mut taken = TakenBack::default();
 
     if let Some(line) = releases.line(version) {
-        take_back_line(repo, line, version, &mut taken)?;
+        delete_branch(repo, &line.branch, &mut taken)?;
     }
     delete_branch(repo, &releases::notes_branch(version), &mut taken)?;
 
@@ -355,38 +301,6 @@ fn take_back(
     }
 
     Ok(taken)
-}
-
-fn take_back_line(
-    repo: &Repository<'_>,
-    line: &Line,
-    version: &Version,
-    taken: &mut TakenBack,
-) -> Result<(), String> {
-    if version.patch == 0 {
-        return delete_branch(repo, &line.branch, taken);
-    }
-
-    let Some(started) = line
-        .started
-        .iter()
-        .find(|started| started.version == *version)
-    else {
-        return Ok(());
-    };
-
-    let branch = repo.refs.branch(&line.branch)?;
-    let before = repo.history.commit(&format!("{}^", started.hash))?;
-    repo.refs
-        .set_branch(&line.branch, &before, branch.local.as_deref())?;
-    if let Some(origin) = &branch.origin
-        && repo.history.is_ancestor(&started.hash, origin)?
-    {
-        taken.force = Some(line.branch.clone());
-    }
-    taken.reset = Some((line.branch.clone(), before));
-
-    Ok(())
 }
 
 fn delete_branch(repo: &Repository<'_>, name: &str, taken: &mut TakenBack) -> Result<(), String> {
@@ -411,7 +325,11 @@ fn report(
     let abandon = releases::abandon_branch(version);
     let mut said = undone(version, taken);
     said.push_str(&match moved {
-        Some(moved) => format!("On {abandon}, {}.\n", moved.describe(pipeline)),
+        Some(moved) => format!(
+            "On {abandon}, moved {} back to the top of {}/.\n",
+            files(moved.fragments, moved.highlights),
+            pipeline.fragments
+        ),
         None => format!(
             "None of the notes of {version} has to come back to the top of {}/.\n",
             pipeline.fragments
@@ -425,16 +343,12 @@ fn report(
             taken.remove.join(" ")
         ));
     }
-    if let Some(branch) = &taken.force {
-        commands.push(format!("git push --force-with-lease {ORIGIN} {branch}"));
-    }
     if moved.is_some() {
         commands.push(format!("git push {ORIGIN} {abandon}"));
     }
 
-    let again = again(version);
     if commands.is_empty() {
-        said.push_str(&format!("\n{version} can be {again}.\n"));
+        said.push_str(&format!("\n{version} can be cut again.\n"));
         return said;
     }
 
@@ -443,101 +357,22 @@ fn report(
         said.push_str(&format!("    {command}\n"));
     }
     said.push_str(&if moved.is_some() {
-        format!("\nthen merge {abandon} into {MAIN}, so {version} can be {again}.\n")
+        format!("\nthen merge {abandon} into {MAIN}, so {version} can be cut again.\n")
     } else {
-        format!("\nthen {version} can be {again}.\n")
+        format!("\nthen {version} can be cut again.\n")
     });
 
     said
 }
 
 fn undone(version: &Version, taken: &TakenBack) -> String {
-    let mut done = vec![];
-    if let Some((branch, before)) = &taken.reset {
-        done.push(format!(
-            "took its commits off {branch}, which is back at {}",
-            short(before)
-        ));
-    }
-    if !taken.deleted.is_empty() {
-        done.push(format!("deleted {} here", listed(&taken.deleted)));
-    }
-
-    if done.is_empty() {
+    if taken.deleted.is_empty() {
         format!("Abandoned {version}.\n")
     } else {
-        format!("Abandoned {version}: {}.\n", done.join(", and "))
-    }
-}
-
-fn again(version: &Version) -> &'static str {
-    if version.patch == 0 {
-        "cut again"
-    } else {
-        "picked into again"
-    }
-}
-
-/// Compare two fragments or highlights for identical content (ignoring
-/// `Credits` metadata, which `pick` injects when copying a file).
-fn alike(name: &str, highlight: bool, copy: &str, original: &str) -> bool {
-    if highlight {
-        let (Ok(copy), Ok(original)) = (highlight::parse(copy), highlight::parse(original)) else {
-            return false;
-        };
-
-        return copy.title == original.title
-            && copy.authors == original.authors
-            && copy.body == original.body;
-    }
-
-    let Ok((_, type_)) = fragment::name(name) else {
-        return false;
-    };
-    let (Ok(copy), Ok(original)) = (
-        fragment::parse(type_, copy),
-        fragment::parse(type_, original),
-    ) else {
-        return false;
-    };
-
-    copy.entry == original.entry && copy.upgrade == original.upgrade
-}
-
-impl Moved {
-    fn changes(self, pipeline: &Pipeline<'_>) -> String {
-        self.clauses(
-            |files| {
-                format!(
-                    "moves the {files} its notes filed back to the top of `{}/`",
-                    pipeline.fragments
-                )
-            },
-            |copies| format!("removes the {copies} `jp release pick` copied from other releases"),
+        format!(
+            "Abandoned {version}: deleted {} here.\n",
+            listed(&taken.deleted)
         )
-    }
-
-    fn describe(self, pipeline: &Pipeline<'_>) -> String {
-        self.clauses(
-            |files| format!("moved {files} back to the top of {}/", pipeline.fragments),
-            |copies| format!("removed {copies} `jp release pick` copied from other releases"),
-        )
-    }
-
-    fn clauses(
-        self,
-        moved: impl FnOnce(String) -> String,
-        removed: impl FnOnce(String) -> String,
-    ) -> String {
-        let mut parts = vec![];
-        if self.fragments + self.highlights > 0 {
-            parts.push(moved(files(self.fragments, self.highlights)));
-        }
-        if self.copies > 0 {
-            parts.push(removed(counted(self.copies, "file", "files")));
-        }
-
-        parts.join(", and ")
     }
 }
 

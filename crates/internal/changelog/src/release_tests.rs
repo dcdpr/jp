@@ -418,8 +418,8 @@ fn an_empty_overview_md_is_summarized_like_a_missing_one() {
     );
 }
 
-/// A copy a patch release took lists its credits, a commit among them, and each
-/// is credited once.
+/// A fragment that lists its credits, a commit among them, is credited by
+/// those, each once.
 #[test]
 fn listed_credits_replace_the_ones_history_names() {
     let repository = Repository::new(Some("https://github.com/dcdpr/jp"));

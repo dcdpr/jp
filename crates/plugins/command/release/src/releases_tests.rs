@@ -21,7 +21,6 @@ fn line(branch: &str, started: &[&str]) -> Line {
                 at: OCTOBER_1 + day * DAY,
             })
             .collect(),
-        picked: BTreeSet::new(),
     }
 }
 
@@ -126,34 +125,20 @@ fn an_annotated_tag_names_the_commit_it_peels_to() {
 }
 
 #[test]
-fn a_release_branch_says_what_it_started_and_what_was_picked_onto_it() {
+fn a_release_branch_says_what_it_started() {
     // As `git log -z --format=%H%n%ct%n%(trailers)` writes it, newest first.
     let log = concat!(
-        "3333\n1792843200\nSigned-off-by: Jane Doe <jane@example.com>\n",
-        "(cherry picked from commit 9999)\n\0",
-        "2222\n1792756800\nStarts-Release: 0.3.1\n\0",
-        "1111\n1792670400\n(cherry picked from commit 8888)\n\0",
+        "1111\n1792670400\nSigned-off-by: Jane Doe <jane@example.com>\n\0",
         "0000\n1792584000\nStarts-Release: 0.3.0\n",
     );
 
-    let (started, picked) = parse_line(log).unwrap();
+    let started = parse_line(log).unwrap();
 
-    assert_eq!(started, [
-        Started {
-            version: version("0.3.0"),
-            hash: "0000".to_owned(),
-            at: 1_792_584_000,
-        },
-        Started {
-            version: version("0.3.1"),
-            hash: "2222".to_owned(),
-            at: 1_792_756_800,
-        },
-    ]);
-    assert_eq!(
-        picked,
-        BTreeSet::from(["8888".to_owned(), "9999".to_owned()])
-    );
+    assert_eq!(started, [Started {
+        version: version("0.3.0"),
+        hash: "0000".to_owned(),
+        at: 1_792_584_000,
+    }]);
 }
 
 #[test]
@@ -172,20 +157,14 @@ fn the_start_message_ends_in_its_trailer() {
     );
 }
 
-/// What `cut` and `pick` wrote, read back by git with a sign-off in the same
-/// trailer block.
+/// What `cut` wrote, read back by git with a sign-off in the same trailer
+/// block.
 #[test]
 fn trailers_git_reads_back_pass_the_check() {
-    let log = concat!(
-        "1111\n1792670400\n(cherry picked from commit 8888aaaabbbb)\n",
-        "Signed-off-by: Jane Doe <jane@example.com>\n\0",
-        "0000\n1792584000\nStarts-Release: 0.3.1\nSigned-off-by: Jane Doe <jane@example.com>\n",
-    );
+    let log =
+        "0000\n1792584000\nStarts-Release: 0.3.0\nSigned-off-by: Jane Doe <jane@example.com>\n";
 
-    assert_eq!(
-        check_written(log, Some(&version("0.3.1")), &["8888aaaabbbb"]),
-        Ok(())
-    );
+    assert_eq!(check_written(log, &version("0.3.0")), Ok(()));
 }
 
 /// A hook that puts a blank line before a sign-off leaves git reading only the
@@ -193,10 +172,9 @@ fn trailers_git_reads_back_pass_the_check() {
 #[test]
 fn trailers_git_doesnt_read_back_fail_the_check() {
     let start = "0000\n1792584000\nSigned-off-by: Jane Doe <jane@example.com>\n";
-    let pick = "1111\n1792670400\nSigned-off-by: Jane Doe <jane@example.com>\n";
 
     assert_eq!(
-        check_written(start, Some(&version("0.3.0")), &[]),
+        check_written(start, &version("0.3.0")),
         Err(
             "git doesn't read `Starts-Release: 0.3.0` among the trailers of the commit that would \
              start 0.3.0, so no command would find the release, and no branch was changed. A \
@@ -204,18 +182,6 @@ fn trailers_git_doesnt_read_back_fail_the_check() {
              adds, such as a sign-off, causes this: git reads trailers from the last paragraph of \
              a message only. Have the hook add its lines to the trailer block, such as with `git \
              interpret-trailers`, and run this again."
-                .to_owned()
-        )
-    );
-    assert_eq!(
-        check_written(pick, None, &["8888aaaabbbb"]),
-        Err(
-            "git doesn't read the `(cherry picked from commit <hash>)` line of the pick of \
-             8888aaa among its trailers, so a later release would ship the change again, and no \
-             branch was changed. A `prepare-commit-msg` or `commit-msg` hook that puts a blank \
-             line before the lines it adds, such as a sign-off, causes this: git reads trailers \
-             from the last paragraph of a message only. Have the hook add its lines to the \
-             trailer block, such as with `git interpret-trailers`, and run this again."
                 .to_owned()
         )
     );
@@ -236,7 +202,7 @@ fn a_tags_time_is_read_from_its_tagger_line() {
 }
 
 /// The newest minor or major release is the last one cut, whether a tag or a
-/// release branch says so, and a patch release never is one.
+/// release branch says so, and a patch release tagged by hand never is one.
 #[test]
 fn the_newest_cut_is_the_newest_minor_or_major_release() {
     assert_eq!(Releases::default().newest_cut(), None);
@@ -246,7 +212,7 @@ fn the_newest_cut_is_the_newest_minor_or_major_release() {
     );
     assert_eq!(
         releases(&["0.2.0"], vec![
-            line("release/0.2", &["0.2.0", "0.2.1"]),
+            line("release/0.2", &["0.2.0"]),
             line("release/0.3", &["0.3.0"]),
         ])
         .newest_cut(),
@@ -256,16 +222,18 @@ fn the_newest_cut_is_the_newest_minor_or_major_release() {
 
 #[test]
 fn a_release_was_started_by_the_commit_on_its_branch_that_starts_it() {
-    let releases = releases(&["0.3.0"], vec![line("release/0.3", &["0.3.0", "0.3.1"])]);
+    let mut later = line("release/0.4", &["0.4.0"]);
+    later.started[0].at = OCTOBER_1 + DAY;
+    let releases = releases(&["0.3.0"], vec![line("release/0.3", &["0.3.0"]), later]);
 
     assert_eq!(releases.started_at(&version("0.3.0")), Some(OCTOBER_1));
     assert_eq!(
-        releases.started_at(&version("0.3.1")),
+        releases.started_at(&version("0.4.0")),
         Some(OCTOBER_1 + DAY)
     );
     // Tagged by hand, or not started at all.
     assert_eq!(releases.started_at(&version("0.2.0")), None);
-    assert_eq!(releases.started_at(&version("0.3.2")), None);
+    assert_eq!(releases.started_at(&version("0.5.0")), None);
 }
 
 #[test]
@@ -331,8 +299,7 @@ fn a_requested_version_the_cut_cannot_start_is_refused() {
     assert_eq!(
         releases.next_cut(false, Some(&version("0.3.1"))),
         Err(
-            "0.3.1 is a patch release, which `jp release pick 0.3.1 <commit>...` starts on its \
-             release branch; a cut starts a minor or major release."
+            "0.3.1 is a patch release, and `jp release` makes minor and major releases only."
                 .to_owned()
         )
     );
@@ -363,89 +330,39 @@ fn a_cut_onto_an_existing_release_branch_is_refused() {
 }
 
 #[test]
-fn a_pick_goes_into_the_release_in_preparation() {
-    let releases = releases(&[], vec![line("release/0.3", &["0.3.0"])]);
-
-    let target = releases.pick_target(&version("0.3.0")).unwrap();
-
-    assert_eq!(target.line.branch, "release/0.3");
-    assert!(!target.start);
-}
-
-#[test]
-fn a_pick_after_the_last_release_was_tagged_starts_the_next_patch_release() {
-    let releases = releases(&["0.3.0", "0.3.1"], vec![line("release/0.3", &[
-        "0.3.0", "0.3.1",
-    ])]);
-
-    let target = releases.pick_target(&version("0.3.2")).unwrap();
-
-    assert!(target.start);
-    assert_eq!(
-        releases.pick_target(&version("0.3.3")),
-        Err("The next release on release/0.3 is 0.3.2, so pick into that.".to_owned())
-    );
-}
-
-#[test]
-fn a_pick_waits_for_the_release_in_preparation_to_be_tagged() {
-    let releases = releases(&["0.3.0"], vec![line("release/0.3", &["0.3.0", "0.3.1"])]);
-
-    assert_eq!(
-        releases.pick_target(&version("0.3.2")),
-        Err(
-            "0.3.1 is in preparation on release/0.3; pick into it, or finalize it before starting \
-             another release there."
-                .to_owned()
-        )
-    );
-}
-
-#[test]
-fn a_pick_needs_a_release_branch() {
-    let releases = releases(&["0.3.0"], vec![]);
-
-    assert_eq!(
-        releases.pick_target(&version("0.4.0")),
-        Err("0.4.0 hasn't been cut; cut it with `jp release cut --version 0.4.0`.".to_owned())
-    );
-    assert_eq!(
-        releases.pick_target(&version("0.3.1")),
-        Err("There is no release/0.3, so 0.3.1 has no release branch to pick onto.".to_owned())
-    );
-}
-
-#[test]
 fn finalize_tags_the_release_in_preparation() {
-    let releases = releases(&["0.3.0"], vec![line("release/0.3", &["0.3.0", "0.3.1"])]);
+    let releases = releases(&["0.3.0"], vec![
+        line("release/0.3", &["0.3.0"]),
+        line("release/0.4", &["0.4.0"]),
+    ]);
 
     assert_eq!(
         releases
-            .finalize_target(&version("0.3.1"))
+            .finalize_target(&version("0.4.0"))
             .map(|line| &line.branch),
-        Ok(&"release/0.3".to_owned())
+        Ok(&"release/0.4".to_owned())
     );
     assert_eq!(
         releases.finalize_target(&version("0.3.0")),
         Err("0.3.0 is finalized already: origin has its tag v0.3.0.".to_owned())
     );
     assert_eq!(
-        releases.finalize_target(&version("0.3.2")),
-        Err("0.3.1, not 0.3.2, is in preparation on release/0.3.".to_owned())
+        releases.finalize_target(&version("0.4.1")),
+        Err("0.4.0, not 0.4.1, is in preparation on release/0.4.".to_owned())
     );
 }
 
 /// A tag only this repository has finalizes the release once it is pushed.
 #[test]
 fn finalize_points_at_a_tag_made_here_to_publish() {
-    let mut releases = releases(&["0.3.0"], vec![line("release/0.3", &["0.3.0", "0.3.1"])]);
-    releases.tagged.insert(version("0.3.1"));
+    let mut releases = releases(&["0.3.0"], vec![line("release/0.4", &["0.4.0"])]);
+    releases.tagged.insert(version("0.4.0"));
 
     assert_eq!(
-        releases.finalize_target(&version("0.3.1")),
+        releases.finalize_target(&version("0.4.0")),
         Err(
-            "0.3.1 is tagged in this repository already; publish the tag with `git push origin \
-             v0.3.1`."
+            "0.4.0 is tagged in this repository already; publish the tag with `git push origin \
+             v0.4.0`."
                 .to_owned()
         )
     );
@@ -458,8 +375,7 @@ fn finalize_refuses_a_release_that_has_not_started() {
     assert_eq!(
         releases.finalize_target(&version("0.3.1")),
         Err(
-            "0.3.1 isn't in preparation on release/0.3; pick a commit into it with `jp release \
-             pick 0.3.1 <commit>` to start it."
+            "0.3.1 isn't in preparation on release/0.3, and `jp release` makes no patch releases."
                 .to_owned()
         )
     );
@@ -470,21 +386,18 @@ fn finalize_refuses_a_release_that_has_not_started() {
 }
 
 #[test]
-fn a_change_ships_with_the_branches_holding_it_or_picked_onto() {
-    let mut picked_onto = line("release/0.2", &["0.2.0"]);
-    picked_onto.picked.insert("aaaa".to_owned());
+fn a_change_ships_with_the_release_branches_holding_it() {
     let releases = releases(&[], vec![
-        picked_onto,
         line("release/0.3", &["0.3.0"]),
         line("release/0.4", &["0.4.0"]),
     ]);
 
     let shipping: Vec<&str> = releases
-        .shipping("aaaa", &["release/0.4".to_owned()])
+        .shipping(&["release/0.4".to_owned(), "main".to_owned()])
         .into_iter()
         .map(|line| line.branch.as_str())
         .collect();
 
-    assert_eq!(shipping, ["release/0.2", "release/0.4"]);
-    assert_eq!(releases.shipping("bbbb", &[]), Vec::<&Line>::new());
+    assert_eq!(shipping, ["release/0.4"]);
+    assert_eq!(releases.shipping(&[]), Vec::<&Line>::new());
 }

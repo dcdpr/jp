@@ -50,6 +50,6 @@ pub use forge::{Credit, CreditKind, Forge, NoAddress, UnknownForge};
 pub use fragment::{Fragment, FragmentError, NameError, Type, UnknownType, Upgrade};
 pub use git::GitError;
 pub use highlight::{Highlight, HighlightError};
-pub use history::{Added, History};
+pub use history::History;
 pub use order::{Order, OrderError};
 pub use release::{Headings, Release, ReleaseError};

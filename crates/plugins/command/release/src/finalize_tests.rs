@@ -1,7 +1,7 @@
 use serde_json::{Value, json};
 
 use super::*;
-use crate::{cut::cut, options::Options, pick::pick, repository_testing::Fixture};
+use crate::{cut::cut, options::Options, repository_testing::Fixture};
 
 fn options() -> Options {
     let Value::Object(options) = json!({ "forge": "none" }) else {
@@ -339,27 +339,23 @@ fn fragments_of_the_release_at_the_top_level_are_not_tagged() {
     );
 }
 
-/// A patch release whose picks added no fragment has nothing for its tag to
-/// say.
+/// A release whose notes were deleted on `main` after its cut has nothing for
+/// its tag to say.
 #[test]
 fn a_release_without_notes_is_not_tagged() {
     let fixture = filed_0_1_0();
-    finalized(&fixture, "0.1.0").unwrap();
-    fixture.publish(&["release/0.1", "v0.1.0"]);
-    fixture.write("README.md", "Tidied.\n");
-    let tidy = fixture.commit("chore: Tidy");
+    fixture.git(&["rm", "--quiet", "-r", "changelog.d/0.1.0"]);
+    fixture.commit("docs(changelog): Drop the notes of 0.1.0");
     fixture.push();
-    let shell = fixture.shell();
-    let options = options();
-    let pipeline = Pipeline::new(&shell, fixture.root(), &options).unwrap();
-    pick(&pipeline, &version("0.1.1"), &[tidy]).unwrap();
+    // Its notes branch still holds them, which finalize would point at first.
+    fixture.git(&["branch", "--quiet", "-D", "release-notes/v0.1.0"]);
     let head = fixture.hash("HEAD");
 
     assert_eq!(
-        finalized(&fixture, "0.1.1"),
+        finalized(&fixture, "0.1.0"),
         Err(format!(
-            "main at {} has no notes of 0.1.1 in changelog.d/0.1.1/. Write at least one fragment \
-             there, such as changelog.d/0.1.1/<slug>.fixed.md, and finalize from a commit that \
+            "main at {} has no notes of 0.1.0 in changelog.d/0.1.0/. Write at least one fragment \
+             there, such as changelog.d/0.1.0/<slug>.fixed.md, and finalize from a commit that \
              has it.",
             &head[..7]
         ))
