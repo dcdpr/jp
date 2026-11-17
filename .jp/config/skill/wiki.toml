@@ -46,9 +46,6 @@ Name a page by its id, `W-0a1b2c3`, in prose, a ticket, or an RFD: the site \
 links it, and `W-0a1b2c3#turn` links one section.
 """
 
-# Every wiki tool runs without asking: `wiki_edit` refuses an edit that breaks
-# the page, and every write is a diff in the work tree to review before it is
-# committed.
 [conversation.tools]
 wiki_list = { enable = true, run = "allow", result = "allow" }
 wiki_show = { enable = true, run = "allow", result = "allow" }
