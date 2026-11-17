@@ -20,8 +20,8 @@ import { readSettings } from './settings.mjs'
 //   where it maps to, a route or a wiki page id, so a page renamed later
 //   doesn't break the redirect.
 //
-// The documents are the ones `knownDocuments` finds, the same the site links
-// names in prose to.
+// Uses the same document set returned by `knownDocuments` for inline prose
+// links.
 //
 // Drafts get no short link: draft numbers are recycled once a draft is promoted
 // or dropped, so `/rfd/drafts/D38` would resolve to a different document
@@ -33,11 +33,10 @@ import { readSettings } from './settings.mjs'
 // `cleanUrls` means a request for `/rfd/101` is answered with `rfd/101.html`,
 // the same way every other page on the site is served.
 
-// Every redirect the site serves, as a map from the route asked for to the
-// route answered with. `srcDir` is the VitePress source directory.
+// Return all site redirects as a map from source route to target route.
+// `srcDir` is the VitePress source directory.
 //
-// A moved page naming a wiki page that isn't there is an error: the redirect
-// would lead nowhere.
+// Throws if a configured redirect points to a non-existent wiki page ID.
 export function siteRedirects(srcDir, settings = readSettings()) {
     const redirects = new Map()
     const known = knownDocuments(settings, srcDir)
@@ -64,8 +63,9 @@ export function siteRedirects(srcDir, settings = readSettings()) {
     return redirects
 }
 
-// The routes that reach the document `knownDocuments` labels `label`: `042`,
-// `T-005zd00`, or `W-0a1b2c3`. A draft, labelled `D12`, has none.
+// Return the short-link routes for a document label from `knownDocuments`
+// (`042`, `T-005zd00`, or `W-0a1b2c3`). Drafts (such as `D12`) have no short
+// links.
 function shortLinks(label, settings) {
     const [, prefix, id] = label.match(/^([TW])-(.+)$/) ?? []
     if (prefix === 'T') {
@@ -135,16 +135,13 @@ function redirectPage(url) {
 `
 }
 
-// A route without the slashes it may end in.
+// Strip trailing slashes from `route`, preserving `/` for the root.
 function trimmed(route) {
     return route.replace(/\/+$/, '') || '/'
 }
 
-// Where the dev server sends a request for `path`, given `redirects`, or
-// `undefined` when it sends it nowhere.
-//
-// The route as asked for wins, so `/old/` and `/old` can lead to different
-// pages; otherwise a trailing slash doesn't matter.
+// Resolve `path` against `redirects` for the dev server, preferring an exact
+// match before falling back to a trailing-slash-insensitive match.
 export function redirectFor(redirects, path) {
     if (redirects.has(path)) return redirects.get(path)
 
@@ -157,9 +154,9 @@ export function redirectFor(redirects, path) {
 // it's a few directory scans, and a page added since then works without a
 // restart. A browser keeps the `#fragment` across a redirect on its own.
 //
-// A redirect to a wiki page that isn't there fails a build. Here it is named
-// once in the server's log, and no request is redirected until it is fixed, so
-// the rest of the site keeps working while it is.
+// A redirect to a missing wiki page fails the production build. In the dev
+// server, log the error once and skip redirecting until the configuration is
+// fixed so the rest of the site remains usable.
 export const redirectServer = {
     name: 'jp-vite-redirects',
     configureServer(server) {

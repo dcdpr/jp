@@ -3,7 +3,7 @@ enable = false
 run = "allow"
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
-summary = "Run `cargo check` for the given package, validating if the code compiles. Also reports doc comments that are badly formatted, which `cargo_fmt` auto-fixes, wiki pages a change broke, and new rustqual findings that fail CI."
+summary = "Run `cargo check` for the given package, validating if the code compiles. Also reports doc comments that are badly formatted, which `cargo_fmt` auto-fixes, wiki pages a change broke, new rustqual findings that fail CI, and site files `jp vite sync` hasn't synced."
 
 examples = """
 ```json
@@ -36,6 +36,13 @@ options.wiki_check = true
 # `rustqual` on the `PATH` (`just _install-rustqual`); without it, the check
 # says the gate didn't run.
 options.qual_check = true
+
+# Also run `jp-vite`'s `jp_site_is_synced` test (the same check run by the
+# `docs` CI job). Changes under `crates/plugins/command/vite/site/` or to the
+# ticket labels in `.jp/config.toml` must be synced into
+# `docs/.vitepress/jp-vite/`, where `settings.json` records a content hash of
+# the site files. Builds `jp-vite`'s tests from the working tree.
+options.site_check = true
 
 [conversation.tools.cargo_check.style]
 inline_results = "full"
