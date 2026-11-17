@@ -200,6 +200,7 @@ fn a_site_missing_its_package_json_names_it() {
     fs::write(site_dir.join(".vitepress/config.mts"), "").unwrap();
     fs::write(site_dir.join(".vitepress/theme/index.js"), "").unwrap();
     fs::write(site_dir.join("index.md"), "").unwrap();
+    fs::write(site_dir.join(".gitignore"), "").unwrap();
 
     assert_eq!(
         unready(root.path(), &site_dir).as_deref(),
@@ -217,8 +218,8 @@ fn a_site_missing_several_init_files_names_each() {
     assert_eq!(
         unready(root.path(), &site_dir).as_deref(),
         Some(
-            "docs/package.json, docs/.vitepress/theme/index.js, docs/index.md are missing, re-run \
-             `jp vite init`."
+            "docs/package.json, docs/.vitepress/theme/index.js, docs/index.md, docs/.gitignore \
+             are missing, re-run `jp vite init`."
         )
     );
 }
@@ -250,6 +251,287 @@ fn vitepress_runs_through_the_package_manager_the_project_names() {
     )
     .unwrap();
     assert_eq!(runner(dir.path()), ["yarn", "vitepress"]);
+}
+
+/// `packageManager` in `package.json` takes precedence over lockfiles, and its
+/// version distinguishes Yarn 1 from Yarn 2+.
+#[test]
+fn the_package_manager_is_read_from_package_json() {
+    let dir = Utf8TempDir::new().unwrap();
+    fs::write(dir.path().join("pnpm-lock.yaml"), "").unwrap();
+
+    for (named, expected) in [
+        ("yarn@4.9.1", Manager::Yarn),
+        ("yarn@4.9.1+sha512.abc", Manager::Yarn),
+        ("yarn@1.22.22", Manager::YarnClassic),
+        ("pnpm@9.0.0", Manager::Pnpm),
+        ("bun@1.2.0", Manager::Bun),
+        ("npm@10.0.0", Manager::Npm),
+    ] {
+        fs::write(
+            dir.path().join("package.json"),
+            json!({ "packageManager": named }).to_string(),
+        )
+        .unwrap();
+
+        assert_eq!(manager(dir.path()), expected, "{named}");
+    }
+}
+
+#[test]
+fn a_yarn_lockfile_tells_yarn_1_from_later_yarns() {
+    let dir = Utf8TempDir::new().unwrap();
+
+    fs::write(
+        dir.path().join("yarn.lock"),
+        "# yarn lockfile v1\n\nvue@^3:\n  version \"3.5.0\"\n",
+    )
+    .unwrap();
+    assert_eq!(manager(dir.path()), Manager::YarnClassic);
+
+    fs::write(
+        dir.path().join("yarn.lock"),
+        "__metadata:\n  version: 8\n\n\"vue@npm:^3\":\n  version: 3.5.0\n",
+    )
+    .unwrap();
+    assert_eq!(manager(dir.path()), Manager::Yarn);
+
+    fs::write(
+        dir.path().join("package.json"),
+        r#"{"packageManager": "yarn"}"#,
+    )
+    .unwrap();
+    assert_eq!(manager(dir.path()), Manager::Yarn);
+}
+
+fn site(package_json: &str, lockfile: Option<(&str, &str)>) -> Utf8TempDir {
+    let dir = Utf8TempDir::new().unwrap();
+    fs::write(dir.path().join("package.json"), package_json).unwrap();
+    if let Some((name, contents)) = lockfile {
+        fs::write(dir.path().join(name), contents).unwrap();
+    }
+
+    dir
+}
+
+const YARN_4: &str = r#"{"packageManager": "yarn@4.9.1"}"#;
+const BERRY_LOCK: &str = "__metadata:\n  version: 8\n";
+
+#[test]
+fn an_install_with_a_lockfile_is_held_to_it() {
+    for (package_json, lockfile, expected) in [
+        ("{}", ("package-lock.json", "{}"), "npm ci"),
+        ("{}", ("npm-shrinkwrap.json", "{}"), "npm ci"),
+        (
+            YARN_4,
+            ("yarn.lock", BERRY_LOCK),
+            "yarn install --immutable",
+        ),
+        (
+            "{}",
+            ("yarn.lock", "# yarn lockfile v1\n"),
+            "yarn install --frozen-lockfile",
+        ),
+        (
+            "{}",
+            ("pnpm-lock.yaml", ""),
+            "pnpm install --frozen-lockfile",
+        ),
+        ("{}", ("bun.lock", ""), "bun install --frozen-lockfile"),
+        ("{}", ("bun.lockb", ""), "bun install --frozen-lockfile"),
+    ] {
+        let dir = site(package_json, Some(lockfile));
+        let install = install(dir.path(), false);
+
+        assert_eq!(install.to_string(), expected, "{lockfile:?}");
+        assert_eq!(install.lockfile, Some(lockfile.0), "{lockfile:?}");
+    }
+}
+
+#[test]
+fn an_install_without_a_lockfile_writes_one() {
+    for (package_json, expected) in [
+        ("{}", "npm install"),
+        (YARN_4, "yarn install --no-immutable"),
+        (r#"{"packageManager": "yarn@1.22.22"}"#, "yarn install"),
+        (
+            r#"{"packageManager": "pnpm@9.0.0"}"#,
+            "pnpm install --no-frozen-lockfile",
+        ),
+        (r#"{"packageManager": "bun@1.2.0"}"#, "bun install"),
+    ] {
+        let dir = site(package_json, None);
+        let install = install(dir.path(), false);
+
+        assert_eq!(install.to_string(), expected, "{package_json}");
+        assert_eq!(install.lockfile, None, "{package_json}");
+    }
+}
+
+#[test]
+fn an_offline_install_is_kept_off_the_network() {
+    for (package_json, lockfile, expected) in [
+        ("{}", ("package-lock.json", "{}"), "npm ci --offline"),
+        (
+            YARN_4,
+            ("yarn.lock", BERRY_LOCK),
+            "COREPACK_ENABLE_NETWORK=0 YARN_ENABLE_NETWORK=0 yarn install --immutable",
+        ),
+        (
+            "{}",
+            ("yarn.lock", "# yarn lockfile v1\n"),
+            "COREPACK_ENABLE_NETWORK=0 yarn install --frozen-lockfile --offline",
+        ),
+        (
+            "{}",
+            ("pnpm-lock.yaml", ""),
+            "COREPACK_ENABLE_NETWORK=0 pnpm install --frozen-lockfile --offline",
+        ),
+        (
+            "{}",
+            ("bun.lock", ""),
+            "bun install --frozen-lockfile --offline",
+        ),
+    ] {
+        let dir = site(package_json, Some(lockfile));
+
+        assert_eq!(
+            install(dir.path(), true).to_string(),
+            expected,
+            "{lockfile:?}"
+        );
+    }
+}
+
+#[test]
+fn a_missing_package_manager_is_named_with_how_to_get_it() {
+    let dir = site(YARN_4, Some(("yarn.lock", BERRY_LOCK)));
+    let missing = io::Error::from(io::ErrorKind::NotFound);
+
+    assert_eq!(
+        unstarted(&install(dir.path(), false), &missing),
+        "`yarn` isn't on your PATH, and the site's dependencies are installed with it. Install \
+         it, or run `corepack enable` if your Node.js comes with Corepack, then run `jp vite \
+         serve` again."
+    );
+
+    let npm = site("{}", None);
+    assert_eq!(
+        unstarted(&install(npm.path(), false), &missing),
+        "`npm` isn't on your PATH, and the site's dependencies are installed with it. Install \
+         Node.js, which comes with it, then run `jp vite serve` again."
+    );
+}
+
+#[test]
+fn a_package_manager_that_fails_to_start_otherwise_says_why() {
+    let dir = site("{}", None);
+    let denied = io::Error::new(io::ErrorKind::PermissionDenied, "permission denied");
+
+    assert_eq!(
+        unstarted(&install(dir.path(), false), &denied),
+        "`npm install` couldn't be started: permission denied"
+    );
+}
+
+#[test]
+fn a_failed_install_against_a_lockfile_says_how_to_update_it() {
+    let dir = site(YARN_4, Some(("yarn.lock", BERRY_LOCK)));
+
+    assert_eq!(
+        failed(
+            &install(dir.path(), false),
+            Utf8Path::new("docs"),
+            "exit status: 1"
+        ),
+        "`yarn install --immutable` failed in docs (exit status: 1). If yarn.lock doesn't match \
+         package.json, run `yarn install` in docs to update it."
+    );
+}
+
+#[test]
+fn a_failed_offline_install_says_the_cache_may_lack_a_dependency() {
+    let dir = site("{}", None);
+
+    assert_eq!(
+        failed(
+            &install(dir.path(), true),
+            Utf8Path::new("docs"),
+            "exit status: 1"
+        ),
+        "`npm install --offline` failed in docs (exit status: 1). With `--offline`, a dependency \
+         missing from the package manager's cache fails the install: run without it to download \
+         what's missing."
+    );
+}
+
+#[cfg(unix)]
+fn spawn(script: &str) -> Child {
+    Command::new("sh")
+        .args(["-c", script])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap()
+}
+
+#[cfg(unix)]
+fn printed(output: &[u8]) -> Vec<(String, String)> {
+    String::from_utf8(output.to_vec())
+        .unwrap()
+        .lines()
+        .map(|line| match serde_json::from_str(line).unwrap() {
+            PluginToHost::Print(print) => (print.channel, print.text),
+            other => panic!("expected a print, got {other:?}"),
+        })
+        .collect()
+}
+
+#[cfg(unix)]
+#[test]
+fn everything_a_child_prints_reaches_the_host_before_its_status() {
+    let (events, received) = mpsc::channel();
+    let mut output = vec![];
+    let child = spawn("echo one; echo two >&2; echo three; exit 3");
+    // Wait for the child to exit before calling `follow`, so `try_wait`
+    // succeeds on the first poll while all output is still buffered in the
+    // pipes.
+    thread::sleep(Duration::from_millis(300));
+
+    let status = follow(&mut output, child, &events, &received)
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(status.code(), Some(3));
+    // stdout and stderr are read on separate threads, so their relative order
+    // is non-deterministic.
+    let mut lines = printed(&output);
+    lines.sort();
+    assert_eq!(lines, [
+        ("chrome".to_owned(), "one\n".to_owned()),
+        ("chrome".to_owned(), "three\n".to_owned()),
+        ("chrome".to_owned(), "two\n".to_owned()),
+    ]);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_shutdown_stops_the_child() {
+    let (events, received) = mpsc::channel();
+    events
+        .send(Event::Host(Ok(HostToPlugin::Shutdown)))
+        .unwrap();
+    let started = Instant::now();
+
+    let status = follow(&mut vec![], spawn("exec sleep 30"), &events, &received).unwrap();
+
+    assert_eq!(status, None);
+    assert!(
+        started.elapsed() < Duration::from_secs(10),
+        "{:?}",
+        started.elapsed()
+    );
 }
 
 fn settings(root: &Utf8TempDir) -> Settings {
