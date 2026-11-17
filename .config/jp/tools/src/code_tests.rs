@@ -407,3 +407,32 @@ fn settings_merge_recursively() {
     );
     assert_eq!(settings["checkOnSave"], json!(false));
 }
+
+#[test]
+fn a_file_is_relative_to_the_root_it_sits_under() {
+    let root = Utf8Path::new("/work");
+
+    assert_eq!(
+        relative_to(Utf8Path::new("/work/src/lib.rs"), root).as_deref(),
+        Some("src/lib.rs")
+    );
+    assert_eq!(
+        relative_to(Utf8Path::new("/elsewhere/src/lib.rs"), root),
+        None
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn a_windows_file_is_relative_to_its_verbatim_root() {
+    let root = Utf8Path::new(r"\\?\C:\Users\runner\work");
+
+    assert_eq!(
+        relative_to(Utf8Path::new(r"c:\Users\runner\work\src\lib.rs"), root).as_deref(),
+        Some("src/lib.rs")
+    );
+    assert_eq!(
+        relative_to(Utf8Path::new(r"c:\Users\runner\other\src\lib.rs"), root),
+        None
+    );
+}
