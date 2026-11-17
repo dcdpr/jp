@@ -27,6 +27,7 @@ Tracking ticket for [RFD 124].
 
 RFD 124 is implemented, so this ticket closes.
 The open item, removing the `qual:api` markers from `md_html::Lines`, moved to
-T-1md6ywd: it waits on the first code that calls those methods, expected in D72.
+T-1md6ywd.
+It waits on the first code that calls those methods, expected in RFD 136.
 
 [RFD 124]: ../rfd/124-source-mapped-markdown-rendering.md

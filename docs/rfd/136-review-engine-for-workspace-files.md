@@ -1,10 +1,12 @@
-# RFD D72: Review Engine for Workspace Files
+# RFD 136: Review Engine for Workspace Files
 
-- **Status**: Draft
+- **Status**: Discussion
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-11-11
 - **Extends**: [RFD 116], [RFD 124]
+- **Summary**: Adds `jp-review`, a command plugin for reviewing workspace files
+  with the assistant, through range-anchored comments answered in passes.
 
 ## Summary
 
@@ -98,16 +100,16 @@ views with `md-html`.
 ### End-to-End Example
 
 ```sh
-$ jp review start docs/rfd/drafts/D72-review-engine-for-workspace-files.md
+$ jp review start docs/rfd/136-review-engine-for-workspace-files.md
 R-1h4k2m9: 1 file, version 2 (version 1 is the base)
 
 $ jp review comment R-1h4k2m9 \
-    --at docs/rfd/drafts/D72-review-engine-for-workspace-files.md:42:5-43:18 \
+    --at docs/rfd/136-review-engine-for-workspace-files.md:42:5-43:18 \
     "This contradicts the Security paragraph."
 R-1h4k2m9#1
 
 $ jp review comment R-1h4k2m9 \
-    --at docs/rfd/drafts/D72-review-engine-for-workspace-files.md:60-64 \
+    --at docs/rfd/136-review-engine-for-workspace-files.md:60-64 \
     --replace "A review is one file."
 R-1h4k2m9#2
 
@@ -295,23 +297,23 @@ each tracked file, with line numbers, in the user message:
 
 First half only.
 
-## docs/rfd/drafts/D72-review-engine-for-workspace-files.md (version 2)
+## docs/rfd/136-review-engine-for-workspace-files.md (version 2)
 
 ```
- 1 | # RFD D72: Review Engine for Workspace Files
+ 1 | # RFD 136: Review Engine for Workspace Files
  2 |
 [...]
 ```
 
 ## Comments
 
-### R-1h4k2m9#1 at D72-review-engine-for-workspace-files.md:42:5-43:18
+### R-1h4k2m9#1 at 136-review-engine-for-workspace-files.md:42:5-43:18
 
 > the server binds to every interface by default
 
 This contradicts the Security paragraph.
 
-### R-1h4k2m9#2 at D72-review-engine-for-workspace-files.md:60-64, suggestion
+### R-1h4k2m9#2 at 136-review-engine-for-workspace-files.md:60-64, suggestion
 
 ```diff
 -`review.json` is the whole review except the contents of its files [...]
@@ -561,9 +563,16 @@ A comment anchored in version 2 carries this anchor when read with `version=3`:
 ```json
 {
   "version": 2,
-  "path": "docs/rfd/drafts/D72-review-engine-for-workspace-files.md",
+  "path": "docs/rfd/136-review-engine-for-workspace-files.md",
   "range": "88:12-88:47",
-  "projected": { "version": 3, "range": "90:12-90:47", "bytes": [4113, 4148] }
+  "projected": {
+    "version": 3,
+    "range": "90:12-90:47",
+    "bytes": [
+      4113,
+      4148
+    ]
+  }
 }
 ```
 
@@ -825,7 +834,7 @@ Depends on Phases 2 and 3.
 - [Plannotator]
 
 [Plannotator]: https://plannotator.ai/
-[RFD 072]: ../072-command-plugin-system.md
-[RFD 076]: ../076-tool-access-grants.md
-[RFD 116]: ../116-shareable-rfd-ticket-and-site-tooling.md
-[RFD 124]: ../124-source-mapped-markdown-rendering.md
+[RFD 072]: 072-command-plugin-system.md
+[RFD 076]: 076-tool-access-grants.md
+[RFD 116]: 116-shareable-rfd-ticket-and-site-tooling.md
+[RFD 124]: 124-source-mapped-markdown-rendering.md

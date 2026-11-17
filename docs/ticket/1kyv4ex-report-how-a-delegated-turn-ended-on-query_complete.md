@@ -62,7 +62,7 @@ The exits that are a stop or an abort today:
       outcome
 - [x] Note the field in RFD 072's description of `query_complete`
 
-RFD D72 (`jp-review`) records how each review pass ended and depends on this.
+RFD 136 (`jp-review`) records how each review pass ended and depends on this.
 
 ## Comments
 

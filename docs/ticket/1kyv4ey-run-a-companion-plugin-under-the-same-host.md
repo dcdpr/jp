@@ -90,5 +90,5 @@ noted otherwise:
   `ConversationId`).
 - **Terminal output**: both plugins share a single `Printer`.
 
-Filed while designing RFD D72 (`jp-review`), which initially spawns a nested
+Filed while designing RFD 136 (`jp-review`), which initially spawns a nested
 `jp` host process.
