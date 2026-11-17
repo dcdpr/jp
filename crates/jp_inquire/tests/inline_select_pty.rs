@@ -59,7 +59,7 @@ fn enter_chooses_the_default_and_clears_the_help_message() {
 
     let screen = terminal
         .wait_for("the help message", |screen| {
-            screen.contains("cannot be undone")
+            screen.contains("cannot be undone") && screen.cursor().0 == 1
         })
         .expect("the help message to be drawn");
     assert_eq!(
@@ -67,7 +67,7 @@ fn enter_chooses_the_default_and_clears_the_help_message() {
         ["above", "? Remove it? [y,n,?] (n)", "[cannot be undone]"],
         "{screen}"
     );
-    // Waiting at the end of the prompt's own row, not below the help message.
+    // The cursor stays on the prompt row, not below the help message.
     assert_eq!(screen.cursor().0, 1, "{screen}");
 
     terminal.send("\r").expect("Enter to be typed");
@@ -123,7 +123,7 @@ fn a_question_mark_lists_the_options_and_asks_again() {
     terminal.send("?").expect("the key to be typed");
     let screen = terminal
         .wait_for("the second prompt", |screen| {
-            screen.contains("print help") && screen.row(5).contains("Remove it?")
+            screen.contains("print help") && screen.row(5) == "? Remove it? [y,n,?]"
         })
         .expect("the prompt to be drawn again");
     assert_eq!(
@@ -161,8 +161,11 @@ fn a_key_that_is_no_option_waits_to_be_corrected() {
     );
 
     terminal.send("\r").expect("Enter to be typed");
+    // The prompt is redrawn below the error, so it is the last row to arrive.
     let screen = terminal
-        .wait_for("the error", |screen| screen.contains("print help"))
+        .wait_for("the error", |screen| {
+            screen.contains("print help") && screen.row(5).ends_with(" x")
+        })
         .expect("the error to be drawn");
     assert_eq!(
         screen.used(),
@@ -177,7 +180,7 @@ fn a_key_that_is_no_option_waits_to_be_corrected() {
         "{screen}"
     );
 
-    // Backspace, then a key that names an option.
+    // Backspace to clear `x`, then select `y`.
     terminal.send("\x7fy").expect("the keys to be typed");
     let screen = outcome(&terminal, probe);
 
