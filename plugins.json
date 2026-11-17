@@ -1,6 +1,31 @@
 {
   "version": 1,
   "plugins": {
+    "gui": {
+      "id": "gui",
+      "description": "Open the current workspace in the JP macOS app",
+      "official": true,
+      "repository": "https://github.com/dcdpr/jp",
+      "type": "command",
+      "binaries": {
+        "aarch64-apple-darwin": {
+          "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-gui-aarch64-apple-darwin",
+          "sha256": "4e47a75c733d4cbb793db6411463c5e0e6164c6c542bb5522ff2c95391384c5c"
+        },
+        "x86_64-apple-darwin": {
+          "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-gui-x86_64-apple-darwin",
+          "sha256": "5a944674a0d14b12a2f7524b53437442ec1139cff8976533a48134c456fbb442"
+        },
+        "x86_64-pc-windows-msvc": {
+          "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-gui-x86_64-pc-windows-msvc",
+          "sha256": "a3c0d529f64b82263676bedb89deffa021f47ffa50d83f418c43c23926904741"
+        },
+        "x86_64-unknown-linux-gnu": {
+          "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-gui-x86_64-unknown-linux-gnu",
+          "sha256": "b1dad63332b8cd83a4d565604e72a68b3340e354e700fedc311f2318bad994c7"
+        }
+      }
+    },
     "path": {
       "id": "path",
       "description": "Print JP directory paths",
@@ -10,15 +35,19 @@
       "binaries": {
         "aarch64-apple-darwin": {
           "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-path-aarch64-apple-darwin",
-          "sha256": "b50511f4ccf6c3810067f0fa4a9ac3213d2a22b5b82a7158a11cbc8228136c07"
+          "sha256": "3dbc66336f11a9d7cbd09f53a9cd89cb4590a606be220cbba90ea0ec53497cd4"
+        },
+        "x86_64-apple-darwin": {
+          "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-path-x86_64-apple-darwin",
+          "sha256": "4c1b4f60836fed9df55bf83ff84c651b89b3ad660a5c06e61d39a15f7feac6b1"
         },
         "x86_64-pc-windows-msvc": {
           "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-path-x86_64-pc-windows-msvc",
-          "sha256": "6f1abf485644042f9fc6ed2592b1696923512db0981b43b50dc4d2306653bb2c"
+          "sha256": "3a131fcd348ffc9bef71a28f38d80d8b61c89804b498f8783433279dd7a06aa5"
         },
         "x86_64-unknown-linux-gnu": {
           "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-path-x86_64-unknown-linux-gnu",
-          "sha256": "c02e05a06db705d4232b22d73f58684d2630ea0abee5ea072cce4157fb49e44f"
+          "sha256": "b42df676f0077d8de92b111b8d1ca8b03c273e606d51cb0f0dcec59b6c9713f2"
         }
       }
     },
@@ -33,7 +62,7 @@
     },
     "serve web": {
       "id": "serve-web",
-      "description": "Read-only web UI for browsing conversations",
+      "description": "Web UI for browsing conversations and continuing them",
       "official": true,
       "repository": "https://github.com/dcdpr/jp",
       "type": "command",
@@ -43,15 +72,19 @@
       "binaries": {
         "aarch64-apple-darwin": {
           "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-serve-web-aarch64-apple-darwin",
-          "sha256": "e16bf014377882b14b9872750f1df3b83f5df1bf9df53096c748b99d937b89c4"
+          "sha256": "db79a74dfba7276db67ea314718d766cf4f6bbbd30810a1b78dabea9b0911568"
+        },
+        "x86_64-apple-darwin": {
+          "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-serve-web-x86_64-apple-darwin",
+          "sha256": "3ebfd103362bb46a42f7a58cee05fcc739ec2e5d1f98954677ba6f28e3cd76f8"
         },
         "x86_64-pc-windows-msvc": {
           "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-serve-web-x86_64-pc-windows-msvc",
-          "sha256": "c3478d57af838e053a01b303360e9d314a05c7a6ebb693a8006fa76d9e835e82"
+          "sha256": "3eceb85f5a9f3fed1426c2aac55c186dc58a2f3a6b62a8142ddc89d1823d030d"
         },
         "x86_64-unknown-linux-gnu": {
           "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-serve-web-x86_64-unknown-linux-gnu",
-          "sha256": "6dd441c580ac95298db851b59d88bed95686241f38e63619e7a314e6bbb0c67a"
+          "sha256": "eb27757e1f0612f719e7734144e55ad793a5f08d9bf90c3f9d99b3ab59f15fee"
         }
       }
     }
