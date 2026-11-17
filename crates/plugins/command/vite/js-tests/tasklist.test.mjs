@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { renderTaskLists } from '../site/jp-vite/tasklist.mjs'
+import { sectionSourceEnv } from '../site/jp-vite/embed.mjs'
+import { joinInlineCode } from '../site/jp-vite/join-inline-code.mjs'
+import { renderTaskLists, ticketItemText } from '../site/jp-vite/tasklist.mjs'
 
 // The parts of markdown-it's `Token` the rule uses.
 class Token {
@@ -104,6 +106,103 @@ test('brackets that are no checkbox, or sit outside a list item, stay text', () 
 
     assert.equal(tokens[0].attrGet('class'), null)
     assert.ok(tokens.every(each => each.type !== 'inline' || each.children[0].type === 'text'))
+})
+
+// Checkable items store their HTML-escaped lookup text in
+// `data-checklist-item`; non-checkable items omit the attribute. Both render
+// disabled until enabled on the client.
+test('a checkbox carries the text its item is checked by', () => {
+    const tokens = list(
+        item('[ ] Quote "a" & <b>', [text('[ ] Quote "a" & <b>')]),
+        item('[x] In a comment', [text('[x] In a comment')]),
+    )
+    const asked = []
+
+    renderTaskLists(tokens, Token, (inline) => {
+        asked.push(inline.content)
+        return inline.content.startsWith('[ ]') ? 'Quote "a" & <b>' : null
+    })
+
+    assert.deepEqual(asked, ['[ ] Quote "a" & <b>', '[x] In a comment'])
+    assert.equal(tokens[3].children[0].content,
+        '<input type="checkbox" class="task-list-item-checkbox" disabled ' +
+        'data-checklist-item="Quote &quot;a&quot; &amp; &lt;b&gt;"> ')
+    assert.equal(tokens[8].children[0].content,
+        '<input type="checkbox" class="task-list-item-checkbox" disabled checked> ')
+})
+
+// Run `joinInlineCode` on `src`, preserving the original source in `env` as
+// the site does before block parsing.
+function parsed(src, env) {
+    const state = { src, env }
+    joinInlineCode(state)
+    return state
+}
+
+function itemAt(content, line) {
+    const tokens = list(item(content, [text(content)]))
+    tokens[3].map = [line, line + 1]
+    return tokens
+}
+
+const WRAPPED = `# Session read surface
+
+- **Status**: Todo
+
+- [ ] **Add the \`jp session\` read surface**: Implement \`jp
+      session ls --all\` in \`jp_cli\`.
+`
+
+// `joinInlineCode` collapses the wrapped code span onto the item's first line
+// in `state.src`, but `jp ticket` matches items against the unjoined first
+// line on disk.
+test('an item wrapping a code span is checked by its first line as written', () => {
+    const state = parsed(WRAPPED, { relativePath: 'ticket/0aaaaaa-session.md' })
+    assert.notEqual(state.src, WRAPPED)
+    const tokens = itemAt('[ ] **Add the `jp session` read surface**: Implement `jp session ls --all`', 4)
+
+    renderTaskLists(tokens, Token, ticketItemText(state.env, state.src))
+
+    assert.equal(tokens[3].children[0].content,
+        '<input type="checkbox" class="task-list-item-checkbox" disabled ' +
+        'data-checklist-item="**Add the `jp session` read surface**: Implement `jp"> ')
+})
+
+const EMBEDDED = `# Ticket B
+
+- **Status**: Todo
+
+## Steps
+
+- [ ] Add tests
+`
+
+const EMBEDDING = `# Ticket A
+
+- **Status**: Todo
+
+- [ ] Add tests
+
+![Steps](0bbbbbb-b.md#steps)
+`
+
+// `embedSection` parses ticket B (including its task lists) before splicing its
+// tokens into ticket A. Both tickets have an `Add tests` item, so enabling B's
+// checkbox on A's page would toggle A's item instead.
+test('an item embedded from another ticket is not checked from the embedding one', () => {
+    const inner = parsed(EMBEDDED, sectionSourceEnv({ relativePath: 'ticket/0bbbbbb-b.md' }))
+    const embedded = itemAt('[ ] Add tests', 6)
+    renderTaskLists(embedded, Token, ticketItemText(inner.env, inner.src))
+
+    const outer = parsed(EMBEDDING, { relativePath: 'ticket/0aaaaaa-a.md' })
+    const tokens = [...itemAt('[ ] Add tests', 4), ...embedded]
+    renderTaskLists(tokens, Token, ticketItemText(outer.env, outer.src))
+
+    assert.equal(tokens[3].children[0].content,
+        '<input type="checkbox" class="task-list-item-checkbox" disabled ' +
+        'data-checklist-item="Add tests"> ')
+    assert.equal(tokens[10].children[0].content,
+        '<input type="checkbox" class="task-list-item-checkbox" disabled> ')
 })
 
 // A class the list or item already carries, from `{.class}` attributes, is

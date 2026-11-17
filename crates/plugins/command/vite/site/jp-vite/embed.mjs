@@ -31,9 +31,22 @@ const IMAGES = new Set([
     'apng', 'avif', 'bmp', 'gif', 'ico', 'jpeg', 'jpg', 'png', 'svg', 'tif', 'tiff', 'webp',
 ])
 
-// Set on the environment of a document parsed for a section it holds: its
-// embeds are expanded once the section is cut out of it, and only those.
+// Environment key marking a full-document parse used to extract an embedded
+// section. Nested embeds are expanded only after the target section is
+// extracted.
 const WHOLE_DOCUMENT = 'jpViteSectionSource'
+
+// Return a markdown-it environment with `fields` marked as a section-embed
+// source parse. Core rules run during that parse, and the extracted tokens are
+// spliced into the embedding page.
+export function sectionSourceEnv(fields) {
+    return { ...fields, [WHOLE_DOCUMENT]: true }
+}
+
+// Return whether `env` belongs to a document being parsed for a section embed.
+export function isSectionSource(env) {
+    return env?.[WHOLE_DOCUMENT] === true
+}
 
 // Add the rule that expands embeds to `md`.
 //
@@ -42,7 +55,7 @@ const WHOLE_DOCUMENT = 'jpViteSectionSource'
 export function embedSections(md) {
     md.core.ruler.push('jp_vite_embeds', (state) => {
         const env = state.env ?? {}
-        if (!env.relativePath || env[WHOLE_DOCUMENT]) return
+        if (!env.relativePath || isSectionSource(env)) return
 
         expand(state.tokens, {
             md: state.md,
@@ -262,12 +275,11 @@ function embedSection(embed, image, enclosing, context) {
 
     // The whole document, so its definitions and its anchors are the ones it
     // has on its own page.
-    const document = md.parse(source, {
+    const document = md.parse(source, sectionSourceEnv({
         path,
         relativePath: embed.target,
         cleanUrls: context.cleanUrls,
-        [WHOLE_DOCUMENT]: true,
-    })
+    }))
     const section = cutSection(document, embed.slug, message => fail(page, src, message))
     // Read before `adapt` moves the section's headings, the title among them
     // when the section is the document's first.

@@ -1,0 +1,26 @@
+[package]
+description = "Markdown rendered to HTML whose text carries the byte range of the source it came from."
+name = "md-html"
+
+authors.workspace = true
+documentation.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license-file.workspace = true
+publish.workspace = true
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+comrak = { workspace = true }
+
+[dev-dependencies]
+indoc = { workspace = true }
+pretty_assertions = { workspace = true, features = ["std"] }
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false
