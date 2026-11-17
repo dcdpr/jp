@@ -137,8 +137,8 @@ fn serve_passes_its_arguments_to_vitepress() {
     }
 }
 
-/// `--offline` before the `vitepress dev` arguments is serve's own; after `--`,
-/// it is `vitepress dev`'s.
+/// `--offline` before `--` is parsed by `jp vite serve`; after `--`, it is
+/// forwarded to `vitepress dev`.
 #[test]
 fn serve_takes_offline_before_the_vitepress_arguments() {
     match parse(&["serve", "--offline", "--", "--open"])

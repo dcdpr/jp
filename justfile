@@ -2002,8 +2002,8 @@ develop-docs *FLAGS="--host --allowedHosts --open": _install-jp _install-site-pl
 #
 # Starts the docs dev server and opens the board at `/rfd/priority`. Dragging
 # rows and toggling "in development" writes `docs/rfd/.priority.json`; commit that
-# file to publish the new order. The board is read-only in the production build
-# — the write endpoint only exists on the dev server.
+# file to publish the new order. The board is read-only in the production build;
+# the write endpoint only exists on the dev server.
 [group('rfd')]
 rfd-manage: _install-jp _install-site-plugins
     jp vite serve -- --host --allowedHosts --open /rfd/priority

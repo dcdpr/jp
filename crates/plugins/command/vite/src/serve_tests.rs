@@ -253,8 +253,8 @@ fn vitepress_runs_through_the_package_manager_the_project_names() {
     assert_eq!(runner(dir.path()), ["yarn", "vitepress"]);
 }
 
-/// The `packageManager` field wins over a lockfile, and its version tells Yarn
-/// 1 from later Yarns.
+/// `packageManager` in `package.json` takes precedence over lockfiles, and its
+/// version distinguishes Yarn 1 from Yarn 2+.
 #[test]
 fn the_package_manager_is_read_from_package_json() {
     let dir = Utf8TempDir::new().unwrap();
@@ -278,7 +278,6 @@ fn the_package_manager_is_read_from_package_json() {
     }
 }
 
-/// Without a version, the lockfile tells which Yarn wrote it.
 #[test]
 fn a_yarn_lockfile_tells_yarn_1_from_later_yarns() {
     let dir = Utf8TempDir::new().unwrap();
@@ -318,8 +317,6 @@ fn site(package_json: &str, lockfile: Option<(&str, &str)>) -> Utf8TempDir {
 const YARN_4: &str = r#"{"packageManager": "yarn@4.9.1"}"#;
 const BERRY_LOCK: &str = "__metadata:\n  version: 8\n";
 
-/// With a lockfile, every package manager is told to fail rather than change
-/// it.
 #[test]
 fn an_install_with_a_lockfile_is_held_to_it() {
     for (package_json, lockfile, expected) in [
@@ -351,8 +348,6 @@ fn an_install_with_a_lockfile_is_held_to_it() {
     }
 }
 
-/// Without a lockfile, the install writes one, even where the package manager
-/// would refuse to by default on CI.
 #[test]
 fn an_install_without_a_lockfile_writes_one() {
     for (package_json, expected) in [
@@ -373,8 +368,6 @@ fn an_install_without_a_lockfile_writes_one() {
     }
 }
 
-/// Yarn 2 and later take no `--offline`, so the network is switched off in
-/// their environment, and in Corepack's for the managers it provides.
 #[test]
 fn an_offline_install_is_kept_off_the_network() {
     for (package_json, lockfile, expected) in [
@@ -483,7 +476,6 @@ fn spawn(script: &str) -> Child {
         .unwrap()
 }
 
-/// What `follow` sent the host, as `(channel, text)` pairs.
 #[cfg(unix)]
 fn printed(output: &[u8]) -> Vec<(String, String)> {
     String::from_utf8(output.to_vec())
@@ -496,17 +488,15 @@ fn printed(output: &[u8]) -> Vec<(String, String)> {
         .collect()
 }
 
-/// Every line a child prints reaches the host, including lines still in the
-/// pipes when it exits, since those are usually why an install failed.
 #[cfg(unix)]
 #[test]
 fn everything_a_child_prints_reaches_the_host_before_its_status() {
     let (events, received) = mpsc::channel();
     let mut output = vec![];
     let child = spawn("echo one; echo two >&2; echo three; exit 3");
-    // By the time `follow` starts reading, the child has exited and every line
-    // is still in the pipes, so the first check finds it gone before any line
-    // has been read.
+    // Wait for the child to exit before calling `follow`, so `try_wait`
+    // succeeds on the first poll while all output is still buffered in the
+    // pipes.
     thread::sleep(Duration::from_millis(300));
 
     let status = follow(&mut output, child, &events, &received)
@@ -514,8 +504,8 @@ fn everything_a_child_prints_reaches_the_host_before_its_status() {
         .unwrap();
 
     assert_eq!(status.code(), Some(3));
-    // Two threads read stdout and stderr, so only lines from one of them keep
-    // their order.
+    // stdout and stderr are read on separate threads, so their relative order
+    // is non-deterministic.
     let mut lines = printed(&output);
     lines.sort();
     assert_eq!(lines, [
@@ -525,8 +515,6 @@ fn everything_a_child_prints_reaches_the_host_before_its_status() {
     ]);
 }
 
-/// The host asking to stop ends an install that would otherwise run for half a
-/// minute.
 #[cfg(unix)]
 #[test]
 fn a_shutdown_stops_the_child() {

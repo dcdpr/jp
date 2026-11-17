@@ -117,17 +117,15 @@ enum Command {
     /// Run the dev server, keeping the site's settings in step with the
     /// configuration.
     ///
-    /// Installs the site's dependencies first, with the package manager the
-    /// site uses.
-    /// A lockfile that is there is never changed: the install fails when it
-    /// doesn't match `package.json`.
+    /// Installs the site's dependencies first using the site's package manager.
+    /// An existing lockfile is never modified; the install fails if the
+    /// lockfile does not match `package.json`.
     /// The RFD and ticket pages can be edited only here.
     /// Arguments after `--` go to `vitepress dev`.
     Serve {
-        /// Install the site's dependencies without the network.
+        /// Install the site's dependencies without network access.
         ///
-        /// The install fails when a dependency isn't in the package manager's
-        /// cache.
+        /// Fails if any dependency is missing from the package manager's cache.
         #[arg(long)]
         offline: bool,
 

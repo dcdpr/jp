@@ -44,8 +44,6 @@ fn a_file_that_exists_is_not_missing() {
     assert_eq!(missing(dir.path()).len(), 4);
 }
 
-/// A new site installs with Yarn 4: the first `jp vite serve` writes the
-/// lockfile, and every one after it is held to the lockfile.
 #[test]
 fn a_new_site_installs_with_yarn_held_to_its_lockfile() {
     let root = Utf8TempDir::new().unwrap();
