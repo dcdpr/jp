@@ -21,7 +21,7 @@ mod install_tools;
 mod test;
 mod update;
 
-use check::cargo_check;
+use check::{Checks, cargo_check};
 use expand::cargo_expand;
 use format::cargo_format;
 use install_tools::cargo_install_tools;
@@ -135,9 +135,12 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
                 &rustflags,
                 profile.as_deref(),
                 &packages(t.opt("package")?),
-                checksum_freshness,
-                t.option_or("wiki_check", false),
-                t.option_or("qual_check", false),
+                Checks {
+                    checksum_freshness,
+                    wiki: t.option_or("wiki_check", false),
+                    qual: t.option_or("qual_check", false),
+                    site: t.option_or("site_check", false),
+                },
             )
             .await
         }

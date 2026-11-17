@@ -9,44 +9,38 @@ use super::{MAX_DIAGNOSTIC_BYTES, cargo_scope, comfort_scope};
 use crate::util::{ToolResult, error, truncate};
 
 /// Run clippy and comfort over `packages`, or the whole workspace when it is
-/// empty.
-///
-/// With `wiki_check`, `jp wiki check` runs over the workspace's wiki as well,
-/// and with `qual_check`, the rustqual gate that CI runs.
+/// empty, and whatever else `checks` turns on.
 pub(crate) async fn cargo_check(
     root: &Utf8Path,
     rustflags: &str,
     profile: Option<&str>,
     packages: &[String],
-    checksum_freshness: bool,
-    wiki_check: bool,
-    qual_check: bool,
+    checks: Checks,
 ) -> ToolResult {
     cargo_check_impl(
         root,
         rustflags,
         profile,
         packages,
-        Checks {
-            checksum_freshness,
-            wiki: wiki_check,
-            qual: qual_check,
-        },
+        checks,
         &SystemProcessRunner,
     )
 }
 
 /// What a check run does besides clippy and comfort.
 #[derive(Debug, Clone, Copy, Default)]
-struct Checks {
+pub(crate) struct Checks {
     /// Use content checksums for cargo's freshness checks.
-    checksum_freshness: bool,
+    pub checksum_freshness: bool,
 
     /// Run `jp wiki check` as well.
-    wiki: bool,
+    pub wiki: bool,
 
     /// Run the rustqual gate, `qual diff`, as well.
-    qual: bool,
+    pub qual: bool,
+
+    /// Run `jp-vite`'s `jp_site_is_synced` test as well.
+    pub site: bool,
 }
 
 fn cargo_check_impl<R: ProcessRunner>(
@@ -126,6 +120,9 @@ fn cargo_check_impl<R: ProcessRunner>(
     if checks.wiki {
         notes.extend(wiki_check(root, runner));
     }
+    if checks.site {
+        notes.extend(site_check(root, profile_arg.as_deref(), &env, runner));
+    }
 
     if notes.is_empty() {
         return Ok(if clippy.is_empty() {
@@ -180,6 +177,82 @@ fn wiki_check<R: ProcessRunner>(root: &Utf8Path, runner: &R) -> Option<String> {
             truncate(output.stderr.trim(), MAX_DIAGNOSTIC_BYTES)
         )),
     }
+}
+
+/// The `jp-vite` test that compares JP's site with the one `jp vite sync`
+/// writes from this checkout.
+const SITE_TEST: &str = "tests::jp_site_is_synced";
+
+/// Run [`SITE_TEST`], which the `docs` job on CI runs, returning what it found
+/// as a note; `None` when JP's site is synced.
+///
+/// The test is built from the working tree, so it compares the site with the
+/// site files this checkout carries.
+/// The test build gets `profile` and `env`, the same as the clippy run, so it
+/// shares that run's artifacts.
+/// A site that can't be checked is a note too, rather than a failed check: the
+/// code itself was checked.
+fn site_check<R: ProcessRunner>(
+    root: &Utf8Path,
+    profile: Option<&str>,
+    env: &[(&str, &str)],
+    runner: &R,
+) -> Option<String> {
+    let mut args = vec!["test", "--quiet", "--package", "jp-vite", "--lib"];
+    args.extend(profile);
+    args.extend(["--", "--exact", SITE_TEST]);
+
+    let output = match runner.run_with_env("cargo", &args, root, env) {
+        Ok(output) => output,
+        Err(error) => {
+            return Some(format!(
+                "JP's site wasn't checked: `cargo` couldn't be run: {error}"
+            ));
+        }
+    };
+
+    if let Some(failure) = test_failure(&output.stdout, SITE_TEST) {
+        return Some(format!(
+            "JP's site isn't synced, which the `docs` job on CI fails on:\n```\n{}\n```\nRun \
+             `JP_VITE_BLESS=1 cargo test -p jp-vite jp_site_is_synced` to sync it, rather than \
+             editing the files under `docs/.vitepress/jp-vite/` by hand. `jp vite sync` writes \
+             the site files the installed `jp-vite` was built with, which can predate this \
+             checkout's.",
+            truncate(&failure, MAX_DIAGNOSTIC_BYTES)
+        ));
+    }
+
+    // `--exact` with a name that matches nothing runs no test and exits 0.
+    if output.status.is_success() && output.stdout.contains("test result: ok. 1 passed") {
+        return None;
+    }
+    if output.status.is_success() {
+        return Some(format!(
+            "JP's site wasn't checked: `jp-vite` has no test named `{SITE_TEST}`."
+        ));
+    }
+
+    Some(format!(
+        "JP's site wasn't checked: `cargo test -p jp-vite` failed: {}",
+        truncate(output.stderr.trim(), MAX_DIAGNOSTIC_BYTES)
+    ))
+}
+
+/// The panic message libtest printed for the failed test `name`, or `None` when
+/// `stdout` reports no failure of that test.
+fn test_failure(stdout: &str, name: &str) -> Option<String> {
+    let (_, rest) = stdout.split_once(&format!("---- {name} stdout ----"))?;
+    let section = rest
+        .split_once("\nfailures:")
+        .map_or(rest, |(section, _)| section);
+
+    let message = section
+        .lines()
+        .filter(|line| !line.starts_with("thread '") && !line.starts_with("note: run with"))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    Some(message.trim().to_owned())
 }
 
 enum ComfortCheck {
