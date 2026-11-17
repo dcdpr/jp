@@ -153,7 +153,7 @@ fn event_loop(
             continue;
         }
 
-        match react(&mut app, event, width, height) {
+        match react(&mut app, &event, width, height) {
             Action::Quit => return Ok(()),
             action => carry_out(action, dir, updates, refresher),
         }
@@ -162,9 +162,9 @@ fn event_loop(
 
 /// Dispatch a key press or mouse event to `app` and return the resulting
 /// [`Action`].
-fn react(app: &mut App, event: Event, width: u16, height: u16) -> Action {
+fn react(app: &mut App, event: &Event, width: u16, height: u16) -> Action {
     match event {
-        Event::Key(key) if key.kind == KeyEventKind::Press => app.handle(key),
+        Event::Key(key) if key.kind == KeyEventKind::Press => app.handle(*key),
         Event::Mouse(mouse) => match mouse.kind {
             MouseEventKind::ScrollDown => {
                 app.wheel(true);
