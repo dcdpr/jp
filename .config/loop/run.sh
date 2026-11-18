@@ -317,9 +317,6 @@ JP_GLOBALS=(
     # Raise the stream idle timeout from the 60s default so brief network
     # handoffs do not abort an in-progress turn.
     --cfg=assistant.request.stream_idle_timeout_secs=180
-    # `just serve-bookworm` compiles from the working tree. Mark it optional so
-    # a broken build does not prevent the repair turn from starting.
-    --cfg=providers.mcp.bookworm.optional=true
 )
 
 COMPACT_ARGS=()

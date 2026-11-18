@@ -2710,7 +2710,7 @@ _install-serve-web *args:
     mv -f "$dir/.jp-serve-web.new" "$dir/jp-serve-web"
     echo "Installed jp-serve-web to $dir" >&2
 
-# Build and install the `bookworm` MCP server that `.jp/config.toml` runs.
+# Build and install the `bookworm` MCP server.
 _install-bookworm *args:
     #!/usr/bin/env sh
     set -eu
