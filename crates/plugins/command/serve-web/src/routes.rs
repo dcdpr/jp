@@ -44,11 +44,12 @@ struct AppState {
     /// Data recovers on its own; the page itself does not.
     boot: String,
 
-    /// The address the server listens on, which decides whether it checks the
-    /// name a request asks for.
+    /// Bound IP address, used to decide whether `Host` header validation
+    /// applies.
     listening: IpAddr,
 
-    /// The names, besides addresses and `localhost`, it answers to on loopback.
+    /// Additional hostnames accepted by [`origin::answers`] when bound to
+    /// loopback.
     allowed_hosts: Arc<[String]>,
 }
 
@@ -130,11 +131,10 @@ enum StopMode {
     Unreachable,
 }
 
-/// Start the HTTP server on an already-bound listener and block until
-/// `shutdown` resolves.
+/// Serve the web UI on `listener` until `shutdown` resolves.
 ///
-/// Listening on loopback, it answers only requests for an address, `localhost`,
-/// or a name in `allowed_hosts`.
+/// When bound to loopback, rejects requests whose `Host` header is not an IP
+/// address, `localhost`, `.localhost`, or an entry in `allowed_hosts`.
 pub(crate) async fn serve(
     client: PluginClient,
     listener: std::net::TcpListener,
@@ -164,8 +164,7 @@ pub(crate) async fn serve(
         .map_err(|e| format!("server error: {e}"))
 }
 
-/// Every route the server answers, behind the checks that refuse a request for
-/// a name it doesn't answer to, and a write from another origin.
+/// Build the axum router with host and origin validation middleware.
 fn router(state: AppState) -> Router {
     Router::new()
         .route("/", axum::routing::get(index))
@@ -242,19 +241,15 @@ async fn same_origin_only(request: Request, next: Next) -> Response {
     next.run(request).await
 }
 
-/// Whether a request came from one of this server's own pages, by the headers
-/// [`origin::same_origin`] reads.
+/// Return whether `headers` pass [`origin::same_origin`].
 fn same_origin(headers: &HeaderMap) -> bool {
     let header = |name: &str| headers.get(name).and_then(|value| value.to_str().ok());
 
     origin::same_origin(header("sec-fetch-site"), header("origin"), header("host"))
 }
 
-/// Refuse a request for a name the server doesn't answer to.
-///
-/// A page on a domain re-pointed at this machine reaches the server as its own
-/// origin, so it could read every conversation and start turns; the name in
-/// `Host` is what gives it away.
+/// Reject requests whose `Host` header is not allowed on `state.listening`
+/// (defending against DNS rebinding on loopback).
 async fn known_host_only(State(state): State<AppState>, request: Request, next: Next) -> Response {
     let Some(refusal) = host_refusal(state.listening, &state.allowed_hosts, request.headers())
     else {
@@ -269,10 +264,10 @@ async fn known_host_only(State(state): State<AppState>, request: Request, next: 
     (StatusCode::FORBIDDEN, format!("{refusal}\n")).into_response()
 }
 
-/// Why a server listening on `listening` refuses a request with `headers`, by
-/// the name in its `Host`; `None` when it answers.
+/// Return the 403 refusal message if `headers` fail [`origin::answers`], or
+/// `None` if the `Host` header is allowed.
 ///
-/// A `Host` that isn't text is refused as no name at all.
+/// Non-UTF-8 `Host` header values are treated as `""` and rejected.
 fn host_refusal(listening: IpAddr, allowed: &[String], headers: &HeaderMap) -> Option<String> {
     let host = header_text(headers, header::HOST.as_str());
 
@@ -280,8 +275,8 @@ fn host_refusal(listening: IpAddr, allowed: &[String], headers: &HeaderMap) -> O
         .then(|| origin::unknown_host(host.unwrap_or_default(), "serve-web"))
 }
 
-/// The header `name` in `headers`: its text, `""` when it isn't text, or `None`
-/// when the request has none.
+/// Extract header `name` as a `&str`, returning `Some("")` if the value is not
+/// valid ASCII/UTF-8 or `None` if the header is absent.
 fn header_text<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
     headers
         .get(name)

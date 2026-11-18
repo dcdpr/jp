@@ -470,7 +470,7 @@ workspace tree), the tools write to it directly.
 | -------------------------------------------------------------------- | ----------------------------------------------------------------- |
 | `start FILE... [--title T]`                                          | Create a review and snapshot its initial version(s).              |
 | `ls`, `show ID [--version N]`                                        | List reviews, or display a review with comments projected to `N`. |
-| `diff ID [--from N] [--to M]`                                        | Show the line diff between two versions.                          |
+| `diff ID [--from N] [--to M] [--pass N\|last]`                       | Show the line diff between two versions or across a pass.         |
 | `comment ID [--at ANCHOR] [--replace TEXT] [BODY]`                   | Add a draft comment or suggestion.                                |
 | `reply COMMENT BODY`                                                 | Add or replace the draft reply on an open comment.                |
 | `edit COMMENT [--at ANCHOR] [--replace TEXT] [BODY]`                 | Change a draft comment, or the draft reply on a comment.          |
@@ -478,7 +478,7 @@ workspace tree), the tools write to it directly.
 | `resolve COMMENT... \| --accepted ID`                                | Mark specific comments, or all `accept`-verdict comments, closed. |
 | `submit ID [--only N,...] [-m BODY] [--id CONVERSATION] [--cfg ...]` | Submit pending comments/replies and run a pass.                   |
 | `close ID`                                                           | Close a completed review.                                         |
-| `serve [--bind ADDR] [--port PORT]`                                  | Run the local HTTP server.                                        |
+| `serve [--bind ADDR] [--port PORT] [--allowed-host NAME]`            | Run the local HTTP server.                                        |
 | `init DIR`                                                           | Generate the default `review.toml` configuration file.            |
 | `tools init DIR`                                                     | Generate the `review_reply` and `review_comment` tool configs.    |
 
@@ -508,7 +508,7 @@ connection to the host so it can start turns with `query` and stop them with
 | `POST /api/reviews`                                                | Create a new review.                                                                          |
 | `GET /api/reviews/{id}?revision=N&version=V`                       | Return the review if its revision exceeds `N` (or empty if unchanged) and active-pass status. |
 | `GET /api/reviews/{id}/versions/{n}/file?path=P&format=html\|text` | Return a file at version `n`, either rendered with `md-html` or as raw text.                  |
-| `GET /api/reviews/{id}/diff?from=N&to=M&path=P`                    | Return the line diff between versions `N` and `M`.                                            |
+| `GET /api/reviews/{id}/diff?from=N&to=M&pass=P&path=PATH`          | Return the line diff between two versions or across a pass.                                   |
 | `POST /api/reviews/{id}/comments`                                  | Create a draft comment or suggestion.                                                         |
 | `PATCH`, `DELETE /api/reviews/{id}/comments/{n}`                   | Change or withdraw a draft comment, or the draft reply on a comment.                          |
 | `POST /api/reviews/{id}/comments/{n}/replies`                      | Add or replace the draft reply.                                                               |
@@ -567,6 +567,9 @@ prints the same security warning as `jp-serve-web`.
 All state-changing HTTP methods (`POST`, `PATCH`, `DELETE`) reject cross-origin
 browser requests by checking `Sec-Fetch-Site` and comparing `Origin` against
 `Host`, preventing arbitrary web pages from issuing requests to loopback.
+When bound to loopback, the server also rejects requests whose `Host` header is
+not an IP address, `localhost`, `.localhost`, or an entry in `allowed_hosts`
+(defending against DNS rebinding).
 
 ### Rendering
 
@@ -670,11 +673,17 @@ cfg = ["skill/review"]
 # `{path}` is the file, relative to the workspace root. Unset: no base version.
 base = ["git", "show", "HEAD:./{path}"]
 
-# The author written on the assistant's replies and comments.
+# Author name recorded on assistant replies and comments.
 assistant = "jp"
 
-# The most characters a reply or comment the assistant writes may hold.
+# Maximum character count for assistant replies and comments.
 max_chars = 600
+
+# Address and port `jp review serve` binds to, and additional allowed `Host`
+# header values when bound to loopback.
+bind = "127.0.0.1"
+port = 3001
+allowed_hosts = ["my-machine.local"]
 ```
 
 All options are optional.

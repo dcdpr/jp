@@ -1,11 +1,11 @@
 //! Review, comment, and conversation identifiers.
 //!
-//! A review id is an epoch id with the `R` prefix, as in `R-1h4k2m9`; its body
-//! names the review's directory in the store.
-//! The format and its allocation are `doc::id`'s and `doc::files`'.
-//! A comment is named by its review and its number in it: `R-1h4k2m9#2`.
-//! A conversation is named the way JP prints it, `jp-c17629384710`
-//! ([`Conversation`]).
+//! - [`ReviewId`] is a `doc::id::Id` with prefix `R` (e.g. `R-1h4k2m9`); its
+//!   7-character body names the review's directory in the store.
+//! - [`CommentRef`] identifies a comment by review ID and 1-based number
+//!   (`R-1h4k2m9#2`).
+//! - [`Conversation`] parses a JP conversation ID in any accepted input form
+//!   and formats it as `jp-c<timestamp>`.
 
 use std::{fmt, str::FromStr};
 
@@ -71,10 +71,9 @@ impl Serialize for CommentRef {
     }
 }
 
-/// A conversation, written the way JP prints it: `jp-c17629384710`.
+/// Conversation ID formatted as `jp-c17629384710`.
 ///
-/// Read from any spelling `jp` takes: that one, with a global id after it, or
-/// the bare number.
+/// Parses `jp-c<id>`, `jp-c<id>-<global>`, or the bare numeric timestamp.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Conversation(i64);
 

@@ -254,7 +254,7 @@ fn list_dirs_is_ordered_by_id_and_skips_other_entries() {
     for path in [&later, &earlier] {
         fs::create_dir(path).unwrap();
     }
-    // A file named like an id, and directories whose names only fold onto one.
+    // Ignore regular files and non-canonical directory names.
     fs::write(dir.path().join(id(7, 2).as_str()), "").unwrap();
     for name in ["W-0000703", "0000704-slug", "000070O", "notes"] {
         fs::create_dir(dir.path().join(name)).unwrap();
@@ -272,8 +272,6 @@ fn list_dirs_of_a_missing_directory_is_empty() {
     assert_eq!(list_dirs::<Page>(&dir.path().join("missing")).unwrap(), []);
 }
 
-/// The first directory claimed in an empty store starts its clock, the way the
-/// first document file does.
 #[test]
 fn the_first_directory_writes_an_epoch_and_is_named_by_its_id() {
     let dir = Utf8TempDir::new().unwrap();
@@ -311,8 +309,6 @@ fn directories_created_in_sequence_stay_ordered() {
     );
 }
 
-/// Directories with no epoch beside them can't take a fresh one, for the reason
-/// document files can't.
 #[test]
 fn directories_without_an_epoch_refuse_a_new_one() {
     let dir = Utf8TempDir::new().unwrap();

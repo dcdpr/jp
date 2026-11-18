@@ -8,7 +8,6 @@ use crate::message::{
     QueryOutcome, QueryRequest,
 };
 
-/// What a client wrote to the host.
 #[derive(Clone, Default)]
 struct Written(Arc<Mutex<Vec<u8>>>);
 
@@ -33,8 +32,7 @@ impl Written {
     }
 }
 
-/// A writer whose every write fails, the way a pipe to a host that is gone
-/// does.
+/// Writer that always fails with `BrokenPipe`.
 struct Broken;
 
 impl Write for Broken {
@@ -51,7 +49,6 @@ fn writing_to(writer: impl Write + Send + 'static) -> Client {
     Client::new(Arc::new(Mutex::new(Box::new(writer))))
 }
 
-/// A client listening to `host`, and what it writes back.
 struct Fixture {
     client: Client,
     written: Written,
@@ -73,7 +70,6 @@ fn fixture() -> Fixture {
     }
 }
 
-/// Write `line` to the client, as the host.
 fn say(host: &mut PipeWriter, line: &str) {
     writeln!(host, "{line}").unwrap();
 }
@@ -175,8 +171,6 @@ async fn a_request_is_sent_and_answered() {
     assert!(nothing_waits(&f.client));
 }
 
-/// What an error answer means is the caller's business: it comes back as the
-/// host sent it.
 #[tokio::test]
 async fn an_error_answer_is_returned_as_the_host_sent_it() {
     let mut f = fixture();
@@ -192,10 +186,8 @@ async fn an_error_answer_is_returned_as_the_host_sent_it() {
     assert_eq!(within(answer.wait(None)).await.unwrap(), refused);
 }
 
-/// A query that starts a conversation is answered with `created`, then with
-/// `query_complete`.
-/// Both are sent back to back here, before anything waits on either, so each
-/// must already have its waiter.
+/// Both responses are written before the caller awaits either `Answer`,
+/// verifying that `send_expecting` registers both channels before sending.
 #[tokio::test]
 async fn two_answers_to_one_request_reach_their_waiters_in_order() {
     let mut f = fixture();
@@ -244,7 +236,6 @@ async fn a_forgotten_request_fails_every_waiter() {
     assert!(matches!(ended.wait(None).await, Err(Error::Closed)));
 }
 
-/// Its answer couldn't be matched to it, so it would wait forever.
 #[test]
 fn a_request_without_an_id_is_not_sent() {
     let written = Written::default();
@@ -318,9 +309,6 @@ async fn a_shutdown_message_signals_shutdown() {
         .unwrap();
 }
 
-/// A line that isn't a protocol message, a message that answers nothing, and an
-/// answer nothing waits for are dropped and logged to the host, and the answer
-/// after them still arrives.
 #[tokio::test]
 async fn what_the_client_cannot_use_is_dropped_and_logged() {
     let mut f = fixture();

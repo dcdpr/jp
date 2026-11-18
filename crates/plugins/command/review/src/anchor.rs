@@ -1,8 +1,8 @@
-//! What a comment is anchored to: the review as a whole, a file, or a range of
-//! a file, in one version of the review.
+//! Comment anchors: the review as a whole, a file, or a line/column range in a
+//! specific version of a file.
 //!
-//! `review.json` holds an anchor as its version, its file's path, and its range
-//! in the form `--at` takes after the path:
+//! In `review.json`, an anchor is serialized as `{ version, path?, range? }`,
+//! where `range` uses the same syntax as `--at` after the path:
 //!
 //! ```json
 //! { "version": 2, "path": "docs/a.md", "range": "42:5-43:18" }
@@ -12,7 +12,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::text::Range;
 
-/// What a comment is about, in the version its lines and columns count in.
+/// Target of a comment and the version in which its line and column numbers are
+/// measured.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "Stored", into = "Stored")]
 pub struct Anchor {
@@ -20,20 +21,20 @@ pub struct Anchor {
     pub target: Target,
 }
 
-/// What a comment is about.
+/// Target of a comment within a version.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Target {
     /// The review as a whole.
     Review,
 
-    /// A whole file, by its path relative to the workspace root.
+    /// An entire file, named relative to the workspace root.
     File(String),
 
-    /// A range of a file.
+    /// A line or character range within a file.
     Range(String, Range),
 }
 
-/// An anchor as `review.json` holds it.
+/// Serialized representation of [`Anchor`] in `review.json`.
 #[derive(Serialize, Deserialize)]
 struct Stored {
     version: u32,
@@ -77,13 +78,13 @@ impl From<Anchor> for Stored {
     }
 }
 
-/// Read what `--at` names, `PATH` or `PATH:RANGE`, as a file the review tracks
-/// and an optional range in it.
+/// Parse an `--at` argument (`PATH` or `PATH:RANGE`) into a tracked file path
+/// and an optional [`Range`].
 ///
-/// `find` returns the tracked path that a path, as typed, names; `tracked`
-/// lists every tracked path, for the error when none matches.
-/// The whole of `at` is tried as a path first, so a file whose name holds a
-/// colon can be named alone.
+/// `find` resolves a user-supplied path to a tracked path; `tracked` lists all
+/// tracked paths for the error message when no path matches.
+/// Tries matching all of `at` as a file path first so filenames containing `:`
+/// can be referenced without a range.
 pub fn place(
     at: &str,
     tracked: &[String],

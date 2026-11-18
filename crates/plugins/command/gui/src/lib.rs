@@ -33,7 +33,6 @@ Arguments:
 /// The app's bundle identifier, which is how macOS finds it without a path.
 const BUNDLE_ID: &str = "computer.jp.jean-pierre";
 
-/// The plugin's executable, as a message about a host gone quiet names it.
 const BINARY: &str = "jp-gui";
 
 /// The protocol version this plugin needs from the host.

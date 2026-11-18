@@ -1,12 +1,11 @@
-//! The commands writing a review's comments and replies: `comment`, `reply`,
-//! `edit`, `withdraw`, and `resolve`.
+//! Comment and reply CLI commands: `comment`, `reply`, `edit`, `withdraw`, and
+//! `resolve`.
 //!
-//! Each makes its change through `Store::update`, holding the review's lock
-//! from reading the review to writing it, so the change is checked against the
-//! review as it stands.
-//! Lines and columns the user gives are the working tree's: a command anchoring
-//! a comment to a file first records the working tree as a new version, when it
-//! changed since the latest.
+//! Each command mutates the review via [`Store::update`] under the review's
+//! file lock.
+//! Because CLI line and column arguments refer to the current working tree,
+//! commands that anchor a comment to a file first snapshot the working tree as
+//! a new version if any tracked file has changed.
 
 use chrono::{DateTime, Utc};
 use doc::author;
@@ -61,9 +60,9 @@ pub(crate) fn comment(
     Ok(format!("{comment}\n").into())
 }
 
-/// What a comment on `at` is anchored to: the review as a whole in its latest
-/// version when `at` is `None`, and otherwise the file or range `at` names in
-/// the version holding the working tree.
+/// Resolve `--at` to an [`Anchor`]: the review as a whole in the latest version
+/// when `at` is `None`, or the specified file/range in a current working-tree
+/// snapshot.
 fn anchor_at(
     ctx: &Context<'_>,
     review: &mut Review,
@@ -92,10 +91,8 @@ fn anchor_at(
     Ok(Anchor { version, target })
 }
 
-/// What a comment on `path`, or on `range` in it, targets in `version`.
-///
-/// Refused when the file is absent from the version, or the range lies outside
-/// it.
+/// Validate that `path` (and optional `range`) exists in `version` of `review`,
+/// returning the corresponding [`Target`].
 pub(crate) fn target(
     review: &Review,
     blobs: &Blobs,

@@ -48,16 +48,16 @@ pub enum Existing {
     Differs,
 }
 
-/// What [`write`] did with one file.
+/// Action taken by [`write`] for a single target file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Written {
-    /// The file already had the contents, and was left alone.
+    /// The file already matched the target contents and was not modified.
     Unchanged,
 
-    /// The file had other contents, which were replaced.
+    /// The file existed with different contents and was overwritten.
     Overwrote,
 
-    /// The file didn't exist.
+    /// The file did not exist and was created.
     Wrote,
 }
 
@@ -71,13 +71,14 @@ impl fmt::Display for Written {
     }
 }
 
-/// Write `files`, `(name, contents)` pairs named relative to `dir`, creating
-/// `dir` if needed, and return what was done with each file, by its path.
+/// Write `(filename, contents)` pairs into `dir`, creating `dir` if needed, and
+/// return the [`Written`] action for each path.
 ///
-/// A file that already has its contents is left alone.
-/// Unless `force` is true, nothing is written when a file with other contents
-/// can't be restored by git; the error is [`refusal`]'s, naming `command`, the
-/// invocation without `--force`.
+/// Files that already match their target contents are left untouched.
+/// Unless `force` is `true`, returns an error from [`refusal`] before writing
+/// any file if any differing file cannot be restored by git.
+/// `command` is the CLI invocation without `--force` shown in the refusal
+/// message.
 pub fn write(
     dir: &Utf8Path,
     files: &[(&str, &str)],
@@ -113,13 +114,13 @@ pub fn write(
         .collect()
 }
 
-/// Write `contents` to `path`, which `existing` found as `found`.
+/// Write `contents` to `path` given its [`Existing`] state.
 fn put(path: &Utf8Path, contents: &str, found: Existing) -> io::Result<Written> {
     match found {
         Existing::Same => Ok(Written::Unchanged),
         Existing::Differs => fs::write(path, contents).map(|()| Written::Overwrote),
-        // `create_new`, so a file created since `existing` looked is not
-        // overwritten.
+        // Use `create_new` so a file created concurrently after `existing`
+        // checked the path is not silently overwritten.
         Existing::Missing => OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -129,10 +130,10 @@ fn put(path: &Utf8Path, contents: &str, found: Existing) -> io::Result<Written> 
     }
 }
 
-/// Refuse with [`refusal`] when git can't restore one of `names`, existing
-/// files named relative to `dir`.
+/// Return a [`refusal`] error if git cannot restore any file in `names`
+/// (relative to `dir`).
 ///
-/// `command` is the invocation without `--force`.
+/// `command` is the CLI invocation without `--force`.
 pub fn refuse_unrecorded(
     dir: &Utf8Path,
     names: &[Utf8PathBuf],

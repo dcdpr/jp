@@ -1,17 +1,14 @@
-//! The passes `jp review serve` runs.
+//! Background pass execution for `jp review serve`.
 //!
-//! A pass submitted over HTTP runs the way `jp review submit` runs one, except
-//! that the server keeps serving while its turn runs.
-//! [`Passes::start`] records the pass and asks the host for its turn, and
-//! leaves a task waiting for the turn to end, which records how it ended.
-//! The task holds the review's `.pass` lock from before the pass is recorded
-//! until after its outcome is, as `submit` does, and the pass runs under the
-//! configuration the server had when it started.
+//! [`Passes::start`] acquires the review's `.pass` lock, snapshots the working
+//! tree and records the pass, sends the `query` request to the host, and spawns
+//! a background task to await `query_complete` and record the post-turn
+//! snapshot and outcome while holding the `.pass` lock.
 //!
-//! [`Passes::stop`] asks the host to stop a pass's turn.
-//! When the server shuts down, [`Passes::stop_all`] stops every pass and
-//! refuses new ones, and [`Passes::wait`] waits for each to record how it
-//! ended.
+//! [`Passes::stop`] sends a `stop` interrupt for a running pass.
+//! On server shutdown, [`Passes::stop_all`] stops all active passes and rejects
+//! new submissions, and [`Passes::wait`] awaits completion of all in-flight
+//! pass tasks.
 
 use std::{
     collections::HashMap,
@@ -395,8 +392,8 @@ impl Passes {
         }
     }
 
-    /// Record how pass `number` ended and the files as its turn left them, then
-    /// let go of the pass.
+    /// Snapshot the working tree, record the outcome of pass `number`, and
+    /// release its `.pass` lock.
     async fn land(
         &self,
         workspace: &Arc<Workspace>,
@@ -410,8 +407,8 @@ impl Passes {
         let recorded =
             blocking(move || Ok(submit::finish(&recording.context(), id, number, ending)?)).await;
 
-        // `.pass` goes only once the outcome is recorded, so a turn that ends
-        // late can't record its outcome over a newer pass.
+        // Release the `.pass` lock only after persisting the outcome so a
+        // subsequent pass cannot start before this pass's outcome is recorded.
         lock(&self.flights).running.remove(&id);
         drop(held);
 
@@ -519,8 +516,7 @@ pub(crate) async fn blocking<T: Send + 'static>(
         .map_err(|error| ApiError::from(format!("The request failed: {error}")))?
 }
 
-/// Acquire `mutex`, recovering the guard if a holder panicked: the map of
-/// passes stays usable whatever a holder was doing.
+/// Lock `mutex`, recovering the inner value if a previous holder panicked.
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }

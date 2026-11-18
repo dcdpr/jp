@@ -7,31 +7,30 @@
 - **Label**: relevant-rfd=116
 - **Label**: type=bug
 
-The dev server `jp vite serve` runs takes writes on `/__ticket-board`,
+The dev server started by `jp vite serve` accepts writes on `/__ticket-board`,
 `/__ticket`, `/__wiki`, and the RFD priority board
 (`crates/plugins/command/vite/site/jp-vite/middleware.mjs`).
 `writeRefusal()` only checks that `jp vite serve` started the site and that its
-checks passed.
-Nothing checks where a request came from:
+startup checks passed; it does not validate the request's origin:
 
-- every `POST` body is parsed as JSON whatever its `Content-Type`, so a
-  `text/plain` post, which a browser sends cross-site without a preflight, gets
-  through;
-- the VitePress config sets `allowedHosts: true`, so Vite's own `Host` check is
-  off.
+- every `POST` body is parsed as JSON regardless of `Content-Type`, so a
+  `text/plain` form submission (which browsers send cross-origin without a CORS
+  preflight) is accepted;
+- the VitePress config sets `allowedHosts: true`, disabling Vite's `Host` header
+  check.
 
-A page open in the same browser can therefore move tickets or edit wiki pages
-while the site runs: the same-origin policy stops it reading the answer, not
-sending the request.
-Not reproduced; this is from reading the middleware.
+An attacker-controlled page open in the same browser can therefore move tickets
+or edit wiki pages while the dev server runs: the same-origin policy blocks
+reading the response, not sending the request.
+(Found by code inspection, not reproduced.)
 
-`jp serve web` and `jp review serve` refuse such writes with one rule,
-`jp_plugin::origin::same_origin`: a write is refused when `Sec-Fetch-Site` says
-another site sent it, or, without that header, when `Origin` doesn't match
-`Host`.
-A request carrying neither, from `curl` or a script, is allowed.
+`jp serve web` and `jp review serve` reject cross-origin writes using
+`jp_plugin::origin::same_origin`: a write is rejected when `Sec-Fetch-Site` is
+present and not `"same-origin"` or `"none"`, or when `Sec-Fetch-Site` is absent
+and the `Origin` authority does not match `Host`.
+Requests with neither header (such as `curl` or scripts) are allowed.
 
-- [ ] Port that rule to `writeRefusal()` (JavaScript, same three headers, same
-      answers), refusing with 403.
-- [ ] Cover it in `js-tests/middleware.test.mjs`: same-origin, `none`,
-      cross-site, mismatched `Origin`, no headers.
+- [ ] Port that check to `writeRefusal()` in JavaScript and return HTTP 403 on
+      failure.
+- [ ] Add test cases in `js-tests/middleware.test.mjs`: `same-origin`, `none`,
+      `cross-site`, mismatched `Origin`, and no origin headers.

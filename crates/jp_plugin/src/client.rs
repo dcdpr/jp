@@ -1,25 +1,20 @@
-//! The plugin's end of a connection to the host that lasts as long as the
-//! plugin runs, for a plugin such as a server that keeps asking `jp` for
-//! things.
+//! Multiplexed async host client for long-running command plugins.
 //!
-//! [`Client`] writes requests to the host and matches the host's answers to
-//! them by request id.
-//! A thread of its own reads the host's messages ([`Client::listen`]), hands
-//! each answer to the request waiting on it, and reports when the host asks the
-//! plugin to shut down or closes the connection.
-//! A `Client` is cheap to clone, and every clone talks over the same
-//! connection.
+//! [`Client`] writes requests to the host on stdout and correlates responses by
+//! request ID.
+//! [`Client::listen`] spawns a reader thread on stdin that dispatches each
+//! response to its waiting [`Answer`] channel and signals when the host sends
+//! `shutdown` or closes the pipe.
+//! Cloning a `Client` shares the underlying connection.
 //!
-//! Most requests are answered once ([`Client::request`]).
-//! A `query` that starts a conversation is answered twice: with `created` as
-//! soon as the conversation exists, and with `query_complete` when its first
-//! turn ends ([`Client::send_expecting`]).
+//! Most requests expect a single response ([`Client::request`]).
+//! A `query` with `new = true` receives two responses: `created` once the
+//! conversation is created and locked, followed by `query_complete` when the
+//! turn finishes ([`Client::send_expecting`]).
 //!
-//! The client sends [`PluginToHost`] messages and returns [`HostToPlugin`]
-//! answers as the host sent them, error answers included: what a request means
-//! is the plugin's business.
-//! It logs to the host through the same connection ([`Log`]), what it can't use
-//! of the host's messages included.
+//! [`Client`] returns [`HostToPlugin`] responses as sent by the host, including
+//! [`HostToPlugin::Error`], and implements [`Log`] to forward structured log
+//! events over the same stdout pipe.
 
 use std::{
     array,
@@ -44,18 +39,19 @@ use crate::{
     message::{HostToPlugin, PluginToHost, PrintMessage},
 };
 
-/// Where a plugin writes its messages to the host: its stdout, shared with
-/// anything else that writes there, such as a log layer.
+/// Shared stdout writer for plugin-to-host messages.
 ///
-/// Each message is written whole while the lock is held, so two writers never
-/// interleave their lines.
+/// Each JSON line is written and flushed while holding the mutex so concurrent
+/// tasks and [`LogLayer`] never interleave partial lines.
+///
+/// [`LogLayer`]: crate::log::LogLayer
 pub type Writer = Arc<Mutex<Box<dyn Write + Send>>>;
 
-/// The waiters for each request's answers, by request id, in the order the
-/// answers are expected.
+/// Pending response channels keyed by request ID, in the order responses are
+/// expected.
 type Pending = Mutex<HashMap<String, VecDeque<oneshot::Sender<HostToPlugin>>>>;
 
-/// A connection to the host, shared by every clone.
+/// Multiplexed connection to the `jp` host, shared across clones.
 #[derive(Clone)]
 pub struct Client {
     inner: Arc<Inner>,
@@ -67,42 +63,42 @@ struct Inner {
     next_id: AtomicU64,
 }
 
-/// An answer the host owes to a request, to wait on with [`Answer::wait`].
+/// Handle for awaiting a single [`HostToPlugin`] response via [`Answer::wait`].
 #[derive(Debug)]
 pub struct Answer {
     rx: oneshot::Receiver<HostToPlugin>,
 }
 
-/// Why a request got no answer.
+/// Error returned when a host request fails before a response is received.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    /// The message couldn't be written to the host, which has most likely gone
-    /// away.
+    /// Writing or flushing the request to stdout failed.
     #[error("failed to write to the host: {0}")]
     Write(io::Error),
 
-    /// The thread reading the host's messages couldn't be started.
+    /// Spawning the stdin reader thread failed.
     #[error("failed to start the host reader: {0}")]
     Listen(io::Error),
 
-    /// The request carries no id, which is what its answer is matched by.
+    /// The request has no correlation ID (`id` is `None`).
     #[error("the request carries no id to match its answer by")]
     NoId,
 
-    /// The connection to the host closed before the answer came.
+    /// The host closed the pipe before responding, or the request was cancelled
+    /// with [`Client::forget`].
     #[error("the connection to the host closed")]
     Closed,
 
-    /// No answer came within the timeout.
+    /// The timeout elapsed before the host responded.
     #[error("timed out waiting for the host")]
     TimedOut,
 }
 
 impl Client {
-    /// A client writing its requests to `writer`.
+    /// Create a client that writes requests to `writer`.
     ///
-    /// It matches no answers until [`Client::listen`] starts reading them, so a
-    /// plugin can answer the host's `init` through it first.
+    /// Responses are not read until [`Client::listen`] is called, allowing the
+    /// plugin to complete the `init`/`ready` handshake on stdin first.
     #[must_use]
     pub fn new(writer: Writer) -> Self {
         Self {
@@ -114,18 +110,17 @@ impl Client {
         }
     }
 
-    /// Read the host's messages from `stdin` on a thread of its own, handing
-    /// each answer to the request waiting on it.
+    /// Spawn a background thread that reads [`HostToPlugin`] messages from
+    /// `stdin` and dispatches responses to waiting [`Answer`]s.
     ///
-    /// The returned receiver turns `true` when the host sends `shutdown`, and
-    /// when it closes the connection, at which point every request still
-    /// waiting fails with [`Error::Closed`].
-    /// A line that isn't a protocol message, and an answer no request waits
-    /// for, is logged and dropped.
+    /// The returned watch receiver becomes `true` when the host sends
+    /// `shutdown` or closes `stdin`.
+    /// When `stdin` closes, all pending requests fail with [`Error::Closed`].
+    /// Malformed lines and uncorrelated responses are logged and ignored.
     ///
     /// # Errors
     ///
-    /// [`Error::Listen`] when the thread can't be started.
+    /// Returns [`Error::Listen`] if the reader thread cannot be spawned.
     pub fn listen(
         &self,
         stdin: impl BufRead + Send + 'static,
@@ -140,8 +135,8 @@ impl Client {
         Ok(shutdown_rx)
     }
 
-    /// The writer this client writes to the host through, for a log layer to
-    /// write through too ([`LogHandle::activate`]).
+    /// Return the shared stdout [`Writer`], for passing to
+    /// [`LogHandle::activate`].
     ///
     /// [`LogHandle::activate`]: crate::log::LogHandle::activate
     #[must_use]
@@ -149,8 +144,7 @@ impl Client {
         Arc::clone(&self.inner.writer)
     }
 
-    /// A request id no other request of this client carries: `1`, `2`, and so
-    /// on.
+    /// Allocate a monotonically increasing correlation ID (`"1"`, `"2"`, ...).
     #[must_use]
     pub fn next_id(&self) -> String {
         self.inner
@@ -159,11 +153,11 @@ impl Client {
             .to_string()
     }
 
-    /// Write `message` to the host as one line.
+    /// Serialize `message` as a single JSON line and flush it to the host.
     ///
     /// # Errors
     ///
-    /// [`Error::Write`] when the message can't be serialized or written.
+    /// Returns [`Error::Write`] if serialization or writing fails.
     pub fn send(&self, message: &PluginToHost) -> Result<(), Error> {
         let json = serde_json::to_string(message).map_err(|error| Error::Write(error.into()))?;
         let mut writer = lock(&self.inner.writer);
@@ -173,13 +167,12 @@ impl Client {
             .map_err(Error::Write)
     }
 
-    /// Print `text` on the host's output channel `channel`: `content`, what a
-    /// script reads on stdout, or `chrome`, notes on stderr that `--quiet`
-    /// hides.
+    /// Send a plain-text `print` message on `channel` (`"content"` for stdout
+    /// or `"chrome"` for stderr output suppressed by `--quiet`).
     ///
     /// # Errors
     ///
-    /// The errors of [`Client::send`].
+    /// Returns [`Error::Write`] if writing to the host fails.
     pub fn print(&self, text: &str, channel: &str) -> Result<(), Error> {
         self.send(&PluginToHost::Print(PrintMessage {
             text: text.to_owned(),
@@ -189,14 +182,14 @@ impl Client {
         }))
     }
 
-    /// Send `message` and wait for its answer: for up to `timeout`, or with no
-    /// timeout for as long as the connection lasts.
+    /// Send `message` and wait for a single response, with an optional
+    /// `timeout`.
     ///
-    /// The request is forgotten when no answer comes.
+    /// Removes the pending waiter if waiting fails or times out.
     ///
     /// # Errors
     ///
-    /// The errors of [`Client::send_expecting`] and [`Answer::wait`].
+    /// Returns the errors of [`Client::send_expecting`] or [`Answer::wait`].
     pub async fn request(
         &self,
         message: &PluginToHost,
@@ -213,17 +206,17 @@ impl Client {
         answered
     }
 
-    /// Send `message`, which the host answers `N` times, and return the answers
-    /// to wait on, in the order the host sends them.
+    /// Send `message` expecting `N` responses on its correlation ID, returning
+    /// their [`Answer`] handles in order.
     ///
-    /// Each answer is waited for before the request goes out, so an answer the
-    /// host sends at once can't arrive before anything waits for it.
-    /// Nothing is left waiting when the request isn't sent.
+    /// Registers the response channels before writing the request so an
+    /// immediate response cannot arrive before its waiter is registered.
+    /// Cleans up the channels if sending fails.
     ///
     /// # Errors
     ///
-    /// [`Error::NoId`] when `message` carries no request id, and the errors of
-    /// [`Client::send`].
+    /// Returns [`Error::NoId`] if `message` has no correlation ID, or
+    /// [`Error::Write`] if writing to the host fails.
     pub fn send_expecting<const N: usize>(
         &self,
         message: &PluginToHost,
@@ -238,15 +231,15 @@ impl Client {
         Ok(answers)
     }
 
-    /// Stop waiting for the answers still owed to the request `id`.
+    /// Cancel all pending [`Answer`]s for request `id`.
     ///
-    /// Waiting on any of them then fails with [`Error::Closed`], and an answer
-    /// the host sends for the request later is logged and dropped.
+    /// Any task awaiting those [`Answer`]s receives [`Error::Closed`], and any
+    /// subsequent host response for `id` is logged and ignored.
     pub fn forget(&self, id: &str) {
         lock(&self.inner.pending).remove(id);
     }
 
-    /// Add a waiter for the next answer to the request `id`, behind any it has.
+    /// Register a oneshot channel for the next response to request `id`.
     fn wait_for(&self, id: &str) -> Answer {
         let (tx, rx) = oneshot::channel();
         lock(&self.inner.pending)
@@ -259,13 +252,13 @@ impl Client {
 }
 
 impl Answer {
-    /// Wait for the answer: for up to `timeout`, or with no timeout for as long
-    /// as the connection lasts.
+    /// Wait for the host's response, with an optional `timeout`.
     ///
     /// # Errors
     ///
-    /// [`Error::TimedOut`] when `timeout` passes first, and [`Error::Closed`]
-    /// when the connection closes first or the request was forgotten.
+    /// Returns [`Error::TimedOut`] if `timeout` elapses first, or
+    /// [`Error::Closed`] if the connection closes or [`Client::forget`] cancels
+    /// the request.
     pub async fn wait(self, timeout: Option<Duration>) -> Result<HostToPlugin, Error> {
         let Some(timeout) = timeout else {
             return self.rx.await.map_err(|_| Error::Closed);
@@ -278,8 +271,8 @@ impl Answer {
     }
 }
 
-/// Read the host's messages until it closes the connection, handing each answer
-/// to the request waiting on it, and logging what can't be used.
+/// Read [`HostToPlugin`] lines from `stdin` until EOF, dispatching responses to
+/// pending waiters and signalling `shutdown` on `Shutdown` or EOF.
 fn read(stdin: impl BufRead, client: &Client, shutdown: &watch::Sender<bool>) {
     for line in stdin.lines() {
         let line = match line {
@@ -322,14 +315,14 @@ fn read(stdin: impl BufRead, client: &Client, shutdown: &watch::Sender<bool>) {
         }
     }
 
-    // The host is gone. Dropping every waiter fails each request still waiting
-    // as closed, rather than leaving it to wait for an answer that can't come.
+    // Clear all pending waiters on EOF so awaiting tasks fail immediately with
+    // `Error::Closed` instead of hanging.
     lock(&client.inner.pending).clear();
     let _ = shutdown.send(true);
 }
 
-/// Hand `answer` to the first request waiting on its id, forgetting the request
-/// once its last waiter is served.
+/// Deliver `answer` to the next waiter registered for its correlation ID,
+/// removing the entry once its queue is empty.
 fn dispatch(client: &Client, answer: HostToPlugin) {
     let Some(id) = answer.id().map(ToOwned::to_owned) else {
         client.log_with(
@@ -358,12 +351,11 @@ fn dispatch(client: &Client, answer: HostToPlugin) {
         return;
     };
 
-    // A waiter that stopped waiting dropped its end, and the answer goes
-    // nowhere.
+    // Ignore send errors when the caller has already dropped its `Answer`.
     drop(waiter.send(answer));
 }
 
-/// The `type` a host message is tagged with on the wire, such as `done`.
+/// Extract the wire `type` tag of `message` (e.g. `"done"`).
 fn kind(message: &HostToPlugin) -> String {
     serde_json::to_value(message)
         .ok()
@@ -376,8 +368,7 @@ fn kind(message: &HostToPlugin) -> String {
         .unwrap_or_default()
 }
 
-/// Acquire `mutex`, recovering the guard if a holder panicked: the map of
-/// waiters and the writer it guards stay usable whatever a holder was doing.
+/// Lock `mutex`, recovering the inner value if a previous holder panicked.
 fn lock<T: ?Sized>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }

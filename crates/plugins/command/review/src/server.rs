@@ -1,22 +1,19 @@
-//! `jp review serve`: the reviews over a JSON HTTP API on a local port, for a
-//! browser to review files in.
+//! HTTP server for `jp review serve`.
 //!
-//! Every route answers JSON, an error as `{"error": "..."}`.
-//! The operations are `api`'s, run on threads that may block, and the passes a
-//! browser submits are `running`'s, which run while the server keeps serving.
-//! A write from a page on another site is refused before it reaches a route
-//! (`origin::same_origin`), and so is any request for a name the server doesn't
-//! answer to when it listens on loopback (`origin::answers`).
+//! Serves the JSON API in [`crate::api`] on a local port and manages background
+//! pass turns via [`crate::running::Passes`].
+//! Rejects cross-origin state-changing requests ([`origin::same_origin`]) and,
+//! when bound to loopback, requests with unrecognized `Host` headers
+//! ([`origin::answers`]).
 //!
-//! While it serves, the server reads the configuration again every
-//! [`RELOAD_EVERY`]: the next request, and the next pass, run under what it
-//! says now, the flags still winning over the options.
-//! The store and the address stay as they were when the server started; a new
-//! `dir`, `bind`, or `port` takes a restart.
+//! Polls the host for configuration changes every [`RELOAD_EVERY`] so updated
+//! options (`cfg`, `base`, `assistant`, `max_chars`, `allowed_hosts`) apply to
+//! subsequent requests without restarting; `dir`, `bind`, and `port` remain
+//! fixed for the lifetime of the server.
 //!
-//! The server stops when the host sends `shutdown` or closes the connection: it
-//! stops taking requests, stops every pass it runs and refuses new ones, waits
-//! for each to record how it ended, and exits.
+//! When the host sends `shutdown` or closes stdin, the server stops accepting
+//! requests, sends `stop` interrupts to all active passes, waits for their
+//! outcomes to be recorded, and exits.
 
 use std::{
     io::{BufRead, Write},

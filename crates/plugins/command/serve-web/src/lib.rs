@@ -29,17 +29,13 @@ use jp_plugin::{
 };
 use tracing::info;
 
-/// The plugin's executable, as a message about a host gone quiet names it.
 const BINARY: &str = "jp-serve-web";
 
-/// The port the server listens on when neither `--port` nor the `port` option
-/// names one.
 const DEFAULT_PORT: u16 = 3000;
 
-/// What the server is described as serving, when it starts.
 const SERVING: &str = "conversations";
 
-/// What anyone who reaches a server listening beyond loopback can do.
+/// Warning text shown when bound to a non-loopback address.
 const REACH: &str = "read every conversation in this workspace, and start turns that spend tokens \
                      and run whatever tools the conversation allows";
 
@@ -126,8 +122,8 @@ fn run_server(
         Err(exit) => return send(&mut stdout, &PluginToHost::Exit(exit)),
     }
 
-    // Bound before anything is announced, so a port in use is reported rather
-    // than a server that isn't there.
+    // Bind the socket before announcing the URL so a port conflict fails
+    // before printing "Serving".
     let (listener, allowed_hosts) =
         match parse_args(&init.args).and_then(|request| listen(init, request)) {
             Ok(Some(listening)) => listening,
@@ -177,9 +173,8 @@ fn run_server(
     result
 }
 
-/// Listen where `request`, the options, and the default say, returning the
-/// names to answer to besides addresses and `localhost`; `None` when the user
-/// asked for help instead.
+/// Bind the TCP listener configured by `request` and `init.options`, returning
+/// the listener and allowed hostnames, or `None` if `--help` was requested.
 fn listen(
     init: &InitMessage,
     request: Request,
@@ -193,15 +188,14 @@ fn listen(
     Ok(Some((listener, options.allowed_hosts(&flags).to_vec())))
 }
 
-/// What `jp serve web` was asked for on its command line.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Request {
     Help,
     Serve(Listen),
 }
 
-/// Read `jp serve web`'s arguments: `--bind ADDR`, `--port PORT`, and
-/// `--allowed-host NAME`, each also written `--flag=value`, or `-h`/`--help`.
+/// Parse `jp serve web` CLI arguments (`--bind`, `--port`, `--allowed-host`, or
+/// `-h`/`--help`).
 fn parse_args(args: &[String]) -> Result<Request, String> {
     let mut flags = Listen::default();
     let mut args = args.iter();
@@ -228,8 +222,8 @@ fn parse_args(args: &[String]) -> Result<Request, String> {
     Ok(Request::Serve(flags))
 }
 
-/// Set the flag `name`, `--bind`, `--port`, or `--allowed-host`, to `value`; an
-/// `--allowed-host` adds to the names the earlier ones gave.
+/// Apply a single CLI flag (`--bind`, `--port`, or `--allowed-host`) to
+/// `flags`.
 fn set_flag(flags: &mut Listen, name: &str, value: &str) -> Result<(), String> {
     if name == "--bind" {
         flags.bind = Some(server::parse_bind(value).map_err(|why| format!("`--bind`: {why}."))?);

@@ -26,8 +26,8 @@
 //! destinations with a `javascript:`, `vbscript:`, `file:`, or non-image
 //! `data:` scheme are stripped.
 //!
-//! [`render_text`] renders a file that isn't Markdown as preformatted text,
-//! each line in a span carrying its byte range the same way.
+//! [`render_text`] renders plain text as preformatted HTML (`<pre>`), wrapping
+//! each line in a `<span>` with its source byte range.
 //!
 //! [`Lines`] converts between byte offsets and 1-based line and column
 //! positions.

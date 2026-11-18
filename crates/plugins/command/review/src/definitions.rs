@@ -1,10 +1,8 @@
-//! The files `jp review` writes into a workspace: the definitions of the tools
-//! the assistant answers a review with, which `jp review tools init` writes,
-//! and the configuration a pass runs under, which `jp review init` writes.
+//! Workspace scaffolding for `jp review`: tool definitions (`jp review tools
+//! init`) and the review pass configuration (`jp review init`).
 //!
-//! Once written, they belong to the workspace.
-//! A file that differs from what would be written is overwritten only when git
-//! can restore it, or with `--force` (`overwrite`).
+//! Existing files with different contents are overwritten only when git can
+//! restore them or when `--force` is passed (see [`overwrite`]).
 
 use camino::Utf8Path;
 use tool_definitions::Definitions;

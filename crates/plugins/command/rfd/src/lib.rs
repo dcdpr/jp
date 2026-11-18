@@ -67,7 +67,6 @@ use crate::{
     render::Sections,
 };
 
-/// The plugin's executable, as a message about a host gone quiet names it.
 const BINARY: &str = "jp-rfd";
 
 /// What `jp rfd --version` prints after the command's name: the plugin's

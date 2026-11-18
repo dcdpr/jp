@@ -69,7 +69,6 @@ use crate::{
     store::Wiki,
 };
 
-/// The plugin's executable, as a message about a host gone quiet names it.
 pub(crate) const BINARY: &str = "jp-wiki";
 
 /// What `jp wiki --version` prints after the command's name: the plugin's

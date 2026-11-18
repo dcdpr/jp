@@ -32,38 +32,38 @@ const DEFAULT_DIR: &str = "review";
 /// isn't set.
 const DEFAULT_ASSISTANT: &str = "assistant";
 
-/// The most characters a reply or comment the assistant writes may hold, when
-/// `max_chars` isn't set.
+/// Default maximum character count for assistant replies and comments.
 const DEFAULT_MAX_CHARS: usize = 600;
 
-/// The port `jp review serve` listens on when neither `--port` nor `port` is
-/// set.
+/// Default port for `jp review serve`.
 const DEFAULT_PORT: u16 = 3001;
 
-/// The configuration key of the `dir` option, as `--cfg` takes it.
+/// Config path for the `dir` option, passed via `--cfg`.
 const DIR_KEY: &str = "plugins.command.review.options.dir";
 
-/// The settings every command runs with.
+/// Resolved plugin options from `plugins.command.review.options` and CLI
+/// overrides.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Options {
-    /// Where reviews are stored; a relative path is inside the workspace.
+    /// Directory where reviews are stored; relative paths resolve against the
+    /// workspace root.
     pub dir: Option<Utf8PathBuf>,
 
-    /// The configurations a pass runs under, as `--cfg` takes them.
+    /// `--cfg` arguments applied to every pass turn.
     pub cfg: Vec<String>,
 
-    /// The command printing what a file is compared with when a review starts,
-    /// `{path}` in its arguments standing for the file.
+    /// Command run to capture the base version of each file when starting a
+    /// review (`{path}` is replaced with the file path).
     pub base: Option<Vec<String>>,
 
-    /// The author written on the assistant's replies and comments.
+    /// Author name recorded on assistant replies and comments.
     pub assistant: String,
 
-    /// The most characters a reply or comment the assistant writes may hold.
+    /// Maximum character count for assistant replies and comments.
     pub max_chars: usize,
 
-    /// Where `jp review serve` listens, and the names it answers to: the
-    /// `bind`, `port`, and `allowed_hosts` options.
+    /// Listener settings (`bind`, `port`, and `allowed_hosts`) for `jp review
+    /// serve`.
     pub listen: Listen,
 }
 

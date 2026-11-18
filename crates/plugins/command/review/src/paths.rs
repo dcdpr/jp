@@ -1,16 +1,16 @@
-//! The paths a review records, and reading the paths a user types as them.
+//! Path normalization and resolution for tracked review files.
 //!
-//! A review names each file relative to the workspace root, with `/` between
-//! components, whichever directory a command runs in.
-//! A path the user types is read relative to the directory `jp` ran in first,
-//! then relative to the workspace root.
+//! Tracked files are stored as `/`-separated paths relative to the workspace
+//! root regardless of the working directory.
+//! User-supplied paths are resolved relative to the current working directory
+//! first, then relative to the workspace root.
 
 use camino::{Utf8Component, Utf8Path, Utf8PathBuf};
 
-/// `typed`, made absolute against `base` and normalized lexically, as a path
-/// relative to `root`: `docs/a.md`.
+/// Resolve `typed` against `base`, normalize `.` and `..` components lexically,
+/// and return the `/`-separated path relative to `root` (e.g. `"docs/a.md"`).
 ///
-/// `None` when it lies outside `root`, or is `root` itself.
+/// Returns `None` if the resolved path is `root` itself or lies outside `root`.
 pub fn relative(root: &Utf8Path, base: &Utf8Path, typed: &str) -> Option<String> {
     let mut path = Utf8PathBuf::new();
     for component in base.join(typed).components() {
@@ -35,8 +35,8 @@ pub fn relative(root: &Utf8Path, base: &Utf8Path, typed: &str) -> Option<String>
     (!parts.is_empty()).then(|| parts.join("/"))
 }
 
-/// The file `typed` names, relative to `root`: read against `cwd`, then against
-/// `root`.
+/// Resolve `typed` to an existing file relative to `root`, checking `cwd` first
+/// and then `root`.
 pub fn existing(root: &Utf8Path, cwd: &Utf8Path, typed: &str) -> Result<String, String> {
     let candidates: Vec<String> = [cwd, root]
         .into_iter()
@@ -54,8 +54,8 @@ pub fn existing(root: &Utf8Path, cwd: &Utf8Path, typed: &str) -> Result<String, 
     })
 }
 
-/// The path among `tracked` that `typed` names: read against `cwd`, then
-/// against `root`.
+/// Resolve `typed` to a path in `tracked`, checking `cwd` first and then
+/// `root`.
 pub fn tracked(root: &Utf8Path, cwd: &Utf8Path, tracked: &[String], typed: &str) -> Option<String> {
     [cwd, root]
         .into_iter()

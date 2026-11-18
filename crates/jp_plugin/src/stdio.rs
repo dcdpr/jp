@@ -1,11 +1,10 @@
-//! A plugin's end of the protocol: one JSON message per line, read from the
-//! host on the plugin's stdin and written to it on its stdout.
+//! Synchronous JSON-lines protocol helpers for command plugins.
 //!
-//! [`read`] and [`send`] exchange one message each, and [`describe`] answers
-//! the host's `describe` for a plugin in JP's repository.
-//! [`print_to`] and [`print_json`] print through the host, and [`send_exit`]
-//! and [`send_result`] end the session.
-//! [`exit_code`] is what a plugin executable's `main` runs around its session:
+//! [`read`] and [`send`] exchange single protocol messages over stdin/stdout,
+//! [`describe`] responds to `describe` requests for in-tree plugins,
+//! [`print_to`] and [`print_json`] emit output through the host printer, and
+//! [`send_exit`] / [`send_result`] terminate the session.
+//! [`exit_code`] wraps a plugin binary's `main` entrypoint:
 //!
 //! ```ignore
 //! fn main() {
@@ -25,22 +24,22 @@ use std::io::{BufRead, Write};
 
 use crate::message::{DescribeResponse, ExitMessage, HostToPlugin, PluginToHost, PrintMessage};
 
-/// Who [`describe`] credits a plugin to.
+/// Default plugin author reported by [`describe`].
 const AUTHOR: &str = "Jean Mertz <git@jeanmertz.com>";
 
-/// Where [`describe`] says a plugin is published.
+/// Default repository URL reported by [`describe`].
 const REPOSITORY: &str = "https://github.com/dcdpr/jp";
 
-/// Read the host's next message from `stdin`.
+/// Read and deserialize the next [`HostToPlugin`] message from `stdin`.
 ///
-/// `binary` names the plugin's executable, as in `jp-ticket`, for the error
-/// when the host closes the pipe without answering: an older `jp` does that
-/// when it can't read the message the plugin sent.
+/// `binary` is the plugin executable name (e.g. `"jp-ticket"`), included in the
+/// error message if the host closes stdin unexpectedly (for example, when an
+/// older `jp` rejects an unrecognized plugin message).
 ///
 /// # Errors
 ///
-/// When the line can't be read, the pipe is closed, or the line isn't a
-/// message.
+/// Returns an error if reading fails, `stdin` reaches EOF, or the line is not a
+/// valid [`HostToPlugin`] message.
 pub fn read(stdin: &mut impl BufRead, binary: &str) -> Result<HostToPlugin, String> {
     let mut line = String::new();
     let read = stdin
@@ -56,11 +55,11 @@ pub fn read(stdin: &mut impl BufRead, binary: &str) -> Result<HostToPlugin, Stri
     serde_json::from_str(line.trim()).map_err(|error| format!("invalid host message: {error}"))
 }
 
-/// Write `message` to the host on `stdout`, as one line, and flush it.
+/// Serialize `message` as a JSON line, write it to `stdout`, and flush.
 ///
 /// # Errors
 ///
-/// When `stdout` refuses the line.
+/// Returns an error if serialization, writing, or flushing fails.
 pub fn send(stdout: &mut impl Write, message: &PluginToHost) -> Result<(), String> {
     let json =
         serde_json::to_string(message).map_err(|error| format!("serialize error: {error}"))?;
@@ -70,15 +69,15 @@ pub fn send(stdout: &mut impl Write, message: &PluginToHost) -> Result<(), Strin
         .map_err(|error| format!("flush error: {error}"))
 }
 
-/// Answer the host's `describe` for a plugin in JP's repository, credited to
-/// JP's author.
+/// Send a [`PluginToHost::Describe`] response for an in-tree JP plugin.
 ///
-/// `manifest` is the line [`manifest!`] built, and `name`, `version`, and
-/// `help` are the plugin's.
+/// `manifest` is the constant produced by [`manifest!`], and `name`, `version`,
+/// and `help` describe the plugin.
 ///
 /// # Errors
 ///
-/// When `manifest` isn't a manifest line, or `stdout` refuses the answer.
+/// Returns an error if `manifest` cannot be parsed or writing to `stdout`
+/// fails.
 ///
 /// [`manifest!`]: crate::manifest!
 pub fn describe(
@@ -94,12 +93,12 @@ pub fn describe(
     )
 }
 
-/// The answer to the host's `describe` for a plugin in JP's repository, for a
-/// plugin that sends it some other way than [`describe`].
+/// Build a [`DescribeResponse`] for an in-tree JP plugin, populated with JP's
+/// author and repository metadata.
 ///
 /// # Errors
 ///
-/// When `manifest` isn't a manifest line.
+/// Returns an error if `manifest` is not a valid manifest line.
 pub fn describe_response(
     manifest: &str,
     name: &str,
@@ -114,12 +113,12 @@ pub fn describe_response(
     Ok(response)
 }
 
-/// Print `text` on the host's output channel `channel`: `content`, what a
-/// script reads on stdout, or `chrome`, notes on stderr that `--quiet` hides.
+/// Send a plain-text `print` message on `channel` (`"content"` for stdout or
+/// `"chrome"` for stderr output suppressed by `--quiet`).
 ///
 /// # Errors
 ///
-/// When `stdout` refuses the message.
+/// Returns an error if writing to `stdout` fails.
 pub fn print_to(stdout: &mut impl Write, text: &str, channel: &str) -> Result<(), String> {
     send(
         stdout,
@@ -132,11 +131,11 @@ pub fn print_to(stdout: &mut impl Write, text: &str, channel: &str) -> Result<()
     )
 }
 
-/// Print `text`, one JSON value, for the host to emit as a record of its own.
+/// Send a JSON `print` message on the `"content"` channel.
 ///
 /// # Errors
 ///
-/// When `stdout` refuses the message.
+/// Returns an error if writing to `stdout` fails.
 pub fn print_json(stdout: &mut impl Write, text: &str) -> Result<(), String> {
     send(
         stdout,
@@ -149,12 +148,11 @@ pub fn print_json(stdout: &mut impl Write, text: &str) -> Result<(), String> {
     )
 }
 
-/// End the session with `code`: success when it is 0, and otherwise a failure
-/// the host reports with `reason`.
+/// Send an `exit` message with `code` and an optional failure `reason`.
 ///
 /// # Errors
 ///
-/// When `stdout` refuses the message.
+/// Returns an error if writing to `stdout` fails.
 pub fn send_exit(stdout: &mut impl Write, code: u8, reason: Option<&str>) -> Result<(), String> {
     send(
         stdout,
@@ -166,13 +164,12 @@ pub fn send_exit(stdout: &mut impl Write, code: u8, reason: Option<&str>) -> Res
     )
 }
 
-/// End the session with `code`, the result a command reports by its exit
-/// status, as a check that found problems does: `jp` exits with it without
-/// treating it as a failure.
+/// Send an `exit` message for a command whose non-zero exit code reports a
+/// check result (`expected = true`) rather than an unexpected failure.
 ///
 /// # Errors
 ///
-/// When `stdout` refuses the message.
+/// Returns an error if writing to `stdout` fails.
 pub fn send_result(stdout: &mut impl Write, code: u8) -> Result<(), String> {
     send(
         stdout,
@@ -184,12 +181,12 @@ pub fn send_result(stdout: &mut impl Write, code: u8) -> Result<(), String> {
     )
 }
 
-/// The exit status of a plugin executable, whose messages go to `stderr`.
+/// Run a plugin's `session` and return the process exit code, writing
+/// diagnostics to `stderr`.
 ///
-/// From a terminal (`terminal`), no host is talking to the executable, so it
-/// prints `help` and points at `jp {command}` instead of waiting for a message
-/// that never comes.
-/// Otherwise it runs `session`, reporting the error that ends it.
+/// When `terminal` is `true` (the user invoked the `jp-<name>` binary directly
+/// in a terminal rather than via `jp <command>`), prints `help` and a usage
+/// note to `stderr` and returns `0` without waiting on stdin.
 pub fn exit_code(
     command: &str,
     terminal: bool,

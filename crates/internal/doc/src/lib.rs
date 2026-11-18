@@ -1,23 +1,22 @@
-//! The parts of the document format JP's in-repo documents share.
+//! Shared storage, metadata, and ID primitives for in-repo documents.
 //!
-//! Each kind of document keeps its own format and commands, RFDs in `jp-rfd`
-//! and tickets in `ticket`; what any kind can reuse lives here.
+//! Each document kind defines its own schema and commands (`jp-rfd` for RFDs,
+//! `ticket` for tickets, `jp-wiki` for wiki pages); this crate provides the
+//! shared building blocks:
 //!
-//! - [`metadata`] reads and edits the `- **Key**: Value` block under a
-//!   document's title, and [`author`] names who a document written from a
-//!   terminal is attributed to.
-//! - [`id`] defines the seven-character ids documents like tickets are named
-//!   by, and [`epoch`] the day a directory's ids count time from.
-//!   [`files`] allocates ids and finds the file each one names.
-//! - [`references`] rewrites what other documents say about one whose id or
-//!   file name changed, and finds the mentions a rewrite didn't reach.
-//! - [`heading`] reads a document's headings and the anchors the site gives
-//!   them.
-//! - [`lock`] takes the advisory file lock that serializes writers across
-//!   processes.
-//! - [`repository`] reads the web address links into the repository point at.
-//! - [`format`] formats a document as it is written, when the workspace turns
-//!   that on for its kind.
+//! - [`metadata`] parses and updates the `- **Key**: Value` block below a
+//!   document's title, and [`author`] resolves the author identity from JP or
+//!   git configuration.
+//! - [`id`] defines the 7-character base32 document IDs, [`epoch`] manages the
+//!   per-directory start date from which ID time buckets are measured, and
+//!   [`files`] allocates IDs and locates document files or directories.
+//! - [`references`] rewrites cross-references when a document's ID or filename
+//!   changes, and reports stale references.
+//! - [`heading`] extracts Markdown headings and their generated HTML anchors.
+//! - [`lock`] acquires advisory file locks to serialize concurrent writers.
+//! - [`repository`] resolves the repository web URL for document links.
+//! - [`format`] formats Markdown documents on write when enabled in workspace
+//!   configuration.
 //!
 //! See `docs/rfd/127-in-repo-project-wiki.md`.
 //!

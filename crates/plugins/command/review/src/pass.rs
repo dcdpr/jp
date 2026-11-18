@@ -1,7 +1,7 @@
-//! Passes: batches of the reviewer's comments and replies sent to the
+//! Review passes: batches of reviewer comments and replies sent to the
 //! assistant, and the turns that answer them.
 //!
-//! [`Passes`] is part of a [`Review`], flattened into `review.json`:
+//! [`Passes`] is flattened into [`Review`] in `review.json`:
 //!
 //! ```json
 //! "conversation": "jp-c17629384710",
@@ -18,10 +18,9 @@
 //! ]
 //! ```
 //!
-//! A pass without `ended` is running, or was left by a process that exited
-//! before recording how it ended; the store tells the two apart by the review's
-//! `.pass` lock.
-//! Nothing here reads or writes files.
+//! A pass with `ended == None` is either currently running or was left behind
+//! by a process that exited before recording its outcome; [`crate::store`]
+//! distinguishes the two using the review's `.pass` advisory lock.
 
 use std::fmt;
 
@@ -46,32 +45,27 @@ pub struct Passes {
 /// answering them ended.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Pass {
-    /// Counts from 1 within the review.
     pub number: u32,
-
-    /// The reviewer who sent it.
     pub author: String,
-
     pub created_at: DateTime<Utc>,
 
-    /// The version the pass was sent against, whose lines its message counts
-    /// in.
+    /// Version against which the pass was submitted.
     pub version: u32,
 
-    /// The comments it sent, by number.
+    /// Comment numbers included in this pass.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub comments: Vec<u32>,
 
-    /// What the reviewer said to the assistant beside the comments.
+    /// Optional reviewer message sent alongside the comments.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
 
-    /// The conversation the turn runs in; unknown until the host creates it,
-    /// for a pass that starts one.
+    /// Conversation ID in which the pass turn ran (`None` until the host
+    /// creates the conversation on the first pass).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub conversation: Option<String>,
 
-    /// How the pass ended; absent while it runs.
+    /// Pass outcome; `None` while the pass is running.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ended: Option<Ended>,
 }

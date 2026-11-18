@@ -1,21 +1,18 @@
-//! The message a pass sends the assistant.
+//! Prompt formatting for review passes.
 //!
-//! The message opens with a `# Review R-1h4k2m9, pass 1` heading and the
-//! reviewer's message to the assistant, if the pass carries one.
-//! The first pass in a conversation then carries each file whole, its lines
-//! numbered, under a `## docs/a.md (version 2)` heading.
-//! A later pass carries a unified diff of what changed in the files since the
-//! last pass the assistant answered in that conversation, so each file enters
-//! the conversation once.
+//! A pass prompt opens with `# Review R-1h4k2m9, pass 1` and the reviewer's
+//! optional pass message.
+//! The first pass in a conversation includes the full numbered text of each
+//! tracked file under `## <path> (version <N>)`.
+//! Subsequent passes in the same conversation include a unified diff under `##
+//! Changes since pass <M>` against the version recorded when the previous pass
+//! completed or stopped, so each file's full text is sent only once.
 //!
-//! Under `## Comments` come the comments the pass sends, each under a heading
-//! such as `### R-1h4k2m9#1 at docs/a.md:3:1-3:6` that places it in the files
-//! as the pass found them.
-//! Each quotes the text it is on from the version it was written against, then
-//! holds what the reviewer wrote in it since the assistant last did.
-//!
-//! The message holds only what the review holds: how the assistant answers it
-//! is the configuration's business.
+//! Under `## Comments`, each submitted comment is rendered with its anchor in
+//! the pass's starting version (e.g. `### R-1h4k2m9#1 at docs/a.md:3:1-3:6`),
+//! the quoted excerpt or suggestion diff from its anchored version, and any
+//! comment body or replies added by the reviewer since the assistant last
+//! replied.
 
 use std::collections::BTreeSet;
 

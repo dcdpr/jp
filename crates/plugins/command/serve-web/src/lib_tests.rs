@@ -14,7 +14,6 @@ use serde_json::{Map, Value, json};
 
 use super::*;
 
-/// What the plugin wrote to the host.
 #[derive(Clone, Default)]
 struct Written(Arc<Mutex<Vec<u8>>>);
 
@@ -39,7 +38,6 @@ impl Written {
     }
 }
 
-/// The messages the plugin sends in answer to `message`.
 fn answer(message: &HostToPlugin) -> Vec<PluginToHost> {
     let input = format!("{}\n", serde_json::to_string(message).unwrap());
     let written = Written::default();
@@ -55,7 +53,6 @@ fn answer(message: &HostToPlugin) -> Vec<PluginToHost> {
     written.messages()
 }
 
-/// How the session `init` starts ended.
 fn exit_of(args: &[&str], options: Value) -> ExitMessage {
     let Value::Object(options) = options else {
         panic!("options are an object");

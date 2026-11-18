@@ -61,7 +61,6 @@ use crate::{
 /// The name the plugin is configured under, `plugins.command.ticket`.
 pub(crate) const PLUGIN: &str = "ticket";
 
-/// The plugin's executable, as a message about a host gone quiet names it.
 pub(crate) const BINARY: &str = "jp-ticket";
 
 /// What `jp ticket --version` prints after the command's name: the plugin's

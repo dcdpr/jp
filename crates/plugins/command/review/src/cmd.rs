@@ -1,7 +1,6 @@
-//! The commands on a review as a whole: `start`, `ls`, `show`, `diff`, and
-//! `close`.
+//! Review-level CLI commands: `start`, `ls`, `show`, `diff`, and `close`.
 //!
-//! The commands writing comments and replies are in `comments`.
+//! Comment and reply commands live in [`crate::comments`].
 
 use std::{collections::BTreeMap, env};
 
@@ -24,29 +23,23 @@ use crate::{
     view::{self, DiffView, Texts},
 };
 
-/// What a command runs against.
+/// Execution context for `jp review` CLI commands.
 pub(crate) struct Context<'a> {
-    /// The workspace root, which a review's file paths are relative to.
+    /// Workspace root directory; tracked file paths are stored relative to this
+    /// path.
     pub root: Utf8PathBuf,
 
-    /// The directory `jp` ran in, which a path the user types is read against
-    /// first.
+    /// Working directory where `jp` was invoked; user-supplied paths are
+    /// resolved relative to `cwd` before `root`.
     pub cwd: Utf8PathBuf,
 
-    /// The configuration the host resolved.
     pub config: &'a Value,
-
-    /// The plugin's own settings.
     pub options: &'a Options,
-
     pub store: Store,
-
-    /// How `jp` was asked to print: `-F json` makes every command print JSON.
     pub format: OutputFormat,
 }
 
 impl<'a> Context<'a> {
-    /// What the command `init` asks for runs against.
     pub(crate) fn new(init: &'a InitMessage, options: &'a Options) -> Result<Self, String> {
         let root = init.workspace.root.clone();
         let cwd = env::current_dir()
@@ -65,21 +58,19 @@ impl<'a> Context<'a> {
         })
     }
 
-    /// The workspace root and the current directory, with symbolic links
-    /// resolved so that a path inside the one can be found relative to the
-    /// other.
+    /// Return `root` and `cwd` with symlinks resolved so relative paths between
+    /// them can be computed reliably.
     pub(crate) fn bases(&self) -> (Utf8PathBuf, Utf8PathBuf) {
         (canonical(&self.root), canonical(&self.cwd))
     }
 }
 
-/// `path` with its symbolic links resolved, or as it is when it can't be.
+/// Canonicalize `path`, falling back to `path` as-is if canonicalization fails.
 fn canonical(path: &Utf8Path) -> Utf8PathBuf {
     path.canonicalize_utf8()
         .unwrap_or_else(|_| path.to_path_buf())
 }
 
-/// `value`, printed as one JSON record.
 pub(crate) fn json(value: &impl Serialize) -> Result<Output, String> {
     Ok(Output {
         text: to_json(value)?,
@@ -88,13 +79,12 @@ pub(crate) fn json(value: &impl Serialize) -> Result<Output, String> {
     })
 }
 
-/// `value` as JSON text.
 pub(crate) fn to_json(value: &impl Serialize) -> Result<String, String> {
     serde_json::to_string(value).map_err(|error| format!("failed to serialize the output: {error}"))
 }
 
-/// Start a review of `files`, recording what they hold as its latest version,
-/// after what the `base` command prints for them when there is one.
+/// Start a new review of `files`, snapshotting the working tree (and the
+/// optional `base` command output as version 1).
 pub(crate) fn start(
     ctx: &Context<'_>,
     files: &[String],
@@ -116,9 +106,8 @@ pub(crate) fn start(
     Ok(format!("{id}: {files}, version {latest}{base}\n").into())
 }
 
-/// Store a new review of `paths`, files relative to the workspace root, with
-/// what they hold as its latest version, after what the `base` command prints
-/// for them when there is one.
+/// Create and persist a new review of workspace-relative `paths`, recording the
+/// working tree (and the optional `base` command output as version 1).
 pub(crate) fn create(
     ctx: &Context<'_>,
     paths: Vec<String>,
@@ -156,8 +145,8 @@ pub(crate) fn create(
     Ok((id, review))
 }
 
-/// The files the user named, relative to the workspace root, each once, in the
-/// order named.
+/// Resolve user-supplied `files` to deduplicated workspace-relative paths in
+/// the order given.
 pub(crate) fn resolve_files(ctx: &Context<'_>, files: &[String]) -> Result<Vec<String>, String> {
     let (root, cwd) = ctx.bases();
     let mut resolved: Vec<String> = vec![];
@@ -171,8 +160,8 @@ pub(crate) fn resolve_files(ctx: &Context<'_>, files: &[String]) -> Result<Vec<S
     Ok(resolved)
 }
 
-/// What a review is called when no title is given: its file, or its first file
-/// and how many more.
+/// Default review title when `--title` is omitted (`<first>` or `<first> and N
+/// more file(s)`).
 fn default_title(paths: &[String]) -> String {
     match paths {
         [] => String::new(),
@@ -281,9 +270,8 @@ pub(crate) fn diff_pass(ctx: &Context<'_>, id: ReviewId, pass: PassRef) -> Resul
     print_changes(ctx, id, &review, span, Some(number))
 }
 
-/// What changed in `review`, the review `id`, from version `from` to `to`, with
-/// a note when nothing did; `pass` is the pass the two versions are from and
-/// to, when they are.
+/// Format the diff of `review` between versions `from` and `to` (or for `pass`
+/// when specified), adding a note on stderr when no files changed.
 fn print_changes(
     ctx: &Context<'_>,
     id: ReviewId,
@@ -308,13 +296,13 @@ fn print_changes(
     Ok(output)
 }
 
-/// The version a diff to `to` is from when none is named: the one before it.
+/// Default `from` version when comparing up to `to` (`max(1, to - 1)`).
 pub(crate) fn before(to: u32) -> u32 {
     to.saturating_sub(1).max(1)
 }
 
-/// What changed in `paths`, files of the review `id`, from version `from` to
-/// version `to`, both of which the review holds.
+/// Compute the [`DiffView`] for `paths` in `review` between versions `from` and
+/// `to`.
 pub(crate) fn changes<'a>(
     blobs: &Blobs,
     id: ReviewId,
@@ -343,9 +331,7 @@ pub(crate) fn changes<'a>(
     })
 }
 
-/// Close a review, after which it takes no changes.
-///
-/// Closing one whose comments aren't all settled warns, naming them.
+/// Close review `id`, warning if any comments remain open or in draft.
 pub(crate) fn close(ctx: &Context<'_>, id: ReviewId) -> Result<Output, String> {
     let at = now();
     let closed = ctx.store.update(id, |review, _| {
@@ -367,8 +353,8 @@ pub(crate) fn close(ctx: &Context<'_>, id: ReviewId) -> Result<Output, String> {
     Ok(output)
 }
 
-/// What a review closed with comments still open, or drafts never sent, is
-/// warned about.
+/// Format a warning listing any open or unsent draft comments when closing
+/// `review`.
 fn unsettled(review: &Review) -> Option<String> {
     let numbers = |status: Status| -> Vec<String> {
         review

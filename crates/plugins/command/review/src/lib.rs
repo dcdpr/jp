@@ -1,30 +1,32 @@
-//! `jp-review`: review workspace files with the assistant, through comments
-//! anchored to exact ranges of them.
+//! `jp-review`: review workspace files with the assistant using range-anchored
+//! comments and suggestions.
 //!
-//! A command plugin providing `jp review` and its subcommands.
-//! A review records versions of the files it tracks, and each comment is
-//! anchored to a file, or a range of one, in one version; read in a later
-//! version, the comment follows its lines there until they change.
+//! Provides `jp review` and its subcommands, plus the `review_reply` and
+//! `review_comment` tools.
+//! A review tracks versions of its files; each comment is anchored to the
+//! review, a file, or a line/column range in a specific version, and projects
+//! forward across unchanged lines in later versions until edited lines mark it
+//! outdated.
 //!
-//! Comments go to the assistant in passes: `jp review submit` sends what waits
-//! on the assistant and runs a turn on it, and the assistant answers each
-//! comment through the `review_reply` and `review_comment` tools, which this
-//! plugin serves.
+//! `jp review submit` sends pending comments and replies to the assistant in a
+//! pass and runs a delegated turn; the assistant responds via `review_reply`
+//! and `review_comment`.
 //!
-//! `text` reads positions in a file and carries them between versions, `anchor`
-//! names what a comment is about, `model` holds a review and the rules for
-//! changing it, `pass` its passes, and `prompt` writes the message a pass
-//! sends; none of them touch the disk.
-//! `store` reads and writes reviews, `snapshot` reads the files they track, and
-//! `paths` reads the paths a user types.
-//! `cmd`, `comments`, and `submit` are the commands, printed through `view` and
-//! `render`; `tool` answers the tools, and `definitions` writes their
-//! definitions and the configuration a pass runs under.
-//! `server` is `jp review serve`: `api` answers its requests, and `running`
-//! runs the passes a browser submits.
-//!
-//! Settings come from `plugins.command.review.options`, read by the `options`
-//! module.
+//! - `text`, `anchor`, `model`, `pass`, and `prompt` are pure domain modules:
+//!   line/column indexing and line-diff projection (`text`), anchor types and
+//!   `--at` parsing (`anchor`), review state and validation (`model`, `pass`),
+//!   and pass prompt rendering (`prompt`).
+//! - `store` manages on-disk review directories, locks, and content-addressed
+//!   blobs; `snapshot` reads tracked files from the working tree and `base`
+//!   command; `paths` resolves user-supplied paths relative to the working
+//!   directory and workspace root.
+//! - `cmd`, `comments`, and `submit` implement the CLI commands, rendered via
+//!   `view` and `render`; `tool` handles `review_reply` and `review_comment`
+//!   tool calls, and `definitions` writes `review.toml` and the tool
+//!   definitions.
+//! - `server`, `api`, and `running` implement `jp review serve`, exposing the
+//!   JSON HTTP API and managing background pass turns.
+//! - `options` parses `plugins.command.review.options`.
 //!
 //! See: `docs/rfd/136-review-engine-for-workspace-files.md`
 
@@ -75,7 +77,6 @@ use crate::{
     submit::Request,
 };
 
-/// The plugin's executable, as a message about a host gone quiet names it.
 pub(crate) const BINARY: &str = "jp-review";
 
 #[derive(Debug, Parser)]

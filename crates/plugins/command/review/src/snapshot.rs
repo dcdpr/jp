@@ -1,7 +1,4 @@
-//! What a review's files hold: in the working tree, and as the `base` command
-//! prints them.
-//!
-//! [`record`] keeps a review's latest version in step with the working tree.
+//! Working-tree and `base`-command file snapshots for a review.
 
 use std::{
     collections::BTreeMap,
@@ -17,15 +14,15 @@ use crate::{
     store::{self, Blobs},
 };
 
-/// What each file holds, `None` when there is nothing to record: the file is
-/// absent from the working tree, or has no base.
+/// Map from tracked file path to its UTF-8 contents, or `None` if the file is
+/// absent from the working tree or base revision.
 pub type Contents = BTreeMap<String, Option<String>>;
 
-/// Record what the working tree in `root` holds of `review`'s files as its next
-/// version, unless its latest version holds the same, returning the number of
-/// the version that holds it.
+/// Snapshot the working tree in `root` for `review`'s tracked files, writing
+/// new blobs and appending a new version if any file differs from the latest
+/// version.
 ///
-/// The contents go into `blobs` before the version that names them.
+/// Returns the version number matching the current working tree.
 pub fn record(
     root: &Utf8Path,
     review: &mut Review,
@@ -45,10 +42,10 @@ pub fn record(
     Ok(review.record(files, None, at))
 }
 
-/// Read each of `paths`, relative to the workspace `root`, from the working
+/// Read each tracked path in `paths` (relative to `root`) from the working
 /// tree.
 ///
-/// A file that isn't there is absent; one that isn't UTF-8 text is an error.
+/// Missing files map to `None`; non-UTF-8 files return an error.
 pub fn working_tree(root: &Utf8Path, paths: &[String]) -> Result<Contents, String> {
     paths
         .iter()
@@ -66,13 +63,11 @@ fn read(path: &Utf8Path) -> Result<Option<String>, String> {
     }
 }
 
-/// Run the `base` command for each of `paths` in the workspace `root`, and
-/// collect what it prints.
+/// Run `command` in `root` for each path in `paths` (substituting `{path}` in
+/// arguments) and return the captured UTF-8 stdout per file.
 ///
-/// `command` is the program and its arguments, `{path}` in an argument standing
-/// for the file.
-/// A file the command exits non-zero for, or prints something other than UTF-8
-/// for, has no base; a program that can't be run is an error.
+/// Files for which the command exits non-zero or emits non-UTF-8 bytes map to
+/// `None`; returns an error if the program itself cannot be spawned.
 pub fn base(root: &Utf8Path, command: &[String], paths: &[String]) -> Result<Contents, String> {
     let (program, args) = command
         .split_first()

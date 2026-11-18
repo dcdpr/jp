@@ -1,16 +1,17 @@
-//! `jp review submit`: send what waits on the assistant, and run the turn that
-//! answers it.
+//! `jp review submit`: submit pending comments and replies as a pass and run
+//! its delegated turn on the host.
 //!
-//! A pass holds the review's `.pass` lock from before it is recorded until
-//! after its outcome is ([`Store::lock_pass`]):
+//! Holds the review's `.pass` lock ([`Store::lock_pass`]) across the entire
+//! pass lifecycle:
 //!
-//! 1. Record the working tree as a version when it changed, and the pass.
-//! 2. Ask the host to run a turn on the pass message (`prompt`), in the
-//!    review's conversation or, for its first pass, a new one.
-//! 3. While the turn runs, print each reply and comment the assistant's tools
-//!    write to the store; the turn's own output goes nowhere.
-//! 4. Record the working tree again, holding the assistant's edits, and how the
-//!    turn ended.
+//! 1. Snapshot the working tree (if changed) and record the new pass.
+//! 2. Send a `query` request to the host with the rendered pass prompt
+//!    ([`crate::prompt`]) on the review's conversation (or a new conversation
+//!    for the first pass).
+//! 3. Poll the store while the turn runs and print each reply and comment
+//!    written by the assistant's tools.
+//! 4. Snapshot the working tree again to capture the assistant's file edits and
+//!    record the pass outcome.
 
 use std::{
     collections::HashSet,
@@ -257,11 +258,11 @@ pub(crate) fn query(
     }
 }
 
-/// Record the working tree, which holds the assistant's edits, and how the turn
-/// of pass `number` ended, returning the review as it then stands.
+/// Snapshot the working tree after pass `number` and record the pass outcome,
+/// returning the updated [`Review`].
 ///
-/// A working tree that can't be read leaves the pass without a version, and
-/// says why beside how its turn ended.
+/// If the working tree cannot be snapshotted, records `version: None` and
+/// appends the snapshot error to the pass's error message.
 pub(crate) fn finish(
     ctx: &Context<'_>,
     id: ReviewId,

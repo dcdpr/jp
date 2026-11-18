@@ -8,7 +8,6 @@ use serde_json::json;
 
 use super::*;
 
-/// What was written to the host.
 #[derive(Clone, Default)]
 struct Written(Arc<Mutex<Vec<u8>>>);
 
@@ -47,7 +46,6 @@ impl Written {
     }
 }
 
-/// The data goes in fields, as JSON, so the host can filter on it.
 #[test]
 fn a_client_logs_through_its_connection() {
     let written = Written::default();
@@ -92,7 +90,6 @@ fn each_level_is_named_the_way_the_host_reads_it() {
     );
 }
 
-/// An event's fields reach the host with their types, beside its target.
 #[test]
 fn a_tracing_event_is_written_with_its_fields() {
     let (layer, handle) = LogLayer::new("jp_review");
@@ -129,8 +126,6 @@ fn a_tracing_event_is_written_with_its_fields() {
     );
 }
 
-/// The host keeps every level in its trace file, whatever its terminal shows,
-/// so nothing is left out here.
 #[test]
 fn every_level_is_sent_including_what_came_before_activation() {
     let (layer, handle) = LogLayer::new("jp_review");
@@ -152,8 +147,6 @@ fn every_level_is_sent_including_what_came_before_activation() {
     );
 }
 
-/// A dependency's events, or another crate whose name starts the same way, are
-/// not the plugin's to report.
 #[test]
 fn only_the_plugin_s_own_events_are_forwarded() {
     let (layer, handle) = LogLayer::new("jp_review");
@@ -169,7 +162,6 @@ fn only_the_plugin_s_own_events_are_forwarded() {
     assert_eq!(written.shown(), ["plugin", "module"]);
 }
 
-/// A target is a module path: the crate's own name, or one of its modules.
 #[test]
 fn the_layer_forwards_the_crate_and_its_modules() {
     let (layer, _) = LogLayer::new("jp_review");
@@ -180,8 +172,6 @@ fn the_layer_forwards_the_crate_and_its_modules() {
     assert!(!layer.forwards("jp_plugin::client"));
 }
 
-/// The layer is the whole process's subscriber, so the event of a thread with
-/// no subscriber of its own reaches the host.
 #[test]
 fn the_installed_layer_takes_every_thread_s_events() {
     let handle = install("jp_installed");

@@ -60,7 +60,6 @@ use crate::{
     transport::Outbox,
 };
 
-/// The plugin's executable, as a message about a host gone quiet names it.
 const BINARY: &str = "jp-serve-chat";
 
 /// Minimum host protocol version required by this plugin.

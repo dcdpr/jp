@@ -17,17 +17,16 @@ use std::{
 
 use camino::Utf8Path;
 
-/// Take an exclusive lock on the file at `path`, held until the returned
-/// [`File`] is dropped.
+/// Acquire an exclusive lock on `path`, held until the returned [`File`] is
+/// dropped.
 ///
-/// Blocks while another process, or another open handle in this one, holds the
-/// lock.
-/// Creates the file if it doesn't exist, and returns `Ok(None)` when the
-/// directory it would be in doesn't exist.
+/// Blocks while another process or open file descriptor holds the lock.
+/// Creates the file if it does not exist, and returns `Ok(None)` if the parent
+/// directory does not exist.
 ///
 /// # Errors
 ///
-/// Returns the I/O error of a file that can't be opened or locked.
+/// Returns an error if the lock file cannot be opened or locked.
 pub fn exclusive(path: &Utf8Path) -> io::Result<Option<File>> {
     let file = match OpenOptions::new()
         .create(true)
@@ -44,17 +43,17 @@ pub fn exclusive(path: &Utf8Path) -> io::Result<Option<File>> {
     Ok(Some(file))
 }
 
-/// Take an exclusive lock on the file at `path` unless something else holds it,
-/// keeping it until the returned [`File`] is dropped.
+/// Try to acquire an exclusive lock on `path` without blocking, held until the
+/// returned [`File`] is dropped.
 ///
-/// Returns `Ok(None)` without waiting while another process, or another open
-/// handle in this one, holds the lock.
-/// Creates the file if it doesn't exist.
+/// Returns `Ok(None)` if another process or open file descriptor holds the
+/// lock.
+/// Creates the file if it does not exist.
 ///
 /// # Errors
 ///
-/// Returns the I/O error of a file that can't be opened or locked, including
-/// one whose directory doesn't exist.
+/// Returns an error if the lock file cannot be opened or locked, including when
+/// its parent directory does not exist.
 pub fn try_exclusive(path: &Utf8Path) -> io::Result<Option<File>> {
     let file = OpenOptions::new()
         .create(true)

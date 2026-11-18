@@ -1,17 +1,15 @@
-//! Documents kept one to a file, `<id>-<slug>.md`, or one to a directory named
-//! by the id's body, in a directory whose [epoch file] says when their ids
-//! start counting.
+//! Document storage as `<id>-<slug>.md` files or `<id>` directories, backed by
+//! a directory [epoch file].
 //!
-//! Ids carry a time bucket and a random tail rather than a counter, so two
-//! checkouts that cannot see each other still hand out different ids.
-//! Nothing coordinates allocation; see
-//! `docs/rfd/102-collision-resistant-ticket-identifiers.md`.
+//! IDs combine a time bucket and a random tail rather than a sequential
+//! counter, so independent checkouts allocate distinct IDs without
+//! coordination; see `docs/rfd/102-collision-resistant-ticket-identifiers.md`.
 //!
-//! The time component counts from the directory's own [`Epoch`], which the
-//! first document in an empty directory writes.
-//! [`create`] claims an id by creating its file exclusively, and [`create_dir`]
-//! by creating its directory; both draw again when another process got there
-//! first.
+//! The time bucket is measured from the directory's [`Epoch`], which is written
+//! when the first document or directory is created.
+//! [`create`] claims an ID by creating its file with `create_new`, and
+//! [`create_dir`] claims an ID by creating its directory; both retry if another
+//! process claims the ID first.
 //!
 //! [epoch file]: crate::epoch
 
@@ -31,7 +29,7 @@ use crate::{
     id::{Id, Kind, MAX_BUCKET, TAIL_SPACE},
 };
 
-/// Longest slug a file name carries; a title beyond this is cut.
+/// Maximum slug length in bytes; longer titles are truncated.
 ///
 /// Slugs are ASCII, so this is both a byte count and a character count.
 pub const MAX_SLUG_SIZE: usize = 60;
@@ -164,16 +162,15 @@ pub fn list<K: Kind>(dir: &Utf8Path) -> io::Result<Vec<(Id<K>, Utf8PathBuf)>> {
     Ok(files)
 }
 
-/// Every directory directly in `dir` named by the body of an id of kind `K`,
-/// such as `02wt0kx`, paired with its id and ordered by it.
+/// Return every subdirectory in `dir` whose name is the canonical body of an
+/// [`Id<K>`] (such as `02wt0kx`), sorted by ID.
 ///
-/// Only the canonical body names a directory: `T-02wt0kx` or `02WT0KX` does
-/// not.
-/// A directory that doesn't exist yet holds none.
+/// Non-canonical names such as `T-02wt0kx` or `02WT0KX` are ignored.
+/// Returns an empty list if `dir` does not exist.
 ///
 /// # Errors
 ///
-/// Returns the I/O error of a directory that can't be read.
+/// Returns an error if `dir` exists but cannot be read.
 pub fn list_dirs<K: Kind>(dir: &Utf8Path) -> io::Result<Vec<(Id<K>, Utf8PathBuf)>> {
     let mut dirs = vec![];
     for path in entries(dir)? {
@@ -192,10 +189,9 @@ pub fn list_dirs<K: Kind>(dir: &Utf8Path) -> io::Result<Vec<(Id<K>, Utf8PathBuf)
     Ok(dirs)
 }
 
-/// The paths directly in `dir`, or none when `dir` doesn't exist.
+/// Return the entries in `dir`, or an empty list if `dir` does not exist.
 ///
-/// A path that isn't UTF-8 is skipped: it can't name a document, since ids and
-/// slugs are ASCII.
+/// Non-UTF-8 paths are skipped because IDs and slugs are ASCII.
 fn entries(dir: &Utf8Path) -> io::Result<Vec<Utf8PathBuf>> {
     let read = match fs::read_dir(dir) {
         Ok(read) => read,
@@ -282,26 +278,27 @@ pub fn load_epoch<K>(dir: &Utf8Path) -> Result<Epoch, Error<K>> {
     read_epoch(dir)?.ok_or_else(|| Error::MissingEpoch(dir.join(EPOCH_FILE)))
 }
 
-/// The epoch `dir`'s ids count time from, written as the start of today when
-/// the directory holds no documents of kind `K` yet.
+/// Return `dir`'s [`Epoch`], writing today's UTC date if `dir` contains no
+/// documents of kind `K`.
 ///
-/// Creates `dir` if it doesn't exist.
-/// A directory holding documents but no epoch file is an error rather than a
-/// fresh start: a new epoch would sort every new id against the existing ones
-/// by an unrelated clock.
+/// Creates `dir` if it does not exist.
+/// If `dir` already contains documents but has no epoch file, returns
+/// [`Error::MissingEpoch`] rather than writing a new epoch that would sort new
+/// IDs against an unrelated start date.
 ///
 /// # Errors
 ///
-/// Returns an error when the epoch file is missing beside existing documents or
-/// doesn't hold an epoch, or when the filesystem refuses.
+/// Returns [`Error::MissingEpoch`] if the epoch file is missing alongside
+/// existing documents, [`Error::MalformedEpoch`] if the epoch file cannot be
+/// parsed, or an I/O error.
 pub fn establish_epoch<K: Kind>(dir: &Utf8Path) -> Result<Epoch, Error<K>> {
     establish(dir, || Ok(!list::<K>(dir)?.is_empty()))
 }
 
-/// The epoch `dir`'s ids count time from, written as the start of today when
-/// `has_documents` says the directory holds none of them yet.
+/// Return `dir`'s [`Epoch`], writing today's UTC date if `has_documents`
+/// returns `false`.
 ///
-/// `has_documents` is asked only when there is no epoch file.
+/// `has_documents` is called only when the epoch file does not exist.
 fn establish<K: Kind>(
     dir: &Utf8Path,
     has_documents: impl FnOnce() -> io::Result<bool>,
@@ -386,8 +383,8 @@ pub fn allocate_in<K: Kind>(dir: &Utf8Path, bucket: u32) -> Result<Id<K>, Error<
     allocate_among(&existing, bucket)
 }
 
-/// Hand out an id in `bucket`, or the first bucket after it with room, given
-/// the `existing` ids in ascending order.
+/// Allocate an ID in `bucket` (or the next bucket with capacity) given
+/// `existing` IDs in ascending order.
 fn allocate_among<K>(existing: &[Id<K>], mut bucket: u32) -> Result<Id<K>, Error<K>> {
     loop {
         let highest = existing.iter().rev().find(|id| id.bucket() == bucket);
@@ -460,21 +457,19 @@ pub fn create<K: Kind>(
     Err(Error::Contended)
 }
 
-/// Create a new directory in `dir`, named for the body of a freshly allocated
-/// id, returning the id and the path.
+/// Create a new directory in `dir` named after the body of a freshly allocated
+/// [`Id<K>`], returning the ID and directory path.
 ///
-/// Ids are allocated as [`create`] allocates them, against the directories
-/// [`list_dirs`] finds, and the epoch file is written by the first directory
-/// created in an empty `dir`.
-/// Creating the directory is what claims the id: two processes drawing in the
-/// same bucket can land on one tail, and the loser finds out here rather than
-/// sharing the winner's directory.
+/// Allocates IDs against the existing directories returned by [`list_dirs`],
+/// writing the epoch file when creating the first directory in an empty `dir`.
+/// `fs::create_dir` claims the ID atomically; if another process creates the
+/// directory first, allocation retries with the next tail.
 ///
 /// # Errors
 ///
-/// Returns [`Error::Contended`] when every id drawn was taken first,
-/// [`Error::MissingEpoch`] when `dir` holds directories named by ids but no
-/// epoch file, and otherwise the errors [`create`] returns.
+/// Returns [`Error::Contended`] if all retry attempts collide,
+/// [`Error::MissingEpoch`] if `dir` contains ID directories but no epoch file,
+/// or any epoch or I/O error.
 pub fn create_dir<K: Kind>(dir: &Utf8Path) -> Result<(Id<K>, Utf8PathBuf), Error<K>> {
     let epoch = establish(dir, || Ok(!list_dirs::<K>(dir)?.is_empty()))?;
 
@@ -495,12 +490,11 @@ pub fn create_dir<K: Kind>(dir: &Utf8Path) -> Result<(Id<K>, Utf8PathBuf), Error
     Err(Error::Contended)
 }
 
-/// The slug a document's file name carries after its id, from its title.
+/// Derive a filename slug from `title`.
 ///
-/// ASCII letters and digits are kept, lowercased, and so is `_`; every other
-/// run of characters becomes one `-`.
-/// The slug is cut to [`MAX_SLUG_SIZE`], and a title with nothing to keep
-/// produces `untitled`.
+/// Keeps ASCII alphanumerics (lowercased) and `_`, collapses any other run of
+/// characters to a single `-`, and truncates the result to [`MAX_SLUG_SIZE`].
+/// Returns `"untitled"` if no valid characters remain.
 #[must_use]
 pub fn slug(title: &str) -> String {
     let mut slug = String::new();

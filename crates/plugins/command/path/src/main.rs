@@ -17,7 +17,6 @@ use jp_plugin::{
     stdio::{self, print_to, send, send_exit},
 };
 
-/// The plugin's executable, as a message about a host gone quiet names it.
 const BINARY: &str = "jp-path";
 
 /// The protocol version this plugin needs from the host.

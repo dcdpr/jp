@@ -1,16 +1,14 @@
-//! The tools the assistant answers a review with, run when the host's `init`
-//! carries a tool call.
+//! Handlers for the `review_reply` and `review_comment` tools.
 //!
-//! The host names a tool the way its `source` does: `reply` for `review_reply`,
-//! and `comment` for `review_comment`.
-//! A call is refused unless it comes from the review's conversation, and writes
-//! only to the review, under its lock; a reply or comment is stored when the
-//! call returns, so a turn stopped part way keeps what it wrote.
-//! The host closed stdin after `init`, so nothing here asks it anything.
+//! Dispatched when the host's `init` message carries a [`ToolCall`] (`source =
+//! "plugin.command.review.reply"` or `"plugin.command.review.comment"`).
+//! Tool calls are accepted only from the conversation bound to the review (or
+//! its currently running pass), and persist each reply or comment immediately
+//! under the review's lock so partial progress survives if the turn is stopped.
 //!
-//! A store inside the workspace is held to the call's access policy, as `jp
-//! ticket`'s tools are held to theirs; a store outside it, such as the default
-//! one in user-local storage, is written directly.
+//! When the review store is inside the workspace root, filesystem access checks
+//! are enforced against [`ToolCall::access`]; stores in user-local data outside
+//! the workspace root are accessed directly.
 
 use camino::Utf8Path;
 use jp_plugin::message::{InitMessage, ToolAction, ToolCall};

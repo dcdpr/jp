@@ -1,11 +1,10 @@
-//! A review: the files it tracks, their versions, and the comments on them.
+//! Core review data model and state transitions (`review.json`).
 //!
-//! [`Review`] is what `review.json` holds.
-//! Every change to a review is a method here or in `pass` that first checks the
-//! change against the review's state, and returns a [`Refusal`] when the state
-//! doesn't allow it.
-//! Nothing here reads or writes files: the store loads and saves a review, and
-//! the commands read the working tree.
+//! [`Review`] represents the serialized state of a review: tracked file paths,
+//! file versions, comments, replies, and passes.
+//! All mutations validate invariants and return a [`Refusal`] on invalid state
+//! transitions; disk I/O is handled by [`crate::store`] and
+//! [`crate::snapshot`].
 
 use std::{collections::BTreeMap, fmt};
 
@@ -18,37 +17,33 @@ use crate::{
     pass::Passes,
 };
 
-/// The `review.json` format this plugin writes, and the newest it reads.
+/// Current `review.json` schema version.
 pub const FORMAT: u32 = 1;
 
-/// The label of the version holding what a review's files are compared with.
+/// Label assigned to the base version when a review is started with a `base`
+/// command.
 pub const BASE_LABEL: &str = "base";
 
-/// The blob holding each tracked file in a version, `None` when the file was
-/// absent.
+/// Map from tracked file path to its SHA-256 blob hash in a version, or `None`
+/// if the file was absent in that version.
 pub type Files = BTreeMap<String, Option<String>>;
 
-/// A review, as `review.json` holds it.
+/// Serialized state of a review in `review.json`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Review {
-    /// The `review.json` format the review is written in.
     pub format: u32,
 
-    /// How many times the review has been written, so a reader can tell it
-    /// changed.
+    /// Monotonically increasing counter incremented on each write.
     pub revision: u64,
 
     pub title: String,
-
-    /// The reviewer who started the review.
     pub author: String,
-
     pub created_at: DateTime<Utc>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub closed_at: Option<DateTime<Utc>>,
 
-    /// The files under review, relative to the workspace root.
+    /// Tracked file paths, relative to the workspace root.
     pub paths: Vec<String>,
 
     pub versions: Vec<Version>,
@@ -56,7 +51,8 @@ pub struct Review {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub comments: Vec<Comment>,
 
-    /// The highest number a comment has taken, withdrawn comments included.
+    /// Highest comment number allocated in this review, including withdrawn
+    /// draft comments.
     #[serde(default)]
     pub last_comment: u32,
 
@@ -64,26 +60,23 @@ pub struct Review {
     pub passes: Passes,
 }
 
-/// The review's files at one point in time.
+/// Snapshot of the review's tracked files at a point in time.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Version {
-    /// Counts from 1.
     pub number: u32,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
 
     pub created_at: DateTime<Utc>,
-
     pub files: Files,
 }
 
-/// A remark on a review, a file, or a range of a file, and the replies to it.
+/// Comment anchored to the review, a file, or a range, along with its reply
+/// thread.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Comment {
-    /// Counts from 1 within the review.
     pub number: u32,
-
     pub role: Role,
     pub author: String,
     pub created_at: DateTime<Utc>,
@@ -91,15 +84,15 @@ pub struct Comment {
     #[serde(flatten)]
     pub content: Content,
 
-    /// The pass the comment first went to the assistant in, or the one the
-    /// assistant opened it during; absent while it is a reviewer's draft.
+    /// Pass number in which this comment was first sent to the assistant (or
+    /// opened by the assistant); `None` while the comment is a reviewer draft.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pass: Option<u32>,
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub replies: Vec<Reply>,
 
-    /// The reviewer's reply, held until it goes to the assistant.
+    /// Pending reviewer reply to be sent in the next pass.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub draft_reply: Option<Reply>,
 

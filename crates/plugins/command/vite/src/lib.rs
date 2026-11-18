@@ -49,7 +49,6 @@ use crate::{
     sync::Change,
 };
 
-/// The plugin's executable, as a message about a host gone quiet names it.
 pub(crate) const BINARY: &str = "jp-vite";
 
 /// What `jp vite --version` prints after the command's name: the plugin's

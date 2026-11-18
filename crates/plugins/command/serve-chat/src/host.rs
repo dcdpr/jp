@@ -2,9 +2,9 @@
 //!
 //! [`Host`] defines the operations the bridge uses: starting a turn, sending an
 //! in-turn reply, stopping a turn, reading a conversation's events and the
-//! configured tools, and logging, through the `Log` every plugin logs with.
-//! [`HostClient`] implements [`Host`] over the protocol client `jp_plugin`
-//! shares between plugins; tests use a fake implementation instead.
+//! configured tools, and logging via [`Log`].
+//! [`HostClient`] implements [`Host`] over [`jp_plugin::client::Client`]; tests
+//! use a fake implementation instead.
 
 use std::{
     future::Future,

@@ -89,7 +89,7 @@ impl<'s> Lines<'s> {
 
     /// Return the byte range of 1-based `line`, excluding its line ending.
     ///
-    /// Returns `None` past the last line.
+    /// Returns `None` if `line` is `0` or past the last line.
     #[must_use]
     pub fn line_range(&self, line: usize) -> Option<Range<usize>> {
         self.ranges.get(line.checked_sub(1)?).cloned()

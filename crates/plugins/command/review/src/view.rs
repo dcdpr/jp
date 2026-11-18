@@ -415,7 +415,7 @@ pub(crate) struct DiffView<'a> {
     pub from: u32,
     pub to: u32,
 
-    /// The files that changed; the rest are left out.
+    /// Changed files; unchanged files are omitted.
     pub files: Vec<FileDiff<'a>>,
 }
 

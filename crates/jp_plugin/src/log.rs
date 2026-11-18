@@ -1,19 +1,17 @@
-//! Logging to the host.
+//! Structured logging from command plugins to the `jp` host.
 //!
-//! A plugin reports what happens as `log` messages: `jp` writes every one to
-//! its trace file, and prints those at the verbosity the user asked for (`-v`).
-//! A plugin sends every level, and leaves the choice to the host.
+//! Plugins emit structured [`LogMessage`] events over stdout; `jp` writes all
+//! log levels to its trace file and prints events matching the CLI verbosity
+//! (`-v`).
 //!
-//! [`Log`] is how a plugin logs: a message naming the event, the same every
-//! time it happens, and what varies as JSON fields ([`fields`]).
-//! A [`Client`] logs through the connection it holds, so a test that gives the
-//! client a writer reads back what was logged; code that takes a `Log` can be
-//! handed one that records instead.
+//! [`Log`] is the logging trait: each call takes a static event message and
+//! structured JSON [`fields`].
+//! [`Client`] implements [`Log`] by writing [`PluginToHost::Log`] messages over
+//! its shared stdout [`Writer`].
 //!
-//! Code with no `Log` at hand can log through `tracing` instead: [`install`]
-//! sets a [`LogLayer`] as the process's subscriber, which forwards one crate's
-//! events, and [`LogHandle::activate`] gives the layer the writer it sends them
-//! through.
+//! Crates that log via `tracing` can call [`install`] to register a
+//! [`LogLayer`] as the global subscriber for a target crate prefix, then call
+//! [`LogHandle::activate`] once the host stdout [`Writer`] is ready.
 
 use std::{
     fmt,
@@ -33,7 +31,7 @@ use crate::{
     message::{LogMessage, PluginToHost},
 };
 
-/// How severe an event is, which the host chooses what to print by.
+/// Log severity level sent in [`LogMessage::level`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Level(&'static str);
 
@@ -44,28 +42,26 @@ impl Level {
     pub const WARN: Self = Self("warn");
     pub const ERROR: Self = Self("error");
 
-    /// The level as a `log` message names it, such as `info`.
+    /// Return the wire name of the level (e.g. `"info"`).
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         self.0
     }
 }
 
-/// Where a plugin's log events go.
+/// Sink for structured plugin log events.
 pub trait Log {
-    /// Log the event `message` at `level`, with `fields`.
-    ///
-    /// The message names the event and is the same every time it happens; what
-    /// varies goes in `fields`.
+    /// Emit a log event at `level` with a static `message` and structured
+    /// `fields`.
     fn log_with(&self, level: Level, message: &'static str, fields: Map<String, Value>);
 
-    /// Log the event `message` at `level`, with no fields.
+    /// Emit a log event at `level` with no structured fields.
     fn log(&self, level: Level, message: &'static str) {
         self.log_with(level, message, Map::new());
     }
 }
 
-/// An event's fields, from `(name, value)` pairs.
+/// Build a JSON field map from `(name, value)` pairs.
 #[must_use]
 pub fn fields<const N: usize>(pairs: [(&str, Value); N]) -> Map<String, Value> {
     pairs
@@ -74,8 +70,8 @@ pub fn fields<const N: usize>(pairs: [(&str, Value); N]) -> Map<String, Value> {
         .collect()
 }
 
-/// A client logs by sending each event to the host; an event that can't be
-/// written is lost, since a host that is gone has nowhere to put it.
+/// Forward log events to the host as [`PluginToHost::Log`] messages, ignoring
+/// write errors if the host pipe has closed.
 impl Log for Client {
     fn log_with(&self, level: Level, message: &'static str, fields: Map<String, Value>) {
         drop(self.send(&PluginToHost::Log(LogMessage {
@@ -86,12 +82,12 @@ impl Log for Client {
     }
 }
 
-/// Set a [`LogLayer`] forwarding the events of the crate `target`, such as
-/// `jp_serve_web`, as the process's subscriber, and return the handle that
-/// activates it.
+/// Install a [`LogLayer`] as the global `tracing` subscriber for events under
+/// `target` (e.g. `"jp_serve_web"`), returning the [`LogHandle`] that activates
+/// output.
 ///
-/// A process that has a subscriber already keeps it, and the handle activates a
-/// layer nothing sends events to.
+/// If a global subscriber is already installed, the existing subscriber is kept
+/// and the returned handle is a no-op.
 #[must_use]
 pub fn install(target: &'static str) -> LogHandle {
     let (layer, handle) = LogLayer::new(target);
@@ -100,30 +96,28 @@ pub fn install(target: &'static str) -> LogHandle {
     handle
 }
 
-/// A `tracing` layer sending the events of one crate to the host as `log`
-/// messages, every level of them, its fields included.
+/// `tracing` layer that forwards events under a crate target prefix to the host
+/// as [`LogMessage`]s.
 pub struct LogLayer {
     sink: &'static Mutex<Sink>,
     target: &'static str,
 }
 
-/// What activates a [`LogLayer`] once the writer to the host is known.
+/// Handle that attaches a [`Writer`] to a [`LogLayer`] and flushes buffered
+/// pre-activation events.
 pub struct LogHandle {
     sink: &'static Mutex<Sink>,
 }
 
-/// Where events go: held until the layer is activated, then written.
+/// Buffered events before activation, or the active stdout [`Writer`].
 enum Sink {
     Holding(Vec<LogMessage>),
     Writing(Writer),
 }
 
 impl LogLayer {
-    /// A layer forwarding the events of the crate `target`, holding them until
-    /// the handle it returns activates it.
-    ///
-    /// The layer and the handle share a sink that lives as long as the process:
-    /// the layer is the process's subscriber for its whole life.
+    /// Create a [`LogLayer`] for events under `target`, buffering events until
+    /// [`LogHandle::activate`] is called.
     #[must_use]
     pub fn new(target: &'static str) -> (Self, LogHandle) {
         let sink: &'static Mutex<Sink> = Box::leak(Box::new(Mutex::new(Sink::Holding(vec![]))));
@@ -131,8 +125,8 @@ impl LogLayer {
         (Self { sink, target }, LogHandle { sink })
     }
 
-    /// Whether an event of `target`, a module path, is forwarded: the crate's
-    /// own, or one of its modules.
+    /// Return whether `target` equals `self.target` or is a submodule path
+    /// (`{self.target}::...`).
     fn forwards(&self, target: &str) -> bool {
         target
             .strip_prefix(self.target)
@@ -141,7 +135,8 @@ impl LogLayer {
 }
 
 impl LogHandle {
-    /// Write every event held so far, and every later one, through `writer`.
+    /// Flush any buffered events to `writer` and route subsequent events
+    /// through it.
     pub fn activate(&self, writer: &Writer) {
         let held = match std::mem::replace(&mut *lock(self.sink), Sink::Writing(writer.clone())) {
             Sink::Holding(held) => held,
@@ -173,8 +168,8 @@ impl<S: Subscriber> Layer<S> for LogLayer {
             fields: fields.map,
         };
 
-        // The sink's lock is let go before writing, so an event raised while
-        // another thread writes waits for the writer alone.
+        // Release the sink lock before acquiring the writer lock so concurrent
+        // events only contend on the writer.
         let writer = match &mut *lock(self.sink) {
             Sink::Holding(held) => {
                 held.push(message);
@@ -186,7 +181,8 @@ impl<S: Subscriber> Layer<S> for LogLayer {
     }
 }
 
-/// Write `message` to the host as one line; a host that is gone loses it.
+/// Write `message` to `writer` as a JSON line, ignoring errors if the pipe is
+/// closed.
 fn write(writer: &mut dyn Write, message: &LogMessage) {
     let Ok(json) = serde_json::to_string(&PluginToHost::Log(message.clone())) else {
         return;
@@ -195,7 +191,7 @@ fn write(writer: &mut dyn Write, message: &LogMessage) {
     drop(writer.flush());
 }
 
-/// An event's message and its other fields.
+/// Visitor that extracts an event's `message` and structured fields.
 #[derive(Default)]
 struct Fields {
     message: String,
@@ -246,8 +242,7 @@ impl Visit for Fields {
     }
 }
 
-/// Acquire `mutex`, recovering the guard if a holder panicked: a log line is
-/// not worth taking the plugin down for.
+/// Lock `mutex`, recovering the inner value if a previous holder panicked.
 fn lock<T: ?Sized>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }

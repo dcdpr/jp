@@ -1,15 +1,15 @@
-//! What `jp review serve` answers over HTTP, without the HTTP: each endpoint is
-//! a function here, taking what its request carries and returning a [`Reply`]
-//! or an [`ApiError`] whose status says what went wrong.
+//! Transport-independent handlers for the `jp review serve` JSON HTTP API.
 //!
-//! A reply is the JSON record `jp -F json review` prints for the same command,
-//! where there is one, and an error is `{"error": "..."}`.
-//! Every operation reads and writes the store as the commands do, so the work
-//! blocks; the server runs it off its async threads.
+//! Each endpoint function takes a parsed request and returns a [`Reply`] or an
+//! [`ApiError`] with an HTTP status code and `{"error": "..."}` body.
+//! Where an endpoint corresponds to a CLI command, the response matches the
+//! JSON emitted by `jp -F json review`.
+//! All handlers perform synchronous store I/O and are run on blocking threads
+//! by `server`.
 //!
-//! Browsers address text by UTF-8 byte offsets into one version of a file: a
-//! comment's anchor can be given as `bytes`, and every projection carries them.
-//! The review itself keeps lines and columns.
+//! For browser clients, [`AnchorRequest`] accepts UTF-8 byte offsets (`bytes`)
+//! in addition to line/column ranges, and projected anchors include byte
+//! offsets alongside line/column ranges.
 
 use axum::http::StatusCode;
 use camino::{Utf8Path, Utf8PathBuf};
@@ -32,20 +32,17 @@ use crate::{
     view::{self, Detail, Summary, Texts},
 };
 
-/// What a server's operations run against: the parts of a [`Context`] it owns.
+/// Shared workspace state for HTTP API handlers.
 pub(crate) struct Workspace {
     pub root: Utf8PathBuf,
-
-    /// The configuration the host resolved.
     pub config: Value,
-
     pub options: Options,
     pub store: Store,
 }
 
 impl Workspace {
-    /// What a command run on the server's behalf runs against: the workspace
-    /// root is the directory paths are read against, and output is JSON.
+    /// Build a command [`Context`] rooted at the workspace root with JSON
+    /// output.
     pub(crate) fn context(&self) -> Context<'_> {
         Context {
             root: self.root.clone(),
@@ -58,7 +55,7 @@ impl Workspace {
     }
 }
 
-/// What the server answers a request with: a status, and a JSON record.
+/// Successful HTTP API response: status code and serialized JSON body.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Reply {
     pub status: StatusCode,
@@ -86,7 +83,7 @@ impl Reply {
     }
 }
 
-/// A request the server didn't do, and the status it answers with.
+/// HTTP API error response: status code and error message.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ApiError {
     pub status: StatusCode,
@@ -101,23 +98,20 @@ impl ApiError {
         }
     }
 
-    /// The request itself is wrong.
     pub(crate) fn invalid(message: impl Into<String>) -> Self {
         Self::new(StatusCode::BAD_REQUEST, message)
     }
 
-    /// What the request names isn't there.
     pub(crate) fn not_found(message: impl Into<String>) -> Self {
         Self::new(StatusCode::NOT_FOUND, message)
     }
 
-    /// The review's state doesn't allow it.
     pub(crate) fn conflict(message: impl Into<String>) -> Self {
         Self::new(StatusCode::CONFLICT, message)
     }
 
-    /// What the review `id` refused, by what it is about: a comment that isn't
-    /// there, the request, or the review's state.
+    /// Map a domain [`Refusal`] on review `id` to an [`ApiError`] with the
+    /// appropriate HTTP status code.
     pub(crate) fn refused(id: ReviewId, refusal: &Refusal) -> Self {
         let status = match refusal {
             Refusal::Comment(_, Why::Missing | Why::Withdrawn) => StatusCode::NOT_FOUND,
@@ -137,13 +131,12 @@ impl ApiError {
         Self::new(status, refusal.message(id))
     }
 
-    /// The error as the response body carries it: `{"error": "..."}`.
+    /// Serialize the error as `{"error": "..."}`.
     pub(crate) fn body(&self) -> String {
         serde_json::json!({ "error": self.message }).to_string()
     }
 }
 
-/// Anything else that went wrong, such as reading a file, is the server's.
 impl From<String> for ApiError {
     fn from(message: String) -> Self {
         Self::new(StatusCode::INTERNAL_SERVER_ERROR, message)
@@ -159,50 +152,49 @@ impl From<Failure> for ApiError {
     }
 }
 
-/// What `POST /api/reviews` takes.
+/// Request body for `POST /api/reviews`.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct NewReview {
-    /// The files to review, relative to the workspace root.
+    /// Files to review, relative to the workspace root.
     pub files: Vec<String>,
 
     pub title: Option<String>,
 }
 
-/// What a request anchors a comment to: the review as a whole, a file, or a
-/// range of a file, in one version.
+/// Comment anchor in an HTTP request.
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct AnchorRequest {
-    /// The version the file and range are read in; the latest when not given,
-    /// which only a comment without a range may leave out.
+    /// Version in which `path` and `range`/`bytes` are resolved; defaults to
+    /// the latest version when `range` and `bytes` are both omitted.
     pub version: Option<u32>,
 
     pub path: Option<String>,
 
-    /// The range in the form `--at` takes after the path: `42:5-43:18`.
+    /// Line or character range (`42`, `42-45`, or `42:5-43:18`).
     pub range: Option<String>,
 
-    /// The range as UTF-8 byte offsets into the file, end exclusive.
+    /// Half-open UTF-8 byte range `[start, end)` within the file.
     pub bytes: Option<[usize; 2]>,
 }
 
-/// What `POST /api/reviews/{id}/comments` takes.
+/// Request body for `POST /api/reviews/{id}/comments`.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct NewCommentRequest {
-    /// What the comment is on; the review as a whole when not given.
+    /// Target anchor; defaults to the review as a whole when omitted.
     pub anchor: Option<AnchorRequest>,
 
     #[serde(default)]
     pub body: String,
 
-    /// Text to replace the range with; empty to suggest deleting it.
+    /// Replacement text for the anchored range, or `""` to suggest deleting it.
     pub suggestion: Option<String>,
 }
 
-/// What `PATCH /api/reviews/{id}/comments/{n}` takes; what it leaves out stays
-/// as it is.
+/// Request body for `PATCH /api/reviews/{id}/comments/{n}`; omitted fields are
+/// left unchanged.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct EditRequest {
@@ -211,36 +203,36 @@ pub(crate) struct EditRequest {
     pub suggestion: Option<String>,
 }
 
-/// What `POST /api/reviews/{id}/comments/{n}/replies` takes.
+/// Request body for `POST /api/reviews/{id}/comments/{n}/replies`.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ReplyRequest {
     pub body: String,
 }
 
-/// What `POST /api/reviews/{id}/passes` takes.
+/// Request body for `POST /api/reviews/{id}/passes`.
 ///
-/// A pass submitted over HTTP runs under the configurations the `cfg` option
-/// names and no others: what a pass may do is the workspace's to say, not the
-/// caller's.
+/// Passes submitted over HTTP always use the workspace's configured
+/// `plugins.command.review.options.cfg` and cannot supply arbitrary `--cfg`
+/// overrides.
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct PassRequest {
-    /// The comments to send, by number; every comment waiting on the assistant
-    /// when empty.
+    /// Comment numbers to include; if empty, sends all comments awaiting the
+    /// assistant.
     #[serde(default)]
     pub only: Vec<u32>,
 
-    /// What the reviewer says to the assistant beside the comments.
+    /// Optional message from the reviewer to accompany the pass.
     pub message: Option<String>,
 
-    /// The conversation to run the review's passes in, `jp-c17629384710`; the
-    /// review's own, or a new one when it has none, when not given.
+    /// Conversation ID (`jp-c17629384710`) to run the pass in; defaults to the
+    /// review's bound conversation, or creates a new conversation on the first
+    /// pass.
     pub conversation: Option<String>,
 }
 
 impl PassRequest {
-    /// The pass this request asks for on the review `id`.
     pub(crate) fn request(self, id: ReviewId) -> Result<Request, ApiError> {
         let conversation = self
             .conversation
@@ -258,17 +250,18 @@ impl PassRequest {
     }
 }
 
-/// What `GET /api/reviews/{id}` takes in its query.
+/// Query parameters for `GET /api/reviews/{id}`.
 #[derive(Debug, Default, Deserialize)]
 pub(crate) struct DetailQuery {
-    /// The revision the caller has; the review is left out unless it is newer.
+    /// Last revision seen by the caller; omits `review` from the response when
+    /// the review has not changed since `revision`.
     pub revision: Option<u64>,
 
-    /// The version to place the comments in; the latest when not given.
+    /// Version to project comment anchors into; defaults to the latest version.
     pub version: Option<u32>,
 }
 
-/// What `GET /api/reviews/{id}/versions/{n}/file` takes in its query.
+/// Query parameters for `GET /api/reviews/{id}/versions/{n}/file`.
 #[derive(Debug, Deserialize)]
 pub(crate) struct FileQuery {
     pub path: String,
@@ -277,7 +270,7 @@ pub(crate) struct FileQuery {
     pub format: Format,
 }
 
-/// How the file endpoint returns a file: its text alone, or rendered as well.
+/// Output format for the file endpoint.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum Format {
@@ -286,17 +279,17 @@ pub(crate) enum Format {
     Html,
 }
 
-/// What `GET /api/reviews/{id}/diff` takes in its query.
+/// Query parameters for `GET /api/reviews/{id}/diff`.
 #[derive(Debug, Default, Deserialize)]
 pub(crate) struct DiffQuery {
     pub from: Option<u32>,
     pub to: Option<u32>,
 
-    /// The pass whose changes to show, in place of `from` and `to`: from the
-    /// version it was sent against to the one recorded when it ended.
+    /// Pass number whose pre-pass and post-pass versions should be compared
+    /// (mutually exclusive with `from` and `to`).
     pub pass: Option<u32>,
 
-    /// The one file to show; every file when not given.
+    /// Single tracked file path to diff; diffs all tracked files when omitted.
     pub path: Option<String>,
 }
 
@@ -440,16 +433,16 @@ struct DetailReply<'a> {
     revision: u64,
     running: Option<Running<'a>>,
 
-    /// Left out when the caller has this revision already.
+    /// Omitted when the caller already holds `revision`.
     #[serde(skip_serializing_if = "Option::is_none")]
     review: Option<Detail<'a>>,
 }
 
-/// `GET /api/reviews/{id}`: the pass running, and the review with its comments
-/// placed in the version `query` names, unless the caller has its revision.
+/// `GET /api/reviews/{id}`: return the running pass and (unless
+/// `query.revision` is current) the review with its comments projected into
+/// `query.version`.
 ///
-/// `here` is the number of the pass this server runs for the review, if it runs
-/// one.
+/// `here` is the number of the pass running on this server for `id`, if any.
 pub(crate) fn detail(
     store: &Store,
     id: ReviewId,

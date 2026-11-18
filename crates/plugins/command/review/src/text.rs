@@ -248,8 +248,8 @@ impl<'a> Text<'a> {
         })
     }
 
-    /// Each line with its line ending, leaving out the empty last line a final
-    /// line ending leaves: the lines a person reading the text sees.
+    /// Return each line with its line ending, omitting the trailing empty
+    /// segment after a final newline.
     pub fn shown(&self) -> Vec<&'a str> {
         let mut lines = self.lines();
         if lines.last().is_some_and(|line| line.is_empty()) {

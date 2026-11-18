@@ -1,4 +1,4 @@
-//! Where reviews live on disk.
+//! On-disk storage for reviews.
 //!
 //! ```text
 //! <store>/
@@ -10,22 +10,21 @@
 //!     blobs/<sha256>
 //! ```
 //!
-//! A review is a directory named by its id's body, claimed by creating it.
-//! `review.json` holds all of the review but the contents of its files, which
-//! are in `blobs/`, each named by the SHA-256 of what it holds.
+//! Each review is stored in a directory named after its 7-character ID body.
+//! `review.json` holds the review metadata, versions, comments, and passes;
+//! file contents are stored in `blobs/` named by their lowercase hex SHA-256
+//! digest.
 //!
-//! [`Store::update`] is the only way to change a review.
-//! It holds an exclusive lock on `.lock` while it reads `review.json`, applies
-//! the change, and writes the result to a temporary file that it renames over
-//! `review.json`, so a reader that takes no lock always reads a whole file.
-//! A blob is written before the `review.json` that names it.
+//! [`Store::update`] serializes mutations with an exclusive lock on `.lock`,
+//! writing blobs before atomically replacing `review.json` via a temporary file
+//! so lockless readers always observe a complete file.
 //!
-//! The process running a pass holds a second lock, on `.pass`, from before it
-//! records the pass until after it records how the pass ended
-//! ([`Store::lock_pass`]).
-//! A pass without an outcome whose `.pass` lock nobody holds was left by a
-//! process that is gone: reading or changing the review records it as
-//! interrupted.
+//! While a pass is running, its owning process holds an exclusive lock on
+//! `.pass` ([`Store::lock_pass`]) from before recording the pass until after
+//! recording its outcome.
+//! If a review has a pass with `ended == None` and `.pass` is unlocked, the
+//! process that started that pass has exited, and [`Store::read`] /
+//! [`Store::update`] mark the pass `interrupted`.
 
 use std::{
     collections::BTreeMap,
