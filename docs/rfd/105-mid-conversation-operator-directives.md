@@ -263,22 +263,20 @@ Text and tool directives are gated independently:
 For example, a user on Opus 5 without the beta header gets positional text
 directives and a flattened `tools` array.
 
-On OpenAI, the gates are catalog features in `ModelDetails::features`, and each
-holds for one route:
+On OpenAI, the gates are per-route catalog features in `ModelDetails::features`:
 
 - **Text and tool directives** require `POSITIONAL_DIRECTIVES` on the platform
   API and `SUBSCRIPTION_POSITIONAL_DIRECTIVES` on the subscription host.
 - **Effort and format directives** require `CONFIGURATION_UPDATE` on the
   platform API and `SUBSCRIPTION_CONFIGURATION_UPDATE` on the subscription host,
-  and are flattened on any request with `reasoning.mode = "pro"` (see
-  [Switching Between Standard and Pro Mode](#switching-between-standard-and-pro-mode)).
+  and are flattened on any request with `reasoning.mode = "pro"` (see [Switching
+  Between Standard and Pro Mode](#switching-between-standard-and-pro-mode)).
 
 OpenAI documents `configuration_update` for "supported GPT-6 and later models"
 without listing them, and does not document which models accept
 `additional_tools`.
-The flags start on the GPT-6.2 models, where a prefix edit drops replayed
-reasoning, and each is enabled on a model and route only after a request against
-that model on that route is seen to succeed.
+These flags start on the GPT-6.2 models, where a prefix edit drops replayed
+reasoning, and are enabled per model and route after live verification.
 
 The routes differ because the subscription host accepts a narrower request:
 
@@ -288,19 +286,19 @@ The routes differ because the subscription host accepts a narrower request:
   breakpoint that makes it a cache lookup boundary.
   The directive still preserves replayed reasoning, but cache reuse past it
   falls back to the implicit breakpoint on the latest message.
-- It does not take `truncation`, whose default, `disabled`, is what
-  `configuration_update` requires.
+- It rejects `truncation`, defaulting to `disabled`, which satisfies
+  `configuration_update`'s requirement.
 
 Codex sends `additional_tools` and `configuration_update` items through the
 subscription host, which suggests the host accepts both, though not for which
 models.
 
-A credential chain can move one request from the platform API to the
-subscription host between attempts, so the choice cannot be made once per
-request.
+Because credential failover can switch a request from the platform API to the
+subscription host between attempts, directive serialization cannot be chosen
+once per turn.
 `create_request` serializes the directives for each route, and each attempt
-sends the request for the route of its credential; on a route whose flag is
-missing, that request carries the flattened form.
+sends the request matching its credential's route, flattening directives
+whenever that route's feature flag is absent.
 
 ## Drawbacks
 
@@ -476,15 +474,14 @@ truncation.
 ### Switching Between Standard and Pro Mode
 
 OpenAI supports configuration updates only in standard, single-agent mode, and
-does not say whether a pro-mode request rejects a history that holds them or
-ignores them.
-A pro-mode request therefore leaves every `configuration_update` item out of
-`input`, and sends the effort and format in force at that point as
-request-level values.
-The stored conversation is unchanged: directives are derived at request time
-and never persisted.
-Codex does the same for models without configuration updates: it filters the
-items out of the request and leaves its stored history alone.
+does not document whether a pro-mode request rejects or ignores a history
+containing them.
+A pro-mode request therefore omits every `configuration_update` item from
+`input` and sends the active effort and format as request-level values.
+The stored conversation is unchanged: directives are derived at request time and
+never persisted.
+Codex does the same for models without configuration updates, filtering the
+items out of the request without modifying its stored history.
 
 The pro-mode request edits the prefix.
 Omitting whole items does not by itself cause a `prefix_mismatch`, but changing
@@ -494,14 +491,13 @@ replayed reasoning after the first update is dropped for that request.
 The next standard-mode request replays the updates in their original positions
 and sends the pinned request-level values again.
 Its prefix matches the requests before the pro-mode turn, so reasoning from
-before that turn is replayed again.
-Reasoning produced during the pro-mode turn was generated under the other
-prefix, so every later standard-mode request drops it as `prefix_mismatch`.
-Each pro-mode turn therefore costs its own reasoning for the rest of the
-conversation, and nothing else.
+earlier standard-mode turns is preserved.
+Reasoning from the pro-mode turn was generated under the flattened prefix, so
+subsequent standard-mode requests drop only that turn's reasoning as
+`prefix_mismatch`.
 
-Two points are unverified: whether `reasoning.mode` is itself part of the
-prefix, and whether a pro-mode request would accept the updates.
+Two points remain unverified: whether `reasoning.mode` is itself part of the
+prefix, and whether a pro-mode request accepts `configuration_update` items.
 Phase 7 checks both before enabling configuration updates.
 
 ### Compaction and Attachments Edit the Prefix

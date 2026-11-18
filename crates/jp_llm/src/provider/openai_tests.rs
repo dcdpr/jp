@@ -1432,8 +1432,6 @@ mod map_model {
         assert_eq!(details.display_name.as_deref(), Some("GPT-5.6 Sol"));
     }
 
-    /// A fine-tuned model reports its base model's capabilities under its own
-    /// id.
     #[test]
     fn a_fine_tuned_model_inherits_its_base_model_details() {
         let details = map_model(model("ft:gpt-4.1-2025-04-14:acme::abc123")).unwrap();
@@ -1447,7 +1445,6 @@ mod map_model {
         assert_eq!(details.reasoning, Some(ReasoningDetails::unsupported()));
     }
 
-    /// A fine-tune of a model the catalog does not know stays unknown.
     #[test]
     fn a_fine_tune_of_an_uncataloged_model_maps_to_empty_details() {
         let details = map_model(model("ft:gpt-3.5-turbo-0125:acme::abc123")).unwrap();
@@ -3566,8 +3563,6 @@ mod map_non_streaming_response {
         assert!(!events.iter().any(|event| matches!(event, Event::Notice(_))));
     }
 
-    /// A host may send an explicit `null` when nothing was removed; the
-    /// response must still parse and finish.
     #[test]
     fn a_null_transformations_field_reports_nothing() {
         let response = response_with_transformations(&serde_json::Value::Null);

@@ -17,17 +17,17 @@ pub(super) fn prepare_subscription_request(request: &mut Request) {
     strip_explicit_cache_controls(request);
 }
 
-/// Remove the explicit prompt-cache controls.
+/// Strip explicit prompt-cache breakpoints and `mode: Explicit`.
 ///
-/// The model behind the subscription route answers a content block carrying
-/// `prompt_cache_breakpoint` with `400 prompt_cache_breakpoint is not supported
-/// on this model`, even for a model that accepts it through the platform API.
-/// Explicit mode in `prompt_cache_options` is dropped with it, as the other
-/// half of the same feature, so `cache = off` cannot disable caching here.
+/// The subscription host rejects `prompt_cache_breakpoint` on content blocks
+/// with `400 prompt_cache_breakpoint is not supported on this model`, even on
+/// models that accept it via the platform API.
+/// `prompt_cache_options.mode` is dropped as well, so `cache = "off"` cannot
+/// disable caching on this route.
 ///
-/// `prompt_cache_options.ttl` and `prompt_cache_key` stay.
-/// Codex sends `ttl` alone through this host, and the host echoes the key back
-/// on the response as the key it cached under.
+/// `prompt_cache_options.ttl` and `prompt_cache_key` are preserved: the
+/// subscription host accepts `ttl` without `mode` and echoes `prompt_cache_key`
+/// on the response as its cache key.
 fn strip_explicit_cache_controls(request: &mut Request) {
     request.prompt_cache_options = request
         .prompt_cache_options
@@ -69,17 +69,13 @@ fn strip_explicit_cache_controls(request: &mut Request) {
     }
 }
 
-/// Drop the parameters the subscription host refuses.
+/// Strip request parameters that the subscription host rejects.
 ///
-/// `max_output_tokens` is refused by name (measured).
-/// The rest are dropped because the first-party client does not send them
-/// either, and the host reports only one unsupported parameter per request:
-/// discovering them one `400` at a time costs a round-trip each.
-///
-/// Sampling controls go with them.
-/// On the API path they are already suppressed for reasoning models, so a
-/// subscription request loses nothing it would have applied; a caller who sets
-/// them explicitly gets them ignored rather than getting a rejected request.
+/// `max_output_tokens` is rejected with `400 Unsupported parameter`.
+/// The remaining fields (`temperature`, `top_p`, `truncation`, `metadata`,
+/// `user`, `previous_response_id`) are omitted by the Codex CLI as well;
+/// stripping them up front avoids discovering unsupported parameters one `400`
+/// at a time.
 fn strip_unsupported_parameters(request: &mut Request) {
     request.max_output_tokens = None;
     request.temperature = None;
@@ -90,19 +86,17 @@ fn strip_unsupported_parameters(request: &mut Request) {
     request.previous_response_id = None;
 }
 
-/// Move system-role input messages into the request's `instructions`.
+/// Fold `role: "system"` input messages into the top-level `instructions`
+/// field.
 ///
-/// The subscription host answers a `role: "system"` entry in `input` with `400
-/// System messages are not allowed`; it takes the system prompt in
-/// `instructions` instead, which is where the Responses API documents it and
-/// where the Codex CLI puts it.
+/// The subscription host rejects `role: "system"` items in `input` with `400
+/// System messages are not allowed` and expects the system prompt in
+/// `instructions`.
 ///
-/// Any `instructions` already set is kept after the folded parts, so the prompt
-/// reads in the order it was assembled.
-///
-/// The cache breakpoint that rode on the last system block is dropped with it.
-/// The host derives its own cache key from the request's `prompt_cache_key`, so
-/// a breakpoint inside a field it does not read buys nothing.
+/// Any existing `instructions` text is appended after the folded messages to
+/// preserve prompt order.
+/// Cache breakpoints on the folded system blocks are discarded because the host
+/// derives its cache key from `prompt_cache_key`.
 pub(super) fn fold_system_into_instructions(request: &mut Request) {
     let types::Input::List(items) = &mut request.input else {
         return;

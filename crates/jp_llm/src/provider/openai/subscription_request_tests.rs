@@ -13,11 +13,8 @@ use super::{
 };
 use crate::query::ChatQuery;
 
-/// Send one query with `cache` to `model` through the subscription route, and
-/// return the body the host received.
-///
-/// The stand-in answers `400`, so the stream ends in an error; only the body
-/// matters here.
+/// Send one query with `cache` to `model` through the subscription route and
+/// return the captured request body.
 async fn subscription_body(model: &str, cache: CachePolicy) -> Value {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
@@ -76,8 +73,8 @@ async fn short_cache_sends_no_cache_options() {
     assert_eq!(body.get("prompt_cache_options"), None);
 }
 
-/// Disabling the cache needs explicit mode, which belongs with the breakpoints
-/// the host rejects, so it is not sent.
+/// Disabling caching requires `mode: explicit`, which the subscription host
+/// does not support, so `prompt_cache_options` is omitted.
 #[tokio::test]
 async fn off_cache_sends_no_cache_options() {
     let body = subscription_body("gpt-6.2-sol", CachePolicy::Off).await;

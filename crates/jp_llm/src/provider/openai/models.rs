@@ -64,8 +64,8 @@ pub(super) fn subscription_models() -> impl Iterator<Item = &'static str> {
         .map(|details| details.id.name.as_ref())
 }
 
-/// The base model ID in a fine-tuned model ID: `gpt-4.1-2025-04-14` for
-/// `ft:gpt-4.1-2025-04-14:acme::abc123`.
+/// Extract the base model ID from a fine-tuned model ID (e.g.
+/// `gpt-4.1-2025-04-14` from `ft:gpt-4.1-2025-04-14:acme::abc123`).
 fn fine_tune_base(id: &str) -> Option<&str> {
     id.strip_prefix("ft:")?
         .split(':')
