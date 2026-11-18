@@ -4,17 +4,18 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-08-26
-- **Summary**: Delivers mid-conversation system prompt and tool changes as
-  positional stream messages to preserve Anthropic's prompt cache.
+- **Summary**: Delivers mid-conversation system prompt, tool, reasoning effort,
+  and response format changes as positional stream items, to preserve the
+  prompt cache and replayed reasoning on Anthropic and OpenAI.
 
 ## Summary
 
-JP delivers mid-conversation system prompt sections and tool availability
-changes as positional messages anchored in the conversation stream rather than
-rewriting the request prefix.
-On supported Anthropic models, this preserves the prompt cache across
-configuration changes; other providers and unsupported models flatten the
-directives into the top-level system prompt and tool list.
+JP delivers mid-conversation system prompt sections, tool availability,
+reasoning effort, and response format changes as positional items anchored in
+the conversation stream rather than rewriting the request prefix.
+On supported Anthropic and OpenAI models, this preserves the prompt cache and
+the replayed reasoning across configuration changes; other providers and
+unsupported models flatten the directives into the top-level request fields.
 
 ## Motivation
 
@@ -50,6 +51,29 @@ Because JP already records configuration changes positionally as `ConfigDelta`
 entries between events in the conversation stream ([RFD 054]), the stream
 already captures where each change belongs.
 
+A rewritten prefix costs more than a cache miss.
+Anthropic rejects replayed `thinking` blocks whose `system` or `tools` changed
+since they were generated, and JP repairs the conversation after the 400 by
+discarding that reasoning (T-0q1k0j4).
+From GPT-6.2 on, OpenAI silently removes every replayed reasoning item that
+follows an edit to the prefix, reported as `prefix_mismatch` in the response's
+`input_transformations` ([keep the prefix unchanged][openai-prefix]).
+The model then redoes that reasoning, at more tokens and possibly lower quality.
+
+OpenAI counts more as a prefix edit than Anthropic does.
+Changing the request-level `reasoning.effort` or `text.format` rewrites hidden
+system instructions, so JP edits the prefix when
+`assistant.model.parameters.reasoning` changes between turns, and when one turn
+sets a `--schema` and the next does not.
+OpenAI provides positional mechanisms for all four kinds of change:
+
+- A `developer` message in `input` delivers new instructions.
+- An `additional_tools` input item offers tools from its position onward.
+- `tool_choice: { "type": "allowed_tools" }` restricts which offered tools are
+  callable without changing the `tools` array.
+- A `configuration_update` input item changes `reasoning.effort` and
+  `text.format` from its position onward.
+
 ## Design
 
 ### CLI Behavior
@@ -83,6 +107,11 @@ pub enum DirectiveBlock {
     ToolAddition(String),
     /// Withdraw a tool from this point onward.
     ToolRemoval(String),
+    /// Reason at this effort from this point onward.
+    ReasoningEffort(ReasoningEffort),
+    /// Constrain responses to this schema from this point onward, or lift the
+    /// constraint with `None`.
+    ResponseFormat(Option<Map<String, Value>>),
 }
 ```
 
@@ -90,6 +119,12 @@ pub enum DirectiveBlock {
 `assistant.instructions`.
 `ToolAddition` and `ToolRemoval` blocks are derived from tool enablement state
 in `conversation.tools` ([RFD 081]).
+`ReasoningEffort` blocks are derived from
+`assistant.model.parameters.reasoning`, resolved against the model's effort
+levels.
+`ResponseFormat` blocks are derived from `ChatRequest::schema` rather than from
+a `ConfigDelta`: a schema belongs to one request, so a directive is emitted
+before every `ChatRequest` whose schema differs from the previous one's.
 
 ### Stable Tool Catalogue
 
@@ -155,15 +190,64 @@ pub enum ThreadItem {
 `jp_conversation` computes the directives and their stream positions once; each
 provider decides how to serialize `prelude` and `items` into its request format.
 
+### OpenAI Serialization
+
+The OpenAI provider serializes `prelude` as the leading system message it sends
+today, and each directive as follows:
+
+| Block                                | Serialized as                                                    | Position                      |
+| ------------------------------------ | ---------------------------------------------------------------- | ----------------------------- |
+| `Text`                               | A `developer` message, with a cache breakpoint on its last block | Snapped position              |
+| `ToolAddition`                       | An `additional_tools` item holding the tool's definition         | Snapped position              |
+| `ToolRemoval`                        | The tool's absence from `tool_choice` (`allowed_tools`)          | Request-level                 |
+| `ReasoningEffort` / `ResponseFormat` | A `configuration_update` item                                    | Before the next `ChatRequest` |
+
+`additional_tools` items take `role: developer`.
+`allowed_tools` lists every offered tool that is still enabled.
+`configuration_update` carries `reasoning.effort`, `text.format`, or both.
+
+Three request-level fields are pinned for the life of the conversation, so the
+prefix never changes:
+
+- `tools` holds the tools enabled at the conversation's first position.
+  A tool enabled later reaches the model through `additional_tools` and stays
+  offered; disabling and re-enabling it changes only `tool_choice`.
+- `reasoning.effort` is the effort at the first position.
+- `text.format` is the format of the first `ChatRequest`.
+
+`tool_choice` is the one request-level field that changes.
+OpenAI documents `allowed_tools` as the cache-preserving way to restrict tools
+([manage tools with append-only updates][openai-tools]).
+A forced tool call replaces `allowed_tools` with `{ "type": "function" }` for
+that request, which names a tool the user enabled and so is already offered.
+
+`Text` directives carry an explicit cache breakpoint because, in implicit
+caching mode, a developer message after the leading block is not a cache lookup
+boundary.
+
+`configuration_update` must appear before the next user message, so effort and
+format directives snap forward to the next `ChatRequest`.
+`Text` and tool directives snap to the same boundary, which keeps every
+directive out of a function call and its output; OpenAI documents no stricter
+placement for either.
+
+OpenAI has no counterpart to Anthropic's `defer_loading`-based catalogue outside
+tool search, so the stable catalogue array described above applies to
+Anthropic only.
+
 ### Provider Fallback
 
-Non-Anthropic providers and unsupported Anthropic models flatten directives into
-the top-level request fields:
+Providers other than Anthropic and OpenAI, and models whose gate is not
+satisfied, flatten directives into the top-level request fields:
 
-| Payload                        | Flattens to                                                                                    | Trade-off                                                          |
-| ------------------------------ | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| `Text`                         | Concatenated into the top-level `system` field                                                 | Loses ordering and authority-timing; the instruction still applies |
-| `ToolAddition` / `ToolRemoval` | The effective tool set computed per request, sent as the `tools` array with no `defer_loading` | Loses cache preservation on change; the tool set is identical      |
+| Payload                              | Flattens to                                                                                    | Trade-off                                                          |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `Text`                               | Concatenated into the top-level `system` field                                                 | Loses ordering and authority-timing; the instruction still applies |
+| `ToolAddition` / `ToolRemoval`       | The effective tool set computed per request, sent as the `tools` array with no `defer_loading` | Loses cache preservation on change; the tool set is identical      |
+| `ReasoningEffort` / `ResponseFormat` | The request-level effort and format of the current request                                     | Loses cache and reasoning preservation on change                   |
+
+Anthropic flattens `ReasoningEffort` and `ResponseFormat` on every model, since
+it offers no positional form for either.
 
 ### Feature Gates
 
@@ -179,6 +263,20 @@ Text and tool directives are gated independently:
 For example, a user on Opus 5 without the beta header gets positional text
 directives and a flattened `tools` array.
 
+On OpenAI, the gates are catalog features in `ModelDetails::features`:
+
+- **Text and tool directives** require `POSITIONAL_DIRECTIVES`.
+- **Effort and format directives** require `CONFIGURATION_UPDATE`, and are
+  flattened on any request with `reasoning.mode = "pro"`, since OpenAI supports
+  configuration updates only in standard, single-agent mode.
+
+OpenAI documents `configuration_update` for "supported GPT-6 and later models"
+without listing them, and does not document which models accept
+`additional_tools`.
+Both flags start on the GPT-6.2 models, where a prefix edit costs reasoning, and
+are added to other models only after a request against each is seen to
+succeed.
+
 ## Drawbacks
 
 - **Larger request payloads.** Every tool definition in the catalogue is sent on
@@ -191,7 +289,14 @@ directives and a flattened `tools` array.
   If that API changes shape, tool directives fall back to rewriting the `tools`
   prefix, degrading to a cache miss rather than failing the request.
 - **Broader provider boundary.** `ThreadItem` adds a concept to the shared
-  provider boundary that six of the seven providers immediately flatten.
+  provider boundary that five of the seven providers immediately flatten.
+- **Withdrawn tools still cost context on OpenAI.** A disabled tool stays in
+  `tools` or in its `additional_tools` item, and its definition is billed on
+  every request until the conversation is compacted.
+  Flattening removes it, at the cost of the cache and the reasoning after it.
+- **Two fork extensions.** The `openai_responses` fork needs the
+  `additional_tools` and `configuration_update` input items and the
+  `allowed_tools` tool choice, alongside the `async-anthropic` changes.
 
 ## Alternatives
 
@@ -257,6 +362,11 @@ cache miss.
 - **Per-position derivation of the "Tool Usage" section.** The "Tool Usage"
   section is computed once from the final resolved configuration and placed in
   the prelude.
+- **Model switches.** Moving a conversation to another model family, or to a
+  less capable model, drops its reasoning on OpenAI (`model_mismatch`) and is
+  out of reach of any directive.
+- **Attachments and compaction.** Both edit the prefix and are covered under
+  Risks and Open Questions; neither is changed here.
 
 ## Risks and Open Questions
 
@@ -319,6 +429,36 @@ We can test this by sending a prompt that requests a tool disabled by a
 `tool_removal` in the initial directive and confirming that the model does not
 call it.
 
+### Truncation and Configuration Updates on OpenAI
+
+OpenAI rejects histories containing `configuration_update` items when
+`truncation` is `auto`, and the turn loop asks for `Truncation::Allowed`, which
+the OpenAI provider sends as `auto`.
+A request carrying an effort or format directive must therefore send
+`truncation: disabled`.
+Automatic truncation drops items from the middle of the conversation, which is
+itself a prefix edit that costs reasoning, so little is lost; but a conversation
+that outgrows the context window then fails with `ContextWindowExceeded` instead
+of being truncated, until JP fits conversations to the window itself
+(T-0n0pex2).
+
+It is unconfirmed whether `additional_tools` items and later `developer`
+messages trip the same rejection.
+Phase 6 checks this before any directive reaches a request that allows
+truncation.
+
+### Compaction and Attachments Edit the Prefix
+
+A compaction summary ([RFD 064]) replaces the turns it covers in place, so the
+kept turns follow an edited prefix and their reasoning is dropped on GPT-6.2.
+OpenAI advises placing a home-grown compaction item at the end of the context
+instead ([keep the prefix unchanged][openai-prefix]); deleting whole items
+without editing the remaining ones does not by itself trigger a removal.
+Attachments are sent in one user message ahead of the conversation, so an
+attachment whose content changes between requests has the same effect.
+Both deserve their own design; T-1mnmqbx's reporting of `input_transformations`
+shows how often each one happens.
+
 ### Cache Breakpoint Budget
 
 `MAX_EXPLICIT_CACHE_CONTROL_COUNT` is 3, allocated to system, then documents,
@@ -357,6 +497,26 @@ The breakpoint allocation comment in `anthropic.rs` needs updating to match.
    anchoring across repeated requests, including after compaction and turn
    pruning, and assert that unresolvable directives are stripped rather than
    sent.
+6. **Phase 6: OpenAI text and tool directives.** Add the `additional_tools`
+   input item and the `allowed_tools` tool choice to the `openai_responses`
+   fork.
+   Pin `tools` to the first position's tool set, emit `Text` directives as
+   `developer` messages and `ToolAddition` directives as `additional_tools`
+   items, and derive `allowed_tools` from current enablement, gated on
+   `POSITIONAL_DIRECTIVES`.
+   Before enabling the flag on a model, confirm against it that a request
+   with `truncation: auto` and an `additional_tools` item is accepted, and that
+   a tool change produces no `prefix_mismatch` in `input_transformations`
+   (T-1mnmqbx).
+   Depends on Phase 1.
+7. **Phase 7: OpenAI configuration updates.** Add the `configuration_update`
+   input item to the fork.
+   Derive `ReasoningEffort` and `ResponseFormat` directives, pin the
+   request-level effort and format to their first values, emit
+   `configuration_update` before the next `ChatRequest`, and send
+   `truncation: disabled` on any request whose history holds one, gated on
+   `CONFIGURATION_UPDATE` and standard reasoning mode.
+   Depends on Phase 6.
 
 ## References
 
@@ -365,6 +525,13 @@ The breakpoint allocation comment in `anthropic.rs` needs updating to match.
   `tool_reference` alternative
 - [Tool use with prompt caching][anthropic-tool-caching]: what invalidates the
   `tools` prefix, and why deferral is required to shrink it
+- [Keep the prefix unchanged][openai-prefix]: what OpenAI counts as a prefix
+  edit, and the append-only alternative for each
+- [Prompt caching: manage tools with append-only updates][openai-tools]
+- [Change reasoning mid-conversation][openai-config-update]:
+  `configuration_update` placement and constraints
+- [Reasoning item removal across requests][openai-removal]:
+  `input_transformations` reasons
 - [RFD 054]: config deltas positioned in the conversation stream
 - [RFD 064]: compaction projection
 - [RFD 076]: access grant revocation as a mid-conversation tool change
@@ -377,5 +544,9 @@ The breakpoint allocation comment in `anthropic.rs` needs updating to match.
 [RFD 078]: 078-tool-config-mutation.md
 [RFD 081]: 081-decompose-tool-enable-into-state-and-allow_toggle.md
 [anthropic-midconv]: https://platform.claude.com/docs/en/build-with-claude/mid-conversation-system-messages
+[openai-prefix]: https://developers.openai.com/api/docs/guides/keep-prefix-unchanged
+[openai-tools]: https://developers.openai.com/api/docs/guides/prompt-caching#manage-tools-with-append-only-updates
+[openai-config-update]: https://developers.openai.com/api/docs/guides/reasoning#change-reasoning-mid-conversation
+[openai-removal]: https://developers.openai.com/api/docs/guides/reasoning#reasoning-item-removal-across-requests
 [anthropic-tool-caching]: https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-use-with-prompt-caching
 [anthropic-tool-search]: https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-search-tool

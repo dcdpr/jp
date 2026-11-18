@@ -3408,7 +3408,7 @@ checksum = "a4895175b425cb1f87721b59f0f286c2092bd4af812243672510e1ac53e2e0ad"
 [[package]]
 name = "openai_responses"
 version = "0.1.6"
-source = "git+https://github.com/JeanMertz/openai-responses-rs#db70ddd95c89d5dea3f58e06aefa7a4089b7ef20"
+source = "git+https://github.com/JeanMertz/openai-responses-rs#d89991f024a60ae8723e1c46d071facfff8e1d51"
 dependencies = [
  "async-fn-stream",
  "chrono",

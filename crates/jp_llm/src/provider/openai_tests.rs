@@ -1383,9 +1383,9 @@ mod map_model {
     use chrono::{TimeZone as _, Utc};
 
     use super::super::{
-        EXPLICIT_PROMPT_CACHING, MODEL_OVERRIDES, ModelResponse, PERSISTED_REASONING,
-        REASONING_PRO_MODE, STREAMING_UNSUPPORTED, TEMP_REQUIRES_NO_REASONING, is_api_only,
-        map_model, subscription_models,
+        EXPLICIT_PROMPT_CACHING, ModelResponse, PERSISTED_REASONING, REASONING_PRO_MODE,
+        STREAMING_UNSUPPORTED, TEMP_REQUIRES_NO_REASONING, is_api_only, map_model,
+        models::MODEL_OVERRIDES, subscription_models,
     };
     use crate::model::{ModelDeprecation, ReasoningDetails};
 
@@ -1403,8 +1403,11 @@ mod map_model {
     #[test]
     fn subscription_lists_the_models_the_catalog_marks_as_served() {
         assert_eq!(subscription_models().collect::<Vec<_>>(), vec![
+            "gpt-6.2-astra",
+            "gpt-6.2-sol",
             "gpt-6-astra",
             "gpt-6.1-sol",
+            "gpt-6.1-terra",
             "gpt-6-sol",
             "gpt-6-luna",
             "gpt-5.6-sol",
@@ -1436,6 +1439,58 @@ mod map_model {
         assert!(is_api_only("gpt-5.5-pro"));
         assert!(!is_api_only("gpt-6-luna"));
         assert!(!is_api_only("gpt-9-unreleased"));
+    }
+
+    #[test]
+    fn gpt_6_2_astra_uses_latest_metadata() {
+        let details = map_model(model("gpt-6.2-astra")).unwrap();
+
+        assert_eq!(details.display_name.as_deref(), Some("GPT-6.2 Astra"));
+        assert_eq!(details.context_window, Some(1_050_000));
+        assert_eq!(details.max_output_tokens, Some(128_000));
+        // `none` is rejected, so reasoning cannot be turned off.
+        assert_eq!(
+            details.reasoning,
+            Some(ReasoningDetails::leveled(false, true, true, true, true, true).always_on())
+        );
+        assert_eq!(
+            details.knowledge_cutoff,
+            chrono::NaiveDate::from_ymd_opt(2026, 5, 18)
+        );
+        assert_eq!(details.deprecated, Some(ModelDeprecation::Active));
+        assert_eq!(details.subscription, Some(true));
+        assert_eq!(details.features, vec![
+            TEMP_REQUIRES_NO_REASONING,
+            REASONING_PRO_MODE,
+            PERSISTED_REASONING,
+            EXPLICIT_PROMPT_CACHING
+        ]);
+    }
+
+    #[test]
+    fn gpt_6_2_sol_uses_latest_metadata() {
+        let details = map_model(model("gpt-6.2-sol")).unwrap();
+
+        assert_eq!(details.display_name.as_deref(), Some("GPT-6.2 Sol"));
+        assert_eq!(details.context_window, Some(1_050_000));
+        assert_eq!(details.max_output_tokens, Some(128_000));
+        // `none` is rejected, so reasoning cannot be turned off.
+        assert_eq!(
+            details.reasoning,
+            Some(ReasoningDetails::leveled(false, true, true, true, true, true).always_on())
+        );
+        assert_eq!(
+            details.knowledge_cutoff,
+            chrono::NaiveDate::from_ymd_opt(2026, 6, 1)
+        );
+        assert_eq!(details.deprecated, Some(ModelDeprecation::Active));
+        assert_eq!(details.subscription, Some(true));
+        assert_eq!(details.features, vec![
+            TEMP_REQUIRES_NO_REASONING,
+            REASONING_PRO_MODE,
+            PERSISTED_REASONING,
+            EXPLICIT_PROMPT_CACHING
+        ]);
     }
 
     #[test]
@@ -1480,6 +1535,34 @@ mod map_model {
             chrono::NaiveDate::from_ymd_opt(2026, 4, 30)
         );
         assert_eq!(details.deprecated, Some(ModelDeprecation::Active));
+        assert_eq!(details.features, vec![
+            TEMP_REQUIRES_NO_REASONING,
+            REASONING_PRO_MODE,
+            PERSISTED_REASONING,
+            EXPLICIT_PROMPT_CACHING
+        ]);
+    }
+
+    #[test]
+    fn gpt_6_1_terra_uses_latest_metadata() {
+        let details = map_model(model("gpt-6.1-terra")).unwrap();
+
+        assert_eq!(details.display_name.as_deref(), Some("GPT-6.1 Terra"));
+        assert_eq!(details.context_window, Some(1_050_000));
+        assert_eq!(details.max_output_tokens, Some(128_000));
+        // `none` is accepted, so reasoning can be turned off.
+        assert_eq!(
+            details.reasoning,
+            Some(ReasoningDetails::leveled(
+                false, true, true, true, true, true
+            ))
+        );
+        assert_eq!(
+            details.knowledge_cutoff,
+            chrono::NaiveDate::from_ymd_opt(2026, 6, 1)
+        );
+        assert_eq!(details.deprecated, Some(ModelDeprecation::Active));
+        assert_eq!(details.subscription, Some(true));
         assert_eq!(details.features, vec![
             TEMP_REQUIRES_NO_REASONING,
             REASONING_PRO_MODE,
@@ -1687,9 +1770,12 @@ mod map_model {
 }
 
 mod create_request {
+    use std::time::Duration;
+
     use chrono::{DateTime, TimeZone as _, Utc};
     use jp_config::{
         AppConfig,
+        assistant::request::CachePolicy,
         model::{
             id::{ModelIdConfig, ModelIdOrAliasConfig, ProviderId},
             parameters::{CustomReasoningConfig, ReasoningConfig, ReasoningEffort},
@@ -1756,6 +1842,94 @@ mod create_request {
         let request = request_for("gpt-6-sol", created_at);
 
         assert_eq!(request.get("prompt_cache_key"), None);
+    }
+
+    /// The request body for a one-question conversation on `model` with the
+    /// given cache policy.
+    fn request_with_cache(model: &str, cache: CachePolicy) -> Value {
+        let created_at = Utc.with_ymd_and_hms(2026, 9, 1, 0, 0, 0).unwrap();
+
+        let mut config = AppConfig::new_test();
+        config.assistant.model.id = ModelIdOrAliasConfig::Id(ModelIdConfig {
+            provider: ProviderId::Openai,
+            name: model.parse().unwrap(),
+        });
+        config.assistant.request.cache = cache;
+
+        let mut stream = ConversationStream::new(config.into()).with_created_at(created_at);
+        stream.extend([
+            ConversationEvent::new(TurnStart::default(), created_at),
+            ConversationEvent::new(ChatRequest::from("A question"), created_at),
+        ]);
+
+        let thread = ThreadBuilder::new().with_events(stream).build().unwrap();
+
+        // Dummy API key env var, mirroring the VCR harness.
+        let env = if cfg!(windows) { "USERNAME" } else { "USER" }.to_owned();
+        let mut providers = LlmProviderConfig::default();
+        providers.openai.api_key_env = env.into();
+
+        let details = map_model(ModelResponse {
+            id: model.to_owned(),
+            _object: "model".to_owned(),
+            _created: Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+            _owned_by: "openai".to_owned(),
+        })
+        .unwrap();
+
+        build_request_value(
+            ProviderId::Openai,
+            &providers,
+            &details,
+            ChatQuery::from(thread),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn long_cache_requests_a_12_hour_ttl() {
+        let request = request_with_cache("gpt-6.2-sol", CachePolicy::Long);
+
+        assert_eq!(request["prompt_cache_options"], json!({ "ttl": "12h" }));
+    }
+
+    /// 30 minutes is the API default, so the short policy sends nothing.
+    #[test]
+    fn short_cache_leaves_the_default_ttl() {
+        let request = request_with_cache("gpt-6.2-sol", CachePolicy::Short);
+
+        assert_eq!(request.get("prompt_cache_options"), None);
+    }
+
+    /// A custom duration rounds to the nearer of 30 minutes and 12 hours, which
+    /// are the only TTLs the API accepts.
+    /// The midpoint is 6h15m.
+    #[test]
+    fn custom_cache_duration_rounds_to_the_nearer_ttl() {
+        let below =
+            request_with_cache("gpt-6.2-sol", CachePolicy::Custom(Duration::from_mins(374)));
+        let at = request_with_cache("gpt-6.2-sol", CachePolicy::Custom(Duration::from_mins(375)));
+
+        assert_eq!(below.get("prompt_cache_options"), None);
+        assert_eq!(at["prompt_cache_options"], json!({ "ttl": "12h" }));
+    }
+
+    #[test]
+    fn off_cache_disables_caching_with_explicit_mode() {
+        let request = request_with_cache("gpt-6.2-sol", CachePolicy::Off);
+
+        assert_eq!(
+            request["prompt_cache_options"],
+            json!({ "mode": "explicit" })
+        );
+    }
+
+    /// Models before GPT-5.6 reject `prompt_cache_options` outright.
+    #[test]
+    fn long_cache_sends_no_cache_options_to_implicit_caching_models() {
+        let request = request_with_cache("gpt-5.5", CachePolicy::Long);
+
+        assert_eq!(request.get("prompt_cache_options"), None);
     }
 
     /// Older models route requests to a cache by `prompt_cache_key`, and one
@@ -1965,6 +2139,93 @@ mod create_request {
             json!("low")
         );
     }
+
+    /// GPT-6.2 Astra and Sol reject `none`, and OpenAI's migration guide maps
+    /// `minimal` to `low`, so both are sent as `low`.
+    #[test]
+    fn gpt_6_2_clamps_efforts_below_low_to_low() {
+        assert_eq!(
+            reasoning_for_effort("gpt-6.2-astra", ReasoningEffort::Xlow)["effort"],
+            json!("low")
+        );
+        assert_eq!(
+            reasoning_for_effort("gpt-6.2-astra", ReasoningEffort::None)["effort"],
+            json!("low")
+        );
+        assert_eq!(
+            reasoning_for_effort("gpt-6.2-sol", ReasoningEffort::Xlow)["effort"],
+            json!("low")
+        );
+        assert_eq!(
+            reasoning_for_effort("gpt-6.2-sol", ReasoningEffort::None)["effort"],
+            json!("low")
+        );
+    }
+
+    /// The request body for `model` with `reasoning = "off"` and both sampling
+    /// parameters configured.
+    fn request_with_reasoning_off_and_sampling(model: &str) -> Value {
+        let ts = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
+
+        let mut config = AppConfig::new_test();
+        config.assistant.model.id = ModelIdOrAliasConfig::Id(ModelIdConfig {
+            provider: ProviderId::Openai,
+            name: model.parse().unwrap(),
+        });
+        config.assistant.model.parameters.reasoning = Some(ReasoningConfig::Off);
+        config.assistant.model.parameters.temperature = Some(0.7);
+        config.assistant.model.parameters.top_p = Some(0.9);
+
+        let mut stream = ConversationStream::new(config.into()).with_created_at(ts);
+        stream.extend([
+            ConversationEvent::new(TurnStart::default(), ts),
+            ConversationEvent::new(ChatRequest::from("A question"), ts),
+        ]);
+
+        let thread = ThreadBuilder::new().with_events(stream).build().unwrap();
+
+        // Dummy API key env var, mirroring the VCR harness.
+        let env = if cfg!(windows) { "USERNAME" } else { "USER" }.to_owned();
+        let mut providers = LlmProviderConfig::default();
+        providers.openai.api_key_env = env.into();
+
+        let details = map_model(ModelResponse {
+            id: model.to_owned(),
+            _object: "model".to_owned(),
+            _created: Utc.with_ymd_and_hms(2026, 11, 17, 0, 0, 0).unwrap(),
+            _owned_by: "openai".to_owned(),
+        })
+        .unwrap();
+
+        build_request_value(
+            ProviderId::Openai,
+            &providers,
+            &details,
+            ChatQuery::from(thread),
+        )
+        .unwrap()
+    }
+
+    /// GPT-6.2 rejects `effort: none`, `temperature`, and `top_p`, so
+    /// `reasoning = "off"` sends its lowest effort and drops both sampling
+    /// parameters.
+    #[test]
+    fn gpt_6_2_astra_reasoning_off_sends_low_effort_and_strips_sampling() {
+        let request = request_with_reasoning_off_and_sampling("gpt-6.2-astra");
+
+        assert_eq!(request["reasoning"]["effort"], json!("low"));
+        assert_eq!(request.get("temperature"), None);
+        assert_eq!(request.get("top_p"), None);
+    }
+
+    #[test]
+    fn gpt_6_2_sol_reasoning_off_sends_low_effort_and_strips_sampling() {
+        let request = request_with_reasoning_off_and_sampling("gpt-6.2-sol");
+
+        assert_eq!(request["reasoning"]["effort"], json!("low"));
+        assert_eq!(request.get("temperature"), None);
+        assert_eq!(request.get("top_p"), None);
+    }
 }
 
 mod unknown_model {
@@ -2140,12 +2401,11 @@ mod unknown_model {
         );
     }
 
-    /// `reasoning = "off"` on a model absent from the catalog disables
-    /// reasoning explicitly with `effort: none`.
-    /// Omitting the field would let the model reason (hidden, and billed) at
-    /// its default effort.
+    /// `reasoning = "off"` on a model absent from the catalog sends `low`.
+    /// Every OpenAI model since GPT-6 Astra rejects `none`, and omitting the
+    /// field would let the model reason at its default effort.
     #[test]
-    fn reasoning_off_sends_none_effort() {
+    fn reasoning_off_sends_low_effort() {
         let ts = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
 
         let mut config = AppConfig::new_test();
@@ -2179,9 +2439,51 @@ mod unknown_model {
         .to_string();
 
         assert!(
-            request.contains(r#""effort":"none""#),
-            "reasoning not explicitly disabled: {request}"
+            request.contains(r#""effort":"low""#),
+            "reasoning not sent at the lowest effort: {request}"
         );
+    }
+
+    /// Sampling parameters are dropped on a model absent from the catalog even
+    /// with reasoning unconfigured: recent OpenAI models reason by default and
+    /// reject `temperature` and `top_p` outright.
+    #[test]
+    fn unconfigured_reasoning_strips_sampling() {
+        let ts = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
+
+        let mut config = AppConfig::new_test();
+        config.assistant.model.id = ModelIdOrAliasConfig::Id(ModelIdConfig {
+            provider: ProviderId::Openai,
+            name: "gpt-9".parse().unwrap(),
+        });
+        config.assistant.model.parameters.reasoning = None;
+        config.assistant.model.parameters.temperature = Some(0.7);
+        config.assistant.model.parameters.top_p = Some(0.9);
+
+        let mut stream = ConversationStream::new(config.into()).with_created_at(ts);
+        stream.extend([
+            ConversationEvent::new(TurnStart::default(), ts),
+            ConversationEvent::new(ChatRequest::from("A question"), ts),
+        ]);
+
+        let thread = ThreadBuilder::new().with_events(stream).build().unwrap();
+
+        // Dummy API key env var, mirroring the VCR harness.
+        let env = if cfg!(windows) { "USERNAME" } else { "USER" }.to_owned();
+        let mut providers = LlmProviderConfig::default();
+        providers.openai.api_key_env = env.into();
+
+        let model = ModelDetails::empty("openai/gpt-9".parse().unwrap());
+        let request = build_request_value(
+            ProviderId::Openai,
+            &providers,
+            &model,
+            ChatQuery::from(thread),
+        )
+        .unwrap();
+
+        assert_eq!(request.get("temperature"), None);
+        assert_eq!(request.get("top_p"), None);
     }
 
     /// Unconfigured reasoning on a model absent from the catalog omits the
@@ -2273,6 +2575,37 @@ mod convert_reasoning {
         );
 
         assert_eq!(config.effort, Some(types::ReasoningEffort::XHigh));
+    }
+
+    /// A model absent from the catalog has no effort ladder to clamp against,
+    /// so `none` and `minimal`, which no OpenAI model since GPT-6 Astra
+    /// accepts, are sent as `low`.
+    #[test]
+    fn unknown_model_sends_efforts_below_low_as_low() {
+        let details = ModelDetails::empty("openai/gpt-9".parse().unwrap());
+        let effort = |effort| {
+            convert_reasoning(
+                CustomReasoningConfig {
+                    effort,
+                    exclude: false,
+                },
+                &details,
+            )
+            .effort
+        };
+
+        assert_eq!(
+            effort(ReasoningEffort::None),
+            Some(types::ReasoningEffort::Low)
+        );
+        assert_eq!(
+            effort(ReasoningEffort::Xlow),
+            Some(types::ReasoningEffort::Low)
+        );
+        assert_eq!(
+            effort(ReasoningEffort::Low),
+            Some(types::ReasoningEffort::Low)
+        );
     }
 }
 
@@ -3100,6 +3433,107 @@ mod map_non_streaming_response {
         assert_eq!(
             reasoning.delta(1, "Next".into()),
             Event::reasoning(1, "Next")
+        );
+    }
+
+    /// A completed response with no output that reports `transformations` in
+    /// `input_transformations`.
+    fn response_with_transformations(transformations: &serde_json::Value) -> Response {
+        serde_json::from_value(json!({
+            "id": "resp_123", "created_at": 1_577_836_800, "status": "completed",
+            "model": "gpt-6.2-sol", "metadata": {}, "parallel_tool_calls": true,
+            "reasoning": {}, "temperature": 1.0, "text": {"format": {"type": "text"}},
+            "tool_choice": "auto", "tools": [], "top_p": 1.0, "truncation": "disabled", "store": false,
+            "output": [],
+            "input_transformations": transformations,
+        }))
+        .unwrap()
+    }
+
+    fn removed(id: &str, reason: &str) -> serde_json::Value {
+        json!({ "id": id, "action": "removed", "reason": reason, "type": "reasoning" })
+    }
+
+    /// Removals caused by an edited prefix or a model switch reach the user,
+    /// one notice per reason, ahead of the finish event.
+    #[test]
+    fn removed_reasoning_is_reported_once_per_reason() {
+        let response = response_with_transformations(&json!([
+            removed("rs_1", "prefix_mismatch"),
+            removed("rs_2", "prefix_mismatch"),
+            removed("rs_3", "model_mismatch"),
+        ]));
+
+        let events = map_non_streaming_response(response, false, true).unwrap();
+
+        assert_eq!(events, vec![
+            Event::Notice(
+                "OpenAI dropped 2 reasoning items from earlier turns because the conversation \
+                 before them changed (prefix_mismatch); the model may redo that reasoning."
+                    .to_owned()
+            ),
+            Event::Notice(
+                "OpenAI dropped 1 reasoning item from earlier turns because the conversation \
+                 moved to a different or less capable model (model_mismatch); the model may redo \
+                 that reasoning."
+                    .to_owned()
+            ),
+            Event::Finished(FinishReason::Completed),
+        ]);
+    }
+
+    /// `turn_boundary` is the documented default on models without persisted
+    /// reasoning, and the identity reasons need a change JP never makes, so
+    /// they are logged only.
+    #[test]
+    fn other_removal_reasons_produce_no_notice() {
+        let response = response_with_transformations(&json!([
+            removed("rs_1", "turn_boundary"),
+            removed("rs_2", "end_user_mismatch"),
+            removed("rs_3", "organization_mismatch"),
+        ]));
+
+        let events = map_non_streaming_response(response, false, true).unwrap();
+
+        assert_eq!(events, vec![Event::Finished(FinishReason::Completed)]);
+    }
+
+    /// A response without the field, from any model before GPT-6.2, still
+    /// parses.
+    #[test]
+    fn a_response_without_transformations_reports_nothing() {
+        let events = map_non_streaming_response(response(), false, true).unwrap();
+
+        assert!(!events.iter().any(|event| matches!(event, Event::Notice(_))));
+    }
+
+    /// The streaming path reports removals from the terminal event, which
+    /// carries the same final `Response`.
+    #[test]
+    fn streamed_terminal_event_reports_removed_reasoning() {
+        let events = map_event(
+            types::Event::ResponseCompleted {
+                response: response_with_transformations(&json!([removed(
+                    "rs_1",
+                    "prefix_mismatch"
+                )])),
+            },
+            false,
+            true,
+            &mut ReasoningState::default(),
+            &mut StreamedArguments::default(),
+        );
+
+        assert_eq!(
+            events.into_iter().collect::<Result<Vec<_>, _>>().unwrap(),
+            vec![
+                Event::Notice(
+                    "OpenAI dropped 1 reasoning item from earlier turns because the conversation \
+                     before them changed (prefix_mismatch); the model may redo that reasoning."
+                        .to_owned()
+                ),
+                Event::Finished(FinishReason::Completed),
+            ]
         );
     }
 }
