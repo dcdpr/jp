@@ -1,6 +1,6 @@
 # --no-persist queries leave a query draft in user storage
 
-- **Status**: In Progress
+- **Status**: Done
 - **Authors**: jp
 - **Date**: 2026-11-18
 - **Label**: client=cli
@@ -22,5 +22,18 @@ directory per failed probe.
 - [x] Failing test: a `--no-persist` inline query whose turn fails leaves no
       conversation directory
 - [x] `--no-persist` never writes the preserved draft
-- [ ] Decide what an editor-composed `--no-persist` query does with its draft
+- [x] Decide what an editor-composed `--no-persist` query does with its draft
       file
+
+## Comments
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-18T19:15:45Z
+
+Decided: an editor-composed `--no-persist` query keeps its draft file on a
+failed run, like any other query.
+Losing typed text is worse than a leftover directory, and T-1n2tta7 makes a
+draft-only directory read as an unstored conversation, so JP neither reports nor
+moves it.
