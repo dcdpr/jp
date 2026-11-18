@@ -1,0 +1,15 @@
+# Add jp doctor
+
+- **Status**: Todo
+- **Authors**: jp
+- **Date**: 2026-11-18
+- **Label**: client=cli
+- **Label**: package=jp_cli
+- **Label**: type=feature
+- **Parent**: T-1n2tnwv
+
+Check the `jp` installation, user-global and workspace configuration, and
+conversation storage (load failures, unsent drafts, and `.trash/` contents),
+reporting each detected problem with a suggested fix.
+`jp doctor` is read-only: it suggests commands such as `jp c repair` and `jp c
+trash` without modifying anything on disk.
