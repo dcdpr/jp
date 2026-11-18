@@ -22,12 +22,13 @@ use crate::{
     },
 };
 
-/// Map an OpenAI model id onto its capabilities.
+/// Map an OpenAI model ID to its [`ModelDetails`].
 ///
-/// An id the catalog does not know maps to empty details, with a warning.
+/// Models absent from [`MODEL_OVERRIDES`] return empty details and log a
+/// warning.
 pub(super) fn map_model(model: ModelResponse) -> Result<ModelDetails> {
     if let Some(details) = model_overrides(&model.id) {
-        // Reported under the id the caller named, which may be an alias.
+        // Preserve the caller's requested ID, which may be an alias.
         let mut details = details.clone();
         details.id = (PROVIDER, model.id).try_into()?;
         return Ok(details);
@@ -39,14 +40,13 @@ pub(super) fn map_model(model: ModelResponse) -> Result<ModelDetails> {
 
 /// Whether the catalog marks `model` as served only through the API.
 ///
-/// A model the catalog does not know is not API-only: the plan's model set
-/// changes without a JP release, and refusing it here would hide a model the
-/// subscription may well serve.
+/// Returns `false` for models absent from the catalog so that newly added
+/// subscription models remain usable without a JP release.
 pub(super) fn is_api_only(model: &str) -> bool {
     model_overrides(model).is_some_and(|details| details.subscription == Some(false))
 }
 
-/// The canonical ids of the models a `ChatGPT` subscription serves, in catalog
+/// Canonical IDs of the models served by a `ChatGPT` subscription, in catalog
 /// order.
 pub(super) fn subscription_models() -> impl Iterator<Item = &'static str> {
     MODEL_OVERRIDES
@@ -55,21 +55,18 @@ pub(super) fn subscription_models() -> impl Iterator<Item = &'static str> {
         .map(|details| details.id.name.as_ref())
 }
 
-/// Look up the details for `id`, under its canonical id or an alias.
-///
-/// `None` for a model absent from [`MODEL_OVERRIDES`].
+/// Look up `id` in [`MODEL_OVERRIDES`] by canonical ID or alias.
 fn model_overrides(id: &str) -> Option<&'static ModelDetails> {
     MODEL_OVERRIDES.get(id)
 }
 
-/// The OpenAI model details the API does not report, which is all of them.
+/// Static capability metadata for OpenAI models.
 ///
 /// This table is authoritative rather than a fallback: `GET /v1/models/{id}`
 /// returns only `{id, object, created, owned_by}`, reporting neither context
 /// windows nor reasoning effort levels.
-/// Unlike the Anthropic, OpenRouter, and Cerebras providers, there is nothing
-/// to derive from, so every value here is maintained by hand against OpenAI's
-/// published model documentation.
+/// Every entry is maintained by hand against OpenAI's published model
+/// documentation.
 pub(super) static MODEL_OVERRIDES: LazyLock<Catalog<ModelDetails>> = LazyLock::new(|| {
     let date = |year, month, day| NaiveDate::from_ymd_opt(year, month, day).unwrap();
     let id = |name: &str| ModelIdConfig::try_from((PROVIDER, name)).unwrap();
@@ -82,9 +79,8 @@ pub(super) static MODEL_OVERRIDES: LazyLock<Catalog<ModelDetails>> = LazyLock::n
                 display_name: Some("GPT-6.2 Astra".to_owned()),
                 context_window: Some(1_050_000),
                 max_output_tokens: Some(128_000),
-                // Reasoning.effort rejects `none`, and the migration guide maps
-                // `minimal` to `low`, so the lowest level stands in for a
-                // disable.
+                // `reasoning.effort` rejects `none` and maps `minimal` to `low`,
+                // so `low` is the minimum effort when reasoning is set to `off`.
                 reasoning: Some(
                     ReasoningDetails::leveled(false, true, true, true, true, true).always_on(),
                 ),
@@ -108,9 +104,8 @@ pub(super) static MODEL_OVERRIDES: LazyLock<Catalog<ModelDetails>> = LazyLock::n
                 display_name: Some("GPT-6.2 Sol".to_owned()),
                 context_window: Some(1_050_000),
                 max_output_tokens: Some(128_000),
-                // Reasoning.effort rejects `none`, and the migration guide maps
-                // `minimal` to `low`, so the lowest level stands in for a
-                // disable.
+                // `reasoning.effort` rejects `none` and maps `minimal` to `low`,
+                // so `low` is the minimum effort when reasoning is set to `off`.
                 reasoning: Some(
                     ReasoningDetails::leveled(false, true, true, true, true, true).always_on(),
                 ),
@@ -134,9 +129,9 @@ pub(super) static MODEL_OVERRIDES: LazyLock<Catalog<ModelDetails>> = LazyLock::n
                 display_name: Some("GPT-6 Astra".to_owned()),
                 context_window: Some(1_050_000),
                 max_output_tokens: Some(128_000),
-                // Reasoning.effort supports: low, medium, high, xhigh, max. There
-                // is no `none`, so reasoning cannot be turned off; the lowest
-                // level stands in for a disable.
+                // `reasoning.effort` supports: low, medium, high, xhigh, max.
+                // `none` is rejected, so `low` is the minimum effort when
+                // reasoning is set to `off`.
                 reasoning: Some(
                     ReasoningDetails::leveled(false, true, true, true, true, true).always_on(),
                 ),
@@ -145,9 +140,9 @@ pub(super) static MODEL_OVERRIDES: LazyLock<Catalog<ModelDetails>> = LazyLock::n
                 structured_output: None,
                 prefill: None,
                 subscription: Some(true),
-                // Reasoning is always active, so TEMP_REQUIRES_NO_REASONING drops
-                // temperature and top_p on every request, which is what this model
-                // wants: it rejects both outright.
+                // Reasoning is always active, so `TEMP_REQUIRES_NO_REASONING`
+                // strips `temperature` and `top_p` on every request (the model
+                // rejects both parameters).
                 features: vec![
                     TEMP_REQUIRES_NO_REASONING,
                     REASONING_PRO_MODE,
@@ -163,9 +158,9 @@ pub(super) static MODEL_OVERRIDES: LazyLock<Catalog<ModelDetails>> = LazyLock::n
                 display_name: Some("GPT-6.1 Sol".to_owned()),
                 context_window: Some(1_050_000),
                 max_output_tokens: Some(128_000),
-                // Reasoning.effort supports: low, medium, high, xhigh, max. Neither
-                // `none` nor `minimal` is accepted, so reasoning cannot be turned
-                // off; the lowest level stands in for a disable.
+                // `reasoning.effort` supports: low, medium, high, xhigh, max.
+                // `none` and `minimal` are rejected, so `low` is the minimum
+                // effort when reasoning is set to `off`.
                 reasoning: Some(
                     ReasoningDetails::leveled(false, true, true, true, true, true).always_on(),
                 ),

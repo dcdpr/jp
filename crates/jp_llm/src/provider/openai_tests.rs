@@ -1844,8 +1844,6 @@ mod create_request {
         assert_eq!(request.get("prompt_cache_key"), None);
     }
 
-    /// The request body for a one-question conversation on `model` with the
-    /// given cache policy.
     fn request_with_cache(model: &str, cache: CachePolicy) -> Value {
         let created_at = Utc.with_ymd_and_hms(2026, 9, 1, 0, 0, 0).unwrap();
 
@@ -2162,8 +2160,6 @@ mod create_request {
         );
     }
 
-    /// The request body for `model` with `reasoning = "off"` and both sampling
-    /// parameters configured.
     fn request_with_reasoning_off_and_sampling(model: &str) -> Value {
         let ts = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
 
@@ -3436,8 +3432,6 @@ mod map_non_streaming_response {
         );
     }
 
-    /// A completed response with no output that reports `transformations` in
-    /// `input_transformations`.
     fn response_with_transformations(transformations: &serde_json::Value) -> Response {
         serde_json::from_value(json!({
             "id": "resp_123", "created_at": 1_577_836_800, "status": "completed",
@@ -3482,9 +3476,8 @@ mod map_non_streaming_response {
         ]);
     }
 
-    /// `turn_boundary` is the documented default on models without persisted
-    /// reasoning, and the identity reasons need a change JP never makes, so
-    /// they are logged only.
+    /// `turn_boundary`, `end_user_mismatch`, and `organization_mismatch` do not
+    /// result from mid-conversation edits, so they are only logged.
     #[test]
     fn other_removal_reasons_produce_no_notice() {
         let response = response_with_transformations(&json!([
@@ -3498,8 +3491,6 @@ mod map_non_streaming_response {
         assert_eq!(events, vec![Event::Finished(FinishReason::Completed)]);
     }
 
-    /// A response without the field, from any model before GPT-6.2, still
-    /// parses.
     #[test]
     fn a_response_without_transformations_reports_nothing() {
         let events = map_non_streaming_response(response(), false, true).unwrap();

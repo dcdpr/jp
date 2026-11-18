@@ -1,22 +1,22 @@
-//! Reporting of the input items OpenAI withholds from the model.
+//! Reporting of input items that OpenAI removes from a request.
 //!
-//! A response's `input_transformations` lists replayed items the API removed
-//! before sampling, with the reason.
-//! [`input_transformation_notices`] turns them into log lines and user-facing
-//! [`Event::Notice`]s.
+//! A response's `input_transformations` field lists replayed items that the API
+//! removed before sampling, along with the removal reason.
+//! [`input_transformation_notices`] logs each transformation and converts
+//! user-actionable removals into [`Event::Notice`] events.
 
 use openai_responses::types::response::InputTransformation;
 use tracing::debug;
 
 use crate::event::Event;
 
-/// Notices for the replayed reasoning items the API withheld from the model.
+/// Emit notices for replayed reasoning items that the API removed.
 ///
-/// Every withheld input item is logged.
-/// Reasoning removed because the conversation before it changed, or because the
-/// conversation moved to another model, produces one notice per reason: both
-/// follow from a change the user or JP made.
-/// Other reasons are logged only.
+/// Every withheld input item is logged at `debug`.
+/// Reasoning items removed for `prefix_mismatch` (the conversation prefix
+/// before them changed) or `model_mismatch` (the conversation switched to a
+/// different or less capable model) emit one [`Event::Notice`] per reason;
+/// other removal reasons are only logged.
 pub(super) fn input_transformation_notices(transformations: &[InputTransformation]) -> Vec<Event> {
     for transformation in transformations {
         debug!(

@@ -1286,8 +1286,8 @@ fn create_request(
     if reasoning_enabled && let Some(r) = reasoning.as_mut() {
         r.mode = reasoning_mode;
 
-        // JP replays the complete event history — including encrypted
-        // reasoning items — on every request, so ask supporting models to
+        // JP replays the complete event history, including encrypted
+        // reasoning items, on every request, so ask supporting models to
         // render reasoning from earlier turns into the next sample.
         if model.features.contains(&PERSISTED_REASONING) {
             r.context = Some(types::ReasoningContext::AllTurns);
@@ -1361,11 +1361,11 @@ fn create_request(
         }));
     }
 
-    // GPT-5 family models reject temperature/top_p when reasoning is active
-    // (any effort other than `none`). Models absent from the catalog are
-    // newer than this binary, and recent models reason by default and reject
-    // both outright, so they never get them. Strip the parameters and warn if
-    // configured.
+    // Cataloged models with `TEMP_REQUIRES_NO_REASONING` reject `temperature`
+    // and `top_p` whenever reasoning is active (any effort other than `none`).
+    // Uncataloged models are assumed to match recent OpenAI models, which
+    // reason by default and reject both parameters outright. Strip the
+    // parameters and warn if configured.
     let strip_temp = model.reasoning.is_none()
         || (model.features.contains(&TEMP_REQUIRES_NO_REASONING)
             && reasoning
@@ -2553,13 +2553,13 @@ fn parse_reasoning_mode(value: &str, model: &ModelDetails) -> Option<types::Reas
     }
 }
 
-/// The `prompt_cache_options` to send a model with explicit prompt caching.
+/// Build `prompt_cache_options` for a model with explicit prompt caching.
 ///
-/// `off` selects explicit mode with no marked breakpoints, which disables cache
-/// reads and writes.
-/// `long` selects the 12-hour TTL.
-/// `short` omits the field, leaving the 30-minute default.
-/// A custom duration rounds to the nearer of the two TTLs.
+/// - `off`: explicit mode with no marked breakpoints, disabling cache reads and
+///   writes.
+/// - `short`: `None`, using the API's 30-minute default TTL.
+/// - `long`: 12-hour TTL (`"12h"`).
+/// - `Custom`: rounded to the nearer of 30 minutes and 12 hours.
 fn prompt_cache_options(policy: CachePolicy) -> Option<types::PromptCacheOptions> {
     // 6h15m, halfway between the 30-minute and 12-hour TTLs.
     const LONG_TTL_FROM: Duration = Duration::from_mins(375);
@@ -2601,8 +2601,8 @@ fn convert_service_tier(tier: ServiceTier) -> Option<types::ServiceTier> {
 ///
 /// The `max` effort is only sent to models that support it; others degrade to
 /// `xhigh`.
-/// A model absent from the catalog gets `low` for `none` and `minimal`, which
-/// no OpenAI model since GPT-6 Astra accepts.
+/// Models absent from the catalog clamp `none` and `minimal` (`Xlow`) to `low`,
+/// since OpenAI models from GPT-6 Astra onward reject both.
 fn convert_reasoning(
     reasoning: CustomReasoningConfig,
     model: &ModelDetails,
