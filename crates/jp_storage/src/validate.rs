@@ -7,7 +7,7 @@ use tracing::{debug, trace};
 
 use crate::{
     BASE_CONFIG_FILE, CONVERSATIONS_DIR, EVENTS_FILE, IMPORT_STAGING_PREFIX, METADATA_FILE,
-    Storage, dir_entries,
+    Storage, dir_entries, holds_managed_files,
     scan::{DirStamps, EventsSummary, SCAN_CACHE_FILE, ScanCache, ScannedDir},
     trash::trash_conversation,
     value::{cleanup_tmp_files, has_tmp_files},
@@ -18,6 +18,10 @@ use crate::{
 pub struct ValidationResult {
     /// Conversations that passed all validation checks.
     pub valid: Vec<ValidConversation>,
+
+    /// Directories named for a conversation that hold none of the managed
+    /// files.
+    pub unstored: Vec<UnstoredConversation>,
 
     /// Conversations that failed one or more validation checks.
     pub invalid: Vec<InvalidConversation>,
@@ -31,6 +35,19 @@ pub struct ValidConversation {
 
     /// The directory name on disk.
     pub dirname: String,
+}
+
+/// A directory named for a conversation whose first write never happened.
+///
+/// It holds none of the managed files (`metadata.json`, `base_config.json`,
+/// `events.json`), only whatever was put there before the conversation was
+/// stored, such as the query draft of a run that ended before its first write.
+/// It is not a conversation: it is never indexed, never loaded, and never
+/// reported as a validation failure.
+#[derive(Debug)]
+pub struct UnstoredConversation {
+    pub id: ConversationId,
+    pub path: Utf8PathBuf,
 }
 
 /// A conversation directory that failed validation.
@@ -283,32 +300,54 @@ fn validate_root(
 
     for (entry, outcome) in entries.into_iter().zip(outcomes) {
         match outcome {
-            Ok((valid, scan)) => {
+            Ok(Validated::Stored(valid, scan)) => {
                 result.valid.push(valid);
                 if let Some(scan) = scan {
                     scanned.push((entry.into_path(), scan));
                 }
             }
+            Ok(Validated::Unstored(unstored)) => result.unstored.push(unstored),
             Err(e) => result.invalid.push(e),
         }
     }
 }
 
+/// A conversation directory that passed validation.
+enum Validated {
+    /// A stored conversation, with its scan record when its file stamps are
+    /// complete.
+    Stored(ValidConversation, Option<ScannedDir>),
+
+    /// A directory holding none of the managed files.
+    Unstored(UnstoredConversation),
+}
+
 /// Validate a single conversation directory entry.
 ///
-/// Returns [`ScannedDir`] alongside the result when `metadata.json` and
-/// `events.json` both have valid file stamps.
+/// Returns [`ScannedDir`] alongside a stored conversation when `metadata.json`
+/// and `events.json` both have valid file stamps.
 fn validate_entry(
     conversations_dir: &Utf8Path,
     dirname: &str,
     entry_path: &Utf8Path,
     cache: &ScanCache,
-) -> Result<(ValidConversation, Option<ScannedDir>), InvalidConversation> {
-    let id = ConversationId::try_from_dirname(dirname).map_err(|_| InvalidConversation {
+) -> Result<Validated, InvalidConversation> {
+    let invalid = |error| InvalidConversation {
         conversations_dir: conversations_dir.to_path_buf(),
-        error: ValidationError::InvalidDirname,
+        error,
         dirname: dirname.to_owned(),
-    })?;
+    };
+
+    let id = ConversationId::try_from_dirname(dirname)
+        .map_err(|_| invalid(ValidationError::InvalidDirname))?;
+
+    if !holds_managed_files(entry_path) {
+        return Ok(Validated::Unstored(UnstoredConversation {
+            id,
+            path: entry_path.to_path_buf(),
+        }));
+    }
+
     let valid = ValidConversation {
         id,
         dirname: dirname.to_owned(),
@@ -318,50 +357,33 @@ fn validate_entry(
     // the older stamp and is re-read on the next scan.
     let stamps = DirStamps::of(entry_path);
     if let Some(scan) = cache.get(entry_path, &stamps) {
-        return Ok((valid, Some(scan)));
+        return Ok(Validated::Stored(valid, Some(scan)));
     }
 
     let metadata_path = entry_path.join(METADATA_FILE);
     if !metadata_path.is_file() {
-        return Err(InvalidConversation {
-            conversations_dir: conversations_dir.to_path_buf(),
-            error: ValidationError::MissingMetadata,
-            dirname: dirname.to_owned(),
-        });
+        return Err(invalid(ValidationError::MissingMetadata));
     }
-    validate_metadata(&metadata_path).map_err(|source| InvalidConversation {
-        conversations_dir: conversations_dir.to_path_buf(),
-        error: ValidationError::CorruptMetadata { source },
-        dirname: dirname.to_owned(),
-    })?;
+    validate_metadata(&metadata_path)
+        .map_err(|source| invalid(ValidationError::CorruptMetadata { source }))?;
 
     // base_config.json is optional for backward compat (old conversations have
     // the base config packed into events.json), but if it exists it must be
     // valid JSON.
     let base_config_path = entry_path.join(BASE_CONFIG_FILE);
     if base_config_path.is_file() {
-        validate_json_file(&base_config_path).map_err(|source| InvalidConversation {
-            conversations_dir: conversations_dir.to_path_buf(),
-            error: ValidationError::CorruptBaseConfig { source },
-            dirname: dirname.to_owned(),
-        })?;
+        validate_json_file(&base_config_path)
+            .map_err(|source| invalid(ValidationError::CorruptBaseConfig { source }))?;
     }
 
     let events_path = entry_path.join(EVENTS_FILE);
     if !events_path.is_file() {
-        return Err(InvalidConversation {
-            conversations_dir: conversations_dir.to_path_buf(),
-            error: ValidationError::MissingEvents,
-            dirname: dirname.to_owned(),
-        });
+        return Err(invalid(ValidationError::MissingEvents));
     }
-    let summary = validate_events(&events_path).map_err(|source| InvalidConversation {
-        conversations_dir: conversations_dir.to_path_buf(),
-        error: ValidationError::CorruptEvents { source },
-        dirname: dirname.to_owned(),
-    })?;
+    let summary = validate_events(&events_path)
+        .map_err(|source| invalid(ValidationError::CorruptEvents { source }))?;
 
-    Ok((valid, stamps.scanned(summary)))
+    Ok(Validated::Stored(valid, stamps.scanned(summary)))
 }
 
 /// Confirm `metadata.json` is a valid JSON object.

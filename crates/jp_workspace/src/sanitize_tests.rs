@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{fs, sync::Arc};
 
 use camino_tempfile::{Utf8TempDir, tempdir};
 use datetime_literal::datetime;
@@ -39,7 +39,7 @@ fn test_invalid_conversations_are_trashed() {
     let valid_id = ConversationId::try_from(datetime!(2024-01-01 00:00:00 Z)).unwrap();
     fs.write_test_conversation(&valid_id, &Conversation::default());
 
-    // Two different kinds of invalid: bad dirname + empty dir with valid ID.
+    // Two different kinds of invalid: bad dirname + corrupt metadata.
     let bad_id = ConversationId::try_from(datetime!(2024-01-02 00:00:00 Z)).unwrap();
     fs.create_test_conversation_dir("not-a-valid-id");
     fs.create_test_conversation_dir(&bad_id.to_dirname(None));
@@ -56,7 +56,7 @@ fn test_trashed_conversations_not_loaded() {
     let id2 = ConversationId::try_from(datetime!(2024-01-02 00:00:00 Z)).unwrap();
     fs.write_test_conversation(&id2, &Conversation::default());
 
-    // id1 is invalid (empty dir).
+    // id1 is invalid (corrupt metadata).
     fs.create_test_conversation_dir(&id1.to_dirname(None));
 
     let report = ws.sanitize().unwrap();
@@ -129,6 +129,28 @@ fn test_all_conversations_trashed_produces_empty_workspace() {
     assert_eq!(ws.conversations().count(), 0);
 }
 
+// The shape an interrupted `jp query --new` leaves: the request the user typed,
+// in a directory the conversation's first write never reached.
+#[test]
+fn test_unstored_conversation_is_left_in_place_and_not_indexed() {
+    let (_tmp, backend, mut ws) = setup();
+
+    let id = ConversationId::try_from(datetime!(2024-01-01 00:00:00 Z)).unwrap();
+    let dir = backend.build_conversation_dir(&id, None, true);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("QUERY_MESSAGE.md"), "typed request").unwrap();
+
+    let report = ws.sanitize().unwrap();
+    assert!(report.trashed.is_empty());
+    assert_eq!(
+        fs::read_to_string(dir.join("QUERY_MESSAGE.md")).unwrap(),
+        "typed request"
+    );
+
+    ws.load_conversation_index();
+    assert_eq!(ws.conversations().count(), 0);
+}
+
 #[test]
 fn test_skips_dot_prefixed_directories() {
     let (_tmp, fs, mut ws) = setup();
@@ -166,12 +188,11 @@ fn test_locked_invalid_conversation_is_not_trashed() {
 
     let id = ConversationId::try_from(datetime!(2024-01-01 00:00:00 Z)).unwrap();
 
-    // Create an empty directory (no metadata.json) — normally trashed.
+    // Corrupt metadata, normally trashed.
     fs.create_test_conversation_dir(&id.to_dirname(None));
 
-    // Acquire a lock on this conversation, simulating a process that has
-    // created the directory (e.g. for QUERY_MESSAGE.md) but hasn't persisted
-    // managed files yet.
+    // Acquire a lock on this conversation, simulating a process that is
+    // mid-write and holds the conversation.
     let lock = fs.try_lock(&id.to_string(), None).unwrap().unwrap();
 
     let report = ws.sanitize().unwrap();
@@ -204,7 +225,7 @@ fn test_sanitize_then_load_with_mixed_valid_and_invalid() {
     fs.write_test_conversation(&id1, &Conversation::default());
     fs.write_test_conversation(&id3, &Conversation::default());
 
-    // id2 and id4 are invalid (empty dirs).
+    // id2 and id4 are invalid (corrupt metadata).
     fs.create_test_conversation_dir(&id2.to_dirname(None));
     fs.create_test_conversation_dir(&id4.to_dirname(None));
 

@@ -265,6 +265,45 @@ fn test_corrupt_events_is_detected() {
     ));
 }
 
+// A fresh conversation composes its query draft in its directory before the
+// first write stores anything, and a run that ends in between leaves the draft
+// there as the only copy of what the user typed. That is a conversation not yet
+// stored, not a broken one.
+#[test]
+fn a_directory_without_managed_files_is_unstored() {
+    let tmp = tempdir().unwrap();
+    let storage = Storage::new(tmp.path()).unwrap();
+    let convs = tmp.path().join(CONVERSATIONS_DIR);
+
+    let drafted = convs.join("17636257526");
+    fs::create_dir_all(&drafted).unwrap();
+    fs::write(drafted.join("QUERY_MESSAGE.md"), "typed request").unwrap();
+
+    let empty = convs.join("17636257527-a-title");
+    fs::create_dir_all(&empty).unwrap();
+
+    let result = storage.validate_conversations();
+    assert!(result.valid.is_empty());
+    assert!(result.invalid.is_empty());
+
+    let mut unstored: Vec<_> = result
+        .unstored
+        .iter()
+        .map(|entry| (entry.id, entry.path.clone()))
+        .collect();
+    unstored.sort();
+    assert_eq!(unstored, [
+        (
+            ConversationId::try_from_deciseconds_str("17636257526").unwrap(),
+            drafted
+        ),
+        (
+            ConversationId::try_from_deciseconds_str("17636257527").unwrap(),
+            empty
+        ),
+    ]);
+}
+
 #[test]
 fn test_skips_files_and_dot_dirs() {
     let tmp = tempdir().unwrap();

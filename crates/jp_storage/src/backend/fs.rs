@@ -20,9 +20,13 @@ use super::{
     PersistBackend, Projection, SanitizeReport, SessionBackend, TrashedConversation,
 };
 use crate::{
-    CONVERSATIONS_DIR, LoadError, Storage, dir_entries, error::Result, get_expiring_timestamp,
-    load::load_json, load_conversation_id_from_entry, lock::LockInfo,
-    validate::trash_invalid_conversation,
+    CONVERSATIONS_DIR, LoadError, Storage, dir_entries,
+    error::Result,
+    get_expiring_timestamp,
+    load::load_json,
+    load_conversation_id_from_entry,
+    lock::LockInfo,
+    validate::{ValidationResult, trash_invalid_conversation},
 };
 
 /// Filesystem-backed storage that delegates to `Storage`.
@@ -187,6 +191,15 @@ impl FsStorageBackend {
     #[must_use]
     pub fn conversation_base_config_path(&self, id: &ConversationId) -> Option<Utf8PathBuf> {
         self.storage.conversation_base_config_path(id)
+    }
+
+    /// Check every conversation directory in both roots without moving any.
+    ///
+    /// Sorts each directory into valid, unstored, or invalid.
+    /// See [`Storage::validate_conversations`] for the checks.
+    #[must_use]
+    pub fn validate_conversations(&self) -> ValidationResult {
+        self.storage.validate_conversations()
     }
 
     /// Synchronize a projected conversation's user-local copy from the
@@ -395,7 +408,8 @@ impl FsStorageBackend {
         self.storage.read_test_events_raw(id)
     }
 
-    /// Create an empty conversation directory that will fail validation.
+    /// Create a conversation directory whose `metadata.json` is not valid JSON.
+    /// For test fixture setup.
     #[doc(hidden)]
     pub fn create_test_conversation_dir(&self, dirname: &str) {
         self.storage.create_test_conversation_dir(dirname);

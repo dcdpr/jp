@@ -16,7 +16,7 @@ use tracing::warn;
 use crate::{
     ARCHIVE_DIR, BASE_CONFIG_FILE, CONVERSATIONS_DIR, EVENTS_FILE, METADATA_FILE, Storage,
     backend::{ConversationFilter, ConversationIndexEntry, StoragePresence},
-    build_conversation_dir_prefix, dir_entries, find_conversation_dir_path,
+    build_conversation_dir_prefix, dir_entries, find_conversation_dir_path, holds_managed_files,
     load_conversation_id_from_entry,
     scan::{EventsSummary, FileStamp},
 };
@@ -163,11 +163,17 @@ pub fn projected_conversation_ids(storage_dir: &Utf8Path) -> Vec<ConversationId>
 ///
 /// Dot-prefixed entries (`.trash/`, leftover `.tmp`/`.staging-`/`.old-` dirs
 /// from older versions) are skipped by [`load_conversation_id_from_entry`].
+/// Directories holding none of the managed files are skipped too: they hold no
+/// stored conversation (see [`UnstoredConversation`]).
+///
+/// [`UnstoredConversation`]: crate::validate::UnstoredConversation
 fn scan_conversation_ids(path: &Utf8Path) -> Vec<ConversationId> {
     let entries: Vec<_> = dir_entries(path).collect();
     entries
         .par_iter()
-        .filter_map(load_conversation_id_from_entry)
+        .filter_map(|entry| {
+            load_conversation_id_from_entry(entry).filter(|_| holds_managed_files(entry.path()))
+        })
         .collect()
 }
 

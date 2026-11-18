@@ -184,6 +184,29 @@ fn load_conversation_index_still_skips_trash() {
     assert!(ids.is_empty(), ".trash should still be invisible to scan");
 }
 
+// A directory holding none of the managed files was never stored, so there is
+// no conversation to list or load, only a query draft waiting to be sent.
+#[test]
+fn load_conversation_index_skips_unstored_directories() {
+    let tmp = tempdir().unwrap();
+    let storage = Storage::new(tmp.path()).unwrap();
+    let convs = tmp.path().join(CONVERSATIONS_DIR);
+
+    let stored = ConversationId::try_from_deciseconds_str("17636257521").unwrap();
+    write_conv_dir(&convs, &stored, "x");
+
+    let unstored = convs.join("17636257522");
+    fs::create_dir_all(&unstored).unwrap();
+    fs::write(unstored.join("QUERY_MESSAGE.md"), "typed request").unwrap();
+
+    let ids: Vec<_> = storage
+        .load_conversation_index(ConversationFilter::default())
+        .into_iter()
+        .map(|entry| entry.id)
+        .collect();
+    assert_eq!(ids, [stored]);
+}
+
 #[test]
 fn test_persist_conversation_creates_all_files() {
     let tmp = tempdir().unwrap();

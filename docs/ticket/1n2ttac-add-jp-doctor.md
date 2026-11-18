@@ -13,3 +13,7 @@ conversation storage (load failures, unsent drafts, and `.trash/` contents),
 reporting each detected problem with a suggested fix.
 `jp doctor` is read-only: it suggests commands such as `jp c repair` and `jp c
 trash` without modifying anything on disk.
+
+- [ ] Lists stale unstored conversation directories (no managed files, usually
+      a query draft) as unsent drafts, from
+      `FsStorageBackend::validate_conversations`

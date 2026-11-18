@@ -1143,6 +1143,14 @@ fn build_conversation_dir_prefix(root: &Utf8Path, id: &ConversationId) -> Utf8Pa
     root.join(CONVERSATIONS_DIR).join(id.to_dirname(None))
 }
 
+/// Whether a conversation directory holds any of the managed files.
+///
+/// A directory without them has never been written as a conversation, whatever
+/// else it contains.
+pub(crate) fn holds_managed_files(dir: &Utf8Path) -> bool {
+    MANAGED_FILES.iter().any(|name| dir.join(name).exists())
+}
+
 pub(crate) fn load_conversation_id_from_entry(entry: &Utf8DirEntry) -> Option<ConversationId> {
     if !entry.file_type().ok()?.is_dir() {
         return None;
@@ -1204,15 +1212,16 @@ impl Storage {
             })
     }
 
-    /// Create an empty conversation directory that will fail validation.
+    /// Create a conversation directory that fails validation.
     ///
-    /// The directory contains no files, so it will fail the "missing
-    /// metadata.json" check during validation.
+    /// The directory holds a `metadata.json` that is not valid JSON.
     /// For test fixture setup only.
     #[doc(hidden)]
     pub fn create_test_conversation_dir(&self, dirname: &str) {
         let dir = self.root.join(CONVERSATIONS_DIR).join(dirname);
-        fs::create_dir_all(&dir).unwrap();
+        fs::create_dir_all(&dir)
+            .and_then(|()| fs::write(dir.join(METADATA_FILE), "not json"))
+            .unwrap();
     }
 }
 

@@ -4094,20 +4094,19 @@ fn stored_conversation_ids(root: &Utf8Path) -> Vec<ConversationId> {
     test_backend(root).load_conversation_ids(ConversationFilter::default())
 }
 
-/// Assert the store holds nothing for the next run's sanitization to repair.
+/// Assert every conversation directory in the store holds a valid, stored
+/// conversation.
 ///
-/// A directory left behind without its managed files is indexed as a
-/// conversation and then trashed as corrupt, which an id assertion alone does
-/// not catch: the id is there either way.
-fn assert_store_needs_no_repair(root: &Utf8Path) {
-    let report = test_backend(root)
-        .sanitize()
-        .expect("sanitization succeeds");
+/// A directory left behind without its managed files is not indexed, so an id
+/// assertion alone does not catch it.
+fn assert_store_holds_only_conversations(root: &Utf8Path) {
+    let result = test_backend(root).validate_conversations();
 
+    assert!(result.invalid.is_empty(), "invalid: {:?}", result.invalid);
     assert!(
-        !report.has_repairs(),
-        "sanitization repaired: {:?}",
-        report.trashed
+        result.unstored.is_empty(),
+        "unstored: {:?}",
+        result.unstored
     );
 }
 
@@ -4141,7 +4140,7 @@ fn run_empty_editor_query_stores_no_conversation() {
     assert_eq!(out.lock().as_str(), "Query is empty, ignoring.\n");
     assert_eq!(err.lock().as_str(), "");
     assert_eq!(stored_conversation_ids(tmp.path()), []);
-    assert_store_needs_no_repair(tmp.path());
+    assert_store_holds_only_conversations(tmp.path());
     assert_eq!(ctx.workspace.session_active_conversation(&session), None);
 }
 
@@ -4160,7 +4159,7 @@ fn run_empty_titled_query_stores_no_conversation() {
 
     assert_eq!(out.lock().as_str(), "Query is empty, ignoring.\n");
     assert_eq!(stored_conversation_ids(tmp.path()), []);
-    assert_store_needs_no_repair(tmp.path());
+    assert_store_holds_only_conversations(tmp.path());
 }
 
 // A bare `--fork` keeps every turn, and a value keeps that many trailing turns.
@@ -4227,7 +4226,7 @@ fn run_empty_expiring_query_stores_no_conversation() {
 
     assert_eq!(out.lock().as_str(), "Query is empty, ignoring.\n");
     assert_eq!(stored_conversation_ids(tmp.path()), []);
-    assert_store_needs_no_repair(tmp.path());
+    assert_store_holds_only_conversations(tmp.path());
 }
 
 // A `--fork` query builds the fork before the request is composed, because the
@@ -4252,7 +4251,7 @@ fn run_empty_forking_query_leaves_only_the_source() {
 
     assert_eq!(out.lock().as_str(), "Query is empty, ignoring.\n");
     assert_eq!(stored_conversation_ids(tmp.path()), [source_id]);
-    assert_store_needs_no_repair(tmp.path());
+    assert_store_holds_only_conversations(tmp.path());
 }
 
 // `--compact` is staged against the stream the request is composed against, so
@@ -4292,7 +4291,7 @@ fn run_empty_compacting_query_stores_no_compaction() {
         .unwrap();
     assert_eq!(stored.compactions().count(), 0);
 
-    assert_store_needs_no_repair(tmp.path());
+    assert_store_holds_only_conversations(tmp.path());
 }
 
 // Not only the empty query: any failure before the turn starts leaves the
@@ -4312,7 +4311,7 @@ fn run_failing_before_the_turn_stores_no_conversation() {
     assert_eq!(error.message.as_deref(), Some("Editor error"));
 
     assert_eq!(stored_conversation_ids(tmp.path()), []);
-    assert_store_needs_no_repair(tmp.path());
+    assert_store_holds_only_conversations(tmp.path());
 }
 
 // Under `--no-persist`, a failed inline query does not write a recovery draft
@@ -4372,7 +4371,7 @@ fn run_failing_no_persist_query_leaves_no_conversation_directory() {
         .unwrap_or_default();
     assert_eq!(dirs, Vec::<String>::new());
 
-    assert_store_needs_no_repair(root);
+    assert_store_holds_only_conversations(root);
 }
 
 // A run that renames the conversation composes its draft in the directory the

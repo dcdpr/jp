@@ -2860,9 +2860,8 @@ fn cleanup_query_message_file(
 ///
 /// The editor composes into a directory named after the conversation, which it
 /// creates before anything about that conversation has been written.
-/// A run that ends without starting a turn writes nothing, so the directory is
-/// all that is left of it — and a directory without the managed files beside
-/// it is indexed as a conversation and then trashed as corrupt by the next run.
+/// A run that ends without starting a turn writes nothing, so the empty
+/// directory is all that is left of a conversation that was never stored.
 ///
 /// [`fs::remove_dir`] refuses a directory that is not empty, so a conversation
 /// with stored files, or a draft deliberately kept for recovery, is left alone.
