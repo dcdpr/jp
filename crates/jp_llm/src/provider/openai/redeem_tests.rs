@@ -27,10 +27,10 @@ use jp_storage::resource_lock::InMemoryResourceLocker;
 use serde_json::Value;
 use tokio::{
     io::{AsyncReadExt as _, AsyncWriteExt as _},
-    net::{TcpListener, TcpStream},
+    net::TcpListener,
 };
 
-use super::{Openai, Provider as _, resolve};
+use super::{Openai, Provider as _, resolve, test_support::read_request};
 use crate::{
     EventStream, StreamError, StreamErrorKind, credential::Credential, event::Event,
     model::ModelDetails, query::ChatQuery, stream::with_idle_timeout,
@@ -73,40 +73,6 @@ async fn serve(listener: TcpListener, redemptions: Arc<Mutex<Vec<Value>>>, answe
             reply.len()
         );
         socket.write_all(response.as_bytes()).await.unwrap();
-    }
-}
-
-/// Read one request's target and body.
-async fn read_request(socket: &mut TcpStream) -> (String, String) {
-    let mut raw = vec![];
-    let mut chunk = [0u8; 1024];
-
-    loop {
-        let read = socket.read(&mut chunk).await.unwrap();
-        raw.extend_from_slice(&chunk[..read]);
-
-        let text = String::from_utf8_lossy(&raw).to_string();
-        let Some((head, body)) = text.split_once("\r\n\r\n") else {
-            continue;
-        };
-
-        let length = head
-            .lines()
-            .find_map(|line| {
-                let (name, value) = line.split_once(':')?;
-                name.eq_ignore_ascii_case("content-length")
-                    .then(|| value.trim().parse::<usize>().ok())?
-            })
-            .unwrap_or(0);
-
-        if body.len() >= length || read == 0 {
-            let target = head
-                .split_whitespace()
-                .nth(1)
-                .unwrap_or_default()
-                .to_owned();
-            return (target, body.to_owned());
-        }
     }
 }
 
