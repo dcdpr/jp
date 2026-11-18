@@ -47,7 +47,7 @@ use jp_storage::{
     lock::LockInfo,
 };
 use parking_lot::{ArcRwLockReadGuard, RawRwLock, RwLock, RwLockReadGuard};
-pub use sanitize::{SanitizeReport, TrashedConversation};
+pub use sanitize::SanitizeReport;
 pub use session_mapping::SessionOverview;
 use state::State;
 use tracing::{debug, trace, warn};

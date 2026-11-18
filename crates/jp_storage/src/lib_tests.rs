@@ -12,7 +12,9 @@ use jp_conversation::{
 use test_log::test;
 
 use super::*;
-use crate::backend::{ConversationFilter, Projection, StoragePresence};
+use crate::backend::{
+    ConversationFilter, FsStorageBackend, LoadBackend as _, Projection, StoragePresence,
+};
 
 #[test]
 fn test_storage_handles_missing_src() {
@@ -193,7 +195,7 @@ fn load_conversation_index_skips_unstored_directories() {
     let convs = tmp.path().join(CONVERSATIONS_DIR);
 
     let stored = ConversationId::try_from_deciseconds_str("17636257521").unwrap();
-    write_conv_dir(&convs, &stored, "x");
+    write_valid_conv_dir(&convs, &stored);
 
     let unstored = convs.join("17636257522");
     fs::create_dir_all(&unstored).unwrap();
@@ -205,6 +207,67 @@ fn load_conversation_index_skips_unstored_directories() {
         .map(|entry| entry.id)
         .collect();
     assert_eq!(ids, [stored]);
+}
+
+// The index is where conversations enter the rest of JP, so a directory whose
+// managed files are broken stops here instead of failing wherever it is first
+// loaded.
+#[test]
+fn load_conversation_index_skips_invalid_conversations() {
+    let tmp = tempdir().unwrap();
+    let storage = Storage::new(tmp.path()).unwrap();
+    let convs = tmp.path().join(CONVERSATIONS_DIR);
+
+    let valid = ConversationId::try_from_deciseconds_str("17636257521").unwrap();
+    write_valid_conv_dir(&convs, &valid);
+
+    let corrupt_metadata = ConversationId::try_from_deciseconds_str("17636257522").unwrap();
+    let dir = write_valid_conv_dir(&convs, &corrupt_metadata);
+    fs::write(dir.join(METADATA_FILE), "not json").unwrap();
+
+    let missing_events = ConversationId::try_from_deciseconds_str("17636257523").unwrap();
+    let dir = write_valid_conv_dir(&convs, &missing_events);
+    fs::remove_file(dir.join(EVENTS_FILE)).unwrap();
+
+    let ids: Vec<_> = storage
+        .load_conversation_index(ConversationFilter::default())
+        .into_iter()
+        .map(|entry| entry.id)
+        .collect();
+    assert_eq!(ids, [valid]);
+}
+
+// Expiry removes a conversation outright, so it only applies to conversations
+// JP can load. One that fails validation is reported, and left to the user.
+#[test]
+fn expiry_skips_invalid_conversations() {
+    let tmp = tempdir().unwrap();
+    let backend = FsStorageBackend::new(tmp.path()).unwrap();
+    let convs = tmp.path().join(CONVERSATIONS_DIR);
+    let expired = Conversation {
+        expires_at: Some("2024-01-01T00:00:00Z".parse().unwrap()),
+        ..Default::default()
+    };
+    let now = "2025-01-01T00:00:00Z".parse().unwrap();
+
+    let valid = ConversationId::try_from_deciseconds_str("17636257521").unwrap();
+    let dir = write_valid_conv_dir(&convs, &valid);
+    fs::write(
+        dir.join(METADATA_FILE),
+        serde_json::to_string(&expired).unwrap(),
+    )
+    .unwrap();
+
+    let missing_events = ConversationId::try_from_deciseconds_str("17636257522").unwrap();
+    let dir = write_valid_conv_dir(&convs, &missing_events);
+    fs::write(
+        dir.join(METADATA_FILE),
+        serde_json::to_string(&expired).unwrap(),
+    )
+    .unwrap();
+    fs::remove_file(dir.join(EVENTS_FILE)).unwrap();
+
+    assert_eq!(backend.load_expired_conversation_ids(now), [valid]);
 }
 
 #[test]
@@ -810,6 +873,15 @@ fn write_base_config(conv_dir: &Utf8Path, mtime_secs: u64) {
     set_mtime(&conv_dir.join(BASE_CONFIG_FILE), mtime_secs);
 }
 
+/// Write a conversation directory that passes validation, returning its path.
+fn write_valid_conv_dir(conversations: &Utf8Path, id: &ConversationId) -> Utf8PathBuf {
+    let dir = conversations.join(id.to_dirname(None));
+    fs::create_dir_all(&dir).unwrap();
+    write_meta(&dir, None, 1_000);
+    write_valid_stream(&dir);
+    dir
+}
+
 /// Write a valid, loadable conversation stream (`base_config.json` +
 /// `events.json`).
 fn write_valid_stream(conv_dir: &Utf8Path) {
@@ -852,10 +924,10 @@ fn index_dedups_and_classifies_presence() {
     let only_user = ConversationId::try_from_deciseconds_str("17636257522").unwrap();
     let projected = ConversationId::try_from_deciseconds_str("17636257523").unwrap();
 
-    write_conv_dir(&ws_convs, &only_workspace, "x");
-    write_conv_dir(&user_convs, &only_user, "x");
-    write_conv_dir(&ws_convs, &projected, "x");
-    write_conv_dir(&user_convs, &projected, "x");
+    write_valid_conv_dir(&ws_convs, &only_workspace);
+    write_valid_conv_dir(&user_convs, &only_user);
+    write_valid_conv_dir(&ws_convs, &projected);
+    write_valid_conv_dir(&user_convs, &projected);
 
     let entries = storage.load_conversation_index(ConversationFilter::default());
     assert_eq!(

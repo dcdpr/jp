@@ -178,7 +178,7 @@ fn load_expired_skips_future_conversations() {
 fn sanitize_returns_empty_report() {
     let backend = InMemoryStorageBackend::new();
     let report = backend.sanitize().unwrap();
-    assert!(!report.has_repairs());
+    assert!(report.invalid.is_empty());
 }
 
 #[test]

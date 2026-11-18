@@ -21,7 +21,6 @@ mod session;
 pub use fs::FsStorageBackend;
 pub use load::{
     ConversationFilter, ConversationIndexEntry, LoadBackend, SanitizeReport, StoragePresence,
-    TrashedConversation,
 };
 pub use lock::{ConversationLockGuard, LockBackend};
 pub use memory::InMemoryStorageBackend;

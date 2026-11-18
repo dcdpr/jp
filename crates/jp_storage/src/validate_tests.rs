@@ -323,35 +323,6 @@ fn test_skips_files_and_dot_dirs() {
 }
 
 #[test]
-fn test_trash_moves_invalid_to_trash() {
-    let tmp = tempdir().unwrap();
-    let storage = Storage::new(tmp.path()).unwrap();
-
-    let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
-    write_valid(tmp.path(), &id);
-
-    // Create an invalid entry.
-    let bad = tmp.path().join(CONVERSATIONS_DIR).join("not-valid");
-    fs::create_dir_all(&bad).unwrap();
-    fs::write(bad.join("somefile"), "data").unwrap();
-
-    let result = storage.validate_conversations();
-    assert_eq!(result.invalid.len(), 1);
-
-    trash_invalid_conversation(&result.invalid[0]).unwrap();
-
-    // Original should be gone, trash should have it.
-    assert!(!bad.exists());
-    assert!(
-        tmp.path()
-            .join(CONVERSATIONS_DIR)
-            .join(".trash")
-            .join("not-valid")
-            .exists()
-    );
-}
-
-#[test]
 fn test_empty_conversations_dir() {
     let tmp = tempdir().unwrap();
     let storage = Storage::new(tmp.path()).unwrap();

@@ -104,6 +104,9 @@ impl PartialEq for LoadErrorInner {
 impl Storage {
     /// Scan conversation index entries from both roots for the given partition.
     ///
+    /// Only conversations that pass validation are listed: a directory that
+    /// holds no managed files, or broken ones, is not a conversation JP can
+    /// load.
     /// IDs are deduplicated across roots, and each entry's [`StoragePresence`]
     /// records which roots hold the conversation.
     /// Entries are sorted by ID.
@@ -121,14 +124,15 @@ impl Storage {
             }
         };
 
-        let workspace_ids: HashSet<ConversationId> = scan_conversation_ids(&partition(&self.root))
+        let workspace_ids: HashSet<ConversationId> = self
+            .valid_conversation_ids(&partition(&self.root))
             .into_iter()
             .collect();
         let user_ids: HashSet<ConversationId> = self
             .user
             .as_deref()
             .map(|user| {
-                scan_conversation_ids(&partition(user))
+                self.valid_conversation_ids(&partition(user))
                     .into_iter()
                     .collect()
             })

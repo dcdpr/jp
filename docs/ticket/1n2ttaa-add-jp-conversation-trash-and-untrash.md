@@ -27,3 +27,15 @@ Target resolution for these commands reads the directory listing directly.
       directory with the same id
 - [ ] The end-of-command load-failure report names `jp c trash` as one way to
       clear an entry
+
+## Comments
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-18T19:53:26Z
+
+`jp_storage::trash` (`trash_conversation`, `TRASH_DIR`, the `TRASHED.md` writer,
+and their tests) was deleted with T-1n2tta8, because nothing called it any more.
+Restore it from git history when `jp c trash` lands; the `TRASHED.md` wording
+("failed workspace sanitization") should change for a user-initiated trash.

@@ -5,6 +5,8 @@
 //! The `Storage` struct remains as an internal implementation detail; external
 //! code interacts through the traits.
 
+use std::collections::HashSet;
+
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, Utc};
 use jp_config::PartialAppConfig;
@@ -13,11 +15,11 @@ use rayon::iter::{IntoParallelIterator as _, ParallelIterator as _};
 use relative_path::RelativePath;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
-use tracing::{debug, error};
+use tracing::debug;
 
 use super::{
     ConversationFilter, ConversationIndexEntry, ConversationLockGuard, LoadBackend, LockBackend,
-    PersistBackend, Projection, SanitizeReport, SessionBackend, TrashedConversation,
+    PersistBackend, Projection, SanitizeReport, SessionBackend,
 };
 use crate::{
     CONVERSATIONS_DIR, LoadError, Storage, dir_entries,
@@ -26,7 +28,7 @@ use crate::{
     load::load_json,
     load_conversation_id_from_entry,
     lock::LockInfo,
-    validate::{ValidationResult, trash_invalid_conversation},
+    validate::{InvalidConversation, ValidationResult},
 };
 
 /// Filesystem-backed storage that delegates to `Storage`.
@@ -282,11 +284,18 @@ impl LoadBackend for FsStorageBackend {
         let mut expired = vec![];
         for root in roots {
             let path = root.join(CONVERSATIONS_DIR);
+
+            // Expiry deletes a conversation, which is only JP's to do for one
+            // that loads.
+            let valid: HashSet<_> = storage.valid_conversation_ids(&path).into_iter().collect();
             let ids: Vec<_> = dir_entries(&path)
                 .collect::<Vec<_>>()
                 .into_par_iter()
                 .filter_map(|entry| {
                     let id = load_conversation_id_from_entry(&entry)?;
+                    if !valid.contains(&id) {
+                        return None;
+                    }
                     let path = entry.into_path();
                     let expiring_ts = get_expiring_timestamp(&path)?;
                     (expiring_ts <= now).then_some(id)
@@ -302,43 +311,26 @@ impl LoadBackend for FsStorageBackend {
     }
 
     fn sanitize(&self) -> Result<SanitizeReport> {
-        let validation = self.storage.validate_conversations();
-        let mut report = SanitizeReport::default();
+        let mut invalid: Vec<_> = self
+            .storage
+            .validate_conversations()
+            .invalid
+            .into_iter()
+            .filter(|entry| {
+                // A conversation another process holds may be between the
+                // writes of its managed files, so its state says nothing yet.
+                let locked = entry
+                    .id()
+                    .is_some_and(|id| self.storage.is_conversation_locked(&id.to_string()));
+                if locked {
+                    debug!(%entry, "Not reporting a locked conversation.");
+                }
+                !locked
+            })
+            .collect();
+        invalid.sort_by_key(InvalidConversation::path);
 
-        for entry in validation.invalid {
-            // Skip conversations that are actively locked by another process.
-            // This prevents a race where process A creates a conversation
-            // directory (e.g. for QUERY_MESSAGE.md while the editor is open)
-            // but hasn't persisted the managed files yet, and process B's
-            // validation trashes it because metadata.json is missing.
-            if let Ok(id) = ConversationId::try_from_dirname(&entry.dirname)
-                && self.storage.is_conversation_locked(&id.to_string())
-            {
-                debug!(
-                    dirname = entry.dirname,
-                    error = %entry.error,
-                    "Skipping locked conversation during sanitization."
-                );
-                continue;
-            }
-
-            if let Err(e) = trash_invalid_conversation(&entry) {
-                error!(
-                    dirname = entry.dirname,
-                    error = %entry.error,
-                    trash_error = %e,
-                    "Failed to trash conversation, skipping"
-                );
-                continue;
-            }
-
-            report.trashed.push(TrashedConversation {
-                dirname: entry.dirname.clone(),
-                error: entry.error,
-            });
-        }
-
-        Ok(report)
+        Ok(SanitizeReport { invalid })
     }
 }
 

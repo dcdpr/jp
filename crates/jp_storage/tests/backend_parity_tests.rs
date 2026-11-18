@@ -301,7 +301,7 @@ with_backends!(load_expired_skips_future, |b| {
 
 with_backends!(sanitize_empty_store, |b| {
     let report = b.sanitize().unwrap();
-    assert!(!report.has_repairs());
+    assert!(report.invalid.is_empty());
 });
 
 with_backends!(lock_acquire_and_release, |b| {

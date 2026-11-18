@@ -9,7 +9,6 @@ use crate::{
     BASE_CONFIG_FILE, CONVERSATIONS_DIR, EVENTS_FILE, IMPORT_STAGING_PREFIX, METADATA_FILE,
     Storage, dir_entries, holds_managed_files,
     scan::{DirStamps, EventsSummary, SCAN_CACHE_FILE, ScanCache, ScannedDir},
-    trash::trash_conversation,
     value::{cleanup_tmp_files, has_tmp_files},
 };
 
@@ -54,8 +53,6 @@ pub struct UnstoredConversation {
 #[derive(Debug)]
 pub struct InvalidConversation {
     /// The conversations root this entry lives under.
-    ///
-    /// Callers pass this back to [`trash_invalid_conversation`].
     pub(crate) conversations_dir: Utf8PathBuf,
 
     /// What went wrong.
@@ -104,6 +101,21 @@ pub enum ValidationError {
     },
 }
 
+impl InvalidConversation {
+    /// The conversation directory that failed validation.
+    #[must_use]
+    pub fn path(&self) -> Utf8PathBuf {
+        self.conversations_dir.join(&self.dirname)
+    }
+
+    /// The conversation the directory is named for, or `None` when the
+    /// directory name does not parse as a conversation ID.
+    #[must_use]
+    pub fn id(&self) -> Option<ConversationId> {
+        ConversationId::try_from_dirname(&self.dirname).ok()
+    }
+}
+
 impl fmt::Display for InvalidConversation {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}: {}", self.dirname, self.error)
@@ -148,15 +160,7 @@ impl Storage {
     fn validate_conversations_at(&self, scan_started: SystemTime) -> ValidationResult {
         trace!("Validating conversations.");
 
-        let cache_path = self
-            .user
-            .as_ref()
-            .map(|user| user.join(CONVERSATIONS_DIR))
-            .filter(|dir| dir.is_dir())
-            .map(|dir| dir.join(SCAN_CACHE_FILE));
-        if let Some(path) = &cache_path {
-            self.scan.load(path);
-        }
+        let cache_path = self.load_scan_cache();
 
         let mut result = ValidationResult::default();
         let mut scanned = Vec::new();
@@ -188,6 +192,43 @@ impl Storage {
         );
 
         result
+    }
+
+    /// IDs of the conversations under `conversations_dir` that pass
+    /// [`Self::validate_conversations`]'s checks.
+    ///
+    /// Reads nothing on disk but file stamps for a directory the scan cache
+    /// already records, and records the directories it reads.
+    /// Removes nothing: unlike [`Self::validate_conversations`], it leaves
+    /// leftovers of interrupted writes for the next validation.
+    pub(crate) fn valid_conversation_ids(
+        &self,
+        conversations_dir: &Utf8Path,
+    ) -> Vec<ConversationId> {
+        let scan_started = SystemTime::now();
+        self.load_scan_cache();
+
+        let mut result = ValidationResult::default();
+        let mut scanned = Vec::new();
+        validate_root(conversations_dir, &self.scan, &mut result, &mut scanned);
+        self.scan.extend(scanned, scan_started);
+
+        result.valid.into_iter().map(|valid| valid.id).collect()
+    }
+
+    /// Load the persisted scan cache into memory, and return where it lives.
+    ///
+    /// `None` without user-local storage, which is where the cache is kept.
+    fn load_scan_cache(&self) -> Option<Utf8PathBuf> {
+        let path = self
+            .user
+            .as_ref()
+            .map(|user| user.join(CONVERSATIONS_DIR))
+            .filter(|dir| dir.is_dir())
+            .map(|dir| dir.join(SCAN_CACHE_FILE))?;
+
+        self.scan.load(&path);
+        Some(path)
     }
 
     /// Remove leftover import staging directories from one `conversations/`
@@ -249,8 +290,8 @@ impl Storage {
                 continue;
             }
 
-            // Unparseable directory names cannot be locked and will be trashed
-            // by `validate_root`.
+            // Unparseable directory names cannot be locked, and `validate_root`
+            // reports them as invalid.
             let Ok(id) = ConversationId::try_from_dirname(entry.file_name()) else {
                 continue;
             };
@@ -263,15 +304,6 @@ impl Storage {
             cleanup_tmp_files(entry.path());
         }
     }
-}
-
-/// Trash a conversation that failed validation.
-///
-/// Moves the conversation directory to `.trash/` and writes a `TRASHED.md`
-/// explaining the error.
-pub(crate) fn trash_invalid_conversation(entry: &InvalidConversation) -> crate::error::Result<()> {
-    let error_msg = entry.error.to_string();
-    trash_conversation(&entry.conversations_dir, &entry.dirname, &error_msg)
 }
 
 /// Validate every conversation directory under `conversations_dir`.

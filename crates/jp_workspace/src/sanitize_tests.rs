@@ -1,9 +1,13 @@
 use std::{fs, sync::Arc};
 
+use camino::Utf8PathBuf;
 use camino_tempfile::{Utf8TempDir, tempdir};
 use datetime_literal::datetime;
 use jp_conversation::{Conversation, ConversationId};
-use jp_storage::backend::{FsStorageBackend, LockBackend};
+use jp_storage::{
+    backend::{FsStorageBackend, LockBackend, SanitizeReport},
+    validate::InvalidConversation,
+};
 use test_log::test;
 
 use crate::Workspace;
@@ -19,8 +23,20 @@ fn setup() -> (Utf8TempDir, Arc<FsStorageBackend>, Workspace) {
     (tmp, fs, ws)
 }
 
+fn conversation_dir(backend: &FsStorageBackend, dirname: &str) -> Utf8PathBuf {
+    backend.storage_path().join("conversations").join(dirname)
+}
+
+fn reported_paths(report: &SanitizeReport) -> Vec<Utf8PathBuf> {
+    report
+        .invalid
+        .iter()
+        .map(InvalidConversation::path)
+        .collect()
+}
+
 #[test]
-fn test_clean_workspace_reports_no_repairs() {
+fn test_clean_workspace_reports_nothing() {
     let (_tmp, fs, mut ws) = setup();
 
     let id = ConversationId::try_from(datetime!(2024-01-01 00:00:00 Z)).unwrap();
@@ -28,12 +44,13 @@ fn test_clean_workspace_reports_no_repairs() {
 
     let report = ws.sanitize().unwrap();
 
-    assert!(!report.has_repairs());
-    assert!(report.trashed.is_empty());
+    assert!(report.invalid.is_empty());
 }
 
+// JP reports a broken conversation and leaves its files where they are: moving
+// a user's data is the user's decision.
 #[test]
-fn test_invalid_conversations_are_trashed() {
+fn test_invalid_conversations_are_reported_and_left_in_place() {
     let (_tmp, fs, mut ws) = setup();
 
     let valid_id = ConversationId::try_from(datetime!(2024-01-01 00:00:00 Z)).unwrap();
@@ -41,32 +58,61 @@ fn test_invalid_conversations_are_trashed() {
 
     // Two different kinds of invalid: bad dirname + corrupt metadata.
     let bad_id = ConversationId::try_from(datetime!(2024-01-02 00:00:00 Z)).unwrap();
-    fs.create_corrupt_test_conversation_dir("not-a-valid-id")
-        .unwrap();
     fs.create_corrupt_test_conversation_dir(&bad_id.to_dirname(None))
+        .unwrap();
+    fs.create_corrupt_test_conversation_dir("not-a-valid-id")
         .unwrap();
 
     let report = ws.sanitize().unwrap();
-    assert_eq!(report.trashed.len(), 2);
+
+    assert_eq!(reported_paths(&report), [
+        conversation_dir(&fs, "17041536000"),
+        conversation_dir(&fs, "not-a-valid-id"),
+    ]);
+    assert!(
+        conversation_dir(&fs, "17041536000")
+            .join("metadata.json")
+            .is_file()
+    );
+    assert!(
+        conversation_dir(&fs, "not-a-valid-id")
+            .join("metadata.json")
+            .is_file()
+    );
+    assert!(!conversation_dir(&fs, ".trash").exists());
 }
 
 #[test]
-fn test_trashed_conversations_not_loaded() {
+fn test_invalid_conversations_are_not_indexed() {
     let (_tmp, fs, mut ws) = setup();
 
     let id1 = ConversationId::try_from(datetime!(2024-01-01 00:00:00 Z)).unwrap();
     let id2 = ConversationId::try_from(datetime!(2024-01-02 00:00:00 Z)).unwrap();
     fs.write_test_conversation(&id2, &Conversation::default());
-
-    // id1 is invalid (corrupt metadata).
     fs.create_corrupt_test_conversation_dir(&id1.to_dirname(None))
         .unwrap();
 
-    let report = ws.sanitize().unwrap();
-    assert_eq!(report.trashed.len(), 1);
-
-    // After sanitize + load, only the valid conversation should be accessible.
+    ws.sanitize().unwrap();
     ws.load_conversation_index();
+
+    assert!(ws.acquire_conversation(&id2).is_ok());
+    assert!(ws.acquire_conversation(&id1).is_err());
+}
+
+// The index keeps a broken conversation out on its own, so a reader that never
+// sanitizes, such as the macOS app, does not hand it on to be loaded either.
+#[test]
+fn test_invalid_conversations_are_not_indexed_without_sanitize() {
+    let (_tmp, fs, mut ws) = setup();
+
+    let id1 = ConversationId::try_from(datetime!(2024-01-01 00:00:00 Z)).unwrap();
+    let id2 = ConversationId::try_from(datetime!(2024-01-02 00:00:00 Z)).unwrap();
+    fs.write_test_conversation(&id2, &Conversation::default());
+    fs.create_corrupt_test_conversation_dir(&id1.to_dirname(None))
+        .unwrap();
+
+    ws.load_conversation_index();
+
     assert!(ws.acquire_conversation(&id2).is_ok());
     assert!(ws.acquire_conversation(&id1).is_err());
 }
@@ -118,7 +164,7 @@ fn test_eager_load_missing_conversation_errors() {
 }
 
 #[test]
-fn test_all_conversations_trashed_produces_empty_workspace() {
+fn test_only_invalid_conversations_produce_an_empty_index() {
     let (_tmp, fs, mut ws) = setup();
 
     let id = ConversationId::try_from(datetime!(2024-01-01 00:00:00 Z)).unwrap();
@@ -126,9 +172,8 @@ fn test_all_conversations_trashed_produces_empty_workspace() {
         .unwrap();
 
     let report = ws.sanitize().unwrap();
-    assert_eq!(report.trashed.len(), 1);
+    assert_eq!(report.invalid.len(), 1);
 
-    // Fresh workspace after all trashed.
     ws.load_conversation_index();
     assert_eq!(ws.conversations().count(), 0);
 }
@@ -145,7 +190,7 @@ fn test_unstored_conversation_is_left_in_place_and_not_indexed() {
     fs::write(dir.join("QUERY_MESSAGE.md"), "typed request").unwrap();
 
     let report = ws.sanitize().unwrap();
-    assert!(report.trashed.is_empty());
+    assert!(report.invalid.is_empty());
     assert_eq!(
         fs::read_to_string(dir.join("QUERY_MESSAGE.md")).unwrap(),
         "typed request"
@@ -162,12 +207,11 @@ fn test_skips_dot_prefixed_directories() {
     let id = ConversationId::try_from(datetime!(2024-01-01 00:00:00 Z)).unwrap();
     fs.write_test_conversation(&id, &Conversation::default());
 
-    // These should be silently ignored, not trashed.
     fs.create_corrupt_test_conversation_dir(".trash").unwrap();
     fs.create_corrupt_test_conversation_dir(".hidden").unwrap();
 
     let report = ws.sanitize().unwrap();
-    assert!(!report.has_repairs());
+    assert!(report.invalid.is_empty());
 }
 
 #[test]
@@ -176,46 +220,36 @@ fn test_no_storage_returns_empty_report() {
     // (InMemoryStorageBackend has nothing to sanitize).
     let mut ws = Workspace::in_memory("/nonexistent");
     let report = ws.sanitize().unwrap();
-    assert!(!report.has_repairs());
+    assert!(report.invalid.is_empty());
 }
 
 #[test]
 fn test_empty_workspace_no_conversations_dir() {
     let (_tmp, _fs, mut ws) = setup();
     let report = ws.sanitize().unwrap();
-    assert!(!report.has_repairs());
+    assert!(report.invalid.is_empty());
 }
 
+// A conversation another process holds may be halfway through a write, so its
+// files are not yet worth reporting on.
 #[test]
-fn test_locked_invalid_conversation_is_not_trashed() {
+fn test_locked_invalid_conversation_is_not_reported() {
     let (_tmp, fs, mut ws) = setup();
 
     let id = ConversationId::try_from(datetime!(2024-01-01 00:00:00 Z)).unwrap();
-
-    // Corrupt metadata, normally trashed.
     fs.create_corrupt_test_conversation_dir(&id.to_dirname(None))
         .unwrap();
 
-    // Acquire a lock on this conversation, simulating a process that is
-    // mid-write and holds the conversation.
     let lock = fs.try_lock(&id.to_string(), None).unwrap().unwrap();
-
     let report = ws.sanitize().unwrap();
+    assert!(report.invalid.is_empty());
 
-    // The conversation should NOT be trashed because it's locked.
-    assert!(
-        report.trashed.is_empty(),
-        "locked conversation should not be trashed"
-    );
-
-    // After releasing the lock, it should be trashed.
     drop(lock);
     let report = ws.sanitize().unwrap();
-    assert_eq!(
-        report.trashed.len(),
-        1,
-        "unlocked invalid conversation should be trashed"
-    );
+    assert_eq!(reported_paths(&report), [conversation_dir(
+        &fs,
+        "17040672000"
+    )]);
 }
 
 #[test]
@@ -237,7 +271,7 @@ fn test_sanitize_then_load_with_mixed_valid_and_invalid() {
         .unwrap();
 
     let report = ws.sanitize().unwrap();
-    assert_eq!(report.trashed.len(), 2);
+    assert_eq!(report.invalid.len(), 2);
 
     ws.load_conversation_index();
     // Only valid conversations should be in the index.

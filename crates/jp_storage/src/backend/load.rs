@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use jp_config::PartialAppConfig;
 use jp_conversation::{Conversation, ConversationEvent, ConversationId, ConversationStream};
 
-use crate::{LoadError, validate::ValidationError};
+use crate::{LoadError, validate::InvalidConversation};
 
 /// Controls which storage partition to scan.
 ///
@@ -116,39 +116,21 @@ pub trait LoadBackend: Send + Sync + Debug {
     /// In-memory backends check the structs directly.
     fn load_expired_conversation_ids(&self, now: DateTime<Utc>) -> Vec<ConversationId>;
 
-    /// Validate and repair the backing store.
+    /// Check the backing store and report the conversations that cannot be
+    /// loaded.
     ///
-    /// For filesystem backends, this scans conversation directories, trashes
-    /// corrupt entries to `.trash/`, and returns a report of what was repaired.
-    /// For in-memory backends, data is always structurally valid, so this
-    /// returns an empty report.
-    ///
-    /// Call this before [`Self::load_conversation_ids`] to guarantee the store
-    /// is in a consistent state.
+    /// Filesystem backends check every conversation directory and remove
+    /// leftovers of their own interrupted writes, but never move or delete a
+    /// conversation.
+    /// A conversation another process holds the lock on is left out of the
+    /// report, because it may be partway through a write.
+    /// In-memory backends hold only valid data and return an empty report.
     fn sanitize(&self) -> crate::error::Result<SanitizeReport>;
 }
 
-/// Report of actions taken by [`LoadBackend::sanitize`].
+/// The conversations [`LoadBackend::sanitize`] found it cannot load.
 #[derive(Debug, Default)]
 pub struct SanitizeReport {
-    /// Conversations that were moved to `.trash/` (or equivalent).
-    pub trashed: Vec<TrashedConversation>,
-}
-
-impl SanitizeReport {
-    /// Returns `true` if any repairs were made.
-    #[must_use]
-    pub fn has_repairs(&self) -> bool {
-        !self.trashed.is_empty()
-    }
-}
-
-/// A conversation that was trashed during sanitization.
-#[derive(Debug)]
-pub struct TrashedConversation {
-    /// The original directory name (or equivalent identifier).
-    pub dirname: String,
-
-    /// The reason this conversation was trashed.
-    pub error: ValidationError,
+    /// Conversation directories that failed validation, sorted by path.
+    pub invalid: Vec<InvalidConversation>,
 }

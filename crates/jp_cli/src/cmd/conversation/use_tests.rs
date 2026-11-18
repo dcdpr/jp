@@ -335,9 +335,9 @@ fn filter_grep_drops_a_match_whose_stream_does_not_load() {
     }));
     fs::write(&events_path, serde_json::to_string(&events).unwrap()).unwrap();
 
-    // Startup validation checks structure only, so it does not trash the
+    // Startup validation checks structure only, so it does not report the
     // conversation before `c use` runs.
-    assert!(!backend.sanitize().unwrap().has_repairs());
+    assert!(backend.sanitize().unwrap().invalid.is_empty());
 
     // `FsStorageBackend` stores session mappings in user storage, which is not
     // configured in this fixture, so keep sessions in memory.
