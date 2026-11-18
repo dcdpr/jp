@@ -7,11 +7,18 @@
 //!
 //! See: `docs/rfd/072-command-plugin-system.md`
 
-use std::io::{self, BufRead, BufReader, IsTerminal as _, Write};
-
-use jp_plugin::message::{
-    DescribeResponse, ExitMessage, HostToPlugin, InitMessage, PluginToHost, PrintMessage,
+use std::{
+    io::{self, BufRead, BufReader, IsTerminal as _, Write},
+    process,
 };
+
+use jp_plugin::{
+    message::{HostToPlugin, InitMessage, PluginToHost},
+    stdio::{self, print_to, send, send_exit},
+};
+
+/// The plugin's executable, as a message about a host gone quiet names it.
+const BINARY: &str = "jp-path";
 
 /// The protocol version this plugin needs from the host.
 ///
@@ -43,37 +50,28 @@ Options for user-local:
   --plugins=command  Print the command plugin install directory";
 
 fn main() {
-    if io::stdin().is_terminal() {
-        let mut err = io::stderr().lock();
-        drop(writeln!(err, "{HELP_TEXT}"));
-        drop(writeln!(err));
-        drop(writeln!(
-            err,
-            "Note: this binary is a JP plugin. Run it via `jp path`."
-        ));
-        std::process::exit(0);
-    }
+    let code = stdio::exit_code(
+        "path",
+        io::stdin().is_terminal(),
+        || HELP_TEXT.to_owned(),
+        || run(BufReader::new(io::stdin()), io::stdout()),
+        &mut io::stderr(),
+    );
 
-    let stdin = BufReader::new(io::stdin());
-    let stdout = io::stdout();
-
-    let code = match run(stdin, stdout) {
-        Ok(()) => 0,
-        Err(e) => {
-            let mut err = io::stderr().lock();
-            drop(writeln!(err, "Fatal: {e}"));
-            1
-        }
-    };
-
-    std::process::exit(code);
+    process::exit(code);
 }
 
 fn run(mut stdin: impl BufRead, mut stdout: impl Write) -> Result<(), String> {
-    let first_msg = read_message(&mut stdin)?;
+    let first_msg = stdio::read(&mut stdin, BINARY)?;
 
     match first_msg {
-        HostToPlugin::Describe => send_describe(&mut stdout),
+        HostToPlugin::Describe => stdio::describe(
+            &mut stdout,
+            MANIFEST,
+            "path",
+            env!("CARGO_PKG_VERSION"),
+            HELP_TEXT,
+        ),
         HostToPlugin::Init(init) => {
             match jp_plugin::ready(REQUIRED_PROTOCOL, init.version) {
                 Ok(ready) => send(&mut stdout, &PluginToHost::Ready(ready))?,
@@ -100,15 +98,7 @@ fn handle_command(init: &InitMessage, stdout: &mut impl Write) -> Result<(), Str
 
     match result {
         Ok(path) => {
-            send(
-                stdout,
-                &PluginToHost::Print(PrintMessage {
-                    text: format!("{path}\n"),
-                    channel: "content".into(),
-                    format: "plain".into(),
-                    language: None,
-                }),
-            )?;
+            print_to(stdout, &format!("{path}\n"), "content")?;
             send_exit(stdout, 0, None)
         }
         Err(msg) => send_exit(stdout, 1, Some(&msg)),
@@ -146,43 +136,6 @@ fn handle_user_workspace(init: &InitMessage) -> Result<String, String> {
         .as_ref()
         .map(ToString::to_string)
         .ok_or_else(|| "no user-workspace storage configured for this workspace".to_owned())
-}
-
-fn send_describe(stdout: &mut impl Write) -> Result<(), String> {
-    let mut describe =
-        DescribeResponse::from_manifest(MANIFEST, "path", env!("CARGO_PKG_VERSION"), HELP_TEXT)
-            .map_err(|e| format!("invalid embedded manifest: {e}"))?;
-
-    describe.author = Some("Jean Mertz <git@jeanmertz.com>".to_owned());
-    describe.repository = Some("https://github.com/dcdpr/jp".to_owned());
-
-    send(stdout, &PluginToHost::Describe(describe))
-}
-
-fn send_exit(stdout: &mut impl Write, code: u8, reason: Option<&str>) -> Result<(), String> {
-    send(
-        stdout,
-        &PluginToHost::Exit(ExitMessage {
-            code,
-            reason: reason.map(String::from),
-            expected: false,
-        }),
-    )
-}
-
-fn read_message(stdin: &mut impl BufRead) -> Result<HostToPlugin, String> {
-    let mut line = String::new();
-    stdin
-        .read_line(&mut line)
-        .map_err(|e| format!("failed to read from host: {e}"))?;
-
-    serde_json::from_str(line.trim()).map_err(|e| format!("invalid host message: {e}"))
-}
-
-fn send(stdout: &mut impl Write, msg: &PluginToHost) -> Result<(), String> {
-    let json = serde_json::to_string(msg).map_err(|e| format!("serialize error: {e}"))?;
-    writeln!(stdout, "{json}").map_err(|e| format!("write error: {e}"))?;
-    stdout.flush().map_err(|e| format!("flush error: {e}"))
 }
 
 #[cfg(test)]

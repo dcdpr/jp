@@ -12,6 +12,7 @@ use jp_config::{
     assignment::{AssignKeyValue as _, KvAssignment},
     util::{build, load_partial_at_path},
 };
+use jp_plugin::log::Log;
 use pretty_assertions::assert_eq;
 use regex::Regex;
 use tokio::sync::oneshot;
@@ -247,16 +248,18 @@ impl Host for FakeHost {
         ]))
     }
 
+    fn print(&self, text: &str) {
+        self.0.lock().unwrap().prints.push(text.to_owned());
+    }
+}
+
+impl Log for FakeHost {
     fn log_with(&self, _level: Level, message: &'static str, fields: Map<String, Value>) {
         self.0
             .lock()
             .unwrap()
             .logs
             .push((message.to_owned(), fields));
-    }
-
-    fn print(&self, text: &str) {
-        self.0.lock().unwrap().prints.push(text.to_owned());
     }
 }
 

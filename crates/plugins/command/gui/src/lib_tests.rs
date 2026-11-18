@@ -1,6 +1,6 @@
 use std::{cell::RefCell, env, io::Cursor};
 
-use jp_plugin::message::{OutputFormat, PathsInfo, ReadyMessage, WorkspaceInfo};
+use jp_plugin::message::{ExitMessage, OutputFormat, PathsInfo, ReadyMessage, WorkspaceInfo};
 use pretty_assertions::assert_eq;
 
 use super::*;

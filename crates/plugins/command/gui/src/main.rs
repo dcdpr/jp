@@ -3,33 +3,22 @@
 //! Everything the plugin does lives in the library, so it can be tested without
 //! spawning a process.
 
-use std::io::{self, BufReader, IsTerminal as _, Write};
+use std::{
+    io::{self, BufReader, IsTerminal as _},
+    process,
+};
 
 use jp_gui::{HELP_TEXT, launch::SystemLauncher, run};
+use jp_plugin::stdio;
 
 fn main() {
-    if io::stdin().is_terminal() {
-        let mut err = io::stderr().lock();
-        drop(writeln!(err, "{HELP_TEXT}"));
-        drop(writeln!(err));
-        drop(writeln!(
-            err,
-            "Note: this binary is a JP plugin. Run it via `jp gui`."
-        ));
-        std::process::exit(0);
-    }
+    let code = stdio::exit_code(
+        "gui",
+        io::stdin().is_terminal(),
+        || HELP_TEXT.to_owned(),
+        || run(BufReader::new(io::stdin()), io::stdout(), &SystemLauncher),
+        &mut io::stderr(),
+    );
 
-    let stdin = BufReader::new(io::stdin());
-    let stdout = io::stdout();
-
-    let code = match run(stdin, stdout, &SystemLauncher) {
-        Ok(()) => 0,
-        Err(e) => {
-            let mut err = io::stderr().lock();
-            drop(writeln!(err, "Fatal: {e}"));
-            1
-        }
-    };
-
-    std::process::exit(code);
+    process::exit(code);
 }

@@ -1,0 +1,59 @@
+[package]
+name = "jp-review"
+description = "Review workspace files with the assistant, through range-anchored comments."
+
+authors.workspace = true
+documentation.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license-file.workspace = true
+publish.workspace = true
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
+
+# No `[package.metadata.jp-registry]`: a project installs this plugin with
+# `cargo install`, from a checkout or from JP's repository at a pinned revision,
+# so it is deliberately absent from the published registry. `jp` finds it on
+# `$PATH`.
+
+[dependencies]
+doc = { workspace = true }
+jp_id = { workspace = true }
+jp_plugin = { workspace = true, features = ["client"] }
+jp_tool = { workspace = true }
+md-html = { workspace = true }
+overwrite = { workspace = true }
+tool-definitions = { workspace = true }
+
+# `jp review serve`: the HTTP API, and the passes it runs while it serves.
+axum = { workspace = true, features = ["http1", "query", "tokio"] }
+camino = { workspace = true, features = ["serde1"] }
+chrono = { workspace = true }
+clap = { workspace = true, features = ["derive", "error-context", "help", "std", "usage"] }
+serde = { workspace = true, features = ["std", "derive"] }
+serde_json = { workspace = true, features = ["std"] }
+sha2 = { workspace = true }
+# Splits `start --base` into its program and arguments, as a shell would.
+shlex = { workspace = true }
+similar = { workspace = true, features = ["text"] }
+tokio = { workspace = true }
+
+[dev-dependencies]
+camino-tempfile = { workspace = true }
+pretty_assertions = { workspace = true, features = ["std"] }
+toml = { workspace = true, features = ["parse", "serde"] }
+
+[lints]
+workspace = true
+
+[lib]
+name = "jp_review"
+path = "src/lib.rs"
+doctest = false
+
+# The binary is a shell around the library, and carries no tests of its own.
+[[bin]]
+name = "jp-review"
+path = "src/main.rs"
+test = false

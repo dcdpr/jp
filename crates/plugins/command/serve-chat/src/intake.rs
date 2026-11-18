@@ -11,13 +11,14 @@
 use std::{sync::Arc, time::Duration};
 
 use chrono::NaiveDate;
+use jp_plugin::log::{Level, fields};
 use serde_json::json;
 use tokio::{sync::mpsc, time::Instant};
 
 use crate::{
     bridge::{Event, millis},
     decide::{Action, Decide, Decision, Verdict},
-    host::{Host, Level, fields},
+    host::Host,
     inbox::{Inbox, Incoming, Next},
     inject::{Injected, Injector, render},
     transport::Chat,

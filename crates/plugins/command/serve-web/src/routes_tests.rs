@@ -1,4 +1,6 @@
-use axum::http::{HeaderMap, HeaderName};
+use std::net::Ipv4Addr;
+
+use axum::http::{HeaderMap, HeaderName, HeaderValue};
 use pretty_assertions::assert_eq;
 use serde_json::json;
 
@@ -73,6 +75,46 @@ fn an_origin_matching_the_host_is_allowed() {
 #[test]
 fn a_caller_that_sends_neither_header_is_allowed() {
     assert!(same_origin(&headers(&[("host", "127.0.0.1:3000")])));
+}
+
+/// A page on a domain re-pointed at this machine still names that domain.
+#[test]
+fn a_request_for_a_name_the_server_does_not_answer_to_is_refused() {
+    let loopback = IpAddr::V4(Ipv4Addr::LOCALHOST);
+    let refusal = |listening, allowed: &[String], host| {
+        host_refusal(listening, allowed, &headers(&[("host", host)]))
+    };
+
+    assert_eq!(
+        refusal(loopback, &[], "evil.example:3000"),
+        Some(
+            "This server doesn't answer to `evil.example`. To reach it by that name, add \
+             `evil.example` to `plugins.command.serve-web.options.allowed_hosts`."
+                .to_owned()
+        )
+    );
+    assert_eq!(refusal(loopback, &[], "localhost:3000"), None);
+    assert_eq!(refusal(loopback, &[], "127.0.0.1:3000"), None);
+    assert_eq!(
+        refusal(loopback, &["box.local".to_owned()], "box.local:3000"),
+        None
+    );
+    assert_eq!(
+        refusal(IpAddr::V4(Ipv4Addr::UNSPECIFIED), &[], "evil.example:3000"),
+        None
+    );
+}
+
+/// A `Host` that isn't text names nothing this server answers to.
+#[test]
+fn a_host_that_is_not_text_is_refused() {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::HOST,
+        HeaderValue::from_bytes(b"caf\xe9.example").unwrap(),
+    );
+
+    assert!(host_refusal(IpAddr::V4(Ipv4Addr::LOCALHOST), &[], &headers).is_some());
 }
 
 /// A caller that says nothing about what it holds gets the tail.

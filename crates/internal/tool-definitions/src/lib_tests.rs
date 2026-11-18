@@ -10,7 +10,7 @@ use super::*;
 const NOTES: Definitions = Definitions {
     plugin: "notes",
     files: &[("create.toml", "# create\n"), ("list.toml", "# list\n")],
-    offers: "categories",
+    offers: Some("categories"),
 };
 
 const SYNCED_NOTES: &str = "#\n# Mirrors the categories.\n";
@@ -96,6 +96,28 @@ fn init_writes_one_file_per_definition() {
              `jp notes tools sync {target}` to offer the categories.\n",
             target.join("create.toml"),
             target.join("list.toml")
+        )
+    );
+}
+
+/// A plugin whose tools mirror nothing has no `tools sync` to point at.
+#[test]
+fn init_without_anything_to_sync_only_says_to_load_the_directory() {
+    let dir = Utf8TempDir::new().unwrap();
+    let plain = Definitions {
+        offers: None,
+        ..NOTES
+    };
+
+    let text = plain.init(dir.path(), false).unwrap();
+
+    assert_eq!(
+        text,
+        format!(
+            "Wrote {}\nWrote {}\nLoad the directory from the workspace configuration to offer the \
+             tools.\n",
+            dir.path().join("create.toml"),
+            dir.path().join("list.toml")
         )
     );
 }

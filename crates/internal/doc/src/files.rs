@@ -1,5 +1,6 @@
-//! Documents kept one to a file, `<id>-<slug>.md`, in a directory whose [epoch
-//! file] says when their ids start counting.
+//! Documents kept one to a file, `<id>-<slug>.md`, or one to a directory named
+//! by the id's body, in a directory whose [epoch file] says when their ids
+//! start counting.
 //!
 //! Ids carry a time bucket and a random tail rather than a counter, so two
 //! checkouts that cannot see each other still hand out different ids.
@@ -8,8 +9,9 @@
 //!
 //! The time component counts from the directory's own [`Epoch`], which the
 //! first document in an empty directory writes.
-//! [`create`] claims an id by creating its file exclusively, and draws again
-//! when another process got there first.
+//! [`create`] claims an id by creating its file exclusively, and [`create_dir`]
+//! by creating its directory; both draw again when another process got there
+//! first.
 //!
 //! [epoch file]: crate::epoch
 
@@ -143,19 +145,8 @@ impl<K> From<io::Error> for Error<K> {
 ///
 /// Returns the I/O error of a directory that can't be read.
 pub fn list<K: Kind>(dir: &Utf8Path) -> io::Result<Vec<(Id<K>, Utf8PathBuf)>> {
-    let entries = match fs::read_dir(dir) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(vec![]),
-        Err(error) => return Err(error),
-    };
-
     let mut files = vec![];
-    for entry in entries {
-        // A path that isn't UTF-8 can't be a document file: ids and slugs are
-        // ASCII.
-        let Ok(path) = Utf8PathBuf::try_from(entry?.path()) else {
-            continue;
-        };
+    for path in entries(dir)? {
         if path.extension() != Some("md") {
             continue;
         }
@@ -171,6 +162,55 @@ pub fn list<K: Kind>(dir: &Utf8Path) -> io::Result<Vec<(Id<K>, Utf8PathBuf)>> {
     files.sort_unstable();
 
     Ok(files)
+}
+
+/// Every directory directly in `dir` named by the body of an id of kind `K`,
+/// such as `02wt0kx`, paired with its id and ordered by it.
+///
+/// Only the canonical body names a directory: `T-02wt0kx` or `02WT0KX` does
+/// not.
+/// A directory that doesn't exist yet holds none.
+///
+/// # Errors
+///
+/// Returns the I/O error of a directory that can't be read.
+pub fn list_dirs<K: Kind>(dir: &Utf8Path) -> io::Result<Vec<(Id<K>, Utf8PathBuf)>> {
+    let mut dirs = vec![];
+    for path in entries(dir)? {
+        let Some(id) = path
+            .file_name()
+            .and_then(|name| name.parse::<Id<K>>().ok().filter(|id| id.as_str() == name))
+        else {
+            continue;
+        };
+        if path.is_dir() {
+            dirs.push((id, path));
+        }
+    }
+    dirs.sort_unstable();
+
+    Ok(dirs)
+}
+
+/// The paths directly in `dir`, or none when `dir` doesn't exist.
+///
+/// A path that isn't UTF-8 is skipped: it can't name a document, since ids and
+/// slugs are ASCII.
+fn entries(dir: &Utf8Path) -> io::Result<Vec<Utf8PathBuf>> {
+    let read = match fs::read_dir(dir) {
+        Ok(read) => read,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(vec![]),
+        Err(error) => return Err(error),
+    };
+
+    let mut paths = vec![];
+    for entry in read {
+        if let Ok(path) = Utf8PathBuf::try_from(entry?.path()) {
+            paths.push(path);
+        }
+    }
+
+    Ok(paths)
 }
 
 /// The one file in `dir` that `id` names.
@@ -255,9 +295,20 @@ pub fn load_epoch<K>(dir: &Utf8Path) -> Result<Epoch, Error<K>> {
 /// Returns an error when the epoch file is missing beside existing documents or
 /// doesn't hold an epoch, or when the filesystem refuses.
 pub fn establish_epoch<K: Kind>(dir: &Utf8Path) -> Result<Epoch, Error<K>> {
+    establish(dir, || Ok(!list::<K>(dir)?.is_empty()))
+}
+
+/// The epoch `dir`'s ids count time from, written as the start of today when
+/// `has_documents` says the directory holds none of them yet.
+///
+/// `has_documents` is asked only when there is no epoch file.
+fn establish<K: Kind>(
+    dir: &Utf8Path,
+    has_documents: impl FnOnce() -> io::Result<bool>,
+) -> Result<Epoch, Error<K>> {
     match read_epoch(dir)? {
         Some(epoch) => return Ok(epoch),
-        None if !list::<K>(dir)?.is_empty() => {
+        None if has_documents()? => {
             return Err(Error::MissingEpoch(dir.join(EPOCH_FILE)));
         }
         None => {}
@@ -327,11 +378,17 @@ pub fn current_bucket<K>(epoch: Epoch) -> Result<u32, Error<K>> {
 ///
 /// Returns [`Error::Exhausted`] when no bucket the format can express has room,
 /// or the I/O error of a directory that can't be read.
-pub fn allocate_in<K: Kind>(dir: &Utf8Path, mut bucket: u32) -> Result<Id<K>, Error<K>> {
+pub fn allocate_in<K: Kind>(dir: &Utf8Path, bucket: u32) -> Result<Id<K>, Error<K>> {
     fs::create_dir_all(dir)?;
 
     let existing: Vec<Id<K>> = list(dir)?.into_iter().map(|(id, _)| id).collect();
 
+    allocate_among(&existing, bucket)
+}
+
+/// Hand out an id in `bucket`, or the first bucket after it with room, given
+/// the `existing` ids in ascending order.
+fn allocate_among<K>(existing: &[Id<K>], mut bucket: u32) -> Result<Id<K>, Error<K>> {
     loop {
         let highest = existing.iter().rev().find(|id| id.bucket() == bucket);
         let tail = match highest {
@@ -395,6 +452,41 @@ pub fn create<K: Kind>(
             }
             // Another process claimed this id first. The next attempt sees its
             // file and draws a higher tail.
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+
+    Err(Error::Contended)
+}
+
+/// Create a new directory in `dir`, named for the body of a freshly allocated
+/// id, returning the id and the path.
+///
+/// Ids are allocated as [`create`] allocates them, against the directories
+/// [`list_dirs`] finds, and the epoch file is written by the first directory
+/// created in an empty `dir`.
+/// Creating the directory is what claims the id: two processes drawing in the
+/// same bucket can land on one tail, and the loser finds out here rather than
+/// sharing the winner's directory.
+///
+/// # Errors
+///
+/// Returns [`Error::Contended`] when every id drawn was taken first,
+/// [`Error::MissingEpoch`] when `dir` holds directories named by ids but no
+/// epoch file, and otherwise the errors [`create`] returns.
+pub fn create_dir<K: Kind>(dir: &Utf8Path) -> Result<(Id<K>, Utf8PathBuf), Error<K>> {
+    let epoch = establish(dir, || Ok(!list_dirs::<K>(dir)?.is_empty()))?;
+
+    for _ in 0..CLAIM_ATTEMPTS {
+        let existing: Vec<Id<K>> = list_dirs(dir)?.into_iter().map(|(id, _)| id).collect();
+        let id = allocate_among(&existing, current_bucket(epoch)?)?;
+        let path = dir.join(id.as_str());
+
+        match fs::create_dir(&path) {
+            Ok(()) => return Ok((id, path)),
+            // Another process claimed this id first. The next attempt sees its
+            // directory and draws a higher tail.
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
             Err(error) => return Err(error.into()),
         }

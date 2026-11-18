@@ -20,13 +20,15 @@
 //! Missing files and files that already match the target contents (ignoring
 //! `CRLF` vs. `LF` line endings) are never refused.
 //!
+//! [`write`] writes a set of files under this rule.
 //! [`existing`] compares a file on disk against the target contents,
 //! [`unrecorded`] finds existing files that git cannot restore, and [`refusal`]
 //! formats the error message.
 
 use std::{
-    fmt::Write as _,
-    fs, io,
+    fmt::{self, Write as _},
+    fs::{self, OpenOptions},
+    io::{self, Write as _},
     process::{Command, Output, Stdio},
 };
 
@@ -44,6 +46,109 @@ pub enum Existing {
 
     /// The file exists with different contents.
     Differs,
+}
+
+/// What [`write`] did with one file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Written {
+    /// The file already had the contents, and was left alone.
+    Unchanged,
+
+    /// The file had other contents, which were replaced.
+    Overwrote,
+
+    /// The file didn't exist.
+    Wrote,
+}
+
+impl fmt::Display for Written {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Unchanged => "Unchanged",
+            Self::Overwrote => "Overwrote",
+            Self::Wrote => "Wrote",
+        })
+    }
+}
+
+/// Write `files`, `(name, contents)` pairs named relative to `dir`, creating
+/// `dir` if needed, and return what was done with each file, by its path.
+///
+/// A file that already has its contents is left alone.
+/// Unless `force` is true, nothing is written when a file with other contents
+/// can't be restored by git; the error is [`refusal`]'s, naming `command`, the
+/// invocation without `--force`.
+pub fn write(
+    dir: &Utf8Path,
+    files: &[(&str, &str)],
+    command: &str,
+    force: bool,
+) -> Result<Vec<(Utf8PathBuf, Written)>, String> {
+    let mut planned = vec![];
+    for (name, contents) in files {
+        let found = existing(&dir.join(name), contents.as_bytes())?;
+        planned.push((*name, *contents, found));
+    }
+
+    if !force {
+        let differing: Vec<Utf8PathBuf> = planned
+            .iter()
+            .filter(|(.., found)| *found == Existing::Differs)
+            .map(|(name, ..)| Utf8PathBuf::from(*name))
+            .collect();
+        refuse_unrecorded(dir, &differing, command)?;
+    }
+
+    fs::create_dir_all(dir).map_err(|error| format!("failed to create {dir}: {error}"))?;
+
+    planned
+        .into_iter()
+        .map(|(name, contents, found)| {
+            let path = dir.join(name);
+            let written = put(&path, contents, found)
+                .map_err(|error| format!("failed to write {path}: {error}"))?;
+
+            Ok((path, written))
+        })
+        .collect()
+}
+
+/// Write `contents` to `path`, which `existing` found as `found`.
+fn put(path: &Utf8Path, contents: &str, found: Existing) -> io::Result<Written> {
+    match found {
+        Existing::Same => Ok(Written::Unchanged),
+        Existing::Differs => fs::write(path, contents).map(|()| Written::Overwrote),
+        // `create_new`, so a file created since `existing` looked is not
+        // overwritten.
+        Existing::Missing => OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+            .and_then(|mut file| file.write_all(contents.as_bytes()))
+            .map(|()| Written::Wrote),
+    }
+}
+
+/// Refuse with [`refusal`] when git can't restore one of `names`, existing
+/// files named relative to `dir`.
+///
+/// `command` is the invocation without `--force`.
+pub fn refuse_unrecorded(
+    dir: &Utf8Path,
+    names: &[Utf8PathBuf],
+    command: &str,
+) -> Result<(), String> {
+    let unrecorded = unrecorded(dir, names)?;
+    if unrecorded.is_empty() {
+        return Ok(());
+    }
+
+    let shown: Vec<(Utf8PathBuf, Unrecorded)> = unrecorded
+        .into_iter()
+        .map(|(name, why)| (dir.join(name), why))
+        .collect();
+
+    Err(refusal(command, &shown))
 }
 
 /// Compare the file at `path` against `contents`.

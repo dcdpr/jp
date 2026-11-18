@@ -1,4 +1,8 @@
-use std::io::{BufReader, Cursor};
+use std::{
+    io::{BufReader, Cursor, Read, Write},
+    sync::{Arc, Mutex, mpsc},
+    time::Duration,
+};
 
 use jp_plugin::message::*;
 use serde_json::json;
@@ -10,27 +14,8 @@ fn host_line(msg: &HostToPlugin) -> String {
     serde_json::to_string(msg).unwrap()
 }
 
-fn shared_writer() -> SharedWriter {
-    Arc::new(Mutex::new(Box::new(Vec::<u8>::new())))
-}
-
-/// Start a client whose reader consumes bytes from the returned sender.
-///
-/// Pair with `feed_after_register` to deliver a canned response only once a
-/// request is pending.
-/// Feeding through a pre-filled reader instead races the reader thread against
-/// request registration: the reader can dispatch (and drop) the response before
-/// the request has registered, leaving the request to wait out the full
-/// timeout.
-fn channel_client() -> (PluginClient, std::sync::mpsc::Sender<u8>) {
-    let (tx, rx) = std::sync::mpsc::channel::<u8>();
-    let stdin = BufReader::new(BlockingReader { rx });
-    let (client, _shutdown) = PluginClient::start(stdin, shared_writer());
-    (client, tx)
-}
-
 /// A writer whose bytes stay readable, for asserting what reached the host.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 struct Recorder(Arc<Mutex<Vec<u8>>>);
 
 impl Recorder {
@@ -39,7 +24,7 @@ impl Recorder {
     }
 }
 
-impl std::io::Write for Recorder {
+impl Write for Recorder {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         self.0.lock().unwrap().write(buf)
     }
@@ -49,125 +34,64 @@ impl std::io::Write for Recorder {
     }
 }
 
-/// [`channel_client`], keeping what the client sends.
-fn recording_client() -> (PluginClient, std::sync::mpsc::Sender<u8>, Recorder) {
-    let (tx, rx) = std::sync::mpsc::channel::<u8>();
+/// A reader that blocks on `read` until a byte is sent, and reports EOF when
+/// the sending end is dropped.
+/// Lets a test hold the reader open, issue a request, and then close stdin at a
+/// controlled moment.
+struct BlockingReader {
+    rx: mpsc::Receiver<u8>,
+}
+
+impl Read for BlockingReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        match self.rx.recv() {
+            Ok(byte) => {
+                buf[0] = byte;
+                Ok(1)
+            }
+            // Sender dropped: report EOF.
+            Err(_) => Ok(0),
+        }
+    }
+}
+
+/// A client reading the bytes sent on the returned sender, and recording what
+/// it writes.
+fn recording_client() -> (PluginClient, mpsc::Sender<u8>, Recorder) {
+    let (tx, rx) = mpsc::channel::<u8>();
     let stdin = BufReader::new(BlockingReader { rx });
-    let recorder = Recorder(Arc::new(Mutex::new(Vec::new())));
-    let writer: SharedWriter = Arc::new(Mutex::new(Box::new(recorder.clone())));
-    let (client, _shutdown) = PluginClient::start(stdin, writer);
+    let recorder = Recorder::default();
+    let writer: Writer = Arc::new(Mutex::new(Box::new(recorder.clone())));
+    let (client, _shutdown) = PluginClient::start(stdin, writer).unwrap();
+
     (client, tx, recorder)
 }
 
-/// Deliver `line` to the reader once `client` has a pending request, so the
-/// response is dispatched to a waiting receiver rather than dropped.
-fn feed_after_register(client: &PluginClient, tx: std::sync::mpsc::Sender<u8>, line: String) {
-    let client = client.clone();
-    tokio::spawn(async move {
-        while client.inner.pending.lock().unwrap().is_empty() {
-            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+/// Wait until the client has written `requests` whole lines.
+///
+/// A request waits for its answer before it is written, so an answer fed after
+/// this reaches a waiting request rather than being dropped.
+async fn wait_for_requests(sent: &Recorder, requests: usize) {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while sent.written().matches('\n').count() < requests {
+            tokio::time::sleep(Duration::from_millis(1)).await;
         }
-        for b in line.into_bytes() {
-            let _ = tx.send(b);
+    })
+    .await
+    .expect("the client didn't write its request within 5 seconds");
+}
+
+/// Feed `lines` to the reader once the client has written its first request.
+fn answer_first_request(sent: &Recorder, tx: mpsc::Sender<u8>, lines: Vec<String>) {
+    let sent = sent.clone();
+    tokio::spawn(async move {
+        wait_for_requests(&sent, 1).await;
+        for line in lines {
+            for b in format!("{line}\n").into_bytes() {
+                let _ = tx.send(b);
+            }
         }
     });
-}
-
-/// Two replies to one request reach two waiters, in the order they registered.
-///
-/// Starting a conversation is answered twice: once with the id as soon as it
-/// exists, and again when its first turn ends.
-/// The second reply is what clears the turn from the busy map, so a dispatcher
-/// that served only the first would leave the conversation marked running for
-/// the life of the process.
-#[tokio::test]
-async fn two_replies_to_one_request_reach_both_waiters() {
-    let (client, _tx) = channel_client();
-
-    let first = client.register("7");
-    let second = client.register("7");
-
-    dispatch(
-        &client.inner.pending,
-        Some("7"),
-        HostToPlugin::Created(CreatedResponse {
-            id: Some("7".to_owned()),
-            conversation: "jp-c1".to_owned(),
-        }),
-    );
-    dispatch(
-        &client.inner.pending,
-        Some("7"),
-        HostToPlugin::QueryComplete(QueryCompleteResponse {
-            id: Some("7".to_owned()),
-            conversation: "jp-c1".to_owned(),
-            outcome: QueryOutcome::Finished,
-            data: None,
-        }),
-    );
-
-    assert!(
-        matches!(first.await, Ok(HostToPlugin::Created(_))),
-        "the first waiter gets the first reply"
-    );
-    assert!(
-        matches!(second.await, Ok(HostToPlugin::QueryComplete(_))),
-        "the second waiter gets the second, rather than the first being served twice or the \
-         second being dropped"
-    );
-
-    assert!(
-        client.inner.pending.lock().unwrap().is_empty(),
-        "the request is forgotten once its last waiter is served"
-    );
-}
-
-/// One waiter still behaves as it always did.
-///
-/// The queue is only there for requests answered more than once; every other
-/// request registers one waiter and must be cleaned up by the reply that serves
-/// it, not left behind for a second that never comes.
-#[tokio::test]
-async fn a_single_reply_still_clears_its_request() {
-    let (client, _tx) = channel_client();
-
-    let only = client.register("3");
-
-    dispatch(
-        &client.inner.pending,
-        Some("3"),
-        HostToPlugin::QueryComplete(QueryCompleteResponse {
-            id: Some("3".to_owned()),
-            conversation: "jp-c1".to_owned(),
-            outcome: QueryOutcome::Finished,
-            data: None,
-        }),
-    );
-
-    assert!(matches!(only.await, Ok(HostToPlugin::QueryComplete(_))));
-    assert!(
-        client.inner.pending.lock().unwrap().is_empty(),
-        "a request with one waiter is forgotten when that waiter is served"
-    );
-}
-
-/// Abandoning a request drops every waiter it registered.
-///
-/// The error paths in `start_conversation` register two and may bail after the
-/// first; leaving the second behind would keep a sender alive for a reply that
-/// is never coming.
-#[tokio::test]
-async fn forgetting_a_request_drops_all_of_its_waiters() {
-    let (client, _tx) = channel_client();
-
-    let first = client.register("9");
-    let second = client.register("9");
-
-    client.forget("9");
-
-    assert!(client.inner.pending.lock().unwrap().is_empty());
-    assert!(first.await.is_err(), "a dropped sender closes its channel");
-    assert!(second.await.is_err());
 }
 
 #[tokio::test]
@@ -183,8 +107,8 @@ async fn list_conversations_roundtrip() {
         }],
     });
 
-    let (client, tx) = channel_client();
-    feed_after_register(&client, tx, format!("{}\n", host_line(&response)));
+    let (client, tx, sent) = recording_client();
+    answer_first_request(&sent, tx, vec![host_line(&response)]);
     let result = client.list_conversations().await.unwrap();
 
     assert_eq!(result.len(), 1);
@@ -202,8 +126,8 @@ async fn read_events_roundtrip() {
         data: vec![json!({"type": "turn_start", "timestamp": "2025-01-01T00:00:00Z"})],
     });
 
-    let (client, tx) = channel_client();
-    feed_after_register(&client, tx, format!("{}\n", host_line(&response)));
+    let (client, tx, sent) = recording_client();
+    answer_first_request(&sent, tx, vec![host_line(&response)]);
     let result = client.read_events("456").await.unwrap();
 
     assert_eq!(result.conversation, "456");
@@ -218,11 +142,62 @@ async fn host_error_propagated() {
         message: "something went wrong".to_owned(),
     });
 
-    let (client, tx) = channel_client();
-    feed_after_register(&client, tx, format!("{}\n", host_line(&response)));
+    let (client, tx, sent) = recording_client();
+    answer_first_request(&sent, tx, vec![host_line(&response)]);
     let err = client.list_conversations().await.unwrap_err();
 
     assert!(matches!(err, ClientError::Host(msg) if msg.contains("something went wrong")));
+}
+
+/// Starting a conversation is answered twice: once with the id as soon as it
+/// exists, and again when its first turn ends.
+/// The second answer is what clears the turn from the busy map, so losing it
+/// would leave the conversation marked running for the life of the process.
+#[tokio::test]
+async fn starting_a_conversation_returns_its_id_and_then_its_turns_end() {
+    let (client, tx, sent) = recording_client();
+    answer_first_request(&sent, tx, vec![
+        host_line(&HostToPlugin::Created(CreatedResponse {
+            id: Some("1".to_owned()),
+            conversation: "jp-c1".to_owned(),
+        })),
+        host_line(&HostToPlugin::QueryComplete(QueryCompleteResponse {
+            id: Some("1".to_owned()),
+            conversation: "jp-c1".to_owned(),
+            outcome: QueryOutcome::Finished,
+            data: None,
+        })),
+    ]);
+
+    let (conversation, outcome) = client
+        .start_conversation("Hi", Some("Chat".to_owned()), vec![])
+        .await
+        .unwrap();
+
+    assert_eq!(conversation, "jp-c1");
+    outcome.finished().await.unwrap();
+
+    let expected =
+        r#"{"type":"query","id":"1","conversation":"","content":"Hi","new":true,"title":"Chat"}"#;
+    assert_eq!(sent.written(), format!("{expected}\n"));
+}
+
+#[tokio::test]
+async fn a_refused_conversation_reports_the_hosts_reason() {
+    let (client, tx, sent) = recording_client();
+    answer_first_request(&sent, tx, vec![host_line(&HostToPlugin::Error(
+        ErrorResponse {
+            id: Some("1".to_owned()),
+            request: Some("query".to_owned()),
+            message: "unknown persona".to_owned(),
+        },
+    ))]);
+
+    let Err(error) = client.start_conversation("Hi", None, vec![]).await else {
+        panic!("the host refused the conversation");
+    };
+
+    assert!(matches!(error, ClientError::Host(message) if message == "unknown persona"));
 }
 
 /// Sending to a busy conversation asks the host to interrupt the turn and
@@ -234,16 +209,11 @@ async fn host_error_propagated() {
 #[tokio::test]
 async fn a_reply_is_sent_as_an_interrupt_carrying_the_message() {
     let (client, tx, sent) = recording_client();
-    feed_after_register(
-        &client,
-        tx,
-        format!(
-            "{}\n",
-            host_line(&HostToPlugin::Done(DoneResponse {
-                id: Some("1".to_owned()),
-            }))
-        ),
-    );
+    answer_first_request(&sent, tx, vec![host_line(&HostToPlugin::Done(
+        DoneResponse {
+            id: Some("1".to_owned()),
+        },
+    ))]);
 
     client
         .reply("jp-c17000000000", "use Rust instead")
@@ -259,19 +229,14 @@ async fn a_reply_is_sent_as_an_interrupt_carrying_the_message() {
 /// message.
 #[tokio::test]
 async fn a_reply_to_a_finished_turn_reports_the_hosts_reason() {
-    let (client, tx, _sent) = recording_client();
-    feed_after_register(
-        &client,
-        tx,
-        format!(
-            "{}\n",
-            host_line(&HostToPlugin::Error(ErrorResponse {
-                id: Some("1".to_owned()),
-                request: Some("interrupt".to_owned()),
-                message: "no turn is running on conversation jp-c17000000000".to_owned(),
-            }))
-        ),
-    );
+    let (client, tx, sent) = recording_client();
+    answer_first_request(&sent, tx, vec![host_line(&HostToPlugin::Error(
+        ErrorResponse {
+            id: Some("1".to_owned()),
+            request: Some("interrupt".to_owned()),
+            message: "no turn is running on conversation jp-c17000000000".to_owned(),
+        },
+    ))]);
 
     let error = client
         .reply("jp-c17000000000", "use Rust instead")
@@ -287,61 +252,32 @@ async fn a_reply_to_a_finished_turn_reports_the_hosts_reason() {
 
 #[tokio::test]
 async fn shutdown_signals_watch() {
-    let shutdown_msg = HostToPlugin::Shutdown;
-    let stdin_data = format!("{}\n", host_line(&shutdown_msg));
+    let stdin_data = format!("{}\n", host_line(&HostToPlugin::Shutdown));
     let stdin = BufReader::new(Cursor::new(stdin_data));
-    let (_client, mut shutdown_rx) = PluginClient::start(stdin, shared_writer());
+    let writer: Writer = Arc::new(Mutex::new(Box::new(Vec::<u8>::new())));
+    let (_client, mut shutdown_rx) = PluginClient::start(stdin, writer).unwrap();
 
-    tokio::time::timeout(
-        std::time::Duration::from_secs(1),
-        shutdown_rx.wait_for(|v| *v),
-    )
-    .await
-    .expect("shutdown not signaled")
-    .unwrap();
-}
-
-/// A reader that blocks on `read` until a byte is sent, and reports EOF when
-/// the sending end is dropped.
-/// Lets a test hold the reader loop open, register a request, and then close
-/// stdin at a controlled moment.
-struct BlockingReader {
-    rx: std::sync::mpsc::Receiver<u8>,
-}
-
-impl std::io::Read for BlockingReader {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        match self.rx.recv() {
-            Ok(byte) => {
-                buf[0] = byte;
-                Ok(1)
-            }
-            // Sender dropped: report EOF.
-            Err(_) => Ok(0),
-        }
-    }
+    tokio::time::timeout(Duration::from_secs(1), shutdown_rx.wait_for(|v| *v))
+        .await
+        .expect("shutdown not signaled")
+        .unwrap();
 }
 
 #[tokio::test]
 async fn pending_request_resolves_when_stdin_closes() {
-    let (tx, rx) = std::sync::mpsc::channel::<u8>();
-    let stdin = BufReader::new(BlockingReader { rx });
-    let (client, _shutdown) = PluginClient::start(stdin, shared_writer());
+    let (client, tx, sent) = recording_client();
 
-    // Issue a request and wait until it is registered as pending.
     let request = tokio::spawn({
         let client = client.clone();
         async move { client.list_conversations().await }
     });
-    while client.inner.pending.lock().unwrap().is_empty() {
-        tokio::time::sleep(std::time::Duration::from_millis(1)).await;
-    }
+    wait_for_requests(&sent, 1).await;
 
-    // Closing stdin (dropping the sender) makes the reader loop exit and drain
-    // the pending map, so the request resolves instead of hanging.
+    // Closing stdin (dropping the sender) makes the reader exit and drop every
+    // waiter, so the request resolves instead of hanging.
     drop(tx);
 
-    let err = tokio::time::timeout(std::time::Duration::from_secs(1), request)
+    let err = tokio::time::timeout(Duration::from_secs(1), request)
         .await
         .expect("request hung after stdin closed")
         .unwrap()
@@ -364,15 +300,15 @@ impl Write for FailingWriter {
 }
 
 #[tokio::test]
-async fn failed_send_does_not_leak_pending() {
-    // Hold the sender so the reader loop stays parked and can't drain the map
-    // itself; the request must clean up its own entry when the send fails.
-    let (_tx, rx) = std::sync::mpsc::channel::<u8>();
+async fn a_failed_send_is_a_protocol_error() {
+    // Hold the sender so the reader stays parked rather than closing the
+    // connection, which would fail the request for another reason.
+    let (_tx, rx) = mpsc::channel::<u8>();
     let stdin = BufReader::new(BlockingReader { rx });
-    let writer: SharedWriter = Arc::new(Mutex::new(Box::new(FailingWriter)));
-    let (client, _shutdown) = PluginClient::start(stdin, writer);
+    let writer: Writer = Arc::new(Mutex::new(Box::new(FailingWriter)));
+    let (client, _shutdown) = PluginClient::start(stdin, writer).unwrap();
 
     let err = client.list_conversations().await.unwrap_err();
-    assert!(matches!(err, ClientError::Protocol(_)));
-    assert!(client.inner.pending.lock().unwrap().is_empty());
+
+    assert!(matches!(err, ClientError::Protocol(msg) if msg == "boom"));
 }

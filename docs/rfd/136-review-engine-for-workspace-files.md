@@ -1,6 +1,6 @@
 # RFD 136: Review Engine for Workspace Files
 
-- **Status**: Discussion
+- **Status**: Implemented
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-11-11

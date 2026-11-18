@@ -10,7 +10,10 @@
 
 use std::io::{BufRead, Write};
 
-use jp_plugin::message::{DescribeResponse, ExitMessage, HostToPlugin, InitMessage, PluginToHost};
+use jp_plugin::{
+    message::{HostToPlugin, InitMessage, PluginToHost},
+    stdio::{self, send, send_exit},
+};
 
 pub mod launch;
 
@@ -29,6 +32,9 @@ Arguments:
 
 /// The app's bundle identifier, which is how macOS finds it without a path.
 const BUNDLE_ID: &str = "computer.jp.jean-pierre";
+
+/// The plugin's executable, as a message about a host gone quiet names it.
+const BINARY: &str = "jp-gui";
 
 /// The protocol version this plugin needs from the host.
 ///
@@ -55,8 +61,14 @@ pub fn run(
     mut stdout: impl Write,
     launcher: &impl Launcher,
 ) -> Result<(), String> {
-    match read_message(&mut stdin)? {
-        HostToPlugin::Describe => send_describe(&mut stdout),
+    match stdio::read(&mut stdin, BINARY)? {
+        HostToPlugin::Describe => stdio::describe(
+            &mut stdout,
+            MANIFEST,
+            "gui",
+            env!("CARGO_PKG_VERSION"),
+            HELP_TEXT,
+        ),
         HostToPlugin::Init(init) => {
             match jp_plugin::ready(REQUIRED_PROTOCOL, init.version) {
                 Ok(ready) => send(&mut stdout, &PluginToHost::Ready(ready))?,
@@ -123,43 +135,6 @@ fn validate(init: &InitMessage, root: &str) -> Result<(), String> {
              open it instead."
         ))
     }
-}
-
-fn send_describe(stdout: &mut impl Write) -> Result<(), String> {
-    let mut describe =
-        DescribeResponse::from_manifest(MANIFEST, "gui", env!("CARGO_PKG_VERSION"), HELP_TEXT)
-            .map_err(|e| format!("invalid embedded manifest: {e}"))?;
-
-    describe.author = Some("Jean Mertz <git@jeanmertz.com>".to_owned());
-    describe.repository = Some("https://github.com/dcdpr/jp".to_owned());
-
-    send(stdout, &PluginToHost::Describe(describe))
-}
-
-fn send_exit(stdout: &mut impl Write, code: u8, reason: Option<&str>) -> Result<(), String> {
-    send(
-        stdout,
-        &PluginToHost::Exit(ExitMessage {
-            code,
-            reason: reason.map(String::from),
-            expected: false,
-        }),
-    )
-}
-
-fn read_message(stdin: &mut impl BufRead) -> Result<HostToPlugin, String> {
-    let mut line = String::new();
-    stdin
-        .read_line(&mut line)
-        .map_err(|e| format!("failed to read from host: {e}"))?;
-
-    serde_json::from_str(line.trim()).map_err(|e| format!("invalid host message: {e}"))
-}
-
-fn send(stdout: &mut impl Write, msg: &PluginToHost) -> Result<(), String> {
-    let json = serde_json::to_string(msg).map_err(|e| format!("serialize error: {e}"))?;
-    writeln!(stdout, "{json}").map_err(|e| format!("write error: {e}"))?;
-    stdout.flush().map_err(|e| format!("flush error: {e}"))
 }
 
 #[cfg(test)]

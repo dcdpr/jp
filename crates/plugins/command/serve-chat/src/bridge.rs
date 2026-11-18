@@ -27,7 +27,10 @@
 
 use std::{sync::Arc, time::Duration};
 
-use jp_plugin::message::{Compaction, StoredCompaction, SummarySource, ToolCallsMode};
+use jp_plugin::{
+    log::{Level, fields},
+    message::{Compaction, StoredCompaction, SummarySource, ToolCallsMode},
+};
 use serde_json::{Map, Value, json};
 use tokio::{
     sync::{mpsc, watch},
@@ -38,7 +41,7 @@ use crate::{
     answer::last_answer,
     checkout::Checkout,
     decide::{Action, Decide},
-    host::{Host, Level, ReplyError, fields},
+    host::{Host, ReplyError},
     inbox::Incoming,
     inject::Injector,
     intake::{Decided, Intake},

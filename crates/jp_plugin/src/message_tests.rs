@@ -104,6 +104,32 @@ fn host_init_without_a_tool_call_reads_as_a_command() {
     assert_eq!(init.tool, None);
 }
 
+/// A client matches an answer to the request it was waiting on by this id.
+#[test]
+fn an_answer_names_the_request_it_answers() {
+    for json in [
+        r#"{"type":"done","id":"7"}"#,
+        r#"{"type":"created","id":"7","conversation":"jp-c1"}"#,
+        r#"{"type":"query_complete","id":"7","conversation":"jp-c1"}"#,
+        r#"{"type":"compacted","id":"7","conversation":"jp-c1","compactions":[]}"#,
+        r#"{"type":"error","id":"7","message":"no turn is running"}"#,
+    ] {
+        let answer: HostToPlugin = from_str(json).unwrap();
+
+        assert_eq!(answer.id(), Some("7"), "{json}");
+    }
+
+    for json in [
+        r#"{"type":"done"}"#,
+        r#"{"type":"shutdown"}"#,
+        r#"{"type":"describe"}"#,
+    ] {
+        let message: HostToPlugin = from_str(json).unwrap();
+
+        assert_eq!(message.id(), None, "{json}");
+    }
+}
+
 #[test]
 fn edit_files_and_its_answer_roundtrip() {
     let request = PluginToHost::EditFiles(EditFilesRequest {

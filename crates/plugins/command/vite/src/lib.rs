@@ -34,9 +34,11 @@ use std::{
 
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::{CommandFactory, Parser, Subcommand};
-use jp_plugin::message::{
-    ComposeMode, ComposeOption, ComposeRequest, DescribeResponse, ExitMessage, HostToPlugin,
-    InitMessage, PluginToHost, PrintMessage,
+use jp_plugin::{
+    message::{
+        ComposeMode, ComposeOption, ComposeRequest, HostToPlugin, InitMessage, PluginToHost,
+    },
+    stdio::{self, print_to, send, send_exit},
 };
 use overwrite::Existing;
 use serde_json::Value;
@@ -46,6 +48,9 @@ use crate::{
     settings::{below, snapshot, source_dir},
     sync::Change,
 };
+
+/// The plugin's executable, as a message about a host gone quiet names it.
+pub(crate) const BINARY: &str = "jp-vite";
 
 /// What `jp vite --version` prints after the command's name: the plugin's
 /// version, and the revision of the site files it carries.
@@ -173,7 +178,7 @@ impl<R: BufRead, W: Write> Session<R, W> {
     fn compose(&mut self, request: ComposeRequest) -> Result<Option<String>, String> {
         send(&mut self.stdout, &PluginToHost::Compose(request))?;
 
-        match read_message(&mut self.stdin)? {
+        match stdio::read(&mut self.stdin, BINARY)? {
             HostToPlugin::Composed(response) => Ok(response.text),
             HostToPlugin::Error(error) => Err(error.message),
             HostToPlugin::Shutdown => Err("Interrupted.".to_owned()),
@@ -206,8 +211,14 @@ impl<R: BufRead, W: Write> Session<R, W> {
 /// A `describe` is answered and ends the session; an `init` runs the command
 /// its arguments name.
 pub fn run(mut stdin: impl BufRead + Send + 'static, mut stdout: impl Write) -> Result<(), String> {
-    match read_message(&mut stdin)? {
-        HostToPlugin::Describe => send_describe(&mut stdout),
+    match stdio::read(&mut stdin, BINARY)? {
+        HostToPlugin::Describe => stdio::describe(
+            &mut stdout,
+            MANIFEST,
+            "vite",
+            env!("CARGO_PKG_VERSION"),
+            help_text(),
+        ),
         HostToPlugin::Init(init) => {
             match jp_plugin::ready(REQUIRED_PROTOCOL, init.version) {
                 Ok(ready) => send(&mut stdout, &PluginToHost::Ready(ready))?,
@@ -551,66 +562,6 @@ pub(crate) fn shown(root: &Utf8Path, path: &Utf8Path) -> Utf8PathBuf {
 #[must_use]
 pub fn help_text() -> String {
     Args::command().render_help().to_string()
-}
-
-fn send_describe(stdout: &mut impl Write) -> Result<(), String> {
-    let mut describe =
-        DescribeResponse::from_manifest(MANIFEST, "vite", env!("CARGO_PKG_VERSION"), help_text())
-            .map_err(|e| format!("invalid embedded manifest: {e}"))?;
-
-    describe.author = Some("Jean Mertz <git@jeanmertz.com>".to_owned());
-    describe.repository = Some("https://github.com/dcdpr/jp".to_owned());
-
-    send(stdout, &PluginToHost::Describe(describe))
-}
-
-/// Print `text` on the host's output channel `channel`.
-pub(crate) fn print_to(stdout: &mut impl Write, text: &str, channel: &str) -> Result<(), String> {
-    send(
-        stdout,
-        &PluginToHost::Print(PrintMessage {
-            text: text.to_owned(),
-            channel: channel.to_owned(),
-            format: "plain".into(),
-            language: None,
-        }),
-    )
-}
-
-fn send_exit(stdout: &mut impl Write, code: u8, reason: Option<&str>) -> Result<(), String> {
-    send(
-        stdout,
-        &PluginToHost::Exit(ExitMessage {
-            code,
-            reason: reason.map(String::from),
-            expected: false,
-        }),
-    )
-}
-
-pub(crate) fn read_message(stdin: &mut impl BufRead) -> Result<HostToPlugin, String> {
-    let mut line = String::new();
-    let read = stdin
-        .read_line(&mut line)
-        .map_err(|error| format!("failed to read from host: {error}"))?;
-
-    // EOF: the host closed the pipe without answering, which is what an older
-    // `jp` does when it gives up on a message it couldn't read.
-    if read == 0 {
-        return Err(
-            "The host stopped responding. Are `jp` and `jp-vite` the same build?".to_owned(),
-        );
-    }
-
-    serde_json::from_str(line.trim()).map_err(|error| format!("invalid host message: {error}"))
-}
-
-pub(crate) fn send(stdout: &mut impl Write, msg: &PluginToHost) -> Result<(), String> {
-    let json = serde_json::to_string(msg).map_err(|error| format!("serialize error: {error}"))?;
-    writeln!(stdout, "{json}").map_err(|error| format!("write error: {error}"))?;
-    stdout
-        .flush()
-        .map_err(|error| format!("flush error: {error}"))
 }
 
 #[cfg(test)]

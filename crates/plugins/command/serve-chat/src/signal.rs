@@ -24,11 +24,11 @@ use std::{
 };
 
 use camino::Utf8PathBuf;
+use jp_plugin::log::{Level, fields};
 use serde_json::{Map, Value, json};
 use tokio::sync::mpsc;
 
 use crate::{
-    host::{Level, fields},
     lock,
     options::SignalOptions,
     text::{chunks, styled},

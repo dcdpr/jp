@@ -110,6 +110,32 @@ pub enum HostToPlugin {
     Shutdown,
 }
 
+impl HostToPlugin {
+    /// The correlation ID of the request this message answers, if any.
+    ///
+    /// `None` covers an answer to a request that omitted its optional id, and a
+    /// message that answers no request at all: `init`, `describe`, and
+    /// `shutdown`.
+    #[must_use]
+    pub fn id(&self) -> Option<&str> {
+        match self {
+            Self::Conversations(m) => m.id.as_deref(),
+            Self::Events(m) => m.id.as_deref(),
+            Self::Config(m) => m.id.as_deref(),
+            Self::Composed(m) => m.id.as_deref(),
+            Self::Edited(m) => m.id.as_deref(),
+            Self::Done(m) => m.id.as_deref(),
+            Self::Draft(m) => m.id.as_deref(),
+            Self::Configs(m) => m.id.as_deref(),
+            Self::QueryComplete(m) => m.id.as_deref(),
+            Self::Compacted(m) => m.id.as_deref(),
+            Self::Created(m) => m.id.as_deref(),
+            Self::Error(m) => m.id.as_deref(),
+            Self::Init(_) | Self::Describe | Self::Shutdown => None,
+        }
+    }
+}
+
 /// Messages sent from the plugin to the host (`jp`).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]

@@ -12,12 +12,15 @@ use std::{
 
 use camino::Utf8Path;
 use doc::format::Formatting;
-use jp_plugin::message::{
-    ComposeMode, ComposeOption, ComposeRequest, EditFilesRequest, HostToPlugin, PluginToHost,
+use jp_plugin::{
+    message::{
+        ComposeMode, ComposeOption, ComposeRequest, EditFilesRequest, HostToPlugin, PluginToHost,
+    },
+    stdio::{self, send},
 };
 use ticket::{TicketId, parse, store};
 
-use crate::{Output, compose, options::Options, read_message, send};
+use crate::{BINARY, Output, compose, options::Options};
 
 /// The protocol that added `edit_files`, through which the host opens the
 /// editor.
@@ -55,7 +58,7 @@ impl<R: BufRead, W: Write> Editing for Host<'_, R, W> {
             }),
         )?;
 
-        match read_message(self.stdin)? {
+        match stdio::read(self.stdin, BINARY)? {
             HostToPlugin::Edited(response) => Ok(response.saved),
             HostToPlugin::Error(error) => Err(format!(
                 "Couldn't open an editor: {}. {USE_THE_FLAGS}",

@@ -8,7 +8,6 @@
 //! See: `docs/rfd/072-command-plugin-system.md`
 
 mod client;
-mod log_layer;
 mod render;
 mod routes;
 mod style;
@@ -16,15 +15,33 @@ mod views;
 
 use std::{
     io::{BufRead, Write},
-    net::{IpAddr, SocketAddr, TcpListener},
+    net::TcpListener,
     sync::{Arc, Mutex},
 };
 
-use jp_plugin::message::{DescribeResponse, HostToPlugin, InitMessage, PluginToHost, PrintMessage};
-use tracing::{Level, info, warn};
+use jp_plugin::{
+    client::Writer,
+    log::LogHandle,
+    message::{HostToPlugin, InitMessage, PluginToHost},
+    origin,
+    server::{self, Listen},
+    stdio::{self, print_to, send, send_exit},
+};
+use tracing::info;
 
-pub use crate::log_layer::ProtocolLogHandle;
-use crate::{client::SharedWriter, log_layer::ProtocolLogLayer};
+/// The plugin's executable, as a message about a host gone quiet names it.
+const BINARY: &str = "jp-serve-web";
+
+/// The port the server listens on when neither `--port` nor the `port` option
+/// names one.
+const DEFAULT_PORT: u16 = 3000;
+
+/// What the server is described as serving, when it starts.
+const SERVING: &str = "conversations";
+
+/// What anyone who reaches a server listening beyond loopback can do.
+const REACH: &str = "read every conversation in this workspace, and start turns that spend tokens \
+                     and run whatever tools the conversation allows";
 
 /// The protocol version this plugin needs from the host.
 ///
@@ -58,13 +75,18 @@ Start the web interface for browsing JP conversations and continuing them.
 Usage: jp serve web [OPTIONS]
 
 Options:
-  --bind <ADDR>    Address to bind to [default: 127.0.0.1]
-  --port <PORT>    Port to listen on [default: 3000]
+  --bind <ADDR>           Address to listen on: an IP address, or `localhost`
+                          [default: 127.0.0.1]
+  --port <PORT>           Port to listen on [default: 3000]
+  --allowed-host <NAME>   A name to answer to on loopback, besides addresses
+                          and `localhost`, such as the one a proxy on this
+                          machine forwards; repeat for more than one
 
 Configuration (in .jp/config.toml):
   [plugins.command.serve-web.options]
   bind = \"127.0.0.1\"
   port = 8080
+  allowed_hosts = [\"my-machine.local\"]
 
 The server has no authentication and exposes every conversation in the
 workspace, and anyone who reaches it can start a turn, which spends tokens and
@@ -78,15 +100,16 @@ runs whatever tools the conversation allows. Binding to a non-loopback address
 pub fn run(
     mut stdin: impl BufRead + Send + 'static,
     mut stdout: impl Write + Send + 'static,
-    log_handle: &ProtocolLogHandle,
+    log_handle: &LogHandle,
 ) -> Result<(), String> {
-    let first_msg = read_message(&mut stdin)?;
-
-    match first_msg {
-        HostToPlugin::Describe => {
-            send_describe(&mut stdout)?;
-            Ok(())
-        }
+    match stdio::read(&mut stdin, BINARY)? {
+        HostToPlugin::Describe => stdio::describe(
+            &mut stdout,
+            MANIFEST,
+            "serve-web",
+            env!("CARGO_PKG_VERSION"),
+            HELP_TEXT,
+        ),
         HostToPlugin::Init(ref init) => run_server(init, stdin, stdout, log_handle),
         other => Err(format!("expected init or describe, got: {other:?}")),
     }
@@ -96,97 +119,36 @@ fn run_server(
     init: &InitMessage,
     stdin: impl BufRead + Send + 'static,
     mut stdout: impl Write + Send + 'static,
-    log_handle: &ProtocolLogHandle,
+    log_handle: &LogHandle,
 ) -> Result<(), String> {
-    let args = parse_args(init);
-
-    let bind = args
-        .bind
-        .or_else(|| {
-            init.options
-                .get("bind")
-                .and_then(|v| v.as_str())
-                .map(String::from)
-        })
-        .unwrap_or_else(|| "127.0.0.1".into());
-    let port = args
-        .port
-        .or_else(|| {
-            init.options
-                .get("port")
-                .and_then(serde_json::Value::as_u64)
-                .and_then(|v| u16::try_from(v).ok())
-        })
-        .unwrap_or(3000);
-
-    let ip: IpAddr = bind
-        .parse()
-        .map_err(|e| format!("invalid bind address `{bind}`: {e}"))?;
-    let socket_addr = SocketAddr::new(ip, port);
-
-    // Bind before announcing, so a bind failure is reported instead of a false
-    // "Serving at" message. The listener is handed to axum below.
-    let listener =
-        TcpListener::bind(socket_addr).map_err(|e| format!("failed to bind {socket_addr}: {e}"))?;
-    listener
-        .set_nonblocking(true)
-        .map_err(|e| format!("failed to configure listener: {e}"))?;
-
-    let is_loopback = ip.is_loopback();
-    if !is_loopback {
-        warn!(
-            %socket_addr,
-            "Binding to a non-loopback address exposes all conversations, and lets anyone who \
-             reaches it start a turn, without authentication"
-        );
-    }
-
-    // Send early protocol messages before sharing stdout.
     match jp_plugin::ready(REQUIRED_PROTOCOL, init.version) {
         Ok(ready) => send(&mut stdout, &PluginToHost::Ready(ready))?,
         Err(exit) => return send(&mut stdout, &PluginToHost::Exit(exit)),
     }
-    send(
-        &mut stdout,
-        &PluginToHost::Print(PrintMessage {
-            text: format!("Serving at http://{socket_addr}\n"),
-            channel: "content".into(),
-            format: "plain".into(),
-            language: None,
-        }),
-    )?;
 
-    // The `warn!` above is invisible at the default log level, so surface the
-    // exposure through a `Print` that always reaches the terminal.
-    if !is_loopback {
-        send(
-            &mut stdout,
-            &PluginToHost::Print(PrintMessage {
-                text: "Warning: bound to a non-loopback address; every conversation in this \
-                       workspace is readable over the network without authentication, and anyone \
-                       who reaches it can start a turn.\n"
-                    .into(),
-                channel: "content".into(),
-                format: "plain".into(),
-                language: None,
-            }),
-        )?;
-    }
+    // Bound before anything is announced, so a port in use is reported rather
+    // than a server that isn't there.
+    let (listener, allowed_hosts) =
+        match parse_args(&init.args).and_then(|request| listen(init, request)) {
+            Ok(Some(listening)) => listening,
+            Ok(None) => {
+                print_to(&mut stdout, &format!("{HELP_TEXT}\n"), "content")?;
+                return send_exit(&mut stdout, 0, None);
+            }
+            Err(reason) => return send_exit(&mut stdout, 1, Some(&reason)),
+        };
+    let address = listener
+        .local_addr()
+        .map_err(|error| format!("Failed to read the address listened on: {error}"))?;
+    server::announce(&mut stdout, SERVING, address, REACH)?;
 
-    // Wrap stdout for shared access between the protocol client and log layer.
-    let writer: SharedWriter = Arc::new(Mutex::new(Box::new(stdout)));
+    // Shared by the protocol client and the log layer, each writing whole
+    // lines.
+    let writer: Writer = Arc::new(Mutex::new(Box::new(stdout)));
+    log_handle.activate(&writer);
 
-    // Activate the log layer now that we have the writer and know the level.
-    let min_level = match init.log_level {
-        0 => Level::ERROR,
-        1 => Level::WARN,
-        2 => Level::INFO,
-        3 => Level::DEBUG,
-        _ => Level::TRACE,
-    };
-    log_handle.activate(&writer, min_level);
-
-    let (client, shutdown_rx) = client::PluginClient::start(stdin, writer);
+    let (client, shutdown_rx) = client::PluginClient::start(stdin, writer)
+        .map_err(|e| format!("failed to start the protocol client: {e}"))?;
 
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -197,14 +159,14 @@ fn run_server(
     let exit_client = client.clone();
 
     let result = rt.block_on(async {
-        info!(%socket_addr, "Starting web server");
+        info!(%address, "Starting web server");
 
         let mut shutdown = shutdown_rx;
         let shutdown_signal = async move {
             let _ = shutdown.changed().await;
         };
 
-        routes::serve(client, listener, shutdown_signal)
+        routes::serve(client, listener, allowed_hosts, shutdown_signal)
             .await
             .map_err(|e| format!("server error: {e}"))
     });
@@ -215,77 +177,77 @@ fn run_server(
     result
 }
 
-fn send_describe(stdout: &mut impl Write) -> Result<(), String> {
-    let mut describe = DescribeResponse::from_manifest(
-        MANIFEST,
-        "serve-web",
-        env!("CARGO_PKG_VERSION"),
-        HELP_TEXT,
-    )
-    .map_err(|e| format!("invalid embedded manifest: {e}"))?;
+/// Listen where `request`, the options, and the default say, returning the
+/// names to answer to besides addresses and `localhost`; `None` when the user
+/// asked for help instead.
+fn listen(
+    init: &InitMessage,
+    request: Request,
+) -> Result<Option<(TcpListener, Vec<String>)>, String> {
+    let Request::Serve(flags) = request else {
+        return Ok(None);
+    };
+    let options = Listen::from_options(&init.options, "serve-web")?;
+    let listener = server::listen(options.address(&flags, DEFAULT_PORT))?;
 
-    describe.author = Some("Jean Mertz <git@jeanmertz.com>".to_owned());
-    describe.repository = Some("https://github.com/dcdpr/jp".to_owned());
-
-    send(stdout, &PluginToHost::Describe(describe))
+    Ok(Some((listener, options.allowed_hosts(&flags).to_vec())))
 }
 
-fn read_message(stdin: &mut impl BufRead) -> Result<HostToPlugin, String> {
-    let mut line = String::new();
-    stdin
-        .read_line(&mut line)
-        .map_err(|e| format!("failed to read from host: {e}"))?;
-
-    serde_json::from_str(line.trim()).map_err(|e| format!("invalid host message: {e}"))
+/// What `jp serve web` was asked for on its command line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Request {
+    Help,
+    Serve(Listen),
 }
 
-fn send(stdout: &mut impl Write, msg: &PluginToHost) -> Result<(), String> {
-    let json = serde_json::to_string(msg).map_err(|e| format!("serialize error: {e}"))?;
-    writeln!(stdout, "{json}").map_err(|e| format!("write error: {e}"))?;
-    stdout.flush().map_err(|e| format!("flush error: {e}"))
-}
-
-struct Args {
-    bind: Option<String>,
-    port: Option<u16>,
-}
-
-fn parse_args(init: &InitMessage) -> Args {
-    let mut bind = None;
-    let mut port = None;
-    let mut iter = init.args.iter();
-
-    while let Some(arg) = iter.next() {
-        match arg.as_str() {
-            "--bind" => bind = iter.next().map(String::from),
-            "--port" => {
-                port = iter.next().and_then(|v| v.parse().ok());
-            }
-            s if s.starts_with("--bind=") => bind = s.strip_prefix("--bind=").map(String::from),
-            s if s.starts_with("--port=") => {
-                port = s.strip_prefix("--port=").and_then(|v| v.parse().ok());
-            }
-            _ => {}
+/// Read `jp serve web`'s arguments: `--bind ADDR`, `--port PORT`, and
+/// `--allowed-host NAME`, each also written `--flag=value`, or `-h`/`--help`.
+fn parse_args(args: &[String]) -> Result<Request, String> {
+    let mut flags = Listen::default();
+    let mut args = args.iter();
+    while let Some(arg) = args.next() {
+        let (name, inline) = match arg.split_once('=') {
+            Some((name, value)) => (name, Some(value.to_owned())),
+            None => (arg.as_str(), None),
+        };
+        if matches!(name, "-h" | "--help") {
+            return Ok(Request::Help);
         }
+        if !matches!(name, "--bind" | "--port" | "--allowed-host") {
+            return Err(format!(
+                "`jp serve web` takes `--bind`, `--port`, and `--allowed-host`, not `{arg}`."
+            ));
+        }
+
+        let value = inline
+            .or_else(|| args.next().cloned())
+            .ok_or_else(|| format!("`{name}` needs a value."))?;
+        set_flag(&mut flags, name, &value)?;
     }
 
-    Args { bind, port }
+    Ok(Request::Serve(flags))
 }
 
-/// Install the tracing subscriber with the protocol log layer.
-///
-/// Events are buffered until the protocol writer is available.
-/// Returns a handle that must be activated once the writer and log level are
-/// known.
-#[must_use]
-pub fn init_tracing() -> ProtocolLogHandle {
-    use tracing_subscriber::prelude::*;
+/// Set the flag `name`, `--bind`, `--port`, or `--allowed-host`, to `value`; an
+/// `--allowed-host` adds to the names the earlier ones gave.
+fn set_flag(flags: &mut Listen, name: &str, value: &str) -> Result<(), String> {
+    if name == "--bind" {
+        flags.bind = Some(server::parse_bind(value).map_err(|why| format!("`--bind`: {why}."))?);
+        return Ok(());
+    }
+    if name == "--allowed-host" {
+        let host = origin::parse_host(value).map_err(|why| format!("`--allowed-host`: {why}."))?;
+        flags.allowed_hosts.get_or_insert_default().push(host);
+        return Ok(());
+    }
 
-    let (layer, handle) = ProtocolLogLayer::new();
-
-    tracing_subscriber::registry().with(layer).init();
-
-    handle
+    flags.port = Some(
+        value
+            .trim()
+            .parse()
+            .map_err(|_| format!("`--port` must be a port, from 0 to 65535, not `{value}`."))?,
+    );
+    Ok(())
 }
 
 #[cfg(test)]

@@ -46,8 +46,6 @@ impl<'s> Lines<'s> {
     /// last character.
     /// Returns `None` if `offset` is out of bounds or does not lie on a UTF-8
     /// character boundary.
-    // No code in the workspace calls this yet (T-1md6ywd).
-    // qual:api
     #[must_use]
     pub fn line_column(&self, offset: usize) -> Option<LineColumn> {
         let before = self.text.get(..offset)?;
@@ -70,8 +68,6 @@ impl<'s> Lines<'s> {
     /// last line also include the position one past the final character
     /// (`text.len()`).
     /// Returns `None` if `position` is out of bounds.
-    // No code in the workspace calls this yet (T-1md6ywd).
-    // qual:api
     #[must_use]
     pub fn offset(&self, position: LineColumn) -> Option<usize> {
         let index = position.line.checked_sub(1)?;
@@ -92,7 +88,10 @@ impl<'s> Lines<'s> {
     }
 
     /// Return the byte range of 1-based `line`, excluding its line ending.
-    pub(crate) fn line_range(&self, line: usize) -> Option<Range<usize>> {
+    ///
+    /// Returns `None` past the last line.
+    #[must_use]
+    pub fn line_range(&self, line: usize) -> Option<Range<usize>> {
         self.ranges.get(line.checked_sub(1)?).cloned()
     }
 }

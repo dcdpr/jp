@@ -2313,6 +2313,10 @@ lint-ci: (_rustup_component "clippy") _install_ci_matchers
     # spelling rots unnoticed.
     cargo clippy --locked --package jp_mcp --all-targets --no-default-features --features client --no-deps --profile=lint -- --deny warnings
 
+    # Likewise `jp_plugin/client`, which the serving plugins ask for: `jp`
+    # builds the crate without it.
+    cargo clippy --locked --package jp_plugin --all-targets --no-deps --profile=lint -- --deny warnings
+
 # Check structural code quality on CI.
 #
 # Runs `qual` (`crates/internal/qual`) to fail on any `rustqual` finding

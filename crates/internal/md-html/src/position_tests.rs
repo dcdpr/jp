@@ -89,6 +89,17 @@ fn trailing_line_ending_starts_an_empty_last_line() {
 }
 
 #[test]
+fn line_range_excludes_the_line_ending() {
+    let lines = Lines::new("ab\r\nc\n");
+
+    assert_eq!(lines.line_range(0), None);
+    assert_eq!(lines.line_range(1), Some(0..2));
+    assert_eq!(lines.line_range(2), Some(4..5));
+    assert_eq!(lines.line_range(3), Some(6..6));
+    assert_eq!(lines.line_range(4), None);
+}
+
+#[test]
 fn offset_inverts_line_column_at_every_character_boundary() {
     let text = "aé\r\nb\rc\n世\n";
     let lines = Lines::new(text);

@@ -4,7 +4,8 @@
 //! and tickets in `ticket`; what any kind can reuse lives here.
 //!
 //! - [`metadata`] reads and edits the `- **Key**: Value` block under a
-//!   document's title.
+//!   document's title, and [`author`] names who a document written from a
+//!   terminal is attributed to.
 //! - [`id`] defines the seven-character ids documents like tickets are named
 //!   by, and [`epoch`] the day a directory's ids count time from.
 //!   [`files`] allocates ids and finds the file each one names.
@@ -12,6 +13,8 @@
 //!   file name changed, and finds the mentions a rewrite didn't reach.
 //! - [`heading`] reads a document's headings and the anchors the site gives
 //!   them.
+//! - [`lock`] takes the advisory file lock that serializes writers across
+//!   processes.
 //! - [`repository`] reads the web address links into the repository point at.
 //! - [`format`] formats a document as it is written, when the workspace turns
 //!   that on for its kind.
@@ -20,11 +23,13 @@
 //!
 //! [`format`]: crate::format
 
+pub mod author;
 pub mod epoch;
 pub mod files;
 pub mod format;
 pub mod heading;
 pub mod id;
+pub mod lock;
 pub mod metadata;
 pub mod references;
 pub mod repository;

@@ -143,6 +143,18 @@ a turn, and the same-origin policy only stops it reading the answer.
 A request that carries neither header — `curl`, a script, another tool — is
 allowed, since no browser can be made to omit both.
 
+Listening on loopback, the server also refuses a request whose `Host` names
+anything but an IP address, `localhost`, or a name under `.localhost`.
+A page on a domain re-pointed at this machine (DNS rebinding) passes the origin
+check as the server's own, but its requests still name that domain.
+To reach the server by another name, such as the one a proxy on this machine
+forwards, add it to `allowed_hosts` or pass `--allowed-host`:
+
+```toml
+[plugins.command.serve-web.options]
+allowed_hosts = ["my-machine.local"]
+```
+
 ## Development
 
 A file watcher that restarts on save can't be used here: a turn started from the

@@ -1,19 +1,22 @@
-//! Who a new page is attributed to.
+//! Who a document written from a terminal is attributed to.
 //!
-//! The same identity `jp ticket` and `jp rfd` write: JP's own `user.name`, then
-//! git's, then the OS username, with git's email appended to a bare name so the
-//! line reads `Jane Doe <jane@example.com>`.
+//! JP's own `user.name`, then git's, then the OS username, with git's email
+//! appended to a bare name so the line reads `Jane Doe <jane@example.com>`.
 
 use std::{env, process::Command};
 
 use camino::Utf8Path;
 use serde_json::Value;
 
-/// The author of a page written in the workspace at `root`.
+/// The person writing in the workspace at `root`.
 ///
-/// `config` is the configuration the host passed in `init`.
+/// `config` is the configuration the host resolved, as JSON.
 /// Git runs in `root`, so a repository's own identity wins over the global one.
-pub(crate) fn resolve(root: &Utf8Path, config: &Value) -> Result<String, String> {
+///
+/// # Errors
+///
+/// When none of the sources names anyone.
+pub fn resolve(root: &Utf8Path, config: &Value) -> Result<String, String> {
     let configured = config
         .pointer("/user/name")
         .and_then(Value::as_str)
@@ -63,3 +66,7 @@ fn git_config(root: &Utf8Path, key: &str) -> Option<String> {
         .map(|value| value.trim().to_owned())
         .filter(|value| !value.is_empty())
 }
+
+#[cfg(test)]
+#[path = "author_tests.rs"]
+mod tests;
