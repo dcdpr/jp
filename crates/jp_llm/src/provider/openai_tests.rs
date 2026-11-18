@@ -1432,6 +1432,30 @@ mod map_model {
         assert_eq!(details.display_name.as_deref(), Some("GPT-5.6 Sol"));
     }
 
+    /// A fine-tuned model reports its base model's capabilities under its own
+    /// id.
+    #[test]
+    fn a_fine_tuned_model_inherits_its_base_model_details() {
+        let details = map_model(model("ft:gpt-4.1-2025-04-14:acme::abc123")).unwrap();
+
+        assert_eq!(
+            details.id.name.to_string(),
+            "ft:gpt-4.1-2025-04-14:acme::abc123"
+        );
+        assert_eq!(details.display_name, None);
+        assert_eq!(details.context_window, Some(1_047_576));
+        assert_eq!(details.reasoning, Some(ReasoningDetails::unsupported()));
+    }
+
+    /// A fine-tune of a model the catalog does not know stays unknown.
+    #[test]
+    fn a_fine_tune_of_an_uncataloged_model_maps_to_empty_details() {
+        let details = map_model(model("ft:gpt-3.5-turbo-0125:acme::abc123")).unwrap();
+
+        assert_eq!(details.reasoning, None);
+        assert_eq!(details.context_window, None);
+    }
+
     /// Only a model the catalog marks API-only is refused; an unknown one may
     /// be served by a plan newer than this binary.
     #[test]
@@ -2240,7 +2264,7 @@ mod unknown_model {
         thread::ThreadBuilder,
     };
 
-    use super::super::{ENCRYPTED_CONTENT_KEY, ITEM_ID_KEY};
+    use super::super::{ENCRYPTED_CONTENT_KEY, ITEM_ID_KEY, test_support::catalog_model_details};
     use crate::{
         model::{ModelDetails, ReasoningDetails},
         provider::build_request_value,
@@ -2480,6 +2504,50 @@ mod unknown_model {
 
         assert_eq!(request.get("temperature"), None);
         assert_eq!(request.get("top_p"), None);
+    }
+
+    /// A fine-tune of a non-reasoning model keeps its sampling parameters: its
+    /// capabilities come from the base model, not from the unknown-model
+    /// fallback.
+    #[test]
+    fn fine_tuned_non_reasoning_model_keeps_sampling() {
+        let ts = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
+        let name = "ft:gpt-4.1-2025-04-14:acme::abc123";
+
+        let mut config = AppConfig::new_test();
+        config.assistant.model.id = ModelIdOrAliasConfig::Id(ModelIdConfig {
+            provider: ProviderId::Openai,
+            name: name.parse().unwrap(),
+        });
+        config.assistant.model.parameters.reasoning = None;
+        config.assistant.model.parameters.temperature = Some(0.2);
+        config.assistant.model.parameters.top_p = Some(0.9);
+
+        let mut stream = ConversationStream::new(config.into()).with_created_at(ts);
+        stream.extend([
+            ConversationEvent::new(TurnStart::default(), ts),
+            ConversationEvent::new(ChatRequest::from("A question"), ts),
+        ]);
+
+        let thread = ThreadBuilder::new().with_events(stream).build().unwrap();
+
+        // Dummy API key env var, mirroring the VCR harness.
+        let env = if cfg!(windows) { "USERNAME" } else { "USER" }.to_owned();
+        let mut providers = LlmProviderConfig::default();
+        providers.openai.api_key_env = env.into();
+
+        let model = catalog_model_details(name);
+        let request = build_request_value(
+            ProviderId::Openai,
+            &providers,
+            &model,
+            ChatQuery::from(thread),
+        )
+        .unwrap();
+
+        assert_eq!(request["temperature"], serde_json::json!(0.2_f32));
+        assert_eq!(request["top_p"], serde_json::json!(0.9_f32));
+        assert_eq!(request.get("reasoning"), None);
     }
 
     /// Unconfigured reasoning on a model absent from the catalog omits the
@@ -3496,6 +3564,17 @@ mod map_non_streaming_response {
         let events = map_non_streaming_response(response(), false, true).unwrap();
 
         assert!(!events.iter().any(|event| matches!(event, Event::Notice(_))));
+    }
+
+    /// A host may send an explicit `null` when nothing was removed; the
+    /// response must still parse and finish.
+    #[test]
+    fn a_null_transformations_field_reports_nothing() {
+        let response = response_with_transformations(&serde_json::Value::Null);
+
+        let events = map_non_streaming_response(response, false, true).unwrap();
+
+        assert_eq!(events, vec![Event::Finished(FinishReason::Completed)]);
     }
 
     /// The streaming path reports removals from the terminal event, which

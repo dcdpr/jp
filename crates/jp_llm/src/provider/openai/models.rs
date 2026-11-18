@@ -24,6 +24,8 @@ use crate::{
 
 /// Map an OpenAI model ID to its [`ModelDetails`].
 ///
+/// A fine-tuned model (`ft:<base>:...`) gets its base model's details, without
+/// the base model's display name.
 /// Models absent from [`MODEL_OVERRIDES`] return empty details and log a
 /// warning.
 pub(super) fn map_model(model: ModelResponse) -> Result<ModelDetails> {
@@ -31,6 +33,13 @@ pub(super) fn map_model(model: ModelResponse) -> Result<ModelDetails> {
         // Preserve the caller's requested ID, which may be an alias.
         let mut details = details.clone();
         details.id = (PROVIDER, model.id).try_into()?;
+        return Ok(details);
+    }
+
+    if let Some(details) = fine_tune_base(&model.id).and_then(model_overrides) {
+        let mut details = details.clone();
+        details.id = (PROVIDER, model.id).try_into()?;
+        details.display_name = None;
         return Ok(details);
     }
 
@@ -53,6 +62,15 @@ pub(super) fn subscription_models() -> impl Iterator<Item = &'static str> {
         .values()
         .filter(|details| details.served_by_subscription())
         .map(|details| details.id.name.as_ref())
+}
+
+/// The base model ID in a fine-tuned model ID: `gpt-4.1-2025-04-14` for
+/// `ft:gpt-4.1-2025-04-14:acme::abc123`.
+fn fine_tune_base(id: &str) -> Option<&str> {
+    id.strip_prefix("ft:")?
+        .split(':')
+        .next()
+        .filter(|base| !base.is_empty())
 }
 
 /// Look up `id` in [`MODEL_OVERRIDES`] by canonical ID or alias.

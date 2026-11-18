@@ -56,10 +56,12 @@ mod models;
 pub mod oauth;
 pub mod rate_limits;
 pub(crate) mod resolve;
+mod subscription_request;
 pub mod usage;
 
 use input_transformations::input_transformation_notices;
 use models::{is_api_only, map_model, subscription_models};
+use subscription_request::prepare_subscription_request;
 
 /// The path the subscription host serves the responses endpoint at.
 ///
@@ -818,131 +820,6 @@ fn is_switchable(error: &StreamError) -> bool {
     )
 }
 
-/// Reshape a request for the subscription host.
-///
-/// That host accepts a narrower request than the platform API: it takes the
-/// system prompt in a different field, and rejects several parameters outright
-/// with `400 Unsupported parameter: <name>`.
-fn prepare_subscription_request(request: &mut Request) {
-    fold_system_into_instructions(request);
-    strip_unsupported_parameters(request);
-    strip_explicit_cache_controls(request);
-}
-
-/// Remove the explicit prompt-cache controls.
-///
-/// The model behind the subscription route answers a content block carrying
-/// `prompt_cache_breakpoint` with `400 prompt_cache_breakpoint is not supported
-/// on this model`, even for a model that accepts it through the platform API.
-/// `prompt_cache_options` is dropped with it, as the other half of the same
-/// feature.
-///
-/// `prompt_cache_key` stays: the host reads it, and echoes it back on the
-/// response as the key it cached under.
-fn strip_explicit_cache_controls(request: &mut Request) {
-    request.prompt_cache_options = None;
-
-    let types::Input::List(items) = &mut request.input else {
-        return;
-    };
-
-    for item in items {
-        let types::InputListItem::Message(message) = item else {
-            continue;
-        };
-        let types::ContentInput::List(blocks) = &mut message.content else {
-            continue;
-        };
-
-        for block in blocks {
-            let (types::ContentItem::Text {
-                prompt_cache_breakpoint,
-                ..
-            }
-            | types::ContentItem::Image {
-                prompt_cache_breakpoint,
-                ..
-            }
-            | types::ContentItem::File {
-                prompt_cache_breakpoint,
-                ..
-            }) = block;
-
-            *prompt_cache_breakpoint = None;
-        }
-    }
-}
-
-/// Drop the parameters the subscription host refuses.
-///
-/// `max_output_tokens` is refused by name (measured).
-/// The rest are dropped because the first-party client does not send them
-/// either, and the host reports only one unsupported parameter per request:
-/// discovering them one `400` at a time costs a round-trip each.
-///
-/// Sampling controls go with them.
-/// On the API path they are already suppressed for reasoning models, so a
-/// subscription request loses nothing it would have applied; a caller who sets
-/// them explicitly gets them ignored rather than getting a rejected request.
-fn strip_unsupported_parameters(request: &mut Request) {
-    request.max_output_tokens = None;
-    request.temperature = None;
-    request.top_p = None;
-    request.truncation = None;
-    request.metadata = None;
-    request.user = None;
-    request.previous_response_id = None;
-}
-
-/// Move system-role input messages into the request's `instructions`.
-///
-/// The subscription host answers a `role: "system"` entry in `input` with `400
-/// System messages are not allowed`; it takes the system prompt in
-/// `instructions` instead, which is where the Responses API documents it and
-/// where the Codex CLI puts it.
-///
-/// Any `instructions` already set is kept after the folded parts, so the prompt
-/// reads in the order it was assembled.
-///
-/// The cache breakpoint that rode on the last system block is dropped with it.
-/// The host derives its own cache key from the request's `prompt_cache_key`, so
-/// a breakpoint inside a field it does not read buys nothing.
-fn fold_system_into_instructions(request: &mut Request) {
-    let types::Input::List(items) = &mut request.input else {
-        return;
-    };
-
-    let mut folded: Vec<String> = vec![];
-
-    items.retain(|item| {
-        let types::InputListItem::Message(message) = item else {
-            return true;
-        };
-        if !matches!(message.role, types::Role::System) {
-            return true;
-        }
-
-        match &message.content {
-            types::ContentInput::Text(text) => folded.push(text.clone()),
-            types::ContentInput::List(blocks) => {
-                folded.extend(blocks.iter().filter_map(|block| match block {
-                    types::ContentItem::Text { text, .. } => Some(text.clone()),
-                    types::ContentItem::Image { .. } | types::ContentItem::File { .. } => None,
-                }));
-            }
-        }
-
-        false
-    });
-
-    if folded.is_empty() {
-        return;
-    }
-
-    folded.extend(request.instructions.take());
-    request.instructions = Some(folded.join("\n\n"));
-}
-
 /// Whether an error reads as the model being unknown to the endpoint.
 fn looks_like_unknown_model(error: &StreamError) -> bool {
     let message = error.message().to_ascii_lowercase();
@@ -958,7 +835,12 @@ fn map_non_streaming_response(
     reasoning_enabled: bool,
 ) -> Result<Vec<Event>> {
     let incomplete_reason = response.incomplete_details.map(|details| details.reason);
-    let notices = input_transformation_notices(&response.input_transformations);
+    let notices = input_transformation_notices(
+        response
+            .input_transformations
+            .as_deref()
+            .unwrap_or_default(),
+    );
     let mut reasoning = ReasoningState::default();
     let mut arguments = StreamedArguments::default();
     let mut events = response
@@ -1828,7 +1710,12 @@ fn map_event(
             let incomplete_reason = response.incomplete_details.map(|d| d.reason);
             let finished = map_non_streaming_finish_reason(response.status, incomplete_reason)
                 .map_err(|error| StreamError::other(error.to_string()));
-            let notices = input_transformation_notices(&response.input_transformations);
+            let notices = input_transformation_notices(
+                response
+                    .input_transformations
+                    .as_deref()
+                    .unwrap_or_default(),
+            );
             notices.into_iter().map(Ok).chain([finished]).collect()
         }
         Error { error } => vec![Err(classify_stream_error(error))],
@@ -2851,6 +2738,10 @@ mod latency_tests;
 #[cfg(test)]
 #[path = "openai/redeem_tests.rs"]
 mod redeem_tests;
+
+#[cfg(test)]
+#[path = "openai/subscription_request_tests.rs"]
+mod subscription_request_tests;
 
 #[cfg(test)]
 #[path = "openai/switchable_tests.rs"]

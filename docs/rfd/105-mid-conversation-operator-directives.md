@@ -263,18 +263,44 @@ Text and tool directives are gated independently:
 For example, a user on Opus 5 without the beta header gets positional text
 directives and a flattened `tools` array.
 
-On OpenAI, the gates are catalog features in `ModelDetails::features`:
+On OpenAI, the gates are catalog features in `ModelDetails::features`, and each
+holds for one route:
 
-- **Text and tool directives** require `POSITIONAL_DIRECTIVES`.
-- **Effort and format directives** require `CONFIGURATION_UPDATE`, and are
-  flattened on any request with `reasoning.mode = "pro"`, since OpenAI supports
-  configuration updates only in standard, single-agent mode.
+- **Text and tool directives** require `POSITIONAL_DIRECTIVES` on the platform
+  API and `SUBSCRIPTION_POSITIONAL_DIRECTIVES` on the subscription host.
+- **Effort and format directives** require `CONFIGURATION_UPDATE` on the
+  platform API and `SUBSCRIPTION_CONFIGURATION_UPDATE` on the subscription host,
+  and are flattened on any request with `reasoning.mode = "pro"` (see
+  [Switching Between Standard and Pro Mode](#switching-between-standard-and-pro-mode)).
 
 OpenAI documents `configuration_update` for "supported GPT-6 and later models"
 without listing them, and does not document which models accept
 `additional_tools`.
-Both flags start on the GPT-6.2 models, where a prefix edit drops replayed
-reasoning, and will be enabled on other GPT-6 models after live verification.
+The flags start on the GPT-6.2 models, where a prefix edit drops replayed
+reasoning, and each is enabled on a model and route only after a request against
+that model on that route is seen to succeed.
+
+The routes differ because the subscription host accepts a narrower request:
+
+- It rejects `role: system` input, so the prelude moves into `instructions`.
+  Whether it accepts `developer` messages in `input` is unverified.
+- It rejects `prompt_cache_breakpoint`, so a `Text` directive loses the
+  breakpoint that makes it a cache lookup boundary.
+  The directive still preserves replayed reasoning, but cache reuse past it
+  falls back to the implicit breakpoint on the latest message.
+- It does not take `truncation`, whose default, `disabled`, is what
+  `configuration_update` requires.
+
+Codex sends `additional_tools` and `configuration_update` items through the
+subscription host, which suggests the host accepts both, though not for which
+models.
+
+A credential chain can move one request from the platform API to the
+subscription host between attempts, so the choice cannot be made once per
+request.
+`create_request` serializes the directives for each route, and each attempt
+sends the request for the route of its credential; on a route whose flag is
+missing, that request carries the flattened form.
 
 ## Drawbacks
 
@@ -447,6 +473,37 @@ messages trip the same rejection.
 Phase 6 checks this before any directive reaches a request that allows
 truncation.
 
+### Switching Between Standard and Pro Mode
+
+OpenAI supports configuration updates only in standard, single-agent mode, and
+does not say whether a pro-mode request rejects a history that holds them or
+ignores them.
+A pro-mode request therefore leaves every `configuration_update` item out of
+`input`, and sends the effort and format in force at that point as
+request-level values.
+The stored conversation is unchanged: directives are derived at request time
+and never persisted.
+Codex does the same for models without configuration updates: it filters the
+items out of the request and leaves its stored history alone.
+
+The pro-mode request edits the prefix.
+Omitting whole items does not by itself cause a `prefix_mismatch`, but changing
+the request-level effort or format rewrites hidden system instructions, so
+replayed reasoning after the first update is dropped for that request.
+
+The next standard-mode request replays the updates in their original positions
+and sends the pinned request-level values again.
+Its prefix matches the requests before the pro-mode turn, so reasoning from
+before that turn is replayed again.
+Reasoning produced during the pro-mode turn was generated under the other
+prefix, so every later standard-mode request drops it as `prefix_mismatch`.
+Each pro-mode turn therefore costs its own reasoning for the rest of the
+conversation, and nothing else.
+
+Two points are unverified: whether `reasoning.mode` is itself part of the
+prefix, and whether a pro-mode request would accept the updates.
+Phase 7 checks both before enabling configuration updates.
+
 ### Compaction and Attachments Edit the Prefix
 
 A compaction summary ([RFD 064]) replaces the turns it covers in place, so the
@@ -502,20 +559,26 @@ The breakpoint allocation comment in `anthropic.rs` needs updating to match.
    fork.
    Pin `tools` to the first position's tool set, emit `Text` directives as
    `developer` messages and `ToolAddition` directives as `additional_tools`
-   items, and derive `allowed_tools` from current enablement, gated on
-   `POSITIONAL_DIRECTIVES`.
-   Before enabling the flag on a model, confirm against it that a request with
-   `truncation: auto` and an `additional_tools` item is accepted, and that a
-   tool change produces no `prefix_mismatch` in `input_transformations`
-   (T-1mnmqbx).
+   items, and derive `allowed_tools` from current enablement, gated on the
+   route's positional-directive flag.
+   Serialize the request per route, so a credential switch between attempts
+   sends the form verified for the new route.
+   Before enabling a flag on a model, confirm on that route that a request with
+   an `additional_tools` item and a later `developer` message is accepted (on
+   the platform API, with `truncation: auto`), and that a tool change produces
+   no `prefix_mismatch` in `input_transformations` (T-1mnmqbx).
+   A check on the platform API does not enable the subscription flag.
    Depends on Phase 1.
 7. **Phase 7: OpenAI configuration updates.** Add the `configuration_update`
    input item to the fork.
    Derive `ReasoningEffort` and `ResponseFormat` directives, pin the
    request-level effort and format to their first values, emit
    `configuration_update` before the next `ChatRequest`, and send `truncation:
-   disabled` on any request whose history holds one, gated on
-   `CONFIGURATION_UPDATE` and standard reasoning mode.
+   disabled` on any request whose history holds one, gated on the route's
+   configuration-update flag and standard reasoning mode.
+   Before enabling a flag, check on that route that an update is accepted, and
+   that a standard-mode request after a pro-mode turn drops only the pro-mode
+   turn's reasoning.
    Depends on Phase 6.
 
 ## References
