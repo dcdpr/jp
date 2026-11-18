@@ -1217,11 +1217,10 @@ impl Storage {
     /// The directory holds a `metadata.json` that is not valid JSON.
     /// For test fixture setup only.
     #[doc(hidden)]
-    pub fn create_test_conversation_dir(&self, dirname: &str) {
+    pub fn create_corrupt_test_conversation_dir(&self, dirname: &str) -> io::Result<()> {
         let dir = self.root.join(CONVERSATIONS_DIR).join(dirname);
-        fs::create_dir_all(&dir)
-            .and_then(|()| fs::write(dir.join(METADATA_FILE), "not json"))
-            .unwrap();
+        fs::create_dir_all(&dir)?;
+        fs::write(dir.join(METADATA_FILE), "not json")
     }
 }
 

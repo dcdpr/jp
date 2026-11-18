@@ -411,7 +411,7 @@ impl FsStorageBackend {
     /// Create a conversation directory whose `metadata.json` is not valid JSON.
     /// For test fixture setup.
     #[doc(hidden)]
-    pub fn create_test_conversation_dir(&self, dirname: &str) {
-        self.storage.create_test_conversation_dir(dirname);
+    pub fn create_corrupt_test_conversation_dir(&self, dirname: &str) -> std::io::Result<()> {
+        self.storage.create_corrupt_test_conversation_dir(dirname)
     }
 }

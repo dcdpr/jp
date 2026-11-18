@@ -41,8 +41,10 @@ fn test_invalid_conversations_are_trashed() {
 
     // Two different kinds of invalid: bad dirname + corrupt metadata.
     let bad_id = ConversationId::try_from(datetime!(2024-01-02 00:00:00 Z)).unwrap();
-    fs.create_test_conversation_dir("not-a-valid-id");
-    fs.create_test_conversation_dir(&bad_id.to_dirname(None));
+    fs.create_corrupt_test_conversation_dir("not-a-valid-id")
+        .unwrap();
+    fs.create_corrupt_test_conversation_dir(&bad_id.to_dirname(None))
+        .unwrap();
 
     let report = ws.sanitize().unwrap();
     assert_eq!(report.trashed.len(), 2);
@@ -57,7 +59,8 @@ fn test_trashed_conversations_not_loaded() {
     fs.write_test_conversation(&id2, &Conversation::default());
 
     // id1 is invalid (corrupt metadata).
-    fs.create_test_conversation_dir(&id1.to_dirname(None));
+    fs.create_corrupt_test_conversation_dir(&id1.to_dirname(None))
+        .unwrap();
 
     let report = ws.sanitize().unwrap();
     assert_eq!(report.trashed.len(), 1);
@@ -119,7 +122,8 @@ fn test_all_conversations_trashed_produces_empty_workspace() {
     let (_tmp, fs, mut ws) = setup();
 
     let id = ConversationId::try_from(datetime!(2024-01-01 00:00:00 Z)).unwrap();
-    fs.create_test_conversation_dir(&id.to_dirname(None));
+    fs.create_corrupt_test_conversation_dir(&id.to_dirname(None))
+        .unwrap();
 
     let report = ws.sanitize().unwrap();
     assert_eq!(report.trashed.len(), 1);
@@ -159,8 +163,8 @@ fn test_skips_dot_prefixed_directories() {
     fs.write_test_conversation(&id, &Conversation::default());
 
     // These should be silently ignored, not trashed.
-    fs.create_test_conversation_dir(".trash");
-    fs.create_test_conversation_dir(".hidden");
+    fs.create_corrupt_test_conversation_dir(".trash").unwrap();
+    fs.create_corrupt_test_conversation_dir(".hidden").unwrap();
 
     let report = ws.sanitize().unwrap();
     assert!(!report.has_repairs());
@@ -189,7 +193,8 @@ fn test_locked_invalid_conversation_is_not_trashed() {
     let id = ConversationId::try_from(datetime!(2024-01-01 00:00:00 Z)).unwrap();
 
     // Corrupt metadata, normally trashed.
-    fs.create_test_conversation_dir(&id.to_dirname(None));
+    fs.create_corrupt_test_conversation_dir(&id.to_dirname(None))
+        .unwrap();
 
     // Acquire a lock on this conversation, simulating a process that is
     // mid-write and holds the conversation.
@@ -226,8 +231,10 @@ fn test_sanitize_then_load_with_mixed_valid_and_invalid() {
     fs.write_test_conversation(&id3, &Conversation::default());
 
     // id2 and id4 are invalid (corrupt metadata).
-    fs.create_test_conversation_dir(&id2.to_dirname(None));
-    fs.create_test_conversation_dir(&id4.to_dirname(None));
+    fs.create_corrupt_test_conversation_dir(&id2.to_dirname(None))
+        .unwrap();
+    fs.create_corrupt_test_conversation_dir(&id4.to_dirname(None))
+        .unwrap();
 
     let report = ws.sanitize().unwrap();
     assert_eq!(report.trashed.len(), 2);
