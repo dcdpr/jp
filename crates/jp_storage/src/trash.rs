@@ -79,28 +79,8 @@ impl Storage {
         id: &ConversationId,
         now: DateTime<Utc>,
     ) -> Result<Vec<Moved>, TrashError> {
-        let prefix = id.to_dirname(None);
         let _guard = self.lock_for_move(id)?;
-        let roots = self.conversations_dirs();
-
-        if let Some(path) = dirs_for_id(&roots, TRASH_DIR, &prefix).next() {
-            return Err(TrashError::AlreadyTrashed(path));
-        }
-
-        let moves: Vec<_> = roots
-            .iter()
-            .flat_map(|conversations| {
-                conversation_dirs_for_id(conversations, &prefix)
-                    .into_iter()
-                    .map(|from| Moved {
-                        to: conversations.join(TRASH_DIR).join(dirname(&from)),
-                        from,
-                    })
-            })
-            .collect();
-        if moves.is_empty() {
-            return Err(TrashError::NotFound);
-        }
+        let moves = self.trash_moves(id)?;
 
         let note = trashed_note(id, now);
         for moved in &moves {
@@ -127,8 +107,80 @@ impl Storage {
     /// [`TrashError::Locked`] when another process holds the conversation.
     /// Nothing is moved in those cases.
     pub fn untrash_conversation(&self, id: &ConversationId) -> Result<Vec<Moved>, TrashError> {
-        let prefix = id.to_dirname(None);
         let _guard = self.lock_for_move(id)?;
+        let moves = self.untrash_moves(id)?;
+
+        for moved in &moves {
+            rename(moved)?;
+
+            let note = moved.to.join(TRASHED_FILE);
+            match fs::remove_file(&note) {
+                Ok(()) => {}
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => warn!(path = %note, %error, "Failed to remove TRASHED.md."),
+            }
+        }
+
+        Ok(moves)
+    }
+
+    /// The moves [`Self::trash_conversation`] would make, without making them.
+    ///
+    /// Writes nothing, not even a lock file.
+    ///
+    /// # Errors
+    ///
+    /// Returns the error [`Self::trash_conversation`] would return.
+    pub fn plan_trash(&self, id: &ConversationId) -> Result<Vec<Moved>, TrashError> {
+        self.ensure_unlocked(id)?;
+        self.trash_moves(id)
+    }
+
+    /// The moves [`Self::untrash_conversation`] would make, without making
+    /// them.
+    ///
+    /// Writes nothing, not even a lock file.
+    ///
+    /// # Errors
+    ///
+    /// Returns the error [`Self::untrash_conversation`] would return.
+    pub fn plan_untrash(&self, id: &ConversationId) -> Result<Vec<Moved>, TrashError> {
+        self.ensure_unlocked(id)?;
+        self.untrash_moves(id)
+    }
+
+    /// Every live directory of `id` paired with its place in the trash, after
+    /// the checks that would refuse the move.
+    fn trash_moves(&self, id: &ConversationId) -> Result<Vec<Moved>, TrashError> {
+        let prefix = id.to_dirname(None);
+        let roots = self.conversations_dirs();
+
+        if let Some(path) = dirs_for_id(&roots, TRASH_DIR, &prefix).next() {
+            return Err(TrashError::AlreadyTrashed(path));
+        }
+
+        let moves: Vec<_> = roots
+            .iter()
+            .flat_map(|conversations| {
+                conversation_dirs_for_id(conversations, &prefix)
+                    .into_iter()
+                    .map(|from| Moved {
+                        to: conversations.join(TRASH_DIR).join(dirname(&from)),
+                        from,
+                    })
+            })
+            .collect();
+        if moves.is_empty() {
+            return Err(TrashError::NotFound);
+        }
+
+        Ok(moves)
+    }
+
+    /// Every trash entry of `id` paired with its live place, after the checks
+    /// that would refuse the move.
+    fn untrash_moves(&self, id: &ConversationId) -> Result<Vec<Moved>, TrashError> {
+        let prefix = id.to_dirname(None);
         let roots = self.conversations_dirs();
 
         let moves: Vec<_> = roots
@@ -150,18 +202,14 @@ impl Storage {
             return Err(TrashError::Exists(path));
         }
 
-        for moved in &moves {
-            rename(moved)?;
-
-            let note = moved.to.join(TRASHED_FILE);
-            match fs::remove_file(&note) {
-                Ok(()) => {}
-                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-                Err(error) => warn!(path = %note, %error, "Failed to remove TRASHED.md."),
-            }
-        }
-
         Ok(moves)
+    }
+
+    fn ensure_unlocked(&self, id: &ConversationId) -> Result<(), TrashError> {
+        if self.is_conversation_locked(&id.to_string()) {
+            return Err(TrashError::Locked);
+        }
+        Ok(())
     }
 
     /// The live `conversations/` directory of each storage root, workspace

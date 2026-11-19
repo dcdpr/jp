@@ -73,8 +73,12 @@ impl Trash {
 
     pub(crate) fn run(self, ctx: &mut Ctx) -> Output {
         let now = ctx.now();
-        run_batch(ctx, &self.target, Action::Trash, |fs, id| {
-            fs.trash_conversation(id, now)
+        run_batch(ctx, &self.target, Action::Trash, |fs, id, dry_run| {
+            if dry_run {
+                fs.plan_trash(id)
+            } else {
+                fs.trash_conversation(id, now)
+            }
         })
     }
 }
@@ -87,8 +91,12 @@ impl Untrash {
     }
 
     pub(crate) fn run(self, ctx: &mut Ctx) -> Output {
-        run_batch(ctx, &self.target, Action::Untrash, |fs, id| {
-            fs.untrash_conversation(id)
+        run_batch(ctx, &self.target, Action::Untrash, |fs, id, dry_run| {
+            if dry_run {
+                fs.plan_untrash(id)
+            } else {
+                fs.untrash_conversation(id)
+            }
         })
     }
 }
@@ -140,61 +148,86 @@ impl Action {
 /// Apply `action` to every targeted conversation, reporting each one.
 ///
 /// A conversation that fails is reported on stderr and the rest still run; the
-/// command fails at the end if any did.
+/// command fails at the end if any did, listing each failure.
+/// Under `--no-persist`, `apply` is asked for a dry run: the same report, with
+/// nothing moved.
 fn run_batch(
     ctx: &Ctx,
     target: &PositionalIds<false, true>,
     action: Action,
-    apply: impl Fn(&FsStorageBackend, &ConversationId) -> Result<Vec<Moved>, TrashError>,
+    apply: impl Fn(&FsStorageBackend, &ConversationId, bool) -> Result<Vec<Moved>, TrashError>,
 ) -> Output {
-    if !ctx.term.args.persist {
-        return Err(format!(
-            "`jp conversation {}` moves files, so it does not run with `--no-persist`.",
-            action.command()
-        )
-        .into());
-    }
+    let dry_run = !ctx.term.args.persist;
     let Some(fs) = ctx.fs_backend.as_deref() else {
         return Err("This workspace has no conversation storage on disk.".into());
     };
 
     let ids = resolve_ids(ctx, target, action)?;
-    let mut failed = 0_usize;
+    let mut failures = vec![];
     for id in &ids {
         let name = id.to_string().bold().yellow();
-        match apply(fs, id) {
+        match apply(fs, id, dry_run) {
             Ok(moved) => {
                 for Moved { from, to } in &moved {
-                    debug!(%id, %from, %to, "Moved conversation directory.");
+                    debug!(%id, %from, %to, dry_run, "Moved conversation directory.");
                 }
                 ctx.printer
                     .println(format!("Conversation {name} {}.", action.done()));
             }
             Err(error) => {
-                failed += 1;
                 ctx.printer.error_println(format!(
                     "Conversation {name} {}: {error}.",
                     action.not_done()
                 ));
+                failures.push((*id, error));
             }
         }
     }
 
-    if failed == 0 {
+    if dry_run {
+        ctx.printer.println("");
+        ctx.printer
+            .println("This command ran under `--no-persist`, no files on disk were modified.");
+    }
+
+    if failures.is_empty() {
         return Ok(());
     }
 
-    let noun = if ids.len() == 1 {
+    let summary = failure_summary(action, ids.len(), &failures);
+    // The error is written past the printer, which strips styling for the
+    // plain and JSON formats on its own output only.
+    let summary = if ctx.printer.pretty_printing_enabled() {
+        summary
+    } else {
+        strip_ansi_escapes::strip_str(summary)
+    };
+    Err(summary.into())
+}
+
+/// The error a batch ends with when some of its `total` conversations failed: a
+/// count, then each failed conversation and its reason.
+fn failure_summary(
+    action: Action,
+    total: usize,
+    failures: &[(ConversationId, TrashError)],
+) -> String {
+    let noun = if total == 1 {
         "conversation"
     } else {
         "conversations"
     };
     let (verb, direction) = action.failed();
-    Err(format!(
-        "Failed to {verb} {failed} of {} {noun} {direction}.",
-        ids.len()
+    let entries = failures
+        .iter()
+        .map(|(id, error)| format!("{}:  {error}", id.to_string().bold().yellow()))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    format!(
+        "Failed to {verb} {} of {total} {noun} {direction}:\n\n{entries}",
+        failures.len()
     )
-    .into())
 }
 
 /// The targeted IDs: typed IDs as they are, keywords resolved against the

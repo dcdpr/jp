@@ -228,6 +228,21 @@ impl FsStorageBackend {
         self.storage.untrash_conversation(id)
     }
 
+    /// The moves [`Self::trash_conversation`] would make, without making them.
+    ///
+    /// See [`Storage::plan_trash`].
+    pub fn plan_trash(&self, id: &ConversationId) -> std::result::Result<Vec<Moved>, TrashError> {
+        self.storage.plan_trash(id)
+    }
+
+    /// The moves [`Self::untrash_conversation`] would make, without making
+    /// them.
+    ///
+    /// See [`Storage::plan_untrash`].
+    pub fn plan_untrash(&self, id: &ConversationId) -> std::result::Result<Vec<Moved>, TrashError> {
+        self.storage.plan_untrash(id)
+    }
+
     /// Check every conversation directory in both roots without moving any.
     ///
     /// Sorts each directory into valid, unstored, or invalid.

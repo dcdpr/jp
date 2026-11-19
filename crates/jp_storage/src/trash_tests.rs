@@ -162,6 +162,77 @@ fn trash_refuses_a_conversation_another_process_holds() {
     assert!(conversations.join("17941219994").is_dir());
 }
 
+// A dry run answers what `trash_conversation` would do, and changes nothing.
+#[test]
+fn plan_trash_moves_nothing() {
+    let (_tmp, storage, conversations) = single_root();
+    write_dir(&conversations, "17941219994-a-title", &[(
+        EVENTS_FILE,
+        "[]",
+    )]);
+
+    let planned = storage.plan_trash(&id("17941219994")).unwrap();
+
+    assert_eq!(planned, [Moved {
+        from: conversations.join("17941219994-a-title"),
+        to: conversations.join(TRASH_DIR).join("17941219994-a-title"),
+    }]);
+    assert!(conversations.join("17941219994-a-title").is_dir());
+    assert!(!conversations.join(TRASH_DIR).exists());
+}
+
+#[test]
+fn plan_trash_reports_what_trash_would_refuse() {
+    let (_tmp, storage, conversations) = single_root();
+    assert!(matches!(
+        storage.plan_trash(&id("17941219994")),
+        Err(TrashError::NotFound)
+    ));
+
+    write_dir(&conversations, "17941219994", &[(EVENTS_FILE, "[]")]);
+    let _lock = storage
+        .try_lock_conversation(&id("17941219994").to_string(), None)
+        .unwrap()
+        .unwrap();
+    assert!(matches!(
+        storage.plan_trash(&id("17941219994")),
+        Err(TrashError::Locked)
+    ));
+}
+
+#[test]
+fn plan_untrash_moves_nothing() {
+    let (_tmp, storage, conversations) = single_root();
+    let trashed = write_dir(&conversations.join(TRASH_DIR), "17941219994", &[(
+        EVENTS_FILE,
+        "[]",
+    )]);
+
+    let planned = storage.plan_untrash(&id("17941219994")).unwrap();
+
+    assert_eq!(planned, [Moved {
+        from: trashed.clone(),
+        to: conversations.join("17941219994"),
+    }]);
+    assert!(trashed.is_dir());
+    assert!(!conversations.join("17941219994").exists());
+}
+
+#[test]
+fn plan_untrash_reports_what_untrash_would_refuse() {
+    let (_tmp, storage, conversations) = single_root();
+    write_dir(&conversations.join(TRASH_DIR), "17941219994", &[(
+        EVENTS_FILE,
+        "[]",
+    )]);
+    let live = write_dir(&conversations, "17941219994-new", &[(EVENTS_FILE, "[]")]);
+
+    assert!(matches!(
+        storage.plan_untrash(&id("17941219994")),
+        Err(TrashError::Exists(ref path)) if *path == live
+    ));
+}
+
 #[test]
 fn untrash_moves_the_conversation_back_without_the_note() {
     let (_tmp, storage, conversations) = single_root();

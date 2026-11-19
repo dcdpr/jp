@@ -2,6 +2,7 @@ use std::{fs, sync::Arc};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::Utf8TempDir;
+use crossterm::style::Stylize as _;
 use jp_config::AppConfig;
 use jp_conversation::ConversationId;
 use jp_printer::{OutputFormat, Printer, SharedBuffer};
@@ -135,27 +136,94 @@ fn reports_each_id_it_could_not_trash() {
         "Conversation jp-c17941219990 not moved to the trash: no conversation with this ID.\n"
     );
     assert_eq!(
-        error.message.as_deref(),
-        Some("Failed to move 1 of 2 conversations to the trash.")
+        error.message.as_deref().map(strip_ansi_escapes::strip_str),
+        Some(
+            "Failed to move 1 of 2 conversations to the trash:\n\njp-c17941219990:  no \
+             conversation with this ID"
+                .to_owned()
+        )
     );
 }
 
 #[test]
-fn refuses_to_run_without_persistence() {
+fn the_failure_summary_lists_every_failure() {
+    let summary = failure_summary(Action::Trash, 3, &[
+        (id("17941219990"), TrashError::NotFound),
+        (id("17941219991"), TrashError::Locked),
+    ]);
+
+    assert_eq!(
+        strip_ansi_escapes::strip_str(&summary),
+        "Failed to move 2 of 3 conversations to the trash:\n\njp-c17941219990:  no conversation \
+         with this ID\njp-c17941219991:  in use by another process"
+    );
+    assert_eq!(
+        summary,
+        format!(
+            "Failed to move 2 of 3 conversations to the trash:\n\n{}:  no conversation with this \
+             ID\n{}:  in use by another process",
+            "jp-c17941219990".bold().yellow(),
+            "jp-c17941219991".bold().yellow(),
+        )
+    );
+}
+
+// Under `--no-persist` the command reports what it would do and moves nothing.
+#[test]
+fn no_persist_is_a_dry_run() {
     let mut f = fixture(false);
     write_dir(&f.conversations, "17941219991", &[("events.json", "[]")]);
 
     let error = Trash {
-        target: targets(&["17941219991"]),
+        target: targets(&["17941219990", "17941219991"]),
     }
     .run(&mut f.ctx)
     .unwrap_err();
+    f.ctx.printer.flush();
 
     assert_eq!(
-        error.message.as_deref(),
-        Some("`jp conversation trash` moves files, so it does not run with `--no-persist`.")
+        plain(&f.out),
+        "Conversation jp-c17941219991 moved to the trash.\n\nThis command ran under \
+         `--no-persist`, no files on disk were modified.\n"
+    );
+    assert_eq!(
+        plain(&f.err),
+        "Conversation jp-c17941219990 not moved to the trash: no conversation with this ID.\n"
+    );
+    assert_eq!(
+        error.message.as_deref().map(strip_ansi_escapes::strip_str),
+        Some(
+            "Failed to move 1 of 2 conversations to the trash:\n\njp-c17941219990:  no \
+             conversation with this ID"
+                .to_owned()
+        )
     );
     assert!(f.conversations.join("17941219991").is_dir());
+    assert!(!f.conversations.join(".trash").exists());
+}
+
+#[test]
+fn no_persist_untrash_moves_nothing() {
+    let mut f = fixture(false);
+    write_dir(&f.conversations.join(".trash"), "17941219991", &[(
+        "events.json",
+        "[]",
+    )]);
+
+    Untrash {
+        target: targets(&["17941219991"]),
+    }
+    .run(&mut f.ctx)
+    .unwrap();
+    f.ctx.printer.flush();
+
+    assert_eq!(
+        plain(&f.out),
+        "Conversation jp-c17941219991 restored from the trash.\n\nThis command ran under \
+         `--no-persist`, no files on disk were modified.\n"
+    );
+    assert!(f.conversations.join(".trash/17941219991").is_dir());
+    assert!(!f.conversations.join("17941219991").exists());
 }
 
 // The picker lists conversations from the index, which holds none of the ones
@@ -227,7 +295,11 @@ fn untrash_reports_each_id_it_could_not_restore() {
         "Conversation jp-c17941219991 not restored from the trash: not in the trash.\n"
     );
     assert_eq!(
-        error.message.as_deref(),
-        Some("Failed to restore 1 of 1 conversation from the trash.")
+        error.message.as_deref().map(strip_ansi_escapes::strip_str),
+        Some(
+            "Failed to restore 1 of 1 conversation from the trash:\n\njp-c17941219991:  not in \
+             the trash"
+                .to_owned()
+        )
     );
 }

@@ -75,3 +75,23 @@ Done.
 - **Glossary:** added *Trashed Conversation* to W-00dxybc.
 
 Unchanged: the JSON load-failure records carry no hint.
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-19T13:59:01Z
+- **Re**: #2
+
+Revised after text review:
+
+- **Failure summary:** a failing run now ends with each failed conversation and
+  its reason: `Failed to move N of M conversations to the trash:`, a blank line,
+  then one `<id>:  <reason>` line per failure.
+  IDs are bold yellow only under the pretty text format.
+- **`--no-persist`:** a dry run instead of an error.
+  It prints the same per-conversation lines, then a blank line and "This command
+  ran under `--no-persist`, no files on disk were modified."
+  Backed by `Storage::plan_trash` / `plan_untrash`, which run the same checks as
+  the real operations.
+  They check the lock without taking it, so nothing is written, not even a lock
+  file.
