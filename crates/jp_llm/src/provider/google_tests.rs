@@ -326,7 +326,7 @@ fn test_unknown_thinking_level_honours_requested_effort() {
         Some(types::ThinkingLevel::XHigh)
     );
 
-    // Gemini has no level above `xhigh`, so `max` takes the highest one.
+    // `Max` maps to `XHigh`, Gemini's highest thinking level.
     assert_eq!(
         effort_to_thinking_level(ReasoningEffort::Max, None),
         Some(types::ThinkingLevel::XHigh)
@@ -336,9 +336,8 @@ fn test_unknown_thinking_level_honours_requested_effort() {
     assert_eq!(effort_to_thinking_level(ReasoningEffort::Auto, None), None);
 }
 
-/// A model newer than this binary is sent the level the caller asked for, even
-/// one the known models do not all accept.
-/// If the model rejects it, the error tells the user to pick another level.
+/// A model absent from the catalog has no known reasoning levels, so `XHigh` is
+/// passed through as `ThinkingLevel::XHigh` rather than clamped to `High`.
 #[test]
 fn test_xhigh_on_unknown_model_requests_xhigh() {
     let model = ModelDetails::empty((PROVIDER, "gemini-future-99").try_into().unwrap());
