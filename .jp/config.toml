@@ -226,6 +226,19 @@ base_url = "http://model.api:8001"
 id = "haiku"
 parameters.reasoning.effort = "auto"
 
+# Declared, these replace the persona's instructions in inquiries instead of
+# adding to them. A persona's rules for how a turn ends otherwise reach a tool's
+# question too, and get a request for a shorter ticket title answered with a
+# report of the turn's work.
+[[conversation.inquiry.assistant.instructions]]
+title = "Answering a tool's question"
+items = [
+    """\
+    You are answering one question a tool asked, and your reply becomes the tool's input. Reply \
+    with that answer alone: not a summary, report, or plan of the work in the conversation.\
+    """,
+]
+
 [conversation.title.generate.model]
 id = "haiku"
 parameters.reasoning.effort = "low"

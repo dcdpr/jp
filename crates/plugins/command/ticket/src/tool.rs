@@ -412,13 +412,28 @@ fn fitting_title(
 
     let count = retitled.chars().count();
     if count > limit {
+        // Quoted in part: an answer far past the limit, such as a paragraph a
+        // model wrote in place of a title, would bury the refusal.
         return Err(refuse(format!(
-            "The shorter title is {count} characters, and a ticket takes at most {limit}: \
-             {retitled}"
+            "The shorter title is {count} characters, and a ticket takes at most {limit}: {}",
+            excerpt(retitled, limit.saturating_mul(2))
         )));
     }
 
     Ok(retitled.to_owned())
+}
+
+/// The first line of `text`, cut to `max` characters, ending in `…` when any
+/// of `text` was left out.
+fn excerpt(text: &str, max: usize) -> String {
+    let line = text.lines().next().unwrap_or_default();
+    let kept: String = line.chars().take(max).collect();
+
+    if kept.len() == text.len() {
+        kept
+    } else {
+        format!("{kept}…")
+    }
 }
 
 /// Render the ticket file `create` is about to write.

@@ -92,3 +92,21 @@ noted otherwise:
 
 Filed while designing RFD 136 (`jp-review`), which initially spawns a nested
 `jp` host process.
+
+## Comments
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-18T20:06:09Z
+
+The review frontend will be served by `jp review serve` itself, as a
+Rust/WebAssembly UI built with Leptos, rather than by the documentation site
+(drafts "Browser UIs in Rust with Leptos" and "Browser Frontend for the Review
+Engine").
+`jp vite serve` therefore no longer needs to run `jp review serve` beside it,
+and that was the only case this ticket names.
+
+I'm leaving the ticket open for the next pair of plugins that has to run under
+one host.
+If no such pair appears, it can be closed.

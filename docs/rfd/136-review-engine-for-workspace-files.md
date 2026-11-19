@@ -5,6 +5,7 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-11-11
 - **Extends**: [RFD 116], [RFD 124]
+- **Extended by**: [RFD 140]
 - **Summary**: Adds `jp-review`, a command plugin for reviewing workspace files
   with the assistant, through range-anchored comments answered in passes.
 
@@ -895,3 +896,4 @@ Depends on Phases 2 and 3.
 [RFD 076]: 076-tool-access-grants.md
 [RFD 116]: 116-shareable-rfd-ticket-and-site-tooling.md
 [RFD 124]: 124-source-mapped-markdown-rendering.md
+[RFD 140]: 140-browser-frontend-for-the-review-engine.md
