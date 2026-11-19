@@ -17,6 +17,8 @@ trash` without modifying anything on disk.
 - [ ] Lists stale unstored conversation directories (no managed files, usually
       a query draft) as unsent drafts, from
       `FsStorageBackend::validate_conversations`
+- [ ] Suggests trashing all listed unsent drafts with one command,
+      `jp conversation trash <id> <id> ...`
 - [ ] The load-failure report printed after every command
       (`jp_cli::load_failure::render`) points at `jp doctor`, replacing its
       "Run with `-v`" hint
