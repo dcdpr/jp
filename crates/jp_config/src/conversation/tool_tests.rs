@@ -4,7 +4,9 @@ use serde_json::json;
 
 use super::*;
 use crate::{
-    PartialAppConfig, conversation::tool::style::InlineResults, types::json_value::JsonValue,
+    PartialAppConfig,
+    conversation::tool::style::InlineResults,
+    types::{color::Color, json_value::JsonValue},
     util::build,
 };
 
@@ -94,6 +96,65 @@ fn parameters_tool_in_the_defaults_is_accepted_when_only_subprocess_tools_inheri
     ]);
 
     assert!(config.is_ok(), "{config:?}");
+}
+
+#[test]
+fn a_defaults_background_reaches_a_tool_with_its_own_style() {
+    let config = build_assigned(&[
+        "conversation.tools.git_status.source=local",
+        "conversation.tools.git_status.style.inline_results=full",
+        "conversation.tools.*.style.background=237",
+        "conversation.tools.*.style.result_header_background=234",
+    ])
+    .unwrap();
+
+    let style = config
+        .conversation
+        .tools
+        .get("git_status")
+        .unwrap()
+        .style()
+        .clone();
+    assert_eq!(style.background, Some(Color::Ansi256(237)));
+    assert_eq!(style.result_header_background(), Some(Color::Ansi256(234)));
+}
+
+#[test]
+fn a_later_layer_merges_into_a_tool_style_field_by_field() {
+    use schematic::PartialConfig as _;
+
+    use crate::assignment::{AssignKeyValue as _, KvAssignment};
+
+    let mut partial = PartialAppConfig::new_test();
+    for assignment in [
+        "conversation.tools.git_status.source=local",
+        "conversation.tools.git_status.style.background=196",
+    ] {
+        partial
+            .assign(assignment.parse::<KvAssignment>().unwrap())
+            .unwrap();
+    }
+
+    let later: PartialAppConfig = toml::from_str(
+        r#"
+[conversation.tools.git_status]
+source = "local"
+style.inline_results = "full"
+"#,
+    )
+    .unwrap();
+    partial.merge(&(), later).unwrap();
+
+    let config = build(partial).unwrap();
+    let style = config
+        .conversation
+        .tools
+        .get("git_status")
+        .unwrap()
+        .style()
+        .clone();
+    assert_eq!(style.inline_results, InlineResults::Full);
+    assert_eq!(style.background, Some(Color::Ansi256(196)));
 }
 
 /// A tool opting out of the progress window keeps that answer through the whole

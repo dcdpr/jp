@@ -41,6 +41,8 @@ pub fn describe_tools() -> PartialToolConfig {
             parameters: Some(ParametersStyle::Off),
             // A built-in runs in-process and writes no stderr.
             print_stderr: Some(false),
+            background: None,
+            result_header_background: None,
             error: PartialErrorStyleConfig::default(),
         }),
         ..Default::default()

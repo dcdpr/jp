@@ -30,6 +30,31 @@ fn a_global_option_after_the_subcommand_is_read() {
 }
 
 #[test]
+fn cfg_on_both_sides_of_the_subcommand_keeps_every_value_in_order() {
+    let cli = parse(&[
+        "--cfg",
+        "first",
+        "-csecond",
+        "conversation",
+        "--cfg=third",
+        "ls",
+        "-cfourth",
+    ]);
+
+    assert_eq!(
+        format!("{:?}", cli.globals.config),
+        r#"[Path("first"), Path("second"), Path("third"), Path("fourth")]"#
+    );
+}
+
+#[test]
+fn verbose_counts_on_both_sides_of_the_subcommand() {
+    let cli = parse(&["-v", "conversation", "ls", "-vv"]);
+
+    assert_eq!(cli.globals.verbose, 3);
+}
+
+#[test]
 fn unset_options_take_their_defaults() {
     let cli = parse(&["conversation", "ls"]);
 

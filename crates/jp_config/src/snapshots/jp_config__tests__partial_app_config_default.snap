@@ -75,6 +75,8 @@ PartialAppConfig {
                     results_file_link: None,
                     parameters: None,
                     print_stderr: None,
+                    background: None,
+                    result_header_background: None,
                     error: PartialErrorStyleConfig {
                         inline_results: None,
                         results_file_link: None,

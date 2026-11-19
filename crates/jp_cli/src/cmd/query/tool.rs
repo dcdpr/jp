@@ -16,4 +16,4 @@ pub(crate) use mcp_executor::TerminalExecutorSource;
 pub(crate) use pending::{PendingTools, build_execution_plan, unresponded_requests};
 pub(crate) use prompter::ToolPrompter;
 
-pub(crate) use crate::render::ToolRenderer;
+pub(crate) use crate::render::{ToolBackgrounds, ToolRenderer};

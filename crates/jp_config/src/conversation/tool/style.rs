@@ -10,6 +10,8 @@
 //! inline_results = "full"  # how successful results are rendered
 //! results_file_link = "osc8"
 //! print_stderr = true      # feed this tool's stderr to the progress window
+//! background = 237         # shade this tool's call and result
+//! result_header_background = 235
 //!
 //! [tools.my_tool.style.error]
 //! inline_results = "full"  # overrides on top of `style` for failed results
@@ -33,6 +35,7 @@ use crate::{
     delta::{PartialConfigDelta, delta_opt, delta_opt_at, path},
     fill::FillDefaults,
     partial::{ToPartial, partial_opt, partial_opts},
+    types::color::Color,
 };
 
 /// Display style configuration.
@@ -106,6 +109,31 @@ pub struct DisplayStyleConfig {
     #[setting(default = true)]
     pub print_stderr: bool,
 
+    /// Background color for this tool's call and result.
+    ///
+    /// Unset by default, which leaves the tool's output on the terminal's own
+    /// background.
+    /// When set, the `Calling tool …` header, its arguments, the approval
+    /// prompt, and the result are shaded with this color across the full
+    /// terminal width.
+    /// It takes precedence over `style.reasoning.background` for a tool called
+    /// while the assistant is reasoning.
+    ///
+    /// Accepts either an ANSI 256-color index (e.g. `237`) or a hex RGB string
+    /// (e.g. `"#282828"`).
+    pub background: Option<Color>,
+
+    /// Background color for the header shown above this tool's result.
+    ///
+    /// When the assistant calls several tools at once, every call is shown
+    /// before any of them runs, so a result does not follow its own call.
+    /// Each result then gets a `<tool> result` header naming the tool it came
+    /// from, shaded with this color.
+    ///
+    /// If unset, falls back to `background`.
+    /// Accepts the same values as `background`.
+    pub result_header_background: Option<Color>,
+
     /// Per-field overrides applied when the tool result is `Err`.
     /// Unset overlay fields take their value from the matching top-level field.
     ///
@@ -149,6 +177,28 @@ impl DisplayStyleConfig {
             &self.results_file_link
         }
     }
+
+    /// Return the background of the header shown above this tool's result.
+    ///
+    /// Falls back to `style.background` when `style.result_header_background`
+    /// is unset.
+    #[must_use]
+    pub fn result_header_background(&self) -> Option<Color> {
+        self.result_header_background.or(self.background)
+    }
+}
+
+impl PartialDisplayStyleConfig {
+    /// Assign `background` or `result_header_background`, whichever `kv` names.
+    fn assign_background(&mut self, kv: KvAssignment) -> AssignResult {
+        let field = if kv.key_string() == "background" {
+            &mut self.background
+        } else {
+            &mut self.result_header_background
+        };
+        *field = kv.try_some_number_or_from_str()?;
+        Ok(())
+    }
 }
 
 impl AssignKeyValue for PartialDisplayStyleConfig {
@@ -161,6 +211,7 @@ impl AssignKeyValue for PartialDisplayStyleConfig {
             "results_file_link" => self.results_file_link = kv.try_some_from_str()?,
             "parameters" => self.parameters = kv.try_some_from_str()?,
             "print_stderr" => self.print_stderr = kv.try_some_bool()?,
+            "background" | "result_header_background" => self.assign_background(kv)?,
             _ if kv.p("error") => self.error.assign(kv)?,
             _ => return missing_key(&kv),
         }
@@ -178,6 +229,11 @@ impl PartialConfigDelta for PartialDisplayStyleConfig {
             results_file_link: delta_opt(self.results_file_link.as_ref(), next.results_file_link),
             parameters: delta_opt(self.parameters.as_ref(), next.parameters),
             print_stderr: delta_opt(self.print_stderr.as_ref(), next.print_stderr),
+            background: delta_opt(self.background.as_ref(), next.background),
+            result_header_background: delta_opt(
+                self.result_header_background.as_ref(),
+                next.result_header_background,
+            ),
             error: self.error.delta(next.error),
         }
     }
@@ -220,6 +276,18 @@ impl PartialConfigDelta for PartialDisplayStyleConfig {
                 next.print_stderr,
                 unsets,
             ),
+            background: delta_opt_at(
+                &path(prefix, "background"),
+                self.background.as_ref(),
+                next.background,
+                unsets,
+            ),
+            result_header_background: delta_opt_at(
+                &path(prefix, "result_header_background"),
+                self.result_header_background.as_ref(),
+                next.result_header_background,
+                unsets,
+            ),
             error: self
                 .error
                 .delta_with_unsets(next.error, &path(prefix, "error"), unsets),
@@ -236,6 +304,10 @@ impl FillDefaults for PartialDisplayStyleConfig {
             results_file_link: self.results_file_link.or(defaults.results_file_link),
             parameters: self.parameters.or(defaults.parameters),
             print_stderr: self.print_stderr.or(defaults.print_stderr),
+            background: self.background.or(defaults.background),
+            result_header_background: self
+                .result_header_background
+                .or(defaults.result_header_background),
             error: self.error.fill_from(defaults.error),
         }
     }
@@ -252,6 +324,11 @@ impl ToPartial for DisplayStyleConfig {
             results_file_link: partial_opt(&self.results_file_link, defaults.results_file_link),
             parameters: partial_opt(&self.parameters, defaults.parameters),
             print_stderr: partial_opt(&self.print_stderr, defaults.print_stderr),
+            background: partial_opts(self.background.as_ref(), defaults.background),
+            result_header_background: partial_opts(
+                self.result_header_background.as_ref(),
+                defaults.result_header_background,
+            ),
             error: self.error.to_partial(),
         }
     }
@@ -352,14 +429,6 @@ pub enum InlineResults {
     /// Show the first N lines of the tool call results inline.
     #[variant(fallback)]
     Truncate(TruncateLines),
-}
-
-impl InlineResults {
-    /// Returns [`true`] if the results should be truncated.
-    #[must_use]
-    pub const fn is_truncated(&self) -> bool {
-        matches!(self, Self::Truncate(_))
-    }
 }
 
 impl Default for InlineResults {

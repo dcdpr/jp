@@ -54,6 +54,8 @@ fn header_only_style(joins_reasoning: bool) -> DisplayStyleConfig {
         results_file_link: LinkStyle::Off,
         parameters: ParametersStyle::Off,
         print_stderr: false,
+        background: None,
+        result_header_background: None,
         error: ErrorStyleConfig {
             inline_results: None,
             results_file_link: None,
@@ -2242,6 +2244,68 @@ fn replay_keeps_the_gap_after_a_result_when_reasoning_renders_nothing() {
     assert_eq!(
         strip_ansi(&chrome),
         "Calling tool read_file\n\ncontents\n\nCalling tool read_file\n",
+        "got: {chrome:?}"
+    );
+}
+
+#[test]
+fn replay_labels_the_results_of_calls_made_together() {
+    let mut config = AppConfig::new_test();
+    config.conversation.tools.defaults.style.parameters = ParametersStyle::Off;
+    config.conversation.tools.defaults.style.inline_results = InlineResults::Full;
+    config.conversation.tools.defaults.style.results_file_link = LinkStyle::Off;
+
+    let (mut ctx, id, _out, err, _tmp) = setup_ctx_with_config(config, vec![
+        ConversationEvent::new(TurnStart::default(), ts(0, 0, 0)),
+        ConversationEvent::new(ChatRequest::from("edit and check"), ts(0, 0, 1)),
+        ConversationEvent::new(
+            ToolCallRequest {
+                id: "tc1".into(),
+                name: "github_pr_edit".into(),
+                arguments: Map::new(),
+            },
+            ts(0, 0, 2),
+        ),
+        ConversationEvent::new(
+            ToolCallRequest {
+                id: "tc2".into(),
+                name: "cargo_check".into(),
+                arguments: Map::new(),
+            },
+            ts(0, 0, 3),
+        ),
+        ConversationEvent::new(
+            ToolCallResponse {
+                id: "tc1".into(),
+                result: Ok("Updated the PR.".into()),
+            },
+            ts(0, 0, 4),
+        ),
+        ConversationEvent::new(
+            ToolCallResponse {
+                id: "tc2".into(),
+                result: Ok("No errors.".into()),
+            },
+            ts(0, 0, 5),
+        ),
+    ]);
+
+    let print = Print {
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
+        range: TurnSelection::from_last_turn(None, None),
+        current_config: false,
+        style: None,
+        compacted: false,
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    print.run(&mut ctx, &[h]).unwrap();
+    ctx.printer.flush();
+
+    let chrome = err.lock().clone();
+    assert_eq!(
+        strip_ansi(&chrome),
+        "Calling tool github_pr_edit\nCalling tool cargo_check\n\ngithub_pr_edit \
+         result\n\nUpdated the PR.\n\ncargo_check result\n\nNo errors.\n",
         "got: {chrome:?}"
     );
 }

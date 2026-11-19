@@ -117,6 +117,61 @@ fn an_explicit_joins_reasoning_survives_the_defaults_block() {
 }
 
 #[test]
+fn assign_background_accepts_an_index_or_a_hex_string() {
+    let mut partial = PartialDisplayStyleConfig::default();
+    partial
+        .assign(KvAssignment::try_from_cli("background", "237").unwrap())
+        .unwrap();
+    partial
+        .assign(KvAssignment::try_from_cli("result_header_background", "#282828").unwrap())
+        .unwrap();
+
+    assert_eq!(partial.background, Some(Color::Ansi256(237)));
+    assert_eq!(
+        partial.result_header_background,
+        Some(Color::Rgb {
+            r: 0x28,
+            g: 0x28,
+            b: 0x28
+        })
+    );
+}
+
+#[test]
+fn background_fills_from_the_defaults_block() {
+    let filled = PartialDisplayStyleConfig::default().fill_from(PartialDisplayStyleConfig {
+        background: Some(Color::Ansi256(237)),
+        result_header_background: Some(Color::Ansi256(235)),
+        ..Default::default()
+    });
+
+    assert_eq!(filled.background, Some(Color::Ansi256(237)));
+    assert_eq!(filled.result_header_background, Some(Color::Ansi256(235)));
+}
+
+#[test]
+fn result_header_background_falls_back_to_background() {
+    let mut style = DisplayStyleConfig {
+        hidden: false,
+        joins_reasoning: true,
+        parameters: ParametersStyle::Json,
+        inline_results: InlineResults::Full,
+        results_file_link: LinkStyle::Off,
+        print_stderr: true,
+        background: None,
+        result_header_background: None,
+        error: ErrorStyleConfig::default(),
+    };
+    assert_eq!(style.result_header_background(), None);
+
+    style.background = Some(Color::Ansi256(237));
+    assert_eq!(style.result_header_background(), Some(Color::Ansi256(237)));
+
+    style.result_header_background = Some(Color::Ansi256(235));
+    assert_eq!(style.result_header_background(), Some(Color::Ansi256(235)));
+}
+
+#[test]
 fn test_assign_error_inline_results_only_sets_overlay_field() {
     let mut partial = PartialDisplayStyleConfig::default();
     let kv = KvAssignment::try_from_cli("error.inline_results", "full").unwrap();
@@ -151,6 +206,8 @@ fn test_error_overlay_falls_back_per_field() {
         inline_results: InlineResults::Truncate(TruncateLines { lines: 5 }),
         results_file_link: LinkStyle::Full,
         print_stderr: true,
+        background: None,
+        result_header_background: None,
         error: ErrorStyleConfig {
             inline_results: Some(InlineResults::Full),
             results_file_link: None,
