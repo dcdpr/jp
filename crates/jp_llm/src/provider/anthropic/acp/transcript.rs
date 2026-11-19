@@ -213,13 +213,15 @@ pub(super) fn tool_name(name: &str) -> String {
     format!("mcp__jp__{name}")
 }
 
-/// Move the unanswered user text at the end of `messages` into the prompt.
+/// Move trailing user text blocks from `messages` into the `session/prompt`
+/// request.
 ///
-/// Every trailing text block moves, across consecutive user messages, so the
-/// transcript ends on an assistant message whenever the user messages hold only
-/// text.
-/// Blocks the prompt cannot carry (tool results, attachments) stay, and the
-/// prompt then opens with [`RESUMED_TRANSCRIPT_NOTE`].
+/// Moves every trailing text block across consecutive user messages, so the
+/// transcript ends on an assistant message whenever the trailing user messages
+/// contain only text.
+/// Non-text blocks (tool results and document attachments) cannot be sent in
+/// `session/prompt`, so they remain in `messages` and the returned prompt opens
+/// with [`RESUMED_TRANSCRIPT_NOTE`].
 fn take_pending_prompt(messages: &mut Vec<Message>) -> Vec<String> {
     let mut prompt = Vec::new();
     while let Some(last) = messages.last_mut()
