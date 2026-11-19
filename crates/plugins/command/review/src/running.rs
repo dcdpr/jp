@@ -449,7 +449,7 @@ async fn started(workspace: &Arc<Workspace>, id: ReviewId, number: u32) -> Resul
             .get(number)
             .ok_or_else(|| ApiError::from(format!("{id} has no pass {number}.")))?;
 
-        Reply::accepted(&Started { review: id, pass })
+        Reply::new(StatusCode::ACCEPTED, &Started { review: id, pass })
     })
     .await
 }

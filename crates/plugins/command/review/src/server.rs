@@ -639,11 +639,14 @@ async fn stop(State(server): State<Arc<Server>>, Path(id): Path<String>) -> Resp
     let answer = async {
         let id = api::review_id(&id)?;
         match server.passes.stop(id)? {
-            Some(number) => Reply::accepted(&json!({
-                "review": id.to_string(),
-                "number": number,
-                "stopping": true,
-            })),
+            Some(number) => Reply::new(
+                StatusCode::ACCEPTED,
+                &json!({
+                    "review": id.to_string(),
+                    "number": number,
+                    "stopping": true,
+                }),
+            ),
             None => {
                 server
                     .work(move |workspace| api::unstoppable(&workspace.store, id))

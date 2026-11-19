@@ -20,7 +20,7 @@
 //! Missing files and files that already match the target contents (ignoring
 //! `CRLF` vs. `LF` line endings) are never refused.
 //!
-//! [`write`] writes a set of files under this rule.
+//! [`write()`] writes a set of files under this rule.
 //! [`existing`] compares a file on disk against the target contents,
 //! [`unrecorded`] finds existing files that git cannot restore, and [`refusal`]
 //! formats the error message.
@@ -48,7 +48,7 @@ pub enum Existing {
     Differs,
 }
 
-/// Action taken by [`write`] for a single target file.
+/// Action taken by [`write()`] for a single target file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Written {
     /// The file already matched the target contents and was not modified.

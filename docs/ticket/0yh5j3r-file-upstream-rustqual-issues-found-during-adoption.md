@@ -135,6 +135,18 @@ newer release has fixed.
     As a result, `#[test] fn it_works() { run_thing(); }` (the rustqual
     documentation's own example of what `TQ-001` catches) passes, and only tests
     with neither assertion macros nor calls are reported.
+16. **Own calls are matched by method name alone.** A `.ok()` whose receiver
+    type rustqual can't infer, such as `env::var(..).ok()`, counts as a call
+    into the project once any inherent `impl` in the workspace defines a method
+    named `ok` (`ProjectScope::is_own_method` in
+    `src/adapters/shared/project_scope.rs`).
+    The caller is then classified `Integration` instead of `Trivial`, keeps its
+    complexity metrics (item 7), and has its `unsafe` blocks reported as
+    `CX-006`.
+    Adding a `Reply::ok` constructor to jp-review made four unchanged test
+    helpers in `jp_cli`, `jp_config`, and `jp_ffi` fail `qual-ci` as new
+    `CX-006` findings, and replacing it with `Reply::new` cleared them.
+    Item 6 may have the same cause.
 
 ## Comments
 

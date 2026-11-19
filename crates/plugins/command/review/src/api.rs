@@ -63,19 +63,13 @@ pub(crate) struct Reply {
 }
 
 impl Reply {
-    pub(crate) fn ok(value: &impl Serialize) -> Result<Self, ApiError> {
-        Self::with(StatusCode::OK, value)
-    }
-
-    pub(crate) fn created(value: &impl Serialize) -> Result<Self, ApiError> {
-        Self::with(StatusCode::CREATED, value)
-    }
-
-    pub(crate) fn accepted(value: &impl Serialize) -> Result<Self, ApiError> {
-        Self::with(StatusCode::ACCEPTED, value)
-    }
-
-    fn with(status: StatusCode, value: &impl Serialize) -> Result<Self, ApiError> {
+    /// A reply with `status`, whose body is `value` as JSON.
+    // Not split into `ok`, `created`, and so on: rustqual takes a `.ok()` whose
+    // receiver type it can't infer, such as `env::var(..).ok()`, for a call to
+    // any method named `ok` in the workspace. The caller then counts as calling
+    // workspace code, and its `unsafe` blocks are reported as new CX-006
+    // findings.
+    pub(crate) fn new(status: StatusCode, value: &impl Serialize) -> Result<Self, ApiError> {
         Ok(Self {
             status,
             json: to_json(value)?,
@@ -387,7 +381,7 @@ pub(crate) fn list(store: &Store) -> Result<Reply, ApiError> {
         }
     }
 
-    Reply::ok(&Listing {
+    Reply::new(StatusCode::OK, &Listing {
         reviews: reviews
             .iter()
             .map(|(id, review)| view::summary(*id, review))
@@ -411,7 +405,7 @@ pub(crate) fn create(ctx: &Context<'_>, request: &NewReview) -> Result<Reply, Ap
         ctx.options.base.as_deref(),
     )?;
 
-    Reply::created(&view::summary(id, &review))
+    Reply::new(StatusCode::CREATED, &view::summary(id, &review))
 }
 
 /// The pass running on a review, if one is.
@@ -458,7 +452,7 @@ pub(crate) fn detail(
         Texts::default()
     };
 
-    Reply::ok(&DetailReply {
+    Reply::new(StatusCode::OK, &DetailReply {
         revision: review.revision,
         running: review.passes.running().map(|pass| Running {
             number: pass.number,
@@ -500,7 +494,7 @@ pub(crate) fn file(
         .ok_or_else(|| ApiError::not_found(format!("{path} is absent from version {number}.")))?;
     let source = store.blobs(id).get(name)?;
 
-    Reply::ok(&FileReply {
+    Reply::new(StatusCode::OK, &FileReply {
         review: id,
         version: number,
         path,
@@ -533,9 +527,10 @@ pub(crate) fn diff(store: &Store, id: ReviewId, query: &DiffQuery) -> Result<Rep
         None => review.paths.clone(),
     };
 
-    Reply::ok(&cmd::changes(&store.blobs(id), id, &review, &paths, [
-        from, to,
-    ])?)
+    Reply::new(
+        StatusCode::OK,
+        &cmd::changes(&store.blobs(id), id, &review, &paths, [from, to])?,
+    )
 }
 
 /// The two versions the diff `query` compares: those of the pass it names, or
@@ -645,7 +640,7 @@ pub(crate) fn withdraw(store: &Store, comment: CommentRef) -> Result<Reply, ApiE
             .map_err(|refusal| ApiError::refused(id, &refusal))
     })?;
 
-    Reply::ok(&Withdrawal {
+    Reply::new(StatusCode::OK, &Withdrawal {
         id: comment,
         withdrawn,
     })
@@ -687,7 +682,7 @@ pub(crate) fn resolve(store: &Store, comment: CommentRef) -> Result<Reply, ApiEr
             .map_err(|refusal| ApiError::refused(id, &refusal))
     })?;
 
-    Reply::ok(&Resolved {
+    Reply::new(StatusCode::OK, &Resolved {
         id: comment,
         outcome,
     })
@@ -717,7 +712,7 @@ pub(crate) fn close(store: &Store, id: ReviewId) -> Result<Reply, ApiError> {
             .map_err(|refusal| ApiError::refused(id, &refusal))
     })?;
 
-    Reply::ok(&view::summary(id, &store.read(id)?))
+    Reply::new(StatusCode::OK, &view::summary(id, &store.read(id)?))
 }
 
 /// What `request` anchors a comment to in `review`.
