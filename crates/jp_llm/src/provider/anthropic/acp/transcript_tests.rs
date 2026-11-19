@@ -143,8 +143,8 @@ fn consecutive_requests_move_into_the_prompt_together() {
     );
 }
 
-// Tool results cannot be sent in `session/prompt`, so they remain at the end of
-// the transcript and the prompt prepends `RESUMED_TRANSCRIPT_NOTE`.
+// Tool results have no `session/prompt` form, so they remain at the end of the
+// transcript and the prompt prepends `RESUMED_TRANSCRIPT_NOTE`.
 #[test]
 fn trailing_tool_results_prompt_disowns_the_inserted_reply() {
     let timestamp = datetime!(2026-09-11 12:00:00 Z);
@@ -186,8 +186,8 @@ fn trailing_tool_results_prompt_disowns_the_inserted_reply() {
 }
 
 // Document attachments share the first user message with the request text.
-// Because `session/prompt` only accepts text blocks, the documents remain in
-// the transcript while the request text moves into the prompt.
+// The documents remain in the transcript as native `document` blocks, keeping
+// their title and context, while the request text moves into the prompt.
 #[test]
 fn attachments_stay_in_the_transcript_and_the_prompt_disowns_the_inserted_reply() {
     let timestamp = datetime!(2026-09-11 12:00:00 Z);
