@@ -1,6 +1,6 @@
 # Let jp c rm remove conversations that fail to load
 
-- **Status**: Todo
+- **Status**: Done
 - **Authors**: jp
 - **Date**: 2026-11-19
 - **Label**: client=cli
@@ -28,19 +28,19 @@ delete:
 - Never a directory whose name is not a conversation ID; `jp doctor` shows its
   path for the user to handle.
 
-- [ ] `rm <id>` removes invalid and unstored conversations, in every storage
+- [x] `rm <id>` removes invalid and unstored conversations, in every storage
       root, under the rule above
 
-- [ ] Keeps `rm`'s confirmation prompt; a conversation that doesn't load is
+- [x] Keeps `rm`'s confirmation prompt; a conversation that doesn't load is
       described by ID, path, and why it fails
 
-- [ ] Holds the conversation lock, and refuses a conversation another process
+- [x] Holds the conversation lock, and refuses a conversation another process
       holds
 
-- [ ] A dry run under `--no-persist` that prints what would be removed
+- [x] A dry run under `--no-persist` that prints what would be removed
 
-- [ ] The load-failure report ends with the `jp c rm <ids>` command for the
+- [x] The load-failure report ends with the `jp c rm <ids>` command for the
       listed conversations, until T-1n2ttac points it at `jp doctor`
 
-- [ ] Tests that `.archive/`, `.trash/`, and non-ID directories are never
+- [x] Tests that `.archive/`, `.trash/`, and non-ID directories are never
       touched

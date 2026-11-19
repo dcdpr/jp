@@ -10,13 +10,17 @@
 //! details describe the state the answer acts on and no other process can
 //! change that state while the question is open.
 
+use camino::Utf8PathBuf;
 use clap::{Arg, ArgAction, ArgMatches, Command};
 use crossterm::style::Stylize as _;
 use inquire::InquireError;
 use jp_conversation::ConversationId;
 use jp_inquire::{InlineOption, InlineSelect};
 use jp_storage::backend::Projection;
-use jp_term::sanitize::strip_controls;
+use jp_term::{
+    sanitize::strip_controls,
+    table::{DetailItem, DetailRow, Details, details},
+};
 use jp_workspace::ConversationLock;
 
 use crate::{
@@ -181,27 +185,60 @@ pub(crate) fn confirm_conversation_action(
     active_id: Option<ConversationId>,
 ) -> Result<bool> {
     let id = lock.id();
-
-    if !ctx.term.interactive {
-        return Err(CmdError::from(format!(
-            "{} conversation {id} needs a confirmation and nobody is available to give one; pass \
-             --no-confirm to {} it without asking",
-            action.progressive().to_lowercase(),
-            action.imperative(),
-        ))
-        .into());
-    }
+    ensure_answerable(ctx, action, id)?;
 
     let pretty = ctx.printer.pretty_printing_enabled();
+    let details = action_details(lock, active_id, pretty).with_heading(heading(action, id, pretty));
+
+    ask(ctx, action, &details.to_string())
+}
+
+/// Ask the user to confirm removing a conversation that does not load.
+///
+/// The prompt names the conversation, `status` (why it does not load), and
+/// every directory the removal deletes.
+/// Errors in the same cases as [`confirm_conversation_action`].
+pub(crate) fn confirm_unloaded_removal(
+    ctx: &Ctx,
+    id: ConversationId,
+    status: &str,
+    dirs: &[Utf8PathBuf],
+) -> Result<bool> {
+    let action = ConversationAction::Remove;
+    ensure_answerable(ctx, action, id)?;
+
+    let details = unloaded_details(id, status, dirs, ctx.printer.pretty_printing_enabled());
+    ask(ctx, action, &details)
+}
+
+/// Fail when nobody is available to answer the question for `action` on `id`.
+fn ensure_answerable(ctx: &Ctx, action: ConversationAction, id: ConversationId) -> Result<()> {
+    if ctx.term.interactive {
+        return Ok(());
+    }
+
+    Err(CmdError::from(format!(
+        "{} conversation {id} needs a confirmation and nobody is available to give one; pass \
+         --no-confirm to {} it without asking",
+        action.progressive().to_lowercase(),
+        action.imperative(),
+    ))
+    .into())
+}
+
+/// The line above a prompt's details, e.g. `Removing conversation jp-c…`.
+fn heading(action: ConversationAction, id: ConversationId, pretty: bool) -> String {
     let id_label = if pretty {
         id.to_string().bold().yellow().to_string()
     } else {
         id.to_string()
     };
 
-    let details = action_details(lock, active_id, pretty)
-        .with_heading(format!("{} conversation {id_label}", action.progressive()));
+    format!("{} conversation {id_label}", action.progressive())
+}
 
+/// Show `details` and ask the single-key question for `action`.
+fn ask(ctx: &Ctx, action: ConversationAction, details: &str) -> Result<bool> {
     // `InlineSelect` splits at the last newline, printing everything before it
     // as a preamble and handing inquire the single line it can redraw.
     let message = format!("{details}\n\n{}", action.question());
@@ -236,6 +273,31 @@ fn decide(answer: std::result::Result<char, InquireError>) -> Result<bool> {
         }
         Err(error) => Err(error.into()),
     }
+}
+
+/// Build the details block shown above the prompt for removing a conversation
+/// that does not load.
+fn unloaded_details(
+    id: ConversationId,
+    status: &str,
+    dirs: &[Utf8PathBuf],
+    pretty: bool,
+) -> String {
+    let rows = vec![
+        DetailRow::scalar("ID", id.to_string()),
+        DetailRow::scalar("Status", status),
+        DetailRow::list(
+            "Paths",
+            dirs.iter()
+                .map(|dir| DetailItem::new(dir.as_str(), dir.as_str().into()))
+                .collect(),
+        ),
+    ];
+
+    details(
+        Some(&heading(ConversationAction::Remove, id, pretty)),
+        Details::Fields(rows),
+    )
 }
 
 /// Build the details block shown above a confirmation prompt.

@@ -79,8 +79,9 @@ impl<'a> From<&'a InvalidConversation> for LoadFailure<'a> {
 
 /// Render the text report, or `None` when nothing failed to load.
 ///
-/// Up to three failures are listed with their name and error; more are
-/// summarized as a count.
+/// Up to three failures are listed with their name and error, followed by the
+/// `jp conversation rm` command that removes them; more are summarized as a
+/// count.
 pub(crate) fn render_text(failures: &[LoadFailure<'_>]) -> Option<String> {
     let count = failures.len();
     let noun = if count == 1 {
@@ -98,16 +99,40 @@ pub(crate) fn render_text(failures: &[LoadFailure<'_>]) -> Option<String> {
                 .collect::<Vec<_>>()
                 .join("\n");
             let subject = format!("{count} {noun}");
-            Some(format!(
-                "{} failed to load:\n{entries}",
-                subject.bold().yellow()
-            ))
+            let mut report = format!("{} failed to load:\n{entries}", subject.bold().yellow());
+            if let Some(hint) = rm_hint(failures) {
+                report.push('\n');
+                report.push_str(&hint);
+            }
+            Some(report)
         }
         _ => Some(format!(
             "{} {noun} failed to load. Run with `-v` to list them.",
             count.to_string().bold().yellow()
         )),
     }
+}
+
+/// The command that removes every listed failure with a conversation ID.
+///
+/// `None` when no failure has one: `jp conversation rm` only removes
+/// directories named for a conversation ID.
+fn rm_hint(failures: &[LoadFailure<'_>]) -> Option<String> {
+    let ids: Vec<_> = failures
+        .iter()
+        .filter_map(|failure| failure.id)
+        .map(|id| id.to_string())
+        .collect();
+    let pronoun = match ids.len() {
+        0 => return None,
+        1 => "it",
+        _ => "them",
+    };
+
+    Some(format!(
+        "Run `jp conversation rm {}` to remove {pronoun}.",
+        ids.join(" ")
+    ))
 }
 
 /// Render one JSON record per failure.

@@ -1,9 +1,12 @@
-use std::sync::Arc;
+use std::{fs, sync::Arc};
 
+use camino::{Utf8Path, Utf8PathBuf};
+use camino_tempfile::Utf8TempDir;
 use chrono::{DateTime, Utc};
 use jp_config::AppConfig;
 use jp_conversation::{Conversation, ConversationId};
-use jp_printer::{OutputFormat, Printer};
+use jp_printer::{OutputFormat, Printer, SharedBuffer};
+use jp_storage::backend::{FsStorageBackend, LockBackend as _};
 use jp_workspace::Workspace;
 use tokio::runtime::Runtime;
 
@@ -11,7 +14,8 @@ use super::*;
 use crate::{
     Globals,
     bootstrap::ExecutionContext,
-    cmd::{conversation_id::PositionalIds, time::CreationRange},
+    cli::parse_args,
+    cmd::{conversation_id::PositionalIds, target::ConversationTarget, time::CreationRange},
 };
 
 fn ts(secs: i64) -> DateTime<Utc> {
@@ -190,6 +194,241 @@ fn a_waived_confirmation_removes_without_a_user() {
         ctx.workspace.acquire_conversation(&id).is_err(),
         "the conversation is gone"
     );
+}
+
+struct Store {
+    _tmp: Utf8TempDir,
+    ctx: Ctx,
+    out: SharedBuffer,
+    fs: Arc<FsStorageBackend>,
+    workspace: Utf8PathBuf,
+    user: Utf8PathBuf,
+}
+
+/// A `Ctx` over a workspace on disk with user-local storage, and nobody
+/// available to answer a prompt.
+fn store(persist: bool) -> Store {
+    let tmp = camino_tempfile::tempdir().unwrap();
+    let root = tmp.path().to_owned();
+    let fs = Arc::new(
+        FsStorageBackend::new(&root.join(".jp"))
+            .unwrap()
+            .with_user_storage(&root.join("user"), None, "abc")
+            .unwrap(),
+    );
+    let workspace = root.join(".jp").join("conversations");
+    let user = root.join("user").join("abc").join("conversations");
+
+    let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let ws = Workspace::in_memory(&root).with_backend(Arc::clone(&fs));
+    let mut ctx = Ctx::new(
+        ExecutionContext::for_workspace(&ws),
+        ws,
+        Some(Arc::clone(&fs)),
+        Runtime::new().unwrap(),
+        Globals {
+            persist,
+            ..Globals::default()
+        },
+        AppConfig::new_test(),
+        None,
+        printer,
+    );
+    ctx.term.interactive = false;
+
+    Store {
+        _tmp: tmp,
+        ctx,
+        out,
+        fs,
+        workspace,
+        user,
+    }
+}
+
+fn write_dir(conversations: &Utf8Path, dirname: &str, files: &[(&str, &str)]) -> Utf8PathBuf {
+    let dir = conversations.join(dirname);
+    fs::create_dir_all(&dir).unwrap();
+    for (name, content) in files {
+        fs::write(dir.join(name), content).unwrap();
+    }
+    dir
+}
+
+fn id(dirname: &str) -> ConversationId {
+    ConversationId::try_from_dirname(dirname).unwrap()
+}
+
+fn rm_ids(dirnames: &[&str], confirm: &[&str]) -> Rm {
+    Rm {
+        target: PositionalIds::from_targets(
+            dirnames
+                .iter()
+                .map(|dirname| ConversationTarget::Id(id(dirname)))
+                .collect(),
+        ),
+        range: CreationRange::default(),
+        confirm: parse_args::<ConfirmFlag>(confirm).unwrap(),
+    }
+}
+
+fn run(store: &mut Store, rm: Rm) -> Output {
+    let handles = vec![];
+    let result = Runtime::new()
+        .unwrap()
+        .block_on(rm.run(&mut store.ctx, handles));
+    store.ctx.printer.flush();
+    result
+}
+
+// Typed IDs reach conversations the conversation list leaves out: one whose
+// files are broken and one that was never stored, in either storage root.
+#[test]
+fn removes_conversations_that_fail_to_load_by_id() {
+    let mut s = store(true);
+    let broken = write_dir(&s.workspace, "17941219991-a-title", &[(
+        "metadata.json",
+        "not json",
+    )]);
+    let draft = write_dir(&s.user, "17941219992", &[("QUERY_MESSAGE.md", "typed")]);
+
+    run(
+        &mut s,
+        rm_ids(&["17941219991", "17941219992"], &["--no-confirm"]),
+    )
+    .unwrap();
+
+    assert_eq!(s.out.lock().as_str(), "Conversation(s) removed.\n");
+    assert!(!broken.exists());
+    assert!(!draft.exists());
+}
+
+// The removal deletes a conversation's own directories and nothing else, however
+// close another entry's name is.
+#[test]
+fn removing_by_id_leaves_everything_else_alone() {
+    let mut s = store(true);
+    let target = write_dir(&s.workspace, "17941219991", &[(
+        "metadata.json",
+        "not json",
+    )]);
+    let keep = [
+        write_dir(&s.workspace, "179412199915", &[(
+            "metadata.json",
+            "not json",
+        )]),
+        write_dir(&s.workspace.join(".archive"), "17941219991", &[(
+            "events.json",
+            "[]",
+        )]),
+        write_dir(&s.workspace.join(".trash"), "17941219991", &[(
+            "events.json",
+            "[]",
+        )]),
+        write_dir(&s.workspace, "not-an-id", &[("notes", "")]),
+    ];
+
+    run(&mut s, rm_ids(&["17941219991"], &["--no-confirm"])).unwrap();
+
+    assert!(!target.exists());
+    for dir in keep {
+        assert!(dir.is_dir(), "{dir} must survive");
+    }
+    assert!(s.workspace.is_dir());
+}
+
+// The conversations `rm` always handled still go the usual way.
+#[test]
+fn removes_a_loading_conversation_by_id() {
+    let mut s = store(true);
+    s.fs.write_test_conversation(&id("17941219993"), &Conversation::default());
+    s.ctx.workspace.load_conversation_index();
+
+    run(&mut s, rm_ids(&["17941219993"], &["--no-confirm"])).unwrap();
+
+    assert!(
+        s.ctx
+            .workspace
+            .acquire_conversation(&id("17941219993"))
+            .is_err()
+    );
+    assert!(!s.workspace.join("17941219993").exists());
+}
+
+#[test]
+fn an_id_with_no_directory_is_not_found() {
+    let mut s = store(true);
+    let expected: cmd::Error = crate::error::Error::from(
+        s.ctx
+            .workspace
+            .acquire_conversation(&id("17941219994"))
+            .unwrap_err(),
+    )
+    .into();
+
+    let error = run(&mut s, rm_ids(&["17941219994"], &["--no-confirm"])).unwrap_err();
+
+    assert_eq!(error.message, expected.message);
+}
+
+#[test]
+fn refuses_a_conversation_another_process_holds() {
+    let mut s = store(true);
+    let dir = write_dir(&s.workspace, "17941219991", &[(
+        "metadata.json",
+        "not json",
+    )]);
+    let _lock =
+        s.fs.try_lock(&id("17941219991").to_string(), None)
+            .unwrap()
+            .unwrap();
+
+    let error = run(&mut s, rm_ids(&["17941219991"], &["--no-confirm"])).unwrap_err();
+
+    assert_eq!(
+        error.message.as_deref(),
+        Some("Conversation jp-c17941219991 is in use by another process.")
+    );
+    assert!(dir.is_dir());
+}
+
+// Removal cannot be undone, so it is never assumed when nobody can be asked.
+#[test]
+fn asks_before_removing_and_fails_when_nobody_can_answer() {
+    let mut s = store(true);
+    let dir = write_dir(&s.workspace, "17941219991", &[(
+        "metadata.json",
+        "not json",
+    )]);
+
+    let error = run(&mut s, rm_ids(&["17941219991"], &[])).unwrap_err();
+
+    assert_eq!(
+        error.message.as_deref(),
+        Some(
+            "removing conversation jp-c17941219991 needs a confirmation and nobody is available \
+             to give one; pass --no-confirm to remove it without asking"
+        )
+    );
+    assert!(dir.is_dir());
+}
+
+#[test]
+fn no_persist_removes_nothing_and_says_so() {
+    let mut s = store(false);
+    let dir = write_dir(&s.workspace, "17941219991", &[(
+        "metadata.json",
+        "not json",
+    )]);
+
+    run(&mut s, rm_ids(&["17941219991"], &["--no-confirm"])).unwrap();
+
+    assert_eq!(
+        s.out.lock().as_str(),
+        "Conversation(s) removed.\n\nThis command ran under `--no-persist`, no files on disk were \
+         modified.\n"
+    );
+    assert!(dir.is_dir());
 }
 
 #[test]

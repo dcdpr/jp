@@ -22,7 +22,7 @@ use super::{
     PersistBackend, Projection, SanitizeReport, SessionBackend,
 };
 use crate::{
-    CONVERSATIONS_DIR, LoadError, Storage, dir_entries,
+    CONVERSATIONS_DIR, LoadError, Storage, conversation_dirs_for_id, dir_entries,
     error::Result,
     get_expiring_timestamp,
     load::load_json,
@@ -206,6 +206,29 @@ impl FsStorageBackend {
             .flatten()
             .map(|root| root.join(CONVERSATIONS_DIR))
             .collect()
+    }
+
+    /// Every directory of conversation `id` among the live conversations of
+    /// each storage root, workspace first, whether or not it loads.
+    ///
+    /// Lists only `<id>` and `<id>-<title>` directly inside a `conversations/`
+    /// directory: never the archive, other hidden entries, or a directory whose
+    /// name merely starts with the same digits.
+    #[must_use]
+    pub fn live_conversation_dirs(&self, id: &ConversationId) -> Vec<Utf8PathBuf> {
+        let prefix = id.to_dirname(None);
+        self.conversations_dirs()
+            .iter()
+            .flat_map(|dir| conversation_dirs_for_id(dir, &prefix))
+            .collect()
+    }
+
+    /// Whether another process holds conversation `id`'s lock.
+    ///
+    /// Checks without taking the lock, so nothing is written.
+    #[must_use]
+    pub fn is_conversation_locked(&self, id: &ConversationId) -> bool {
+        self.storage.is_conversation_locked(&id.to_string())
     }
 
     /// Check every conversation directory in both roots without moving any.

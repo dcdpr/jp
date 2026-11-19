@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use camino::Utf8PathBuf;
 use chrono::{DateTime, TimeZone as _, Utc};
 use jp_config::AppConfig;
 use jp_conversation::{Conversation, Labels};
@@ -219,6 +220,49 @@ fn details_report_an_unpinned_conversation_as_unpinned() {
     assert!(
         rendered.contains(" Pinned  No"),
         "expected an explicit `Pinned  No` row, got:\n{rendered}"
+    );
+}
+
+// A conversation that does not load has no title or events to show, so the
+// prompt says why it does not load and which directories go.
+#[test]
+fn unloaded_details_show_the_status_and_every_directory() {
+    let details = unloaded_details(
+        make_id(1000),
+        "fails to load: missing metadata.json",
+        &[
+            Utf8PathBuf::from("/ws/.jp/conversations/10000"),
+            Utf8PathBuf::from("/user/conversations/10000-a-title"),
+        ],
+        false,
+    );
+
+    assert_eq!(
+        details,
+        "Removing conversation jp-c10000\n\n     ID  jp-c10000\n Status  fails to load: missing \
+         metadata.json\n  Paths\n         1. /ws/.jp/conversations/10000\n         2. \
+         /user/conversations/10000-a-title"
+    );
+}
+
+#[test]
+fn an_unloaded_removal_nobody_can_confirm_fails() {
+    let id = make_id(1000);
+    let mut ctx = test_ctx(id, Conversation::default());
+    ctx.term.interactive = false;
+
+    let error = confirm_unloaded_removal(&ctx, id, "fails to load", &[])
+        .expect_err("a removal nobody can confirm must not be assumed");
+    let crate::error::Error::Command(error) = error else {
+        panic!("expected a command error, got: {error}");
+    };
+
+    assert_eq!(
+        error.message.as_deref(),
+        Some(
+            "removing conversation jp-c10000 needs a confirmation and nobody is available to give \
+             one; pass --no-confirm to remove it without asking"
+        )
     );
 }
 

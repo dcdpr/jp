@@ -270,6 +270,37 @@ fn expiry_skips_invalid_conversations() {
     assert_eq!(backend.load_expired_conversation_ids(now), [valid]);
 }
 
+// Removal deletes what this lists, so it names a conversation's own directories
+// and nothing that merely shares a prefix or sits in another partition.
+#[test]
+fn live_conversation_dirs_match_the_id_exactly() {
+    let tmp = tempdir().unwrap();
+    let backend = FsStorageBackend::new(&tmp.path().join("ws"))
+        .unwrap()
+        .with_user_storage(&tmp.path().join("user"), None, "abc")
+        .unwrap();
+    let workspace = tmp.path().join("ws").join(CONVERSATIONS_DIR);
+    let user = tmp.path().join("user").join("abc").join(CONVERSATIONS_DIR);
+    for dir in [
+        workspace.join("17941219994"),
+        user.join("17941219994-a-title"),
+        workspace.join("179412199945"),
+        workspace.join(".archive").join("17941219994"),
+        workspace.join(".trash").join("17941219994"),
+        workspace.join("not-an-id"),
+    ] {
+        fs::create_dir_all(dir).unwrap();
+    }
+    fs::write(workspace.join("17941219994-file"), "").unwrap();
+
+    let id = ConversationId::try_from_deciseconds_str("17941219994").unwrap();
+
+    assert_eq!(backend.live_conversation_dirs(&id), [
+        workspace.join("17941219994"),
+        user.join("17941219994-a-title"),
+    ]);
+}
+
 #[test]
 fn test_persist_conversation_creates_all_files() {
     let tmp = tempdir().unwrap();

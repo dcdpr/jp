@@ -51,7 +51,10 @@ fn one_failure_is_listed_in_the_singular() {
 
     assert_eq!(
         report.as_deref(),
-        Some("1 conversation failed to load:\n  jp-c17636257526: missing metadata.json")
+        Some(
+            "1 conversation failed to load:\n  jp-c17636257526: missing metadata.json\nRun `jp \
+             conversation rm jp-c17636257526` to remove it."
+        )
     );
 }
 
@@ -71,8 +74,22 @@ fn up_to_three_failures_are_listed() {
         Some(
             "3 conversations failed to load:\n  jp-c17636257526: missing metadata.json\n  \
              jp-c17636257527: metadata.json: invalid JSON at line 1, column 2\n  not-a-valid-id: \
-             invalid directory name"
+             invalid directory name\nRun `jp conversation rm jp-c17636257526 jp-c17636257527` to \
+             remove them."
         )
+    );
+}
+
+// `jp c rm` only removes directories named for a conversation ID, so a
+// directory whose name is not one gets no command.
+#[test]
+fn no_command_is_suggested_for_directories_that_are_not_ids() {
+    let dirname = ValidationError::InvalidDirname;
+    let report = plain(&[failure("not-a-valid-id", &dirname)]);
+
+    assert_eq!(
+        report.as_deref(),
+        Some("1 conversation failed to load:\n  not-a-valid-id: invalid directory name")
     );
 }
 
@@ -101,7 +118,8 @@ fn the_count_and_conversations_are_highlighted() {
     assert_eq!(
         listed,
         format!(
-            "{} failed to load:\n  {}: missing metadata.json",
+            "{} failed to load:\n  {}: missing metadata.json\nRun `jp conversation rm \
+             jp-c17636257526` to remove it.",
             "1 conversation".bold().yellow(),
             "jp-c17636257526".bold().yellow(),
         )
@@ -223,7 +241,7 @@ fn the_text_report_prints_when_the_notice_drops_even_under_quiet() {
     assert_eq!(
         strip_ansi_escapes::strip_str(err.lock().as_str()),
         "1 conversation failed to load:\n  jp-c17941219994: metadata.json: invalid JSON at line \
-         1, column 2\n"
+         1, column 2\nRun `jp conversation rm jp-c17941219994` to remove it.\n"
     );
 }
 

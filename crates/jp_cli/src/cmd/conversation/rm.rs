@@ -1,17 +1,27 @@
+use std::sync::Arc;
+
+use camino::Utf8PathBuf;
 use clap::{ArgMatches, Command};
 use jp_conversation::ConversationId;
+use jp_storage::{
+    backend::{FsStorageBackend, LockBackend as _, PersistBackend as _},
+    validate::{DirContents, validate_conversation_dir},
+};
 use jp_workspace::{ConversationHandle, Workspace};
 
 use crate::{
     cli::CommandArgs,
     cmd::{
-        ConversationLoadRequest, Output,
-        conversation_id::PositionalIds,
+        self, ConversationLoadRequest, Output,
+        conversation_id::{ConversationIds as _, PositionalIds},
         lock::{LockOutcome, LockRequest, acquire_lock},
+        target::ConversationTarget,
         time::CreationRange,
     },
     ctx::Ctx,
-    shared::confirm::{ConfirmFlag, ConversationAction, confirm_conversation_action},
+    shared::confirm::{
+        ConfirmFlag, ConversationAction, confirm_conversation_action, confirm_unloaded_removal,
+    },
 };
 
 /// `jp conversation rm`.
@@ -48,30 +58,38 @@ impl CommandArgs for Rm {
 }
 
 impl Rm {
-    pub(crate) async fn run(self, ctx: &mut Ctx, mut handles: Vec<ConversationHandle>) -> Output {
+    pub(crate) async fn run(self, ctx: &mut Ctx, handles: Vec<ConversationHandle>) -> Output {
         let active_id = ctx
             .session
             .as_ref()
             .and_then(|s| ctx.workspace.session_active_conversation(s));
 
-        // Range mode: resolve IDs by filtering all conversations on
-        // creation date. `conversation_load_request` returns `none()` in this
-        // mode, so `handles` is empty here.
-        if self.range.is_set() {
-            handles = self.resolve_filtered(&ctx.workspace)?;
-
+        // `conversation_load_request` returns `none()` in range mode and for
+        // literal IDs, so `handles` is empty in both and the targets are
+        // resolved here.
+        let removals = if self.range.is_set() {
+            let handles = self.resolve_filtered(&ctx.workspace)?;
             if handles.is_empty() {
                 ctx.printer.println("No conversations match the range.");
                 return Ok(());
             }
-        }
+            handles.into_iter().map(Removal::Loaded).collect()
+        } else if let Some(ids) = self.literal_ids() {
+            resolve_literal(ctx, &ids)?
+        } else {
+            handles.into_iter().map(Removal::Loaded).collect::<Vec<_>>()
+        };
 
         // Removal is destructive, so the default (`None`) prompts; only an
         // explicit `--no-confirm` / `--yes` skips it.
         let force = self.confirm.preference() == Some(false);
         let mut removed = 0_usize;
-        for handle in handles {
-            if remove(ctx, handle, active_id, force).await? {
+        for removal in removals {
+            let done = match removal {
+                Removal::Loaded(handle) => remove(ctx, handle, active_id, force).await?,
+                Removal::Unloaded { fs, id, dirs } => remove_unloaded(ctx, &fs, id, &dirs, force)?,
+            };
+            if done {
                 removed += 1;
             }
         }
@@ -81,15 +99,39 @@ impl Rm {
         } else {
             ctx.printer.println("Conversation(s) removed.");
         }
+        if !ctx.term.args.persist {
+            ctx.printer.println("");
+            ctx.printer
+                .println("This command ran under `--no-persist`, no files on disk were modified.");
+        }
         Ok(())
     }
 
     pub(crate) fn conversation_load_request(&self) -> ConversationLoadRequest {
-        if self.range.is_set() {
+        if self.range.is_set() || self.literal_ids().is_some() {
             ConversationLoadRequest::none()
         } else {
             ConversationLoadRequest::explicit_or_session(&self.target)
         }
+    }
+
+    /// The targets, when every one is a typed conversation ID.
+    ///
+    /// Those are resolved by `run` rather than through the conversation index,
+    /// which leaves out conversations that fail to load.
+    fn literal_ids(&self) -> Option<Vec<ConversationId>> {
+        let targets = self.target.ids();
+        if targets.is_empty() {
+            return None;
+        }
+
+        targets
+            .iter()
+            .map(|target| match target {
+                ConversationTarget::Id(id) => Some(*id),
+                _ => None,
+            })
+            .collect()
     }
 
     /// Resolve handles by applying the range filter over the workspace.
@@ -108,6 +150,98 @@ impl Rm {
             .filter(|(id, _)| self.range.matches(**id))
             .map(|(id, _)| workspace.acquire_conversation(id).map_err(Into::into))
             .collect()
+    }
+}
+
+/// A conversation `rm` is about to remove.
+enum Removal {
+    /// A conversation in the conversation index.
+    Loaded(ConversationHandle),
+
+    /// A conversation the index leaves out, because it fails to load or was
+    /// never stored, with its live directories.
+    Unloaded {
+        fs: Arc<FsStorageBackend>,
+        id: ConversationId,
+        dirs: Vec<Utf8PathBuf>,
+    },
+}
+
+/// Resolve typed IDs: through the index when the conversation loads, otherwise
+/// by its live directories on disk.
+///
+/// Every ID is resolved before anything is removed, so one unknown ID fails the
+/// run without touching the others.
+fn resolve_literal(ctx: &Ctx, ids: &[ConversationId]) -> Result<Vec<Removal>, cmd::Error> {
+    ids.iter()
+        .map(|id| {
+            let not_found = match ctx.workspace.acquire_conversation(id) {
+                Ok(handle) => return Ok(Removal::Loaded(handle)),
+                Err(error) => error,
+            };
+
+            let unloaded = ctx.fs_backend.as_ref().and_then(|fs| {
+                let dirs = fs.live_conversation_dirs(id);
+                (!dirs.is_empty()).then(|| Removal::Unloaded {
+                    fs: Arc::clone(fs),
+                    id: *id,
+                    dirs,
+                })
+            });
+            unloaded.ok_or_else(|| crate::error::Error::from(not_found).into())
+        })
+        .collect()
+}
+
+/// Remove a conversation that does not load, asking first unless `force`.
+///
+/// Deletes `dirs`, the conversation's live directories, while holding its lock.
+/// Under `--no-persist` it checks the lock without taking it and deletes
+/// nothing.
+/// Returns whether the conversation was (or, in a dry run, would be) removed.
+fn remove_unloaded(
+    ctx: &Ctx,
+    fs: &FsStorageBackend,
+    id: ConversationId,
+    dirs: &[Utf8PathBuf],
+    force: bool,
+) -> Result<bool, cmd::Error> {
+    let dry_run = !ctx.term.args.persist;
+    let locked = || cmd::Error::from(format!("Conversation {id} is in use by another process."));
+
+    let _guard = if dry_run {
+        if fs.is_conversation_locked(&id) {
+            return Err(locked());
+        }
+        None
+    } else {
+        Some(fs.try_lock(&id.to_string(), None)?.ok_or_else(locked)?)
+    };
+
+    if !force && !confirm_unloaded_removal(ctx, id, &unloaded_status(dirs), dirs)? {
+        return Ok(false);
+    }
+
+    if !dry_run {
+        fs.remove(&id)?;
+    }
+    Ok(true)
+}
+
+/// Why a conversation is not in the index, for the removal prompt.
+fn unloaded_status(dirs: &[Utf8PathBuf]) -> String {
+    let mut contents = vec![];
+    for dir in dirs {
+        match validate_conversation_dir(dir) {
+            Ok(found) => contents.push(found),
+            Err(error) => return format!("fails to load: {error}"),
+        }
+    }
+
+    if contents.iter().all(|found| *found == DirContents::Unstored) {
+        "never stored".to_owned()
+    } else {
+        "not in the conversation list".to_owned()
     }
 }
 

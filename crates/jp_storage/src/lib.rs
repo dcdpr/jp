@@ -876,14 +876,8 @@ fn adopt_conversation_dir(
 /// Remove every directory matching conversation `id` from a single
 /// `conversations/` directory.
 fn remove_conversation_dirs(id: &ConversationId, conversations_dir: &Utf8Path) -> Result<()> {
-    let prefix = id.to_dirname(None);
-    for entry in dir_entries(conversations_dir) {
-        let name = entry.file_name().to_owned();
-        let matches =
-            (name == prefix || name.starts_with(&format!("{prefix}-"))) && entry.path().is_dir();
-        if matches {
-            fs::remove_dir_all(entry.into_path())?;
-        }
+    for dir in conversation_dirs_for_id(conversations_dir, &id.to_dirname(None)) {
+        fs::remove_dir_all(dir)?;
     }
     Ok(())
 }
