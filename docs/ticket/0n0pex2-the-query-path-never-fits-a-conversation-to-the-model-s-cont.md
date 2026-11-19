@@ -67,14 +67,14 @@ Findings and the rest of the proposals: T-0n0nwz3.
 
 Gemini 4 models (`gemini-4-carbon`, `-argon`, `-neon`, `-hydrogen`) share one
 1,048,576-token window across input, thinking, and output.
-The Google provider asks for `max_tokens`, falling back to the model's 65,536
-output limit, whatever the conversation size, so a conversation within 64K of
-the window asks for more output than fits.
+The Google provider always requests `max_tokens` (defaulting to the model's
+65,536 output limit) regardless of conversation size, so a conversation within
+64K of the window limit requests more output than fits.
 
-A query-path fit check for these models has to subtract the requested output
-from the window, not compare the input to it alone.
-Google says nothing about whether the API rejects such a request or clamps the
-output, so the clamp case may be silent, like T-0de0hry on Cerebras.
+A query-path fit check for these models must subtract the requested output from
+the window rather than comparing the input against the window alone.
+Google does not document whether the API rejects such a request or clamps the
+output, so clamping may be silent, like T-0de0hry on Cerebras.
 
 With long decode (T-1nfjjv6), `promptTokenCount` sums every hop's input and
 overstates the context size; the fit check should use the first hop's count.

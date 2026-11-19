@@ -19,18 +19,18 @@ Google's migration notes say to remove them from requests:
 On a Gemini 4 model, a user who sets `temperature = 0.2` gets the server's
 default sampling and no sign that the setting had no effect.
 
-The fix is to leave the three fields out for models that ignore them, and warn
-once when a configured value is dropped, naming the model.
-That needs a way to know which models those are: either a fact in the Google
-`MODEL_OVERRIDES` catalog, or a rule on the Gemini 4 family.
-The catalog keeps unknown, newer models sending what the user configured, which
-matches how unknown models are treated elsewhere.
+The fix is to omit the three fields for models that ignore them, and warn once
+when a configured value is dropped, naming the model.
+To identify those models, either record a capability flag in the Google
+`MODEL_OVERRIDES` catalog or match on the Gemini 4 model family.
+Using the catalog preserves configured sampling parameters for unknown or newer
+models, matching how unknown models are handled elsewhere.
 
-This is the opposite gap from T-0px2158, where configured parameters never reach
-providers that would use them.
+This is the inverse of T-0px2158, where configured parameters are not forwarded
+to providers that support them.
 
-- [ ] Mark the Gemini 4 catalog entries as not taking sampling parameters.
-- [ ] Leave `temperature`, `top_p`, and `top_k` out of their requests, with a
+- [ ] Mark the Gemini 4 catalog entries as not accepting sampling parameters.
+- [ ] Omit `temperature`, `top_p`, and `top_k` from their requests, logging a
       warning when a configured value is dropped.
-- [ ] Test that a Gemini 4 request carries none of the three, and that a model
-      outside the catalog still does.
+- [ ] Test that a Gemini 4 request omits all three parameters, and that a model
+      outside the catalog still sends them.

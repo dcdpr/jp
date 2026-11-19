@@ -18,10 +18,11 @@ Move the API route to `claude-haiku-5-5`, taking its details from the catalog
 rather than a hand-written `ModelDetails`, and re-record every Anthropic API
 cassette.
 
-`SubscriptionTestRoute::model()` returns the API route's model.
-Pin it to `claude-haiku-4-5`: its cassettes cannot be re-recorded until
-T-1ngnv8p gives the subscription route an ACP recorder.
+`SubscriptionTestRoute::model()` delegates to the API route's model.
+Pin `SubscriptionTestRoute::model()` to `claude-haiku-4-5` because its cassettes
+cannot be re-recorded until T-1ngnv8p adds an ACP recorder for the subscription
+route.
 
-- [ ] API route on `claude-haiku-5-5`.
-- [ ] Subscription route pinned to `claude-haiku-4-5`, pointing at T-1ngnv8p.
-- [ ] Re-record `provider::tests::anthropic::`.
+- [ ] Move the API route to `claude-haiku-5-5`.
+- [ ] Pin the subscription route to `claude-haiku-4-5`, referencing T-1ngnv8p.
+- [ ] Re-record `provider::tests::anthropic::*`.

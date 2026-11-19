@@ -39,10 +39,10 @@ API body.
 Land before or with T-19mv6rh, which deletes the direct flow these cassettes
 depend on.
 
-- [ ] ACP route for the shared suite, recording through the ACP cassette tap.
-- [ ] Drop the `records_new_cases` exception for the Anthropic subscription
-      route.
+- [ ] Add an ACP route for the shared suite that records through the ACP
+      cassette tap.
+- [ ] Remove the `records_new_cases` skip for the Anthropic subscription route.
 - [ ] Record every `every_route` case against ACP and delete
       `tests/fixtures/anthropic_subscription/`.
-- [ ] Record the subscription route against a 5.x model; it stays on
-      `claude-haiku-4-5` until then so the existing cassettes keep replaying.
+- [ ] Record the subscription route against a 5.x model (keeping it on
+      `claude-haiku-4-5` until then so existing cassettes continue to replay).
