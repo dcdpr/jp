@@ -57,3 +57,28 @@ Landing them in either order works.
 Landing neither leaves the provider error as the only guard.
 
 Findings and the rest of the proposals: T-0n0nwz3.
+
+## Comments
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-19T10:14:56Z
+
+Gemini 4 models (`gemini-4-carbon`, `-argon`, `-neon`, `-hydrogen`) share one
+1,048,576-token window across input, thinking, and output.
+The Google provider always requests `max_tokens` (defaulting to the model's
+65,536 output limit) regardless of conversation size, so a conversation within
+64K of the window limit requests more output than fits.
+
+A query-path fit check for these models must subtract the requested output from
+the window rather than comparing the input against the window alone.
+Google does not document whether the API rejects such a request or clamps the
+output, so clamping may be silent, like T-0de0hry on Cerebras.
+
+With long decode (T-1nfjjv6), each hop's `promptTokenCount` includes the output
+of earlier hops, so summing them overstates usage.
+Usage accounting takes the first hop's count as the prompt size.
+The preflight fit check is a separate question: it must count or estimate the
+request about to be sent (history, the previous turn's full output, and new
+attachments) rather than reuse a recorded count.
