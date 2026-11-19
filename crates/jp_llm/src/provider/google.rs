@@ -625,6 +625,24 @@ static MODEL_OVERRIDES: LazyLock<Catalog<ModelDetails>> = LazyLock::new(|| {
             },
         },
         Entry {
+            aliases: &[],
+            value: ModelDetails {
+                id: id("gemini-4-neon"),
+                display_name: None,
+                context_window: None,
+                max_output_tokens: None,
+                reasoning: Some(
+                    ReasoningDetails::leveled(false, true, true, true, true, false).always_on(),
+                ),
+                knowledge_cutoff: Some(date(2026, 3, 1)),
+                deprecated: Some(ModelDeprecation::Active),
+                structured_output: Some(true),
+                prefill: None,
+                subscription: None,
+                features: vec![],
+            },
+        },
+        Entry {
             aliases: &[
                 "gemini-3.1-pro-preview",
                 "gemini-3.1-pro-preview-customtools",
