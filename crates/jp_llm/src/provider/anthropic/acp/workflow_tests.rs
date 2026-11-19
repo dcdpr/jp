@@ -11,8 +11,8 @@ use jp_conversation::{
 };
 use serde_json::{Map, json};
 
-use super::transcript::PreparedRequest;
-use crate::query::ChatQuery;
+use super::transcript::{PreparedRequest, RESUMED_TRANSCRIPT_NOTE};
+use crate::{provider::CONTINUE_MESSAGE, query::ChatQuery};
 
 fn conversation() -> ChatQuery {
     let timestamp = datetime!(2026-09-11 12:00:00 Z);
@@ -68,7 +68,7 @@ fn conversation() -> ChatQuery {
 fn returning_to_anthropic_retains_the_intervening_openai_turn() {
     let model = super::model_details(&"claude-opus-5".parse().unwrap());
     let prepared = PreparedRequest::new(&model, conversation()).unwrap();
-    assert_eq!(prepared.prompt, "Continue.");
+    assert_eq!(prepared.prompt, vec!["Continue."]);
     assert_eq!(
         serde_json::to_value(prepared.history).unwrap(),
         json!([
@@ -88,7 +88,7 @@ fn selected_turn_fork_excludes_unselected_history() {
     query.thread.events.retain_turns(|index| index != 1);
     let model = super::model_details(&"claude-opus-5".parse().unwrap());
     let prepared = PreparedRequest::new(&model, query).unwrap();
-    assert_eq!(prepared.prompt, "Continue.");
+    assert_eq!(prepared.prompt, vec!["Continue."]);
     assert_eq!(
         serde_json::to_value(prepared.history).unwrap(),
         json!([
@@ -113,7 +113,7 @@ fn replay_uses_the_replacement_request() {
     ]);
     let model = super::model_details(&"claude-opus-5".parse().unwrap());
     let prepared = PreparedRequest::new(&model, query).unwrap();
-    assert_eq!(prepared.prompt, "Revisit instead.");
+    assert_eq!(prepared.prompt, vec!["Revisit instead."]);
     assert_eq!(prepared.history.len(), 6);
     assert_eq!(
         serde_json::to_value(&prepared.history[5]).unwrap(),
@@ -132,7 +132,7 @@ fn compacted_view_is_encoded_without_mutating_raw_history() {
     let before = query.thread.events.iter().cloned().collect::<Vec<_>>();
     let model = super::model_details(&"claude-opus-5".parse().unwrap());
     let prepared = PreparedRequest::new(&model, query.clone()).unwrap();
-    assert_eq!(prepared.prompt, "Continue.");
+    assert_eq!(prepared.prompt, vec!["Continue."]);
     assert_eq!(prepared.history.len(), 2);
     insta::assert_json_snapshot!("compacted_native_history", prepared.history);
     assert_eq!(
@@ -151,11 +151,10 @@ fn tool_result_continuation_does_not_repeat_the_previous_request() {
         .retain(|event| !matches!(event.kind, EventKind::ChatResponse(_)));
     let model = super::model_details(&"claude-opus-5".parse().unwrap());
     let prepared = PreparedRequest::new(&model, query).unwrap();
-    assert_eq!(
-        prepared.prompt,
-        "Continue your response exactly from where you left off. Do not repeat content you \
-         already produced."
-    );
+    assert_eq!(prepared.prompt, vec![
+        RESUMED_TRANSCRIPT_NOTE,
+        CONTINUE_MESSAGE
+    ]);
     assert_eq!(prepared.history.len(), 3);
     assert_eq!(
         serde_json::to_value(&prepared.history[2]).unwrap(),
@@ -180,7 +179,7 @@ fn large_historical_tool_results_remain_complete() {
         message["content"][0]["content"].as_str(),
         Some(content.as_str())
     );
-    assert_eq!(prepared.prompt, "Continue.");
+    assert_eq!(prepared.prompt, vec!["Continue."]);
 }
 
 #[test]
