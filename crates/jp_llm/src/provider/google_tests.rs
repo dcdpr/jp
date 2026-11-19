@@ -15,7 +15,6 @@ use crate::{
 // TODO: Test specific conditions as detailed in
 // <https://ai.google.dev/gemini-api/docs/thought-signatures>:
 //
-// - parallel function calls
 // - dummy thought signatures
 // - multi-turn conversations
 #[test(tokio::test)]
@@ -791,13 +790,18 @@ fn a_function_call_without_args_streams_an_empty_object() {
 mod trailing_thought_signature {
     use gemini_client_rs::types;
     use indexmap::IndexMap;
-    use jp_conversation::{ConversationEvent, ConversationStream, event::ChatRequest};
-    use serde_json::{Value, json};
+    use jp_conversation::{
+        ConversationEvent, ConversationStream,
+        event::{ChatRequest, ToolCallRequest, ToolCallResponse},
+    };
+    use serde_json::{Map, Value, json};
 
     use crate::{
         event::Event,
         event_builder::EventBuilder,
-        provider::google::{THOUGHT_SIGNATURE_KEY, convert_events, map_response},
+        provider::google::{
+            THOUGHT_SIGNATURE_DUMMY_VALUE, THOUGHT_SIGNATURE_KEY, convert_events, map_response,
+        },
     };
 
     fn chunk(parts: &Value, finish_reason: Option<&str>) -> types::GenerateContentResponse {
@@ -985,6 +989,140 @@ mod trailing_thought_signature {
             committed[1].metadata.get(THOUGHT_SIGNATURE_KEY),
             Some(&json!("SIG"))
         );
+    }
+
+    /// Gemini signs only the first parallel function call in a step, and
+    /// expects the history back in that shape: the signature on the first call,
+    /// no signature on subsequent calls, and a response for each call.
+    ///
+    /// See: <https://ai.google.dev/gemini-api/docs/thought-signatures>
+    #[test]
+    fn parallel_function_calls_resend_the_signature_on_the_first_call_only() {
+        let committed = commit(vec![chunk(
+            &json!([
+                {
+                    "functionCall": { "id": "call_paris", "name": "weather", "args": { "city": "Paris" } },
+                    "thoughtSignature": "SIG",
+                },
+                {
+                    "functionCall": { "id": "call_london", "name": "weather", "args": { "city": "London" } },
+                },
+            ]),
+            Some("STOP"),
+        )]);
+
+        assert_eq!(committed.len(), 2);
+        assert_eq!(signatures(&committed), ["SIG"]);
+        assert_eq!(
+            committed[0].as_tool_call_request().map(|r| r.id.as_str()),
+            Some("call_paris")
+        );
+
+        let mut events = ConversationStream::new_test();
+        events.start_turn(ChatRequest::from("Weather in Paris and London?"));
+        events.extend(committed);
+        events.extend([
+            ConversationEvent::now(ToolCallResponse {
+                id: "call_paris".to_owned(),
+                result: Ok("15C".to_owned()),
+            }),
+            ConversationEvent::now(ToolCallResponse {
+                id: "call_london".to_owned(),
+                result: Ok("12C".to_owned()),
+            }),
+        ]);
+
+        let contents = convert_events(events);
+        assert_eq!(contents.len(), 3);
+
+        let model = &contents[1];
+        assert_eq!(model.role, Some(types::Role::Model));
+        let calls: Vec<_> = model
+            .parts
+            .iter()
+            .map(|part| match &part.data {
+                types::ContentData::FunctionCall(call) => {
+                    (call.id.as_deref(), part.thought_signature.as_deref())
+                }
+                other => panic!("expected a function call, got {other:?}"),
+            })
+            .collect();
+        assert_eq!(calls, [
+            (Some("call_paris"), Some("SIG")),
+            (Some("call_london"), None),
+        ]);
+
+        let user = &contents[2];
+        assert_eq!(user.role, Some(types::Role::User));
+        let responses: Vec<_> = user
+            .parts
+            .iter()
+            .map(|part| match &part.data {
+                types::ContentData::FunctionResponse(response) => response.id.as_deref(),
+                other => panic!("expected a function response, got {other:?}"),
+            })
+            .collect();
+        assert_eq!(responses, [Some("call_paris"), Some("call_london")]);
+    }
+
+    /// When a step's first function call has no signature (such as history from
+    /// another model), it receives the dummy signature that skips validation;
+    /// subsequent calls receive none.
+    /// Gemini validates every step of the current turn, so each parallel batch
+    /// gets its own dummy.
+    #[test]
+    fn unsigned_parallel_function_calls_get_the_dummy_on_the_first_call_of_each_step() {
+        let mut events = ConversationStream::new_test();
+        events.start_turn(ChatRequest::from(
+            "Weather in Paris, London, Berlin and Rome?",
+        ));
+        events.extend([
+            ConversationEvent::now(ToolCallRequest::new(
+                "call_paris".to_owned(),
+                "weather".to_owned(),
+                Map::from_iter([("city".to_owned(), json!("Paris"))]),
+            )),
+            ConversationEvent::now(ToolCallRequest::new(
+                "call_london".to_owned(),
+                "weather".to_owned(),
+                Map::from_iter([("city".to_owned(), json!("London"))]),
+            )),
+            ConversationEvent::now(ToolCallResponse {
+                id: "call_paris".to_owned(),
+                result: Ok("15C".to_owned()),
+            }),
+            ConversationEvent::now(ToolCallResponse {
+                id: "call_london".to_owned(),
+                result: Ok("12C".to_owned()),
+            }),
+            ConversationEvent::now(ToolCallRequest::new(
+                "call_berlin".to_owned(),
+                "weather".to_owned(),
+                Map::from_iter([("city".to_owned(), json!("Berlin"))]),
+            )),
+            ConversationEvent::now(ToolCallRequest::new(
+                "call_rome".to_owned(),
+                "weather".to_owned(),
+                Map::from_iter([("city".to_owned(), json!("Rome"))]),
+            )),
+        ]);
+
+        let contents = convert_events(events);
+        assert_eq!(contents.len(), 4);
+
+        let first_step: Vec<_> = contents[1]
+            .parts
+            .iter()
+            .map(|part| part.thought_signature.as_deref())
+            .collect();
+        assert_eq!(first_step, [Some(THOUGHT_SIGNATURE_DUMMY_VALUE), None]);
+
+        let second_step: Vec<_> = contents[3]
+            .parts
+            .iter()
+            .map(|part| part.thought_signature.as_deref())
+            .collect();
+        assert_eq!(second_step, [Some(THOUGHT_SIGNATURE_DUMMY_VALUE), None]);
     }
 
     /// Empty parts without a signature carry nothing and stay skipped.
