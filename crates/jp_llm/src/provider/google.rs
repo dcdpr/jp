@@ -625,6 +625,24 @@ static MODEL_OVERRIDES: LazyLock<Catalog<ModelDetails>> = LazyLock::new(|| {
             },
         },
         Entry {
+            aliases: &[],
+            value: ModelDetails {
+                id: id("gemini-4-neon"),
+                display_name: None,
+                context_window: None,
+                max_output_tokens: None,
+                reasoning: Some(
+                    ReasoningDetails::leveled(false, true, true, true, true, false).always_on(),
+                ),
+                knowledge_cutoff: Some(date(2026, 3, 1)),
+                deprecated: Some(ModelDeprecation::Active),
+                structured_output: Some(true),
+                prefill: None,
+                subscription: None,
+                features: vec![],
+            },
+        },
+        Entry {
             aliases: &[
                 "gemini-3.1-pro-preview",
                 "gemini-3.1-pro-preview-customtools",
@@ -770,11 +788,9 @@ fn effort_to_thinking_level(
         ReasoningEffort::None | ReasoningEffort::Xlow => Some(types::ThinkingLevel::Minimal),
         ReasoningEffort::Low => Some(types::ThinkingLevel::Low),
         ReasoningEffort::Medium => Some(types::ThinkingLevel::Medium),
-        ReasoningEffort::High | ReasoningEffort::XHigh | ReasoningEffort::Max => {
-            Some(types::ThinkingLevel::High)
-        }
         // `abs_to_rel` has already converted any absolute budget.
-        ReasoningEffort::Absolute(_) => Some(types::ThinkingLevel::High),
+        ReasoningEffort::High | ReasoningEffort::Absolute(_) => Some(types::ThinkingLevel::High),
+        ReasoningEffort::XHigh | ReasoningEffort::Max => Some(types::ThinkingLevel::XHigh),
     }
 }
 
@@ -1251,6 +1267,37 @@ fn convert_tools(tools: Vec<ToolDefinition>) -> Vec<types::Tool> {
         .collect()
 }
 
+/// Assign a dummy thought signature to the first function call of each model
+/// step if it has none, so Gemini skips signature validation.
+///
+/// Gemini models that enforce thought signatures reject a request in which the
+/// first function call of any step in the current turn lacks one, such as a
+/// call from another model's history or one with a stripped signature.
+/// Earlier turns are not validated, but signing every step keeps this
+/// independent of where the current turn starts.
+///
+/// Gemini signs only the first of a step's parallel function calls, so
+/// subsequent calls stay unsigned.
+///
+/// See: <https://ai.google.dev/gemini-api/docs/thought-signatures>
+fn sign_first_function_calls(contents: &mut [types::Content]) {
+    for content in contents
+        .iter_mut()
+        .filter(|c| c.role == Some(types::Role::Model))
+    {
+        let first_call = content
+            .parts
+            .iter_mut()
+            .find(|p| matches!(p.data, types::ContentData::FunctionCall(_)));
+
+        if let Some(part) = first_call
+            && part.thought_signature.is_none()
+        {
+            part.thought_signature = Some(THOUGHT_SIGNATURE_DUMMY_VALUE.to_owned());
+        }
+    }
+}
+
 fn convert_events(events: ConversationStream) -> Vec<types::Content> {
     // Google requires the `ToolCallResponse` to contain the name of the tool
     // call from the `ToolCallRequest`, even though they also share the same ID.
@@ -1263,7 +1310,7 @@ fn convert_events(events: ConversationStream) -> Vec<types::Content> {
     // response, but if that is untrue, we silently proceed without erroring.
     let mut tool_call_names = HashMap::new();
 
-    events
+    let mut contents: Vec<types::Content> = events
         .into_iter()
         .filter_map(|event| {
             let ConversationEvent {
@@ -1304,12 +1351,7 @@ fn convert_events(events: ConversationStream) -> Vec<types::Content> {
                         arguments: Value::Object(request.arguments),
                     }),
 
-                    thought_signature: Some(
-                        metadata
-                            .shift_remove(THOUGHT_SIGNATURE_KEY)
-                            .and_then(|v| v.as_str().map(str::to_owned))
-                            .unwrap_or_else(|| THOUGHT_SIGNATURE_DUMMY_VALUE.to_owned()),
-                    ),
+                    thought_signature: None,
                     thought: false,
                     metadata: None,
                 }),
@@ -1350,7 +1392,10 @@ fn convert_events(events: ConversationStream) -> Vec<types::Content> {
             }
 
             messages
-        })
+        });
+
+    sign_first_function_calls(&mut contents);
+    contents
 }
 
 /// The `google.rpc.Status` details of a failed API call, empty if the response

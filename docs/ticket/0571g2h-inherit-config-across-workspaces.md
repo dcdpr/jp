@@ -20,12 +20,12 @@ workspace.
 So a second workspace needs its own copies of everything worth sharing: tool
 configuration, personas, skills, knowledge sections, model definitions, render
 style.
-Copies drift, and the drift is silent — the second workspace simply behaves
-like an older version of the first.
+Copies drift, and the drift is silent: the second workspace simply behaves like
+an older version of the first.
 
 This is separate from [RFD 035] (multi-root *load path* resolution, which is
 about where `--cfg` looks for named entries within one workspace) and from [RFD
-D38] (which is about anchoring a single `extends` path at a named config root).
+D61] (which is about anchoring a single `extends` path at a named config root).
 Neither addresses one workspace inheriting another's config as a whole.
 
 ## Rough direction
@@ -37,7 +37,7 @@ Open questions that make this RFD-shaped rather than ticket-shaped:
 
 - What is the unit of inheritance?
   Whole config, or named entries only?
-- How is the parent identified — path, workspace id, or something stable across
+- How is the parent identified: path, workspace id, or something stable across
   machines?
 - What happens when the parent is unavailable (moved, deleted, different
   machine)?
@@ -48,10 +48,10 @@ Open questions that make this RFD-shaped rather than ticket-shaped:
 
 ## Related
 
-- [RFD D38] — root-qualified extends paths.
+- [RFD D61]: root-qualified extends paths.
   Solves the narrow case of addressing one file in another root; this ticket is
   the general case.
-- [RFD 046] — nested workspace projection.
+- [RFD 046]: nested workspace projection.
 
 ## Next step
 

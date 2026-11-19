@@ -4,7 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-05-03
-- **Extended by**: [RFD 098], [RFD 126]
+- **Extended by**: [RFD 098], [RFD 126], [RFD 138]
 - **Summary**: Assigns a stable, stream-unique identifier to every
   `ConversationStream` entry so references survive manual edits.
 
@@ -607,3 +607,4 @@ Can land alongside Phase 3.
 [RFD 072]: 072-command-plugin-system.md
 [RFD 098]: 098-request-response-event-linking.md
 [RFD 126]: 126-turn-summaries.md
+[RFD 138]: 138-clickable-tool-call-headers.md
