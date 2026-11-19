@@ -147,6 +147,13 @@ conversations.
 Under [RFD 046]'s nested workspace projection, the resolved path follows the
 nested structure automatically.
 
+> [!TIP]
+> [RFD 138] adds `jp conversation path --loaded`, which prints the path to the
+> conversation copy JP itself loads (for a projected conversation, the
+> user-local copy when its stream is newer than the workspace projection).
+> Scripts that read conversation files should pass `--loaded`; `jp conversation
+> edit` keeps the workspace-first resolution described above.
+
 ## Drawbacks
 
 **`edit` default behavior change.** Running bare `jp conversation edit` opens
@@ -196,3 +203,4 @@ and pass them to `EditorConfig::command()`.
 
 [RFD 039]: 039-conversation-trees.md
 [RFD 046]: 046-nested-workspace-projection-for-conversation-trees.md
+[RFD 138]: 138-clickable-tool-call-headers.md
