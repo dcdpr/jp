@@ -148,6 +148,8 @@ Ok(
                             print_stderr: Some(
                                 true,
                             ),
+                            background: None,
+                            result_header_background: None,
                             error: PartialErrorStyleConfig {
                                 inline_results: None,
                                 results_file_link: None,

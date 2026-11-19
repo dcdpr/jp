@@ -86,7 +86,7 @@ use tracing::{debug, info, warn};
 use url::Url;
 
 use super::{
-    ToolRenderer,
+    ToolBackgrounds, ToolRenderer,
     executor::{
         CallExecutors, Executor, ExecutorError, ExecutorResult, ExecutorSource, FanOutCall,
         PermissionInfo, Review,
@@ -355,6 +355,13 @@ struct Batch {
     /// Whether the approved calls were released to run.
     released: bool,
 
+    /// Whether each result is shown under a header naming its tool.
+    ///
+    /// Set when more than one call with visible chrome was released: every call
+    /// is shown before any of them runs, so a result cannot follow its own
+    /// call.
+    labelled: bool,
+
     /// Whether the progress row was claimed for the released calls.
     progress: bool,
 
@@ -380,6 +387,7 @@ impl Batch {
             open_prompt: None,
             stream_ended: false,
             released: false,
+            labelled: false,
             progress: false,
             connection_lost: false,
         }
@@ -854,6 +862,19 @@ impl ToolCoordinator {
             .map_or(self.tools_config.defaults.style.joins_reasoning, |cfg| {
                 cfg.style().joins_reasoning
             })
+    }
+
+    /// The backgrounds this tool's chrome is drawn against, per
+    /// `conversation.tools.<name>.style.background` and
+    /// `result_header_background`.
+    ///
+    /// A tool with no config entry takes them from the `*` defaults block,
+    /// matching replay.
+    pub fn backgrounds(&self, tool_name: &str) -> ToolBackgrounds {
+        self.tools_config.get(tool_name).map_or_else(
+            || ToolBackgrounds::from(&self.tools_config.defaults.style),
+            |cfg| ToolBackgrounds::from(cfg.style()),
+        )
     }
 
     /// Return the response recorded for a cancelled call to `tool_name`: the
@@ -1672,7 +1693,7 @@ impl ToolCoordinator {
         }
         let tool_name = batch.calls[index].tool_name.clone();
         host.renderer.focus(&batch.calls[index].tool_id);
-        self.render_result(&tool_name, &review.response, host.renderer);
+        self.render_result(&tool_name, &review.response, batch.labelled, host.renderer);
         self.settle(batch, index, review, host);
     }
 
@@ -1937,6 +1958,11 @@ impl ToolCoordinator {
         }
 
         debug!(tools = admitted.len(), "Starting tool execution.");
+        let shown = admitted
+            .iter()
+            .filter(|&&index| !self.is_hidden(&batch.calls[index].tool_name))
+            .count();
+        batch.labelled = shown > 1;
 
         // Claimed before the sinks below, not after: `StatusRegion::source`
         // copies the region it is asked of, so a sink taken from the inert
@@ -2217,7 +2243,7 @@ impl ToolCoordinator {
         match self.result_mode(&tool_name) {
             ResultMode::Allow => {
                 host.renderer.focus(&batch.calls[index].tool_id);
-                self.render_result(&tool_name, &response, host.renderer);
+                self.render_result(&tool_name, &response, batch.labelled, host.renderer);
                 self.settle(batch, index, Review::unchanged(response), host);
             }
             // The execution service applies `result = "skip"` itself, so this
@@ -2231,7 +2257,7 @@ impl ToolCoordinator {
             // and the result stands as the tool produced it.
             ResultMode::Ask | ResultMode::Edit if !host.interactive => {
                 host.renderer.focus(&batch.calls[index].tool_id);
-                self.render_result(&tool_name, &response, host.renderer);
+                self.render_result(&tool_name, &response, batch.labelled, host.renderer);
                 self.settle(batch, index, Review::unchanged(response), host);
             }
             // Both Ask and Edit prompt whenever a user is there to answer: the
@@ -2514,7 +2540,15 @@ impl ToolCoordinator {
     }
 
     /// Show a finished call's result, unless the tool renders no chrome.
-    fn render_result(&self, tool_name: &str, response: &ToolCallResponse, renderer: &ToolRenderer) {
+    ///
+    /// A `labelled` result is shown under a header naming `tool_name`.
+    fn render_result(
+        &self,
+        tool_name: &str,
+        response: &ToolCallResponse,
+        labelled: bool,
+        renderer: &ToolRenderer,
+    ) {
         if self.is_hidden(tool_name) {
             return;
         }
@@ -2528,7 +2562,16 @@ impl ToolCoordinator {
                 )
             })
             .unwrap_or_default();
-        renderer.render_result(response, &inline_results, &results_file_link);
+        if labelled {
+            renderer.render_labelled_result(
+                response,
+                tool_name,
+                &inline_results,
+                &results_file_link,
+            );
+        } else {
+            renderer.render_result(response, &inline_results, &results_file_link);
+        }
     }
 
     /// Record a call JP could not complete.

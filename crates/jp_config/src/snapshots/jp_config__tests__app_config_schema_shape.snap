@@ -475,6 +475,7 @@ conversation: ConversationConfig
       result?: "allow" | "ask" | "edit" | "skip"
       run: "ask" | "allow" | "edit" | "skip"
       style: DisplayStyleConfig
+        background: int | string | null
         error: ErrorStyleConfig
           inline_results: "off" | "full" | string | null
           results_file_link: "full" | "osc8" | "off" | null
@@ -493,6 +494,7 @@ conversation: ConversationConfig
               program: string
               shell?: bool
         print_stderr?: bool
+        result_header_background: int | string | null
         results_file_link?: "full" | "osc8" | "off"
     tools (flattened): MergeableMap_ToolConfig
       |:
@@ -861,6 +863,7 @@ conversation: ConversationConfig
           source: string(/^(builtin|local)(\..+)?$|^(mcp|plugin\.command)\.[^.]+(\..+)?$/)
           style:
             |: DisplayStyleConfig
+              background: int | string | null
               error: ErrorStyleConfig
                 inline_results: "off" | "full" | string | null
                 results_file_link: "full" | "osc8" | "off" | null
@@ -879,6 +882,7 @@ conversation: ConversationConfig
                     program: string
                     shell?: bool
               print_stderr?: bool
+              result_header_background: int | string | null
               results_file_link?: "full" | "osc8" | "off"
             |: null
           summary: string | null
@@ -1251,6 +1255,7 @@ conversation: ConversationConfig
             source: string(/^(builtin|local)(\..+)?$|^(mcp|plugin\.command)\.[^.]+(\..+)?$/)
             style:
               |: DisplayStyleConfig
+                background: int | string | null
                 error: ErrorStyleConfig
                   inline_results: "off" | "full" | string | null
                   results_file_link: "full" | "osc8" | "off" | null
@@ -1269,6 +1274,7 @@ conversation: ConversationConfig
                       program: string
                       shell?: bool
                 print_stderr?: bool
+                result_header_background: int | string | null
                 results_file_link?: "full" | "osc8" | "off"
               |: null
             summary: string | null

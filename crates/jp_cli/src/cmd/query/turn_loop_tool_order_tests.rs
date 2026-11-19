@@ -978,13 +978,14 @@ async fn a_later_call_is_prepared_while_an_earlier_one_is_being_approved() {
             Some(true),
             "the second call was not prepared while the first prompt was open"
         );
-        // The second call is only shown once the first is answered.
+        // The second call is only shown once the first is answered. Both run
+        // together after that, so each result is labelled with its tool.
         assert_eq!(
             turn.transcript,
             "\n── jp (anthropic/test) \
              ─────────────────────────────────────────────────────────\n\nCalling tool \
              tool\n\ncall 0\n[prompt: Run local tool tool?]\n\nCalling tool tool\n\ncall \
-             1\n[prompt: Run local tool tool?]\n\nran\n\nran\n\n"
+             1\n[prompt: Run local tool tool?]\n\ntool result\n\nran\n\ntool result\n\nran\n\n"
         );
         assert_eq!(turn.responses, vec![
             ToolCallResponse {
@@ -1045,7 +1046,8 @@ async fn formatter_questions_to_the_assistant_are_answered_for_each_call() {
             "\n── jp (anthropic/test) \
              ─────────────────────────────────────────────────────────\n\nCalling tool \
              tool\n\ncall 0 confirm=true\n[prompt: Run local tool tool?]\n\nCalling tool \
-             tool\n\ncall 1 confirm=true\n[prompt: Run local tool tool?]\n\nran\n\nran\n\n"
+             tool\n\ncall 1 confirm=true\n[prompt: Run local tool tool?]\n\ntool \
+             result\n\nran\n\ntool result\n\nran\n\n"
         );
         let mut inquiries = turn.inquiries;
         inquiries.sort_by_key(|inquiry| inquiry.id().as_str().to_owned());

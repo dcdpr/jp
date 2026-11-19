@@ -61,9 +61,7 @@ use jp_md::{
     format::{CodeBlockState, Formatter, TerminalOptions, render_separator},
     theme,
 };
-use jp_printer::{
-    LineSink, OutputLines, OutputWidth, PrintableExt as _, Printer, RegionStyle, StatusRegion,
-};
+use jp_printer::{LineSink, OutputLines, PrintableExt as _, Printer, RegionStyle, StatusRegion};
 use jp_term::{
     ansi::RESET,
     background::{BackgroundFill, DefaultBackground},
@@ -72,7 +70,7 @@ use jp_term::{
 use tracing::warn;
 
 use super::tool::output_lines;
-use crate::format::sanitize_mode;
+use crate::format::{full_width_background, sanitize_mode};
 
 /// The kind of content last pushed into the renderer.
 ///
@@ -1037,24 +1035,12 @@ impl ChatRenderer {
     }
 
     /// The full-width background fill configured for reasoning content, if any.
-    ///
-    /// A terminal gets the erase-to-end-of-line escape: it follows the real
-    /// edge, so a window resized part-way through a response still shades whole
-    /// lines, and it leaves no trailing spaces in a copied selection.
-    /// A width declared by the caller pads with real spaces instead, because a
-    /// host that lays out its own sub-window (an `fzf` preview pane) drops the
-    /// erase, leaving the shading to stop at the last character.
     fn reasoning_background(&self) -> Option<DefaultBackground> {
+        let width = self.printer.output_width();
         self.config
             .reasoning
             .background
-            .map(|color| DefaultBackground {
-                param: crate::format::color_to_bg_param(color),
-                fill: match self.printer.output_width() {
-                    OutputWidth::Declared(width) => BackgroundFill::Column(usize::from(width)),
-                    OutputWidth::Terminal(_) | OutputWidth::Unknown => BackgroundFill::Terminal,
-                },
-            })
+            .map(|color| full_width_background(color, width))
     }
 
     /// The background reasoning is formatted against.

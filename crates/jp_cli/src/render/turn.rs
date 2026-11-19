@@ -23,7 +23,9 @@ use jp_mcp::server::fan_out;
 use jp_printer::{ErrChannel, Printer};
 use tracing::warn;
 
-use super::{RenderFlow, ToolRenderer, TurnView, metadata::get_rendered_arguments};
+use super::{
+    RenderFlow, ToolBackgrounds, ToolRenderer, TurnView, metadata::get_rendered_arguments,
+};
 
 /// Controls where the renderer sources its configuration from.
 #[derive(Debug, Clone)]
@@ -98,6 +100,16 @@ pub struct TurnRenderer {
     /// decide chrome visibility, so `jp conversation print` honors the same
     /// settings as the live path's `tool_chrome_visible` predicate.
     tool_chrome_shown: bool,
+
+    /// Tool calls requested whose responses have not been rendered yet.
+    unanswered_calls: usize,
+
+    /// Tool calls shown since the last time no call was waiting on its
+    /// response, one per fanned-out operation.
+    ///
+    /// With more than one, every call is shown before any result, so each
+    /// result is labelled with its tool.
+    batch_calls: usize,
 }
 
 impl TurnRenderer {
@@ -135,6 +147,8 @@ impl TurnRenderer {
             user_only: false,
             tool_names: HashMap::new(),
             tool_chrome_shown,
+            unanswered_calls: 0,
+            batch_calls: 0,
         }
     }
 
@@ -172,6 +186,10 @@ impl TurnRenderer {
 
             match &event_with_cfg.event.kind {
                 EventKind::TurnStart(_) => {
+                    // A call left without a response by an interrupted turn
+                    // does not join the next turn's calls.
+                    self.unanswered_calls = 0;
+                    self.batch_calls = 0;
                     self.view.begin_turn();
                 }
 
@@ -201,7 +219,13 @@ impl TurnRenderer {
                         .view
                         .enter_tool_call_region(chrome_visible)
                         .filter(|_| style.joins_reasoning);
-                    self.tool.set_region(&req.id, region);
+                    self.tool
+                        .set_region(&req.id, region, ToolBackgrounds::from(style));
+
+                    if self.unanswered_calls == 0 {
+                        self.batch_calls = 0;
+                    }
+                    self.unanswered_calls += 1;
 
                     if chrome_visible {
                         // A fanned-out call was shown live as one header per
@@ -220,6 +244,7 @@ impl TurnRenderer {
                             self.tool
                                 .render_tool_call(&req.name, arguments, &style.parameters);
                         }
+                        self.batch_calls += operations.len();
 
                         // Show stored formatter output when replaying a tool
                         // call whose parameters style ran a formatter.
@@ -242,10 +267,22 @@ impl TurnRenderer {
                         && !tool_style.hidden;
                     let inline_results = tool_style.inline_results(is_error);
                     let results_file_link = tool_style.results_file_link(is_error);
+                    self.unanswered_calls = self.unanswered_calls.saturating_sub(1);
 
-                    if chrome_visible {
-                        self.tool
-                            .render_result(resp, inline_results, results_file_link);
+                    if !chrome_visible {
+                        continue;
+                    }
+
+                    match name {
+                        Some(name) if self.batch_calls > 1 => self.tool.render_labelled_result(
+                            resp,
+                            name,
+                            inline_results,
+                            results_file_link,
+                        ),
+                        _ => self
+                            .tool
+                            .render_result(resp, inline_results, results_file_link),
                     }
                 }
 

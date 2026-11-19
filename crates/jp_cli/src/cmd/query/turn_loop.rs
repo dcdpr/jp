@@ -896,7 +896,11 @@ async fn drive_turn(
                                 let region = turn_coordinator
                                     .enter_tool_call(tool_chrome_visible)
                                     .filter(|_| tool_coordinator.joins_reasoning(name));
-                                tool_renderer.set_region(id, region);
+                                tool_renderer.set_region(
+                                    id,
+                                    region,
+                                    tool_coordinator.backgrounds(name),
+                                );
 
                                 tool_renderer.register(id, name);
                                 tool_coordinator
