@@ -9,9 +9,9 @@
 
 ## Summary
 
-A **link file** is a plain-text copy of conversation content that JP writes to
-disk so a printed path or `file://` hyperlink has a target to open: the full
-tool result behind `results_file_link`, and the summary reported by `jp
+A **link file** is a disposable plain-text copy of conversation content that JP
+writes to disk so a printed path or `file://` hyperlink has a target to open:
+the full tool result behind `results_file_link`, and the summary reported by `jp
 conversation compact`.
 This RFD moves link files from the OS temp directory to a per-conversation
 directory inside the User-Workspace Directory, names them by content hash, and
@@ -44,12 +44,11 @@ The tool result path has four defects:
    Because `jp conversation print` uses the same renderer, replaying a
    conversation rewrites every tool result file.
 
-[RFD 115] (Accepted) makes link file retention more important.
-It truncates large tool responses before persisting them to `events.json` while
-passing the full output to the renderer, relying on the link file to preserve
-the untruncated output.
-Once RFD 115 lands, the link file is the only copy of that output, so JP should
-control its lifetime.
+The summary path has a defect of its own: its filename depends only on the
+conversation and the turn range.
+Compacting a range, removing that compaction with `jp conversation compact
+--reset`, and compacting the same range again overwrites the file, so the path
+printed first opens the second summary.
 
 ## Design
 
@@ -85,8 +84,11 @@ Storing link files in the User-Workspace Directory provides three properties:
 - **Outside the project tree.** Link files stay out of version control and are
   invisible to tools that scan project files.
 - **Scoped to the workspace.** The directory already holds the user-local
-  conversations from which link files are derived ([RFD 031]), and command
-  plugins that receive the user-workspace path can read link files directly.
+  conversations from which link files are derived ([RFD 031]).
+  Command plugins that receive the user-workspace path can see link files, as
+  they can see those conversations, but link files are not an interface for them
+  (see [Relationship to `events.json` and the Blob
+  Store](#relationship-to-events-json-and-the-blob-store)).
 - **Managed by JP.** JP owns the directory lifecycle and can prune expired files
   on its own schedule.
 
@@ -119,9 +121,8 @@ Content-addressed filenames have three consequences:
 
 - **Identical content shares one file.** Replaying a conversation with `jp
   conversation print` resolves to the file written during the live run.
-- **Distinct content never collides.** Once [RFD 115] lands, a live run writes
-  the full tool output and a later replay writes the truncated persisted
-  response under a different hash, preserving both files.
+- **Distinct content never collides.** Two results with different content get
+  different names, and so do two summaries of the same turn range.
 - **The renderer needs only the conversation ID.** It does not need an event ID
   or operation index.
   A fanned-out tool call writes one file per operation during a live run and one
@@ -131,6 +132,8 @@ Content-addressed filenames have three consequences:
 
 - JP writes a link file only when printing a path or hyperlink to it.
   Rendering a tool result with `results_file_link = "off"` writes no file.
+  The content stays in the event stream, so a later render that prints the link
+  writes the file then; `jp conversation print --style full` is one.
 - If the target file already exists, JP updates its modification time (`mtime`)
   without rewriting the content.
   Otherwise, JP writes to a temporary sibling file and atomically renames it
@@ -192,13 +195,14 @@ The sweep runs inside the existing end-of-run cleanup in `jp_cli::run` alongside
 orphaned lock-file and stale session-mapping removal, covering every command
 that writes link files.
 
-Accepting `"unlimited"` and rejecting `0` matches `size_threshold` in [RFD 115];
-a zero-day window would delete newly written link files before the command
-exits.
+`0` is rejected because a zero-day window would delete every link file at the
+end of the run that wrote it.
+`"unlimited"` is the only way to turn pruning off.
 
 Unlike [RFD 130], which fixes session-record retention at 30 days, link-file
-retention is configurable because link files can be large and, once [RFD 115]
-lands, hold untruncated tool output stored nowhere else.
+retention is configurable: link files are plain-text copies of tool output and
+can be large, so one user wants them gone sooner and another wants links in
+scrollback to keep working longer.
 
 ### Relationship to `events.json` and the Blob Store
 
@@ -218,10 +222,19 @@ Terminal links require an uncompressed file with an appropriate extension,
 whether the underlying payload lives inline in `events.json` or in the blob
 store.
 
-Under [RFD 115], the retention window bounds how long the untruncated output of
-a capped tool response remains on disk.
-Until the blob store or a future design persists untruncated output durably, it
-is deleted when its link file is pruned.
+A link file is a disposable copy, and the event stream remains the source of
+truth:
+
+- **A rendered result may have no link file.** JP writes one only where it
+  prints a link, so none exists when the link is off, the tool is hidden, or the
+  write failed.
+- **A link file can disappear at any time.** JP prunes link files on its own
+  schedule, and deleting `tmp/` by hand is safe.
+- **Names and locations are not an interface.** Both can change without notice,
+  and nothing in JP reads a link file back.
+
+A feature that needs tool output reads the event stream.
+One that needs output the event stream does not hold needs storage of its own.
 
 ### Code Organization
 
@@ -254,7 +267,7 @@ of each run.
 
 - **Keep using the OS temp directory with content-addressed filenames.** This
   eliminates filename collisions, but the OS still deletes link files on its own
-  schedule, along with untruncated tool output once [RFD 115] lands.
+  schedule.
 - **Use the platform cache directory.** System cache cleaners can purge it at
   any time, it is not scoped per workspace, and it introduces another JP-managed
   root directory to document.
@@ -283,10 +296,11 @@ of each run.
   If JP later records per-run diagnostic manifests, those manifests can
   reference the content-addressed link files written during the run.
 - **Name link files by the response's `EventId`.** Event-ID naming requires
-  threading the `EventId` into the renderer, adding an operation index for
-  fanned-out tool calls, and preventing replays from overwriting a live run's
-  untruncated output with the capped response stored in `events.json`.
-  Content hashing avoids all three requirements.
+  threading the `EventId` into the renderer and adding an operation index for
+  fanned-out tool calls.
+  It also gives each file a name that reads as the address of a stream entry,
+  which invites other features to depend on it.
+  Content hashing needs neither, and its names mean nothing outside the link.
 - **Emit custom-scheme links that resolve stream entries directly.** A custom
   URI scheme handled by a user script requires no files on disk, but does
   nothing until the user configures a scheme handler.
@@ -302,8 +316,13 @@ of each run.
   machine-readable source of truth.
 - **Durable payload storage.** Durable storage belongs to the
   content-addressable blob store ([RFD 066]).
-- **Exposing link files to the assistant.** [RFD 115] defers assistant access to
-  truncated output to the blob store.
+- **Exposing link files to the assistant or to other features.** Link files are
+  not an interface (see [Relationship to `events.json` and the Blob
+  Store](#relationship-to-events-json-and-the-blob-store)).
+- **Keeping output the event stream does not hold.** [RFD 115] describes the
+  renderer's temp file as retaining tool output beyond its cap.
+  This RFD gives no such guarantee: with the link off, JP writes no file.
+  Where that output is kept is RFD 115's to settle.
 - **Changing link rendering options.** When links are printed, their display
   text, and `results_file_link` (including its error overlay) remain unchanged.
 - **Relocating diagnostic temp files.** Trace logs and dumped request or config
@@ -366,8 +385,9 @@ of each run.
 - [RFD 031]: Durable conversation storage and the User-Workspace Directory.
 - [RFD 066]: Content-addressable blob store for durable payload storage.
 - [RFD 073]: Layered storage backend traits (unchanged by this RFD).
-- [RFD 115]: Bounded tool output, which relies on link files to hold untruncated
-  tool output.
+- [RFD 115]: Bounded tool output, which describes the renderer's temp file as
+  retaining output beyond its cap; this RFD does not guarantee that (see
+  [Non-Goals](#non-goals)).
 - [RFD 130]: Session record retention, which establishes the 30-day retention
   precedent.
 - `crates/jp_cli/src/render/tool.rs`: `ToolRenderer::render_result`.
