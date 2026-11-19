@@ -283,7 +283,9 @@ fn only_the_reviews_conversation_or_its_running_pass_is_admitted() {
 }
 
 /// The files enter a conversation once: a later pass sends what changed since
-/// the last one the assistant answered there.
+/// the last one the assistant answered there was sent, not since it ended,
+/// since the version recorded at the end may hold edits the assistant never
+/// read.
 #[test]
 fn the_first_pass_in_a_conversation_carries_the_files() {
     let mut review = review(&["One.", "Two.", "Three."]);
@@ -296,7 +298,7 @@ fn the_first_pass_in_a_conversation_carries_the_files() {
 
     assert_eq!(review.passes.carry(2), Carry::Changes {
         pass: 1,
-        version: 3
+        version: 1
     });
 }
 

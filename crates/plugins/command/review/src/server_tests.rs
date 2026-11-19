@@ -411,7 +411,8 @@ async fn reloaded(
 }
 
 /// The next request runs under what the configuration says now; the store stays
-/// where the server started, whatever `dir` says.
+/// where the server started, whatever `dir` says, and so does the `dir` a pass
+/// hands its turn, for the tools to find the review there.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_reloaded_configuration_is_what_the_next_requests_run_under() {
     let mut served = served().await;
@@ -436,6 +437,16 @@ async fn a_reloaded_configuration_is_what_the_next_requests_run_under() {
     assert_eq!(reloaded, Ok(()));
     assert_eq!(workspace.options.cfg, ["skill/review"]);
     assert_eq!(workspace.store, store);
+    assert_eq!(workspace.options.dir, None);
+    assert!(
+        !workspace
+            .options
+            .pass_cfg()
+            .iter()
+            .any(|entry| entry.contains("elsewhere")),
+        "{:?}",
+        workspace.options.pass_cfg()
+    );
     let (_, review) = served.send("POST", "/api/reviews", r#"{"files":["docs/a.md"]}"#);
     assert_eq!(review["author"], "Ada <ada@example.com>");
 }

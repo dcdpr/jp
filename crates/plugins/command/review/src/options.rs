@@ -38,8 +38,8 @@ const DEFAULT_MAX_CHARS: usize = 600;
 /// Default port for `jp review serve`.
 const DEFAULT_PORT: u16 = 3001;
 
-/// Config path for the `dir` option, passed via `--cfg`.
-const DIR_KEY: &str = "plugins.command.review.options.dir";
+/// Config path of the options a pass forwards to its turn.
+const OPTIONS_KEY: &str = "plugins.command.review.options";
 
 /// Resolved plugin options from `plugins.command.review.options` and CLI
 /// overrides.
@@ -139,16 +139,39 @@ impl Options {
     }
 
     /// These options, with what `overrides` sets in their place.
-    ///
-    /// `--dir` is added to the configurations a pass runs under, so the tools
-    /// the assistant answers with store its replies in the same directory.
     pub(crate) fn with(mut self, overrides: &Overrides) -> Self {
         if let Some(dir) = &overrides.dir {
-            self.cfg.push(format!("{DIR_KEY}={dir}"));
             self.dir = Some(dir.clone());
         }
 
         self
+    }
+
+    /// The configurations a pass runs its turn under, before any the pass
+    /// itself names.
+    ///
+    /// First `assistant`, `max_chars`, and `dir` when it is set, as these
+    /// options hold them, then `cfg`, so a value `cfg` sets wins.
+    /// The tools that answer a pass read their options from the turn, and a
+    /// conversation's configuration doesn't follow later edits to the config
+    /// files, so without these a turn could store its replies in another
+    /// directory, or hold them to an older limit.
+    /// Each is a JSON assignment (`KEY:=VALUE`), which keeps `max_chars` a
+    /// number where `KEY=VALUE` would make it a string.
+    pub(crate) fn pass_cfg(&self) -> Vec<String> {
+        let mut forwarded = vec![
+            ("assistant", Value::from(self.assistant.as_str())),
+            ("max_chars", Value::from(self.max_chars)),
+        ];
+        if let Some(dir) = &self.dir {
+            forwarded.push(("dir", Value::from(dir.as_str())));
+        }
+
+        forwarded
+            .into_iter()
+            .map(|(key, value)| format!("{OPTIONS_KEY}.{key}:={value}"))
+            .chain(self.cfg.iter().cloned())
+            .collect()
     }
 
     /// The address to listen on: the flags where they are set, then the `bind`

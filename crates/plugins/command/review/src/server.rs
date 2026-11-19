@@ -7,9 +7,10 @@
 //! ([`origin::answers`]).
 //!
 //! Polls the host for configuration changes every [`RELOAD_EVERY`] so updated
-//! options (`cfg`, `base`, `assistant`, `max_chars`, `allowed_hosts`) apply to
-//! subsequent requests without restarting; `dir`, `bind`, and `port` remain
-//! fixed for the lifetime of the server.
+//! options apply without restarting: `base` and `allowed_hosts` to the next
+//! requests, and `cfg`, `assistant`, and `max_chars` to the next passes, which
+//! forward them to their turns.
+//! `dir`, `bind`, and `port` remain fixed for the lifetime of the server.
 //!
 //! When the host sends `shutdown` or closes stdin, the server stops accepting
 //! requests, sends `stop` interrupts to all active passes, waits for their
@@ -297,12 +298,14 @@ impl Server {
     /// `options`, the plugin's read from it.
     ///
     /// The store stays the one the server started with, whatever `dir` says
-    /// now.
-    fn reconfigure(&self, config: Value, options: Options) {
+    /// now, and so does the `dir` a pass forwards to its turn, whose tools have
+    /// to find the review in that store.
+    fn reconfigure(&self, config: Value, mut options: Options) {
         let mut current = self
             .workspace
             .write()
             .unwrap_or_else(PoisonError::into_inner);
+        options.dir.clone_from(&current.options.dir);
         *current = Arc::new(Workspace {
             root: current.root.clone(),
             config,

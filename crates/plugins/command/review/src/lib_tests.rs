@@ -1083,7 +1083,10 @@ fn a_pass_runs_a_turn_and_prints_what_the_assistant_writes() {
     let query = query_of(&messages);
     assert!(query.new);
     assert_eq!(query.title, Some(format!("Review {id}: docs/a.md")));
-    assert!(query.cfg.is_empty());
+    assert_eq!(query.cfg, [
+        r#"plugins.command.review.options.assistant:="assistant""#,
+        "plugins.command.review.options.max_chars:=600",
+    ]);
     assert!(
         query.content.starts_with(&format!(
             "# Review {id}, pass 1\n\nFirst half only.\n\n## docs/a.md (version 1)\n"
@@ -1222,9 +1225,13 @@ fn dir_on_the_command_line_stores_reviews_there_and_goes_with_each_pass() {
             .is_file()
     );
     assert!(!review_file(root.path(), &id).exists());
-    assert_eq!(query_of(&messages).cfg, [
-        "plugins.command.review.options.dir=elsewhere"
-    ]);
+    assert!(
+        query_of(&messages)
+            .cfg
+            .contains(&r#"plugins.command.review.options.dir:="elsewhere""#.to_owned()),
+        "{:?}",
+        query_of(&messages).cfg
+    );
     assert!(
         run_args(root.path(), &["--dir", " ", "ls"])
             .reason
@@ -1300,7 +1307,7 @@ fn a_later_pass_continues_the_conversation_with_what_changed() {
     );
     assert_eq!(query.title, None);
     assert!(
-        query.content.contains("## Changes since pass 1\n"),
+        query.content.contains("## Changes since pass 1 was sent\n"),
         "{}",
         query.content
     );
@@ -1319,6 +1326,46 @@ fn a_later_pass_continues_the_conversation_with_what_changed() {
         "{}",
         ran(&messages).text
     );
+}
+
+/// The version recorded after a turn also holds what the reviewer saved while
+/// it ran, which the assistant never read, so the next pass diffs from what the
+/// assistant was sent.
+#[test]
+fn an_edit_saved_during_a_turn_goes_with_the_next_pass() {
+    let root = workspace();
+    fs::write(root.path().join("docs/b.md"), "Draft.\n").unwrap();
+    let started = run_args(root.path(), &["start", "docs/a.md", "docs/b.md"]);
+    let id = started.text.split_once(':').unwrap().0.to_owned();
+    let path = root.path().to_owned();
+    session(vec![
+        init_step(root.path(), &["submit", &id, "-m", "Go."]),
+        created(),
+        Step::Act(Box::new(move || {
+            // The assistant edits one file while the reviewer saves the other.
+            fs::write(
+                path.join("docs/a.md"),
+                "# Title\n\nThe first line.\nSecond line.\n",
+            )
+            .unwrap();
+            fs::write(path.join("docs/b.md"), "Draft, reworded.\n").unwrap();
+        })),
+        completed(QueryOutcome::Finished),
+    ]);
+
+    let messages = session(vec![
+        init_step(root.path(), &["submit", &id, "-m", "Go on."]),
+        completed(QueryOutcome::Finished),
+    ]);
+
+    let content = &query_of(&messages).content;
+    assert!(
+        content.contains(
+            "--- v1/docs/b.md\n+++ v2/docs/b.md\n@@ -1 +1 @@\n-Draft.\n+Draft, reworded.\n"
+        ),
+        "{content}"
+    );
+    assert!(content.contains("+The first line.\n"), "{content}");
 }
 
 #[test]
@@ -1479,8 +1526,72 @@ fn the_cfg_option_and_flags_go_with_the_turn() {
     ]);
 
     assert_eq!(query_of(&messages).cfg, [
+        r#"plugins.command.review.options.assistant:="assistant""#,
+        "plugins.command.review.options.max_chars:=600",
         "skill/review",
         "assistant.model.id=opus"
+    ]);
+}
+
+/// `jp --cfg plugins.command.review.options.dir=DIR` sets the store the way the
+/// option does, and reaches the plugin only as its options, while a new
+/// conversation reads the config files instead.
+#[test]
+fn a_store_the_options_name_goes_with_each_pass() {
+    let root = workspace();
+    let options = Map::from_iter([("dir".to_owned(), json!("elsewhere"))]);
+    let run_with =
+        |args: &[&str]| init_message(root.path(), args, OutputFormat::Text, options.clone());
+    let started = run_init(run_with(&["start", "docs/a.md"]));
+    let id = started.text.split_once(':').unwrap().0.to_owned();
+
+    let messages = session(vec![
+        Step::Send(HostToPlugin::Init(Box::new(run_with(&[
+            "submit", &id, "-m", "Go.",
+        ])))),
+        created(),
+        completed(QueryOutcome::Finished),
+    ]);
+
+    assert_eq!(query_of(&messages).cfg, [
+        r#"plugins.command.review.options.assistant:="assistant""#,
+        "plugins.command.review.options.max_chars:=600",
+        r#"plugins.command.review.options.dir:="elsewhere""#,
+    ]);
+}
+
+/// A conversation keeps the configuration it was created with, so a limit
+/// lowered after the first pass reaches the next one's tools only by going with
+/// it.
+#[test]
+fn a_later_pass_forwards_the_options_as_they_are_now() {
+    let root = workspace();
+    let id = commented(root.path());
+    session(vec![
+        init_step(root.path(), &["submit", &id]),
+        created(),
+        completed(QueryOutcome::Finished),
+    ]);
+    let lowered = Map::from_iter([
+        ("assistant".to_owned(), json!("jp")),
+        ("max_chars".to_owned(), json!(20)),
+    ]);
+
+    let messages = session(vec![
+        Step::Send(HostToPlugin::Init(Box::new(init_message(
+            root.path(),
+            &["submit", &id, "-m", "Go on."],
+            OutputFormat::Text,
+            lowered,
+        )))),
+        completed(QueryOutcome::Finished),
+    ]);
+
+    let query = query_of(&messages);
+    assert_eq!(query.conversation, CONVERSATION);
+    assert_eq!(query.cfg, [
+        r#"plugins.command.review.options.assistant:="jp""#,
+        "plugins.command.review.options.max_chars:=20",
     ]);
 }
 

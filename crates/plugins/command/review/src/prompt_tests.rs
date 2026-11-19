@@ -236,7 +236,9 @@ fn a_later_pass_carries_what_changed_and_what_the_assistant_has_not_answered() {
         message_of(&review, 2),
         "# Review R-1h4k2m9, pass 2
 
-## Changes since pass 1
+## Changes since pass 1 was sent
+
+This includes your own edits from that pass.
 
 ```diff
 --- v1/docs/a.md

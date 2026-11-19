@@ -118,10 +118,8 @@ fn the_address_to_listen_on_is_the_flags_then_the_options_then_loopback() {
     );
 }
 
-/// The assistant's tool calls read the options, not the command line: the store
-/// a pass runs against has to reach them through the turn's configuration.
 #[test]
-fn dir_on_the_command_line_wins_and_goes_with_each_pass() {
+fn dir_on_the_command_line_wins_over_the_option() {
     let read = Options::read(&options(json!({
         "dir": ".jp/reviews",
         "cfg": ["skill/review"]
@@ -135,11 +133,38 @@ fn dir_on_the_command_line_wins_and_goes_with_each_pass() {
     let with = read.clone().with(&overrides);
 
     assert_eq!(with.dir, Some(Utf8PathBuf::from("tmp/reviews")));
-    assert_eq!(with.cfg, [
-        "skill/review",
-        "plugins.command.review.options.dir=tmp/reviews"
-    ]);
+    assert_eq!(with.cfg, ["skill/review"]);
     assert_eq!(read.clone().with(&Overrides::default()), read);
+}
+
+/// The tools that answer a pass read the turn's options, which for an existing
+/// conversation are the ones it was created with, so a pass names the values
+/// this process holds, ahead of `cfg`.
+#[test]
+fn a_pass_forwards_the_options_its_tools_read_before_cfg() {
+    let read = Options::read(&options(json!({
+        "dir": "tmp/reviews",
+        "cfg": ["skill/review"],
+        "assistant": "jp \"bot\"",
+        "max_chars": 200
+    })))
+    .unwrap();
+
+    assert_eq!(read.pass_cfg(), [
+        r#"plugins.command.review.options.assistant:="jp \"bot\"""#,
+        "plugins.command.review.options.max_chars:=200",
+        r#"plugins.command.review.options.dir:="tmp/reviews""#,
+        "skill/review",
+    ]);
+}
+
+/// Unset, `dir` is the user-local default, which a turn resolves the same way.
+#[test]
+fn a_pass_forwards_no_dir_when_none_is_set() {
+    assert_eq!(Options::default().pass_cfg(), [
+        r#"plugins.command.review.options.assistant:="assistant""#,
+        "plugins.command.review.options.max_chars:=600",
+    ]);
 }
 
 #[test]

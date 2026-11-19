@@ -5,8 +5,11 @@
 //! The first pass in a conversation includes the full numbered text of each
 //! tracked file under `## <path> (version <N>)`.
 //! Subsequent passes in the same conversation include a unified diff under `##
-//! Changes since pass <M>` against the version recorded when the previous pass
-//! completed or stopped, so each file's full text is sent only once.
+//! Changes since pass <M> was sent` against the version the latest pass whose
+//! turn completed or stopped was sent with, so each file's full text is sent
+//! only once.
+//! The diff includes the assistant's own edits from that pass, because edits
+//! made outside the turn while it ran can't be told apart from them.
 //!
 //! Under `## Comments`, each submitted comment is rendered with its anchor in
 //! the pass's starting version (e.g. `### R-1h4k2m9#1 at docs/a.md:3:1-3:6`),
@@ -127,7 +130,7 @@ fn numbered(text: &str) -> String {
         .collect()
 }
 
-/// What changed in the files from `from`, the version they ended pass `since`
+/// What changed in the files from `from`, the version pass `since` was sent
 /// with, to the pass's version; nothing when nothing did.
 fn changes(prompt: &Prompt<'_>, since: u32, from: u32) -> String {
     let (review, texts, to) = (prompt.review, prompt.texts, prompt.pass.version);
@@ -150,7 +153,10 @@ fn changes(prompt: &Prompt<'_>, since: u32, from: u32) -> String {
         files,
     });
 
-    format!("\n## Changes since pass {since}\n\n```diff\n{diff}```\n")
+    format!(
+        "\n## Changes since pass {since} was sent\n\nThis includes your own edits from that \
+         pass.\n\n```diff\n{diff}```\n"
+    )
 }
 
 /// One comment the pass sends: where it is, the text it is on, and what the

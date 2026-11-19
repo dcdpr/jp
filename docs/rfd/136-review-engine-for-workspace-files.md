@@ -360,9 +360,12 @@ This contradicts the Security paragraph.
 ````
 
 Later passes omit the full files.
-Instead, a subsequent pass message opens with a unified diff of any external
-edits made to the files since the previous pass ended, followed by the newly
-submitted comments and reviewer replies.
+Instead, a subsequent pass message opens with a unified diff of the files since
+the previous pass was sent, followed by the newly submitted comments and
+reviewer replies.
+The diff includes the assistant's own edits from that pass: the version recorded
+when a pass ends also holds edits saved outside the turn while it ran, which the
+assistant never read.
 Because each file enters the conversation history once and later passes only
 append messages, the provider's prompt cache remains valid across passes.
 This holds as long as the conversation does not also attach a tracked file (see

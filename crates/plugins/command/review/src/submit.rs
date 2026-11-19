@@ -248,10 +248,9 @@ pub(crate) fn query(
             .then(|| format!("Review {}: {}", request.id, review.title)),
         cfg: ctx
             .options
-            .cfg
-            .iter()
-            .chain(&request.cfg)
-            .cloned()
+            .pass_cfg()
+            .into_iter()
+            .chain(request.cfg.iter().cloned())
             .collect(),
         schema: None,
         expires_in: None,

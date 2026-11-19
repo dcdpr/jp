@@ -169,7 +169,12 @@ pub enum Carry {
     /// Each file whole, which the first pass in a conversation sends.
     Files,
 
-    /// What changed since pass `pass` ended, with the files at `version`.
+    /// What changed since pass `pass` was sent, with the files at `version`,
+    /// the version that pass was sent with.
+    ///
+    /// The assistant's own edits during pass `pass` are in the diff too: the
+    /// version recorded when it ended also holds edits made outside the turn
+    /// while it ran, which the assistant never read.
     Changes { pass: u32, version: u32 },
 }
 
@@ -265,7 +270,7 @@ impl Passes {
     /// What the message of pass `number` carries of the files.
     ///
     /// The files whole, unless the turn of an earlier pass ran in the same
-    /// conversation; then what changed since the latest such pass ended.
+    /// conversation; then what changed since the latest such pass was sent.
     pub fn carry(&self, number: u32) -> Carry {
         let Some(conversation) = self
             .get(number)
@@ -279,14 +284,11 @@ impl Passes {
             .rev()
             .filter(|pass| pass.number < number)
             .filter(|pass| pass.conversation.as_deref() == Some(conversation))
-            .find_map(|pass| {
-                let ended = pass.ended.as_ref().filter(|ended| ended.ran())?;
-                Some(Carry::Changes {
-                    pass: pass.number,
-                    version: ended.version.unwrap_or(pass.version),
-                })
+            .find(|pass| pass.ended.as_ref().is_some_and(Ended::ran))
+            .map_or(Carry::Files, |pass| Carry::Changes {
+                pass: pass.number,
+                version: pass.version,
             })
-            .unwrap_or(Carry::Files)
     }
 
     /// Whether a tool call from `conversation` belongs to the review: the
