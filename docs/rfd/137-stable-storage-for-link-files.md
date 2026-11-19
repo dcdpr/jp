@@ -9,356 +9,372 @@
 
 ## Summary
 
-A **link file** is a plain copy of conversation content that JP writes so a
-printed path or `file://` link has something to open: the full tool result
-behind `results_file_link`, and the summary `jp conversation compact` reports.
+A **link file** is a plain-text copy of conversation content that JP writes to
+disk so a printed path or `file://` hyperlink has a target to open: the full
+tool result behind `results_file_link`, and the summary reported by `jp
+conversation compact`.
 This RFD moves link files from the OS temp directory to a per-conversation
-directory in the User-Workspace Directory, names them by their content, and
+directory inside the User-Workspace Directory, names them by content hash, and
 prunes them by age.
-What the files contain, and which links JP prints, stay the same.
+File contents and printed links are unchanged.
 
 ## Motivation
 
-Two code paths write link files, both into `env::temp_dir()`:
+Two code paths write link files into `env::temp_dir()`:
 
-- `ToolRenderer::render_result` writes each tool result it renders to
-  `tool_call_<millis>.<ext>`, and `results_file_link` decides whether a path or
-  an OSC 8 link to that file is printed.
+- `ToolRenderer::render_result` writes every rendered tool result to
+  `tool_call_<millis>.<ext>`, and `results_file_link` controls whether JP prints
+  a filesystem path or an OSC 8 hyperlink to that file.
 - `jp conversation compact` writes each generated summary to
   `<conversation_id>-summary-<from>-<to>.md` and prints the path in its
   timeline.
 
 The tool result path has four defects:
 
-1. **The location is not JP's.** The OS clears its temp directory on its own
-   schedule, so a link in scrollback stops working at a time JP does not
-   control.
-2. **Names collide.** `<millis>` is the sub-second part of the clock, a number
-   from 0 to 999.
-   Names repeat every second, so a later result overwrites the file an earlier
-   link points at.
-3. **A failed write still prints a link.** The result of the write is discarded,
-   so a link can be dead from the start.
-4. **Files are written that nothing links to.** With `results_file_link = "off"`
-   and inline results on, every rendered result still writes a file.
-   `jp conversation print` uses the same renderer, so every replay writes every
-   result again.
+1. **The OS controls file lifetime.** The OS clears its temp directory on its
+   own schedule, breaking links in terminal scrollback outside JP's control.
+2. **Filenames collide.** `<millis>` is the sub-second component of the system
+   clock (`0..=999`), repeating every second.
+   A later tool result that lands on the same millisecond and extension
+   overwrites the file an earlier link points to.
+3. **Failed writes still print a link.** `render_result` ignores the write
+   result, so a printed link can point to a missing or stale file.
+4. **Unreferenced files are written.** Even with `results_file_link = "off"`,
+   rendering an inline tool result writes a temp file.
+   Because `jp conversation print` uses the same renderer, replaying a
+   conversation rewrites every tool result file.
 
-[RFD 115] (Accepted) raises the stakes.
-It caps a tool response before the response is persisted, while the renderer
-still receives the full output, and it relies on this file to keep the part the
-assistant never saw.
-Once it lands, the link file is the only copy of that output.
-How long it lives should be JP's decision.
+[RFD 115] (Accepted) makes link file retention more important.
+It truncates large tool responses before persisting them to `events.json` while
+passing the full output to the renderer, relying on the link file to preserve
+the untruncated output.
+Once RFD 115 lands, the link file is the only copy of that output, so JP should
+control its lifetime.
 
 ## Design
 
-### What the user sees
+### User-Facing Behavior
 
-The chrome is the same.
-The path behind it is different:
+Terminal output format is unchanged; only the underlying file path moves:
 
 ```
 see: /home/user/.local/share/jp/workspace/jp-a1b2c/tmp/conversations/jp-c17457886043/fs_read_file-9f2c4e7a1b3d5f60.rs
 ```
 
-A link keeps working for the retention window, 30 days by default, counted from
-the last time JP printed it.
-`jp conversation print` prints links to the files a live run wrote, and writes a
-file only for content that has none yet.
+Each link remains valid for the retention window (30 days by default), measured
+from the last time JP printed a link to that file.
+`jp conversation print` reuses link files written during live runs and writes a
+file only when none exists for that content.
 
-### Location
+### Storage Location
 
 ```
 <user-workspace directory>/tmp/conversations/<conversation_id>/<label>-<hash>.<ext>
 ```
 
 The User-Workspace Directory (W-00dxybd#user-workspace-directory) is the
-workspace's per-user data directory, `~/.local/share/jp/workspace/<slug>-<id>/`
-on Linux.
-JP resolves it at startup, and this RFD only joins a path onto the result
-(`Ctx::user_storage_path`).
-It adds no method to the storage backend traits ([RFD 073]): link files are a
-rendering convenience, not workspace data.
+workspace's per-user data directory (`~/.local/share/jp/workspace/<slug>-<id>/`
+on Linux).
+JP resolves this directory at startup (`Ctx::user_storage_path`), and link file
+resolution simply appends a relative path to it.
+No methods are added to the storage backend traits ([RFD 073]) because link
+files are rendering artifacts rather than workspace data.
 
-The directory has three properties this design relies on:
+Storing link files in the User-Workspace Directory provides three properties:
 
-- It is outside the project, so link files stay out of version control and away
-  from tools that work on project files.
-- It is per workspace and already holds the conversations the files are copies
-  of ([RFD 031]).
-  Command plugins that receive the directory's path can read link files, as they
-  can read those conversations.
-- JP owns it, so JP can prune it.
+- **Outside the project tree.** Link files stay out of version control and are
+  invisible to tools that scan project files.
+- **Scoped to the workspace.** The directory already holds the user-local
+  conversations from which link files are derived ([RFD 031]), and command
+  plugins that receive the user-workspace path can read link files directly.
+- **Managed by JP.** JP owns the directory lifecycle and can prune expired files
+  on its own schedule.
 
-`tmp/` is expendable.
-Deleting it at any time loses link files and nothing else.
-Storage operations give it no protection: when JP merges two user-workspace
-directories of one workspace, it keeps one `tmp/` and may drop the other.
+The `tmp/` subdirectory holds expendable data: deleting it removes only link
+files.
+Storage operations do not preserve `tmp/`; when merging two user-workspace
+directories for the same workspace, JP keeps one `tmp/` directory and may
+discard the other.
 
-Link files sit under `tmp/conversations/`, one directory per conversation ID.
-The `conversations/` level leaves `tmp/` free for other expendable files.
-A conversation's ID never changes, so the path survives a title change and an
-archive.
-Link files are not placed in the conversation's storage directory (see
+Nesting under `tmp/conversations/<conversation_id>/` reserves `tmp/` for other
+expendable files and groups link files by conversation.
+Because a conversation ID is immutable, link file paths survive title changes
+and archiving.
+Link files are not stored inside the conversation's own storage directory (see
 [Alternatives](#alternatives)).
 
-### Names
+### File Naming
 
-| Part      | Value                                                                 |
-| --------- | --------------------------------------------------------------------- |
-| `<label>` | The tool's name for a tool result, `summary` for a compaction summary |
-| `<hash>`  | The first 16 hex characters of the SHA-256 of the file's bytes        |
-| `<ext>`   | The extension the writer detects today, or none                       |
+| Component | Value                                                                        |
+| --------- | ---------------------------------------------------------------------------- |
+| `<label>` | Sanitized tool name for a tool result, or `summary` for a compaction summary |
+| `<hash>`  | First 16 lowercase hex characters of the content's SHA-256 digest            |
+| `<ext>`   | File extension detected by the writer, or omitted if none                    |
 
-The model names the tool it calls, so a tool name is reduced to ASCII letters,
-digits, `_`, and `-` before it becomes part of a file name.
-A result whose tool is unknown uses the label `tool`.
+Because tool names come from model output, `<label>` restricts the tool name to
+ASCII alphanumeric characters, `_`, and `-`.
+If the tool name is unknown, `<label>` defaults to `tool`.
 
-Naming a file by its content has three consequences:
+Content-addressed filenames have three consequences:
 
-- **The same content is one file.** A replay finds the file a live run wrote and
-  links to it.
-- **Different content is a different file.** Nothing is overwritten.
-  Once [RFD 115] lands, a live run writes the full output and a replay writes
-  the capped response under another name, and both exist.
-- **No identifier has to reach the renderer** beyond the conversation ID.
-  A fanned-out tool call writes one file per operation live and one for the
-  folded response on replay, with no index to keep them apart.
+- **Identical content shares one file.** Replaying a conversation with `jp
+  conversation print` resolves to the file written during the live run.
+- **Distinct content never collides.** Once [RFD 115] lands, a live run writes
+  the full tool output and a later replay writes the truncated persisted
+  response under a different hash, preserving both files.
+- **The renderer needs only the conversation ID.** It does not need an event ID
+  or operation index.
+  A fanned-out tool call writes one file per operation during a live run and one
+  file for the merged response on replay without index bookkeeping.
 
-### Writing a link file
+### Writing Link Files
 
-- A link file is written only when a path or link to it is printed.
-  A result rendered with `results_file_link = "off"` writes nothing.
-- When the file exists, JP updates its modification time and writes nothing.
-  Otherwise JP writes to a temporary sibling and renames it into place, so a
-  reader never opens a partial file.
-- When the write fails, JP logs a warning and prints no link.
-  The result still renders inline.
+- JP writes a link file only when printing a path or hyperlink to it.
+  Rendering a tool result with `results_file_link = "off"` writes no file.
+- If the target file already exists, JP updates its modification time (`mtime`)
+  without rewriting the content.
+  Otherwise, JP writes to a temporary sibling file and atomically renames it
+  into place so readers never observe a partial write.
+- If writing fails, JP logs a warning, omits the link, and still renders any
+  inline result.
 
-Link URLs are percent-encoded.
-The renderer builds `file://` and `copy://` URLs by formatting the path into a
-string, which is correct only for paths without reserved characters.
-The default user data directory on macOS is `~/Library/Application Support/jp`,
-and `<slug>` is the checkout's directory name, so the path to a link file can
-contain spaces and non-ASCII characters.
+Link URLs (`file://` and `copy://`) percent-encode path segments.
+Formatting a raw filesystem path into a URL breaks when the path contains spaces
+or non-ASCII characters, which occurs on macOS where the default user data
+directory is `~/Library/Application Support/jp` and `<slug>` comes from the
+checkout directory name.
 
-The path the `full` style prints is not escaped.
-A backslash before a space makes the path paste into a shell, but a terminal
-that detects paths in plain text then stops at the backslash.
-A `file://` URL is detected whole, but it does not paste as a path.
+Plain paths printed by `results_file_link = "full"` are not escaped.
+Backslash-escaping spaces would help shell pasting but breaks terminal path
+auto-detection at the first backslash, whereas `file://` URLs remain clickable
+as a single span.
 
-### Fallback
+### OS Temp Directory Fallback
 
-JP writes the file to the OS temp directory, as
-`<conversation_id>-<label>-<hash>.<ext>`, when:
+JP falls back to writing `<conversation_id>-<label>-<hash>.<ext>` in
+`env::temp_dir()` when:
 
-- the run uses `--no-persist`, which promises to leave nothing in JP's storage;
+- the command runs with `--no-persist`, which must not write to JP's storage; or
 - the workspace has no User-Workspace Directory.
 
-JP never prunes the OS temp directory.
+JP never prunes files in the OS temp directory.
 
 ### Pruning
 
-| Contract    | Value                                                                    |
-| ----------- | ------------------------------------------------------------------------ |
-| Config key  | `conversation.link_files.retention_days`                                 |
-| Default     | `30`                                                                     |
-| Never prune | `"unlimited"`                                                            |
-| Rejected    | `0`, with a validation error that points at `"unlimited"`                |
-| Run point   | The end of every run that loads a workspace, unless it is `--no-persist` |
-| Scope       | Files under `tmp/conversations/`, then directories left empty            |
-| On failure  | A warning in the trace log; the run's result is unaffected               |
+| Contract    | Value                                                                     |
+| ----------- | ------------------------------------------------------------------------- |
+| Config key  | `conversation.link_files.retention_days`                                  |
+| Default     | `30`                                                                      |
+| Never prune | `"unlimited"`                                                             |
+| Rejected    | `0` (fails validation with an error suggesting `"unlimited"`)             |
+| Run point   | End of every workspace-loading invocation, except `--no-persist` runs     |
+| Scope       | Expired files under `tmp/conversations/`, then any directories left empty |
+| On failure  | Logs a trace warning without failing the command                          |
 
-The sweep removes a file whose modification time is older than the window.
-Printing a link refreshes that time, so the window counts from the last time a
-link to the file was printed, not from the first.
+The pruning sweep deletes any link file whose `mtime` is older than the
+retention window.
+Because printing a link refreshes `mtime`, the retention window is measured from
+the most recent print rather than file creation.
 
-The sweep also removes the directory of a conversation that no longer exists,
-whatever the age of its files.
-It checks against a fresh scan of the stored conversation IDs, live and
-archived, as the session mapping cleanup beside it does: another process may
-have created a conversation after this run loaded its index.
-`jp conversation rm` and the expiry of a temporary conversation both happen
-before this cleanup, so a removed conversation's link files are gone when that
-run ends.
-A directory whose name is not a conversation ID is pruned by age only.
+The sweep also removes the link-file directory of any conversation that no
+longer exists, regardless of file age.
+To avoid deleting link files for a conversation created by a concurrent `jp`
+process after the current run loaded its index, the sweep re-scans stored
+conversation IDs (both live and archived) on disk, matching the session-mapping
+cleanup pass.
+Because `jp conversation rm` and temporary-conversation expiration run before
+the end-of-run cleanup, a deleted conversation's link files are removed in the
+same invocation.
+Any subdirectory under `tmp/conversations/` whose name does not parse as a
+conversation ID is pruned by age only.
 
-The sweep joins the cleanup `jp_cli::run` already performs at the end of a run,
-which removes orphaned lock files and stale session mappings.
-Every command that can write a link file passes through it.
+The sweep runs inside the existing end-of-run cleanup in `jp_cli::run` alongside
+orphaned lock-file and stale session-mapping removal, covering every command
+that writes link files.
 
-`"unlimited"` and the rejected `0` follow `size_threshold` in [RFD 115].
-A zero-day window would delete a file at the end of the run that linked to it.
+Accepting `"unlimited"` and rejecting `0` matches `size_threshold` in [RFD 115];
+a zero-day window would delete newly written link files before the command
+exits.
 
-[RFD 130] fixes its retention window for session records at a 30-day constant.
-This window is configurable because link files can be large and, once [RFD 115]
-lands, hold content that exists nowhere else: one user wants them gone sooner,
-another wants them kept.
+Unlike [RFD 130], which fixes session-record retention at 30 days, link-file
+retention is configurable because link files can be large and, once [RFD 115]
+lands, hold untruncated tool output stored nowhere else.
 
-### Relation to `events.json` and the blob store
+### Relationship to `events.json` and the Blob Store
 
-Three places hold a tool result, for three purposes:
+Tool results can exist in three storage locations, each serving a distinct
+purpose:
 
-| Place                      | Holds                                  | Purpose                        |
-| -------------------------- | -------------------------------------- | ------------------------------ |
-| `events.json`              | The persisted response, base64-encoded | The conversation's record      |
-| Blob store ([RFD 066]) | The same payload, gzip-compressed      | Moves payloads out of the file |
-| Link file                  | The rendered result as plain text      | Something a link can open      |
+| Location                   | Content                            | Purpose                                     |
+| -------------------------- | ---------------------------------- | ------------------------------------------- |
+| `events.json`              | Persisted response, base64-encoded | Canonical conversation stream               |
+| Blob store ([RFD 066]) | Persisted payload, gzip-compressed | Offloads large payloads from `events.json`  |
+| Link file                  | Rendered output as plain text      | Directly openable target for terminal links |
 
 The blob store does not replace link files.
-It names a blob by hash and compresses it so that text searches skip it, which
-also means an editor cannot open it.
-A link needs an uncompressed file with a usable extension, whether the bytes
-come from `events.json` or from a blob.
+Blobs are content-addressed and gzip-compressed so workspace text searches skip
+them, which prevents editors from opening them directly.
+Terminal links require an uncompressed file with an appropriate extension,
+whether the underlying payload lives inline in `events.json` or in the blob
+store.
 
-The retention window bounds how long the full output of a capped response
-exists.
-Until the blob store or a later design keeps that output durably, it is gone
-when its link file is pruned.
+Under [RFD 115], the retention window bounds how long the untruncated output of
+a capped tool response remains on disk.
+Until the blob store or a future design persists untruncated output durably, it
+is deleted when its link file is pruned.
 
-### Where the code lives
+### Code Organization
 
-A `LinkFiles` type in `jp_cli` holds the directory for one conversation, or the
-fallback, and offers one write operation that returns the path of the file or
-nothing.
-Both writers take it.
-The sweep is a function beside it, called from `jp_cli::run`.
+A `LinkFiles` type in `jp_cli` encapsulates the link-file directory (or OS temp
+fallback) for a single conversation and exposes one write method that returns
+`Option<PathBuf>`.
+Both `ToolRenderer::render_result` and `jp conversation compact` write through
+`LinkFiles`, and `jp_cli::run` invokes the sibling pruning function at the end
+of each run.
 
 ## Drawbacks
 
-- **Plain-text copies live longer.** `events.json` stores tool content as
-  base64; a link file is plain text.
-  In the OS temp directory such a copy lasts until the OS clears it; here it
-  lasts for the retention window, or until its conversation is removed.
-- **Disk use moves to the user data directory.** It grows with the distinct
-  results rendered within the window.
-- **Paths are longer, and can contain a space.** The `full` link style prints
-  the path, and the default path on macOS has a space in it.
-  A terminal that ends a detected path at whitespace links only the part before
-  the space, and a path pasted into a shell needs quoting.
-  The `osc8` style is unaffected.
-- **Every run pays for a sweep.** One directory walk over `tmp/conversations/`
-  and one scan of conversation IDs at the end of each run.
+- **Plain-text copies persist longer.** `events.json` base64-encodes tool
+  content, whereas link files store plain text.
+  Moving link files out of the OS temp directory keeps plain-text copies on disk
+  for the full retention window (or until the conversation is removed).
+- **Disk usage moves to the user data directory.** Storage under the
+  User-Workspace Directory grows with the volume of distinct tool results and
+  summaries rendered within the retention window.
+- **Printed paths are longer and may contain spaces.** On macOS, the default
+  user data path contains a space (`Application Support`).
+  Under `results_file_link = "full"`, terminals that stop path auto-detection at
+  whitespace only link the prefix before the space, and pasting the path into a
+  shell requires quoting.
+  The `osc8` link style is unaffected.
+- **End-of-run sweep overhead.** Every persistent workspace invocation walks
+  `tmp/conversations/` and scans stored conversation IDs at exit.
 
 ## Alternatives
 
-- **Keep the OS temp directory and fix the names.** Removes the collisions.
-  Links still die on the OS's schedule, and after [RFD 115] so does the full
-  output.
-- **The platform cache directory.** Cache cleaners delete it, it is not scoped
-  to a workspace, and it is a second JP-managed root to document.
-- **The conversation's storage directory.** Its name carries the conversation's
-  title and changes when the title does, and archiving moves it, so either
-  operation breaks every link printed before it.
-  A title generated for a new conversation is applied when its first query ends,
-  so the links that query printed would break as it exits.
-  Storage also merges and removes these directories and decides file by file
-  what survives.
-  Version control is not the concern: the files would sit in the user-local
-  copy, and the workspace projection receives only the three managed files.
-  If conversation directories later get a path that survives both a title change
-  and an archive, link files can move there; [T-1n0d3w0] records that problem
-  and the options for it.
-- **A top-level `[storage]` config section** for the retention key.
-  It would hold this one key; `conversation.link_files` sits beside the other
-  conversation settings.
-- **The project's `.jp/` directory.** Inside the checkout: the files show up in
-  version control and in front of tools that read project files.
-- **One directory per run.** A link file depends only on the content it copies,
-  so each replay of a conversation would store identical copies again.
-  If JP later keeps a record per run for diagnostics, that record can reference
-  the link files a run printed.
-  Revisit if such a record has to carry the full output of a capped response.
-- **Names from the Event ID of the response.** Stable and meaningful, but the
-  renderer needs the ID, a fanned-out call needs an operation index, and a
-  replay must be stopped from overwriting a live run's full output with the
-  capped response.
-  Content hashes need none of the three.
-- **A link that names the stream entry instead of a file.** A custom-scheme link
-  resolved by the user's click handler needs no file, but it does nothing until
-  the user installs a handler.
-  `file://` opens in every terminal that supports OSC 8.
-- **Link to the blob.** See [Relation to `events.json` and the blob
-  store](#relation-to-eventsjson-and-the-blob-store).
+- **Keep using the OS temp directory with content-addressed filenames.** This
+  eliminates filename collisions, but the OS still deletes link files on its own
+  schedule, along with untruncated tool output once [RFD 115] lands.
+- **Use the platform cache directory.** System cache cleaners can purge it at
+  any time, it is not scoped per workspace, and it introduces another JP-managed
+  root directory to document.
+- **Store link files inside the conversation's storage directory.** Conversation
+  directory names include the title slug and change whenever the title is edited
+  or auto-generated at the end of the first query, and archiving moves the
+  directory under `.archive/`.
+  Either move breaks every previously printed link.
+  In addition, storage synchronization and directory merges manage files inside
+  conversation directories explicitly.
+  (Version control is not an issue because link files would live only in the
+  user-local conversation directory, while workspace projection copies only the
+  three managed JSON files.)
+  If user-local conversation directories later adopt a stable path that survives
+  renames and archiving ([T-1n0d3w0]), link files can move there.
+- **Place the retention setting under a top-level `[storage]` section.** A
+  top-level section would contain only this single key;
+  `conversation.link_files` groups it with the rest of the conversation
+  settings.
+- **Store link files under `.jp/` in the project checkout.** Placing link files
+  inside the checkout exposes them to version control and project-scanning
+  tools.
+- **Create one directory per invocation.** Because a link file depends only on
+  its content, per-run directories would duplicate files across every `jp
+  conversation print` replay.
+  If JP later records per-run diagnostic manifests, those manifests can
+  reference the content-addressed link files written during the run.
+- **Name link files by the response's `EventId`.** Event-ID naming requires
+  threading the `EventId` into the renderer, adding an operation index for
+  fanned-out tool calls, and preventing replays from overwriting a live run's
+  untruncated output with the capped response stored in `events.json`.
+  Content hashing avoids all three requirements.
+- **Emit custom-scheme links that resolve stream entries directly.** A custom
+  URI scheme handled by a user script requires no files on disk, but does
+  nothing until the user configures a scheme handler.
+  `file://` links work out of the box in any terminal supporting OSC 8.
+- **Link directly to the blob store.** Rejected for the reasons in [Relationship
+  to `events.json` and the Blob
+  Store](#relationship-to-events-json-and-the-blob-store).
 
 ## Non-Goals
 
-- **A schema for link files.** A file holds what the writer renders today.
-  `events.json` is the machine interface.
-- **Durable storage for conversation content.** That is the blob store's ([RFD
-  066]).
-- **Files the assistant can read.** [RFD 115] defers that to the blob store.
-- **Changes to which links are printed,** to their text, or to
-  `results_file_link` and its error overlay.
-- **Other files JP writes to the OS temp directory.** The trace log and the
-  request and configuration payloads the trace refers to are diagnostics, with
-  their own lifetime questions.
-- **A size limit.** Pruning is by age only.
+- **Defining a machine-readable schema for link files.** Link files hold the
+  human-readable text rendered by the writer; `events.json` remains the
+  machine-readable source of truth.
+- **Durable payload storage.** Durable storage belongs to the
+  content-addressable blob store ([RFD 066]).
+- **Exposing link files to the assistant.** [RFD 115] defers assistant access to
+  truncated output to the blob store.
+- **Changing link rendering options.** When links are printed, their display
+  text, and `results_file_link` (including its error overlay) remain unchanged.
+- **Relocating diagnostic temp files.** Trace logs and dumped request or config
+  payloads in the OS temp directory have separate lifecycle requirements.
+- **Size-based cache eviction.** Pruning is strictly age- and
+  conversation-based.
 
 ## Risks and Open Questions
 
-- **One sweep, one configuration.** The sweep prunes every conversation's files
-  with the window of the run that performs it.
-  A conversation that sets a short window shortens it for the whole workspace
-  whenever that conversation runs.
-- **A conversation only another checkout holds.** A conversation that exists
-  only in one checkout's workspace projection is unknown to a run from another
-  checkout of the same workspace.
-  That run's sweep treats the conversation as removed and deletes its link
-  files.
-  The links printed for it stop working early, and the next print writes the
-  files again.
-- **Sweep cost.** The walk touches every link file on every run.
-  If it shows up in measurements, a marker file can limit the sweep to once a
-  day.
-- **Modification times.** A filesystem that does not record them makes the sweep
-  prune too early or never.
-  The loss is link files.
-- **A sweep racing a link.** One process can sweep a file that is past the
-  window while another is printing a link to it: the sweep reads the old
-  modification time, the other process refreshes it, the sweep deletes the file.
-  The result is one dead link, and the next render writes the file again.
-- **Truncated hashes.** Sixteen hex characters are 64 bits within one
-  conversation's directory.
-  A collision would link one result to another's file; at the number of files a
-  conversation produces, it is not expected to happen.
+- **Workspace-wide pruning uses the active run's retention window.** The
+  end-of-run sweep prunes `tmp/conversations/` across the entire workspace using
+  the current invocation's resolved `retention_days`.
+  Running a conversation configured with a shorter retention window prunes other
+  conversations' link files to that shorter window.
+- **Conversations present only in another checkout's projection.** If a
+  conversation exists exclusively in checkout A's `.jp/conversations/` and has
+  not been imported into user-local storage, a `jp` invocation in checkout B
+  does not see that conversation ID during its sweep and deletes its link files.
+  Existing links break early, though reprinting the conversation in checkout A
+  recreates the files.
+- **Directory walk cost at exit.** The sweep stats every link file in the
+  workspace on every run.
+  If profiling shows noticeable latency, a timestamp marker file can throttle
+  the age-based sweep to once per day.
+- **Filesystems without reliable `mtime`.** On filesystems that do not track
+  modification times, link files may be pruned prematurely or never expire.
+- **Sweep race with concurrent rendering.** One process's sweep can read an
+  expired `mtime` just before a concurrent process refreshes it and prints a
+  link, unlinking the file right after the link is printed.
+  The next render recreates the file.
+- **Hash truncation collisions.** Truncating SHA-256 to 16 hex characters yields
+  a 64-bit space scoped to a single conversation directory, making collisions
+  negligible at the number of tool results in a conversation.
 
 ## Implementation Plan
 
-1. **`LinkFiles`.** Add the type to `jp_cli`: directory resolution with the OS
-   temp fallback, content-hashed names, write-if-absent through a rename, and
-   the modification-time update.
-   Tested against a temporary root with fixed content and fixed names.
-   Mergeable alone while nothing uses it.
-2. **Move the writers.** `ToolRenderer::render_result` and `jp conversation
-   compact` write through `LinkFiles`.
-   `render_result` takes the tool's name for the label, writes only when it
-   prints a link, prints no link when the write fails, and percent-encodes link
-   URLs.
-   `TurnRenderer` keeps the `LinkFiles` across its per-turn rebuild of
-   `ToolRenderer`.
-   Depends on phase 1.
-3. **Config and pruning.** Add `conversation.link_files.retention_days` with its
-   validator, and the sweep to the end-of-run cleanup, including the rule for
-   removed conversations.
-   Depends on phase 1.
-   Until it lands, link files accumulate.
-4. **Docs.** Add a Link File entry to the glossary, mention `tmp/` in the
-   User-Workspace Directory entry (W-00dxybd), and document the key.
+1. **Add `LinkFiles`.** Implement `LinkFiles` in `jp_cli` with directory
+   resolution, OS temp directory fallback, content-addressed naming, atomic
+   write-if-absent via rename, and `mtime` refresh.
+   Unit-test against a temporary root with deterministic content and filenames.
+   This phase can merge independently before any callers are wired up.
+2. **Migrate link-file writers.** Route `ToolRenderer::render_result` and `jp
+   conversation compact` through `LinkFiles`.
+   Update `render_result` to pass the tool name as the label, write a file only
+   when emitting a path or link, suppress the link on write failure, and
+   percent-encode link URLs.
+   Retain `LinkFiles` on `TurnRenderer` across per-turn `ToolRenderer` rebuilds.
+   Depends on Phase 1.
+3. **Add configuration and end-of-run pruning.** Add
+   `conversation.link_files.retention_days` (with validation rejecting `0`) and
+   wire the pruning sweep (including deleted-conversation cleanup) into the
+   end-of-run cleanup in `jp_cli::run`.
+   Depends on Phase 1.
+4. **Update documentation.** Add a "Link File" entry to the Ubiquitous Language
+   glossary, document `tmp/` under the User-Workspace Directory entry
+   (W-00dxybd), and document `conversation.link_files.retention_days`.
 
 ## References
 
-- [RFD 031]: user-local storage, where the User-Workspace Directory comes from.
-- [RFD 066]: the content-addressable blob store, the durable home for payloads.
-- [RFD 073]: the storage backend traits, which gain nothing here.
-- [RFD 115]: bounded tool output, which leaves the full output in the link file.
-- [RFD 130]: session record retention, the fixed-window precedent.
-- `crates/jp_cli/src/render/tool.rs`: `render_result`, the tool result writer.
+- [RFD 031]: Durable conversation storage and the User-Workspace Directory.
+- [RFD 066]: Content-addressable blob store for durable payload storage.
+- [RFD 073]: Layered storage backend traits (unchanged by this RFD).
+- [RFD 115]: Bounded tool output, which relies on link files to hold untruncated
+  tool output.
+- [RFD 130]: Session record retention, which establishes the 30-day retention
+  precedent.
+- `crates/jp_cli/src/render/tool.rs`: `ToolRenderer::render_result`.
 - `crates/jp_cli/src/cmd/conversation/compact.rs`: `write_summary_file`.
-- `crates/jp_cli/src/lib.rs`: the end-of-run cleanup the sweep joins.
+- `crates/jp_cli/src/lib.rs`: End-of-run cleanup in `jp_cli::run`.
 - `crates/jp_cli/src/ctx.rs`: `Ctx::user_storage_path`.
-- `crates/jp_config/src/fs.rs`: how the user data directory is resolved.
+- `crates/jp_config/src/fs.rs`: User data directory resolution.
 
 [RFD 031]: 031-durable-conversation-storage-with-workspace-projection.md
 [RFD 066]: 066-content-addressable-blob-store.md

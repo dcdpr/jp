@@ -8,114 +8,119 @@
 - **Label**: package=jp_storage
 - **Label**: type=pre-rfd
 
-The path of a conversation's user-local directory changes during the
-conversation's life, and everything that kept the path breaks when it does.
-This ticket records the problem and the options discussed so far.
-The answer is a design argument, so it should become an RFD before
-implementation.
+The path of a conversation's user-local directory changes over the
+conversation's lifetime, breaking any external reference that recorded the
+earlier path.
+This ticket records the problem and the options evaluated so far; it should be
+promoted to an RFD before implementation.
 
 ## Problem
 
 A conversation directory is named `<timestamp>-<title-slug>`, where
-`<timestamp>` is the decisecond part of the conversation ID.
-Two operations move it:
+`<timestamp>` is the decisecond timestamp of the conversation ID.
+Two operations move the directory:
 
-- A title change renames it (`reconcile_conversation_dir` in
+- Changing the title renames the directory (`reconcile_conversation_dir` in
   `crates/jp_storage/src/lib.rs`).
-  `conversation.title.generate.auto` defaults to `true`, so a new conversation
-  is renamed when its first query ends.
-- Archiving moves it under `conversations/.archive/`, and unarchiving moves it
-  back.
+  Because `conversation.title.generate.auto` defaults to `true`, a new
+  conversation is renamed as soon as its first query finishes.
+- Archiving moves the directory under `conversations/.archive/`, and unarchiving
+  moves it back.
 
-JP finds the directory by its ID prefix, so JP's own lookups are unaffected.
-What breaks is anything that kept the path:
+JP resolves conversation directories by ID prefix, so internal lookups are
+unaffected.
+External references to the path break:
 
-- a path or `file://` link printed to the terminal;
-- an editor or shell opened on the directory (`jp conversation edit`, `jp
+- paths or `file://` hyperlinks printed to the terminal;
+- editors or shells opened in the directory (`jp conversation edit`, `jp
   conversation path`);
-- a file another feature keeps beside the three managed files.
+- auxiliary files stored alongside the three managed JSON files.
 
-The last group is growing.
-The directory holds the query draft (`QUERY_MESSAGE.md`) today, RFD 114 adds
+The third category is growing.
+The directory holds the query draft (`QUERY_MESSAGE.md`), RFD 114 adds
 `metadata.local.json`, and draft D56 (Conversation-Local External File
 Attachments) adds attachment snapshots.
-Four tickets are about such files being lost when the directory is renamed,
-merged, or replaced: T-0sqf1cs (done), T-0sr3x0v, T-0sr3zez, and T-0sr3zey.
+Four tickets track auxiliary files lost when a conversation directory is
+renamed, merged, or replaced: T-0sqf1cs (done), T-0sr3x0v, T-0sr3zez, and
+T-0sr3zey.
 
-RFD 137 (Stable Storage for Link Files) works around the problem.
-It keeps link files in `tmp/conversations/<conversation_id>/` instead of the
-conversation directory, because a link printed during a conversation's first
-query would break when that query ends.
+RFD 137 (Stable Storage for Link Files) works around this instability by storing
+link files in `tmp/conversations/<conversation_id>/` instead of the conversation
+directory; otherwise, a link printed during a conversation's first query would
+break when the query finishes and the auto-generated title renames the
+directory.
 
 ## Constraint
 
-The title is in the directory name on purpose.
-JP's storage is meant to be usable with `ls`, `cat`, and `grep`, and the title
-shows at a glance which conversation lives where.
-A solution keeps that, or says what it gives up.
+Including the title in the directory name is intentional: JP's storage is
+designed to be navigable with standard shell tools (`ls`, `cat`, `grep`), and
+the title slug makes conversations recognizable in directory listings.
+Any change must either preserve human-readable listings or explicitly justify
+giving them up.
 
 ## Options
 
-1. **Name the user-local copy by ID alone.** The user-local directory never
-   changes its name; the workspace projection in `.jp/conversations/` keeps
-   `<timestamp>-<title-slug>`.
-   No bookkeeping, and a title change no longer renames anything in user-local
-   storage.
-   Costs: a listing of the user-local store shows no titles, and archiving still
-   moves the directory.
-   The leading option so far, accepted with reservations about the lost titles.
-2. **An index file, `conversations/.metadata.json`,** that maps every
-   conversation ID to its current path, titled or not, archived or not.
-   Keeps the titles and needs no symlink.
-   Costs: every rename, archive, unarchive, and removal updates one shared file,
-   and concurrent `jp` processes update it by read-modify-write.
-   RFD 087 chose a directory of per-root files for its roots registry to avoid
-   that.
-3. **A link file per conversation, `conversations/<id>.link`,** that holds the
-   absolute path of the conversation's directory.
-   Keeps the titles and has no shared file.
-   Costs: one more file per conversation to keep in step with each move, and an
-   absolute path goes stale when user-workspace directories are merged or the
-   user data directory moves.
-4. **A symlink per conversation** from a stable name to the current directory.
-   Keeps the titles, and a path that was already printed keeps working through
-   both a rename and an archive.
-   Costs: every operation that moves the directory updates the link, and
-   creating a symlink needs a privilege on Windows, which is why RFD 087 dropped
-   the `storage` symlink.
+1. **Name the user-local directory by conversation ID alone.** The user-local
+   directory name never changes, while the workspace projection in
+   `.jp/conversations/` keeps `<timestamp>-<title-slug>`.
+   Requires no extra index or symlink bookkeeping, and title changes no longer
+   rename user-local directories.
+   Tradeoffs: listing the user-local store no longer shows conversation titles,
+   and archiving still moves the directory under `.archive/`.
+   This is the leading option so far, pending the loss of titles in user-local
+   directory listings.
+2. **Maintain an index file (`conversations/.metadata.json`)** mapping each
+   conversation ID to its current directory path (titled or untitled, live or
+   archived).
+   Preserves titles in directory names without symlinks.
+   Tradeoffs: every rename, archive, unarchive, and removal must update a single
+   shared file, requiring read-modify-write synchronization across concurrent
+   `jp` processes (the reason RFD 087 chose a directory of per-root files for
+   its roots registry).
+3. **Write a pointer file per conversation (`conversations/<id>.link`)**
+   containing the absolute path to the conversation directory.
+   Preserves titles without a shared index file.
+   Tradeoffs: adds an extra file per conversation that must stay synchronized on
+   every move, and absolute paths break when user-workspace directories are
+   merged or the user data directory is relocated.
+4. **Maintain a per-conversation symlink** from a stable ID path to the current
+   titled directory.
+   Preserves titles and keeps previously printed paths valid across both title
+   renames and archiving.
+   Tradeoffs: every move must update the symlink, and creating symlinks on
+   Windows requires elevated privileges or Developer Mode (which led RFD 087 to
+   remove the `storage` symlink).
 
 ## Open questions
 
-- What has to be stable: the path, or the lookup?
-  Options 2 and 3 give a stable way to find the directory.
-  JP already finds a live conversation's directory by ID prefix, and `jp
-  conversation path` prints it.
-  A path that was printed or opened earlier still breaks under them.
-  Options 1 and 4 keep the path itself valid.
-- Does the path have to survive archiving?
-  The archive partition exists so that archived conversations are skipped at
-  startup.
-  Option 1 does not cover it; option 4 does.
-- Can the title be shown some other way than the directory name, so one name
-  does not have to serve both a person reading a listing and a link?
-- Does the workspace projection need the same guarantee, or only the user-local
-  copy?
-- How are existing directories migrated, and what does an older `jp` do with the
-  new layout?
+- **Path stability vs. lookup stability.** Options 2 and 3 provide a stable
+  lookup path, which JP already has via ID-prefix scanning and `jp conversation
+  path`, but any path already printed to a terminal or opened in an editor still
+  breaks on rename.
+  Only Options 1 and 4 keep a previously resolved path valid.
+- **Surviving archiving.** The `.archive/` subdirectory exists so startup scans
+  can skip archived conversations.
+  Option 1 keeps the path stable across title changes but not archiving; Option
+  4 survives both.
+- **Alternative ways to surface titles.** Can human-readable titles be surfaced
+  without encoding them in the user-local directory name?
+- **Workspace projection scope.** Does the workspace projection need a stable
+  path, or only the user-local directory?
+- **Migration and backward compatibility.** How are existing directories
+  migrated, and how do older `jp` binaries handle the new layout?
 
 ## Related
 
-- T-0sr3x0v, T-0sr3zez, T-0sr3zey: open bugs where files beside the managed ones
-  are lost in a merge, a reconcile, or an archive.
-- RFD 031: user-local storage as the source of truth, and the workspace
-  projection.
-- RFD 071: conversation archiving and the `.archive/` partition.
-- RFD 087: the roots registry that replaced the `storage` symlink.
-- RFD 114 and draft D56: more files in the conversation directory.
-- RFD 137 (Stable Storage for Link Files): link files could move into the
+- T-0sr3x0v, T-0sr3zez, T-0sr3zey: Open bugs where auxiliary files in the
+  conversation directory are lost during merge, reconciliation, or archiving.
+- RFD 031: User-local storage as the source of truth and workspace projections.
+- RFD 071: Conversation archiving and the `.archive/` partition.
+- RFD 087: Roots registry that replaced the `storage` symlink.
+- RFD 114 and draft D56: Additional files stored in the conversation directory.
+- RFD 137 (Stable Storage for Link Files): Link files could move into the
   conversation directory once its path is stable.
 
 ## Next step
 
 Promote to an RFD.
-Nothing waits on it: RFD 137 does not depend on the outcome.
+RFD 137 does not depend on this ticket.

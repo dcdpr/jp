@@ -148,11 +148,11 @@ Under [RFD 046]'s nested workspace projection, the resolved path follows the
 nested structure automatically.
 
 > [!TIP]
-> [RFD 138] adds `jp conversation path --loaded`, which prints the copy JP
-> itself loads: for a projected conversation, the user-local copy when its
-> stream is the newer one.
-> A script that reads a conversation's files uses the flag; `jp conversation
-> edit` keeps the resolution described here.
+> [RFD 138] adds `jp conversation path --loaded`, which prints the path to the
+> conversation copy JP itself loads (for a projected conversation, the
+> user-local copy when its stream is newer than the workspace projection).
+> Scripts that read conversation files should pass `--loaded`; `jp conversation
+> edit` keeps the workspace-first resolution described above.
 
 ## Drawbacks
 
