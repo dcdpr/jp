@@ -44,11 +44,11 @@ The tool result path has four defects:
    Because `jp conversation print` uses the same renderer, replaying a
    conversation rewrites every tool result file.
 
-The summary path has a defect of its own: its filename depends only on the
-conversation and the turn range.
+The summary path has a separate collision bug: its filename depends only on the
+conversation ID and turn range.
 Compacting a range, removing that compaction with `jp conversation compact
---reset`, and compacting the same range again overwrites the file, so the path
-printed first opens the second summary.
+--reset`, and compacting the same range again overwrites the file, so the
+earlier printed path opens the newer summary.
 
 ## Design
 
@@ -85,9 +85,9 @@ Storing link files in the User-Workspace Directory provides three properties:
   invisible to tools that scan project files.
 - **Scoped to the workspace.** The directory already holds the user-local
   conversations from which link files are derived ([RFD 031]).
-  Command plugins that receive the user-workspace path can see link files, as
-  they can see those conversations, but link files are not an interface for them
-  (see [Relationship to `events.json` and the Blob
+  Command plugins that receive the user-workspace path can access the directory,
+  though link files are not a plugin interface (see [Relationship to
+  `events.json` and the Blob
   Store](#relationship-to-events-json-and-the-blob-store)).
 - **Managed by JP.** JP owns the directory lifecycle and can prune expired files
   on its own schedule.
@@ -121,8 +121,8 @@ Content-addressed filenames have three consequences:
 
 - **Identical content shares one file.** Replaying a conversation with `jp
   conversation print` resolves to the file written during the live run.
-- **Distinct content never collides.** Two results with different content get
-  different names, and so do two summaries of the same turn range.
+- **Distinct content never collides.** Distinct tool results get distinct
+  filenames, as do distinct summaries of the same turn range.
 - **The renderer needs only the conversation ID.** It does not need an event ID
   or operation index.
   A fanned-out tool call writes one file per operation during a live run and one
@@ -132,8 +132,9 @@ Content-addressed filenames have three consequences:
 
 - JP writes a link file only when printing a path or hyperlink to it.
   Rendering a tool result with `results_file_link = "off"` writes no file.
-  The content stays in the event stream, so a later render that prints the link
-  writes the file then; `jp conversation print --style full` is one.
+  Because the content remains in the event stream, a subsequent render that
+  enables links (such as `jp conversation print --style full`) writes the file
+  at that time.
 - If the target file already exists, JP updates its modification time (`mtime`)
   without rewriting the content.
   Otherwise, JP writes to a temporary sibling file and atomically renames it
@@ -195,14 +196,13 @@ The sweep runs inside the existing end-of-run cleanup in `jp_cli::run` alongside
 orphaned lock-file and stale session-mapping removal, covering every command
 that writes link files.
 
-`0` is rejected because a zero-day window would delete every link file at the
-end of the run that wrote it.
-`"unlimited"` is the only way to turn pruning off.
+`0` is rejected because a zero-day window would delete newly written link files
+at the end of the run that created them; `"unlimited"` disables pruning.
 
 Unlike [RFD 130], which fixes session-record retention at 30 days, link-file
-retention is configurable: link files are plain-text copies of tool output and
-can be large, so one user wants them gone sooner and another wants links in
-scrollback to keep working longer.
+retention is configurable because link files are plain-text copies of tool
+output that can grow large, and users differ on how they trade disk usage
+against scrollback link longevity.
 
 ### Relationship to `events.json` and the Blob Store
 
@@ -222,19 +222,19 @@ Terminal links require an uncompressed file with an appropriate extension,
 whether the underlying payload lives inline in `events.json` or in the blob
 store.
 
-A link file is a disposable copy, and the event stream remains the source of
-truth:
+Link files are disposable rendering artifacts, and the event stream remains the
+source of truth:
 
-- **A rendered result may have no link file.** JP writes one only where it
-  prints a link, so none exists when the link is off, the tool is hidden, or the
-  write failed.
-- **A link file can disappear at any time.** JP prunes link files on its own
-  schedule, and deleting `tmp/` by hand is safe.
-- **Names and locations are not an interface.** Both can change without notice,
-  and nothing in JP reads a link file back.
+- **A rendered result may have no link file.** JP writes a file only when
+  printing a link, so no file exists when links are disabled, the tool is
+  hidden, or the write fails.
+- **Link files can be deleted at any time.** JP prunes expired files
+  automatically, and removing `tmp/` manually is always safe.
+- **Filenames and paths are not a programmatic interface.** Both can change
+  without notice, and nothing in JP reads link files back.
 
-A feature that needs tool output reads the event stream.
-One that needs output the event stream does not hold needs storage of its own.
+Features that consume tool output must read the event stream; features that
+require output omitted from the event stream must provide their own storage.
 
 ### Code Organization
 
@@ -298,9 +298,10 @@ of each run.
 - **Name link files by the response's `EventId`.** Event-ID naming requires
   threading the `EventId` into the renderer and adding an operation index for
   fanned-out tool calls.
-  It also gives each file a name that reads as the address of a stream entry,
-  which invites other features to depend on it.
-  Content hashing needs neither, and its names mean nothing outside the link.
+  It also gives each file a name that looks like a stable stream-entry address,
+  inviting other features to depend on it.
+  Content hashing avoids both costs and produces filenames with no meaning
+  outside the link.
 - **Emit custom-scheme links that resolve stream entries directly.** A custom
   URI scheme handled by a user script requires no files on disk, but does
   nothing until the user configures a scheme handler.
@@ -316,13 +317,14 @@ of each run.
   machine-readable source of truth.
 - **Durable payload storage.** Durable storage belongs to the
   content-addressable blob store ([RFD 066]).
-- **Exposing link files to the assistant or to other features.** Link files are
-  not an interface (see [Relationship to `events.json` and the Blob
+- **Exposing link files to the assistant or other features.** Link files are not
+  a programmatic interface (see [Relationship to `events.json` and the Blob
   Store](#relationship-to-events-json-and-the-blob-store)).
-- **Keeping output the event stream does not hold.** [RFD 115] describes the
-  renderer's temp file as retaining tool output beyond its cap.
-  This RFD gives no such guarantee: with the link off, JP writes no file.
-  Where that output is kept is RFD 115's to settle.
+- **Preserving tool output omitted from the event stream.** [RFD 115] describes
+  the renderer's temp file as retaining untruncated tool output beyond its
+  persistence cap.
+  This RFD makes no such guarantee (when `results_file_link = "off"`, JP writes
+  no link file), leaving untruncated output storage to RFD 115.
 - **Changing link rendering options.** When links are printed, their display
   text, and `results_file_link` (including its error overlay) remain unchanged.
 - **Relocating diagnostic temp files.** Trace logs and dumped request or config

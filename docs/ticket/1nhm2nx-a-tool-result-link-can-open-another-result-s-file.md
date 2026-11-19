@@ -33,13 +33,13 @@ That write has three bugs independent of where the file is stored.
    tool result still writes an unreferenced file, and replaying a conversation
    with `jp conversation print` rewrites a file for every result.
 
-`write_summary_file` in `crates/jp_cli/src/cmd/conversation/compact.rs` shares
-the first defect in a narrower form.
-Its filename is fixed per conversation ID and turn range, so it has no
-clock-based collisions, but compacting the same range again after `jp
-conversation compact --reset` overwrites the file an earlier path points to.
-It prints no path if the write fails.
-This ticket leaves it unchanged; RFD 137 names summary files by content as well.
+`write_summary_file` in `crates/jp_cli/src/cmd/conversation/compact.rs` has a
+narrower form of the first defect: its filename is fixed per conversation ID and
+turn range (avoiding clock collisions, and printing no path on write failure),
+but re-compacting the same turn range after `jp conversation compact --reset`
+overwrites the file an earlier path points to.
+This ticket leaves `write_summary_file` unchanged; RFD 137 switches summary
+files to content-addressed names as well.
 
 ## Fix
 
