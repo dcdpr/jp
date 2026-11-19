@@ -350,14 +350,58 @@ fn test_unknown_thinking_level_honours_requested_effort() {
         Some(types::ThinkingLevel::Medium)
     );
 
-    // Efforts above `high` clamp down rather than being dropped.
+    assert_eq!(
+        effort_to_thinking_level(ReasoningEffort::XHigh, None),
+        Some(types::ThinkingLevel::XHigh)
+    );
+
+    // `Max` maps to `XHigh`, Gemini's highest thinking level.
     assert_eq!(
         effort_to_thinking_level(ReasoningEffort::Max, None),
-        Some(types::ThinkingLevel::High)
+        Some(types::ThinkingLevel::XHigh)
     );
 
     // `auto` leaves the choice to the model.
     assert_eq!(effort_to_thinking_level(ReasoningEffort::Auto, None), None);
+}
+
+/// A model absent from the catalog has no known reasoning levels, so `XHigh` is
+/// passed through as `ThinkingLevel::XHigh` rather than clamped to `High`.
+#[test]
+fn test_xhigh_on_unknown_model_requests_xhigh() {
+    let model = ModelDetails::empty((PROVIDER, "gemini-future-99").try_into().unwrap());
+    assert_eq!(model.reasoning, None, "fixture must have unknown reasoning");
+
+    let mut events = jp_conversation::ConversationStream::new_test().with_turn("test");
+    let mut delta = jp_config::PartialAppConfig::empty();
+    delta.assistant.model.parameters.reasoning = Some(PartialReasoningConfig::Custom(
+        PartialCustomReasoningConfig {
+            effort: Some(ReasoningEffort::XHigh),
+            exclude: Some(false),
+        },
+    ));
+    events.add_config_delta(delta);
+
+    let query = ChatQuery {
+        thread: jp_conversation::thread::Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events,
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
+    };
+
+    let (request, _) = create_request(&model, query).unwrap();
+
+    let thinking = request
+        .generation_config
+        .and_then(|c| c.thinking_config)
+        .expect("configured reasoning sends a thinking config");
+
+    assert_eq!(thinking.thinking_level, Some(types::ThinkingLevel::XHigh));
 }
 
 /// An explicit `off` on a model whose support is unknown sends the documented

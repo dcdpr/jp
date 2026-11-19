@@ -788,11 +788,9 @@ fn effort_to_thinking_level(
         ReasoningEffort::None | ReasoningEffort::Xlow => Some(types::ThinkingLevel::Minimal),
         ReasoningEffort::Low => Some(types::ThinkingLevel::Low),
         ReasoningEffort::Medium => Some(types::ThinkingLevel::Medium),
-        ReasoningEffort::High | ReasoningEffort::XHigh | ReasoningEffort::Max => {
-            Some(types::ThinkingLevel::High)
-        }
         // `abs_to_rel` has already converted any absolute budget.
-        ReasoningEffort::Absolute(_) => Some(types::ThinkingLevel::High),
+        ReasoningEffort::High | ReasoningEffort::Absolute(_) => Some(types::ThinkingLevel::High),
+        ReasoningEffort::XHigh | ReasoningEffort::Max => Some(types::ThinkingLevel::XHigh),
     }
 }
 
