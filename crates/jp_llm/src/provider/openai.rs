@@ -1,19 +1,19 @@
-// qual:allow(srp, file_length=2900) reason: "provider, request building, stream mapping, and model catalog in one file; split in T-1hb8d4k"
+// qual:allow(srp, file_length=1900) reason: "provider, request building, and stream mapping in one file; split in T-1hb8d4k"
 use std::{
     collections::HashMap,
-    sync::{Arc, LazyLock, Mutex, PoisonError},
+    sync::{Arc, Mutex, PoisonError},
     time::Duration,
 };
 
 use async_trait::async_trait;
 use base64::Engine as _;
-use chrono::{DateTime, NaiveDate, Utc};
+use chrono::{DateTime, Utc};
 use futures::{StreamExt as _, TryStreamExt as _, future, stream};
 use jp_attachment::AttachmentContent;
 use jp_config::{
-    assistant::tool_choice::ToolChoice,
+    assistant::{request::CachePolicy, tool_choice::ToolChoice},
     model::{
-        id::{ModelIdConfig, Name, ProviderId},
+        id::{Name, ProviderId},
         parameters::{CustomReasoningConfig, ReasoningConfig, ReasoningEffort, ServiceTier},
     },
     providers::llm::{AuthEntry, openai::OpenaiConfig},
@@ -44,20 +44,24 @@ use crate::{
         looks_like_context_window_error, looks_like_quota_error,
     },
     event::{Event, FinishReason},
-    model::{
-        ModelDeprecation, ReasoningDetails,
-        catalog::{Catalog, Entry},
-    },
+    model::ReasoningDetails,
     provider::{output_schema_is_open, trace_to_tmpfile},
     query::{ChatQuery, Truncation},
     stream::with_tool_call_keepalive,
 };
 
 pub mod auth;
+mod input_transformations;
+mod models;
 pub mod oauth;
 pub mod rate_limits;
 pub(crate) mod resolve;
+mod subscription_request;
 pub mod usage;
+
+use input_transformations::input_transformation_notices;
+use models::{is_api_only, map_model, subscription_models};
+use subscription_request::prepare_subscription_request;
 
 /// The path the subscription host serves the responses endpoint at.
 ///
@@ -816,131 +820,6 @@ fn is_switchable(error: &StreamError) -> bool {
     )
 }
 
-/// Reshape a request for the subscription host.
-///
-/// That host accepts a narrower request than the platform API: it takes the
-/// system prompt in a different field, and rejects several parameters outright
-/// with `400 Unsupported parameter: <name>`.
-fn prepare_subscription_request(request: &mut Request) {
-    fold_system_into_instructions(request);
-    strip_unsupported_parameters(request);
-    strip_explicit_cache_controls(request);
-}
-
-/// Remove the explicit prompt-cache controls.
-///
-/// The model behind the subscription route answers a content block carrying
-/// `prompt_cache_breakpoint` with `400 prompt_cache_breakpoint is not supported
-/// on this model`, even for a model that accepts it through the platform API.
-/// `prompt_cache_options` is dropped with it, as the other half of the same
-/// feature.
-///
-/// `prompt_cache_key` stays: the host reads it, and echoes it back on the
-/// response as the key it cached under.
-fn strip_explicit_cache_controls(request: &mut Request) {
-    request.prompt_cache_options = None;
-
-    let types::Input::List(items) = &mut request.input else {
-        return;
-    };
-
-    for item in items {
-        let types::InputListItem::Message(message) = item else {
-            continue;
-        };
-        let types::ContentInput::List(blocks) = &mut message.content else {
-            continue;
-        };
-
-        for block in blocks {
-            let (types::ContentItem::Text {
-                prompt_cache_breakpoint,
-                ..
-            }
-            | types::ContentItem::Image {
-                prompt_cache_breakpoint,
-                ..
-            }
-            | types::ContentItem::File {
-                prompt_cache_breakpoint,
-                ..
-            }) = block;
-
-            *prompt_cache_breakpoint = None;
-        }
-    }
-}
-
-/// Drop the parameters the subscription host refuses.
-///
-/// `max_output_tokens` is refused by name (measured).
-/// The rest are dropped because the first-party client does not send them
-/// either, and the host reports only one unsupported parameter per request:
-/// discovering them one `400` at a time costs a round-trip each.
-///
-/// Sampling controls go with them.
-/// On the API path they are already suppressed for reasoning models, so a
-/// subscription request loses nothing it would have applied; a caller who sets
-/// them explicitly gets them ignored rather than getting a rejected request.
-fn strip_unsupported_parameters(request: &mut Request) {
-    request.max_output_tokens = None;
-    request.temperature = None;
-    request.top_p = None;
-    request.truncation = None;
-    request.metadata = None;
-    request.user = None;
-    request.previous_response_id = None;
-}
-
-/// Move system-role input messages into the request's `instructions`.
-///
-/// The subscription host answers a `role: "system"` entry in `input` with `400
-/// System messages are not allowed`; it takes the system prompt in
-/// `instructions` instead, which is where the Responses API documents it and
-/// where the Codex CLI puts it.
-///
-/// Any `instructions` already set is kept after the folded parts, so the prompt
-/// reads in the order it was assembled.
-///
-/// The cache breakpoint that rode on the last system block is dropped with it.
-/// The host derives its own cache key from the request's `prompt_cache_key`, so
-/// a breakpoint inside a field it does not read buys nothing.
-fn fold_system_into_instructions(request: &mut Request) {
-    let types::Input::List(items) = &mut request.input else {
-        return;
-    };
-
-    let mut folded: Vec<String> = vec![];
-
-    items.retain(|item| {
-        let types::InputListItem::Message(message) = item else {
-            return true;
-        };
-        if !matches!(message.role, types::Role::System) {
-            return true;
-        }
-
-        match &message.content {
-            types::ContentInput::Text(text) => folded.push(text.clone()),
-            types::ContentInput::List(blocks) => {
-                folded.extend(blocks.iter().filter_map(|block| match block {
-                    types::ContentItem::Text { text, .. } => Some(text.clone()),
-                    types::ContentItem::Image { .. } | types::ContentItem::File { .. } => None,
-                }));
-            }
-        }
-
-        false
-    });
-
-    if folded.is_empty() {
-        return;
-    }
-
-    folded.extend(request.instructions.take());
-    request.instructions = Some(folded.join("\n\n"));
-}
-
 /// Whether an error reads as the model being unknown to the endpoint.
 fn looks_like_unknown_model(error: &StreamError) -> bool {
     let message = error.message().to_ascii_lowercase();
@@ -956,6 +835,12 @@ fn map_non_streaming_response(
     reasoning_enabled: bool,
 ) -> Result<Vec<Event>> {
     let incomplete_reason = response.incomplete_details.map(|details| details.reason);
+    let notices = input_transformation_notices(
+        response
+            .input_transformations
+            .as_deref()
+            .unwrap_or_default(),
+    );
     let mut reasoning = ReasoningState::default();
     let mut arguments = StreamedArguments::default();
     let mut events = response
@@ -974,6 +859,7 @@ fn map_non_streaming_response(
         })
         .collect::<std::result::Result<Vec<_>, StreamError>>()?;
 
+    events.extend(notices);
     events.push(map_non_streaming_finish_reason(
         response.status,
         incomplete_reason,
@@ -1235,11 +1121,12 @@ fn create_request(
     let is_structured = text.is_some();
 
     // Models with unknown reasoning support (absent from the catalog, e.g.
-    // released after this binary was built) are assumed to accept reasoning
-    // request configuration, so an explicit `reasoning = "off"` sends
-    // `effort: none` rather than silently accepting the model's reasoning-on
-    // default. Without explicit configuration the field is omitted entirely:
-    // a non-reasoning deployment (e.g. a fine-tuned chat model) may reject it.
+    // released after this binary was built) are assumed to reason like the
+    // latest models: always on, with `low` as the lowest effort. An explicit
+    // `reasoning = "off"` sends `effort: low` rather than silently accepting
+    // the model's default effort. Without explicit configuration the field is
+    // omitted entirely: a non-reasoning deployment (e.g. a fine-tuned chat
+    // model) may reject it.
     // Conversation replay is independent of this flag: namespaced OpenAI item
     // metadata determines whether a stored event has a native representation.
     let supports_reasoning = model
@@ -1257,15 +1144,14 @@ fn create_request(
         // For leveled models, use their lowest supported effort. Budgetted
         // models fall back to `minimal`, which every cataloged OpenAI
         // reasoning model accepts. Unknown models are newer than this binary,
-        // and every OpenAI flagship since GPT-5.1 accepts `none`, so honor
-        // "off" literally rather than spending reasoning tokens at the
-        // model's default effort.
+        // and no OpenAI model since GPT-6 Astra accepts `none` or `minimal`,
+        // so they get `low`.
         None if supports_reasoning
             && (model.reasoning.is_some()
                 || matches!(parameters.reasoning, Some(ReasoningConfig::Off))) =>
         {
             let effort = match model.reasoning {
-                None => ReasoningEffort::None,
+                None => ReasoningEffort::Low,
                 Some(r) => r.lowest_effort().unwrap_or(ReasoningEffort::Xlow),
             };
             Some(convert_reasoning(
@@ -1282,8 +1168,8 @@ fn create_request(
     if reasoning_enabled && let Some(r) = reasoning.as_mut() {
         r.mode = reasoning_mode;
 
-        // JP replays the complete event history — including encrypted
-        // reasoning items — on every request, so ask supporting models to
+        // JP replays the complete event history, including encrypted
+        // reasoning items, on every request, so ask supporting models to
         // render reasoning from earlier turns into the next sample.
         if model.features.contains(&PERSISTED_REASONING) {
             r.context = Some(types::ReasoningContext::AllTurns);
@@ -1357,15 +1243,16 @@ fn create_request(
         }));
     }
 
-    // GPT-5 family models reject temperature/top_p when reasoning is active
-    // (any effort other than `none`). Models absent from the catalog are
-    // newer than this binary and assumed to share the constraint. Strip the
+    // Cataloged models with `TEMP_REQUIRES_NO_REASONING` reject `temperature`
+    // and `top_p` whenever reasoning is active (any effort other than `none`).
+    // Uncataloged models are assumed to match recent OpenAI models, which
+    // reason by default and reject both parameters outright. Strip the
     // parameters and warn if configured.
-    let strip_temp = (model.features.contains(&TEMP_REQUIRES_NO_REASONING)
-        || model.reasoning.is_none())
-        && reasoning
-            .as_ref()
-            .is_some_and(|r| !matches!(r.effort, Some(types::ReasoningEffort::None)));
+    let strip_temp = model.reasoning.is_none()
+        || (model.features.contains(&TEMP_REQUIRES_NO_REASONING)
+            && reasoning
+                .as_ref()
+                .is_some_and(|r| !matches!(r.effort, Some(types::ReasoningEffort::None))));
     let temperature = if strip_temp {
         if parameters.temperature.is_some() {
             warn!(
@@ -1428,16 +1315,13 @@ fn create_request(
                     conversation_created_at.timestamp_micros()
                 )
             }),
-        // Explicit mode with no marked breakpoints disables cache reads and
-        // writes; the only way to opt out of caching on models that bill
-        // cache writes. Models without the feature flag cache automatically
-        // and at no extra cost, so there is nothing to disable for them.
-        prompt_cache_options: (cache_policy.is_off()
-            && model.features.contains(&EXPLICIT_PROMPT_CACHING))
-        .then_some(types::PromptCacheOptions {
-            mode: Some(types::PromptCacheMode::Explicit),
-            ttl: None,
-        }),
+        // Models without the feature flag reject the field. Their cache
+        // lifetime is set by `prompt_cache_retention`, which JP does not send.
+        prompt_cache_options: model
+            .features
+            .contains(&EXPLICIT_PROMPT_CACHING)
+            .then(|| prompt_cache_options(cache_policy))
+            .flatten(),
         service_tier,
         ..Default::default()
     };
@@ -1446,995 +1330,6 @@ fn create_request(
 
     Ok((request, is_structured, reasoning_enabled, decoders))
 }
-
-/// Map an OpenAI model id onto its capabilities.
-///
-/// An id the catalog does not know maps to empty details, with a warning.
-fn map_model(model: ModelResponse) -> Result<ModelDetails> {
-    if let Some(details) = model_overrides(&model.id) {
-        // Reported under the id the caller named, which may be an alias.
-        let mut details = details.clone();
-        details.id = (PROVIDER, model.id).try_into()?;
-        return Ok(details);
-    }
-
-    warn!(model = model.id.as_str(), "Missing model details.");
-    Ok(ModelDetails::empty((PROVIDER, model.id).try_into()?))
-}
-
-/// Whether the catalog marks `model` as served only through the API.
-///
-/// A model the catalog does not know is not API-only: the plan's model set
-/// changes without a JP release, and refusing it here would hide a model the
-/// subscription may well serve.
-fn is_api_only(model: &str) -> bool {
-    model_overrides(model).is_some_and(|details| details.subscription == Some(false))
-}
-
-/// The canonical ids of the models a `ChatGPT` subscription serves, in catalog
-/// order.
-fn subscription_models() -> impl Iterator<Item = &'static str> {
-    MODEL_OVERRIDES
-        .values()
-        .filter(|details| details.served_by_subscription())
-        .map(|details| details.id.name.as_ref())
-}
-
-/// Look up the details for `id`, under its canonical id or an alias.
-///
-/// `None` for a model absent from [`MODEL_OVERRIDES`].
-fn model_overrides(id: &str) -> Option<&'static ModelDetails> {
-    MODEL_OVERRIDES.get(id)
-}
-
-/// The OpenAI model details the API does not report, which is all of them.
-///
-/// This table is authoritative rather than a fallback: `GET /v1/models/{id}`
-/// returns only `{id, object, created, owned_by}`, reporting neither context
-/// windows nor reasoning effort levels.
-/// Unlike the Anthropic, OpenRouter, and Cerebras providers, there is nothing
-/// to derive from, so every value here is maintained by hand against OpenAI's
-/// published model documentation.
-static MODEL_OVERRIDES: LazyLock<Catalog<ModelDetails>> = LazyLock::new(|| {
-    let date = |year, month, day| NaiveDate::from_ymd_opt(year, month, day).unwrap();
-    let id = |name: &str| ModelIdConfig::try_from((PROVIDER, name)).unwrap();
-
-    Catalog::new(vec![
-        Entry {
-            aliases: &[],
-            value: ModelDetails {
-                id: id("gpt-6-astra"),
-                display_name: Some("GPT-6 Astra".to_owned()),
-                context_window: Some(1_050_000),
-                max_output_tokens: Some(128_000),
-                // Reasoning.effort supports: low, medium, high, xhigh, max. There
-                // is no `none`, so reasoning cannot be turned off; the lowest
-                // level stands in for a disable.
-                reasoning: Some(
-                    ReasoningDetails::leveled(false, true, true, true, true, true).always_on(),
-                ),
-                knowledge_cutoff: Some(date(2026, 4, 30)),
-                deprecated: Some(ModelDeprecation::Active),
-                structured_output: None,
-                prefill: None,
-                subscription: Some(true),
-                // Reasoning is always active, so TEMP_REQUIRES_NO_REASONING drops
-                // temperature and top_p on every request, which is what this model
-                // wants: it rejects both outright.
-                features: vec![
-                    TEMP_REQUIRES_NO_REASONING,
-                    REASONING_PRO_MODE,
-                    PERSISTED_REASONING,
-                    EXPLICIT_PROMPT_CACHING,
-                ],
-            },
-        },
-        Entry {
-            aliases: &[],
-            value: ModelDetails {
-                id: id("gpt-6.1-sol"),
-                display_name: Some("GPT-6.1 Sol".to_owned()),
-                context_window: Some(1_050_000),
-                max_output_tokens: Some(128_000),
-                // Reasoning.effort supports: low, medium, high, xhigh, max. Neither
-                // `none` nor `minimal` is accepted, so reasoning cannot be turned
-                // off; the lowest level stands in for a disable.
-                reasoning: Some(
-                    ReasoningDetails::leveled(false, true, true, true, true, true).always_on(),
-                ),
-                knowledge_cutoff: Some(date(2026, 4, 30)),
-                deprecated: Some(ModelDeprecation::Active),
-                structured_output: None,
-                prefill: None,
-                subscription: Some(true),
-                features: vec![
-                    TEMP_REQUIRES_NO_REASONING,
-                    REASONING_PRO_MODE,
-                    PERSISTED_REASONING,
-                    EXPLICIT_PROMPT_CACHING,
-                ],
-            },
-        },
-        Entry {
-            aliases: &[],
-            value: ModelDetails {
-                id: id("gpt-6-sol"),
-                display_name: Some("GPT-6 Sol".to_owned()),
-                context_window: Some(1_050_000),
-                max_output_tokens: Some(128_000),
-                // Reasoning.effort supports: none, low, medium, high, xhigh, max.
-                reasoning: Some(ReasoningDetails::leveled(
-                    false, true, true, true, true, true,
-                )),
-                knowledge_cutoff: Some(date(2026, 4, 20)),
-                deprecated: Some(ModelDeprecation::Active),
-                structured_output: None,
-                prefill: None,
-                subscription: Some(true),
-                features: vec![
-                    TEMP_REQUIRES_NO_REASONING,
-                    REASONING_PRO_MODE,
-                    PERSISTED_REASONING,
-                    EXPLICIT_PROMPT_CACHING,
-                ],
-            },
-        },
-        Entry {
-            aliases: &[],
-            value: ModelDetails {
-                id: id("gpt-6-luna"),
-                display_name: Some("GPT-6 Luna".to_owned()),
-                context_window: Some(1_050_000),
-                max_output_tokens: Some(128_000),
-                // Reasoning.effort supports: none, low, medium, high, xhigh, max.
-                reasoning: Some(ReasoningDetails::leveled(
-                    false, true, true, true, true, true,
-                )),
-                knowledge_cutoff: Some(date(2026, 5, 18)),
-                deprecated: Some(ModelDeprecation::Active),
-                structured_output: None,
-                prefill: None,
-                subscription: Some(true),
-                features: vec![
-                    TEMP_REQUIRES_NO_REASONING,
-                    REASONING_PRO_MODE,
-                    PERSISTED_REASONING,
-                    EXPLICIT_PROMPT_CACHING,
-                ],
-            },
-        },
-        Entry {
-            aliases: &["gpt-5.6"],
-            value: ModelDetails {
-                id: id("gpt-5.6-sol"),
-                display_name: Some("GPT-5.6 Sol".to_owned()),
-                context_window: Some(1_050_000),
-                max_output_tokens: Some(128_000),
-                // Reasoning.effort supports: none, low, medium, high, xhigh, max.
-                reasoning: Some(ReasoningDetails::leveled(
-                    false, true, true, true, true, true,
-                )),
-                knowledge_cutoff: Some(date(2026, 2, 16)),
-                deprecated: Some(ModelDeprecation::Active),
-                structured_output: None,
-                prefill: None,
-                subscription: Some(true),
-                features: vec![
-                    TEMP_REQUIRES_NO_REASONING,
-                    REASONING_PRO_MODE,
-                    PERSISTED_REASONING,
-                    EXPLICIT_PROMPT_CACHING,
-                ],
-            },
-        },
-        Entry {
-            aliases: &[],
-            value: ModelDetails {
-                id: id("gpt-5.6-terra"),
-                display_name: Some("GPT-5.6 Terra".to_owned()),
-                context_window: Some(1_050_000),
-                max_output_tokens: Some(128_000),
-                reasoning: Some(ReasoningDetails::leveled(
-                    false, true, true, true, true, true,
-                )),
-                knowledge_cutoff: Some(date(2026, 2, 16)),
-                deprecated: Some(ModelDeprecation::Active),
-                structured_output: None,
-                prefill: None,
-                subscription: Some(true),
-                features: vec![
-                    TEMP_REQUIRES_NO_REASONING,
-                    REASONING_PRO_MODE,
-                    PERSISTED_REASONING,
-                    EXPLICIT_PROMPT_CACHING,
-                ],
-            },
-        },
-        Entry {
-            aliases: &[],
-            value: ModelDetails {
-                id: id("gpt-5.6-luna"),
-                display_name: Some("GPT-5.6 Luna".to_owned()),
-                context_window: Some(1_050_000),
-                max_output_tokens: Some(128_000),
-                reasoning: Some(ReasoningDetails::leveled(
-                    false, true, true, true, true, true,
-                )),
-                knowledge_cutoff: Some(date(2026, 2, 16)),
-                deprecated: Some(ModelDeprecation::Active),
-                structured_output: None,
-                prefill: None,
-                subscription: Some(true),
-                features: vec![
-                    TEMP_REQUIRES_NO_REASONING,
-                    REASONING_PRO_MODE,
-                    PERSISTED_REASONING,
-                    EXPLICIT_PROMPT_CACHING,
-                ],
-            },
-        },
-        Entry {
-            aliases: &["gpt-5.5-2026-04-23"],
-            value: ModelDetails {
-                id: id("gpt-5.5"),
-                display_name: Some("GPT-5.5".to_owned()),
-                context_window: Some(1_050_000),
-                max_output_tokens: Some(128_000),
-                reasoning: Some(ReasoningDetails::leveled(
-                    false, true, true, true, true, false,
-                )),
-                knowledge_cutoff: Some(date(2025, 12, 1)),
-                deprecated: Some(ModelDeprecation::Active),
-                structured_output: None,
-                prefill: None,
-                subscription: Some(true),
-                features: vec![TEMP_REQUIRES_NO_REASONING],
-            },
-        },
-        Entry {
-            aliases: &["gpt-5.5-pro-2026-04-23"],
-            value: ModelDetails {
-                id: id("gpt-5.5-pro"),
-                display_name: Some("GPT-5.5 pro".to_owned()),
-                context_window: Some(1_050_000),
-                max_output_tokens: Some(128_000),
-                reasoning: Some(
-                    ReasoningDetails::leveled(false, false, true, true, true, false).always_on(),
-                ),
-                knowledge_cutoff: Some(date(2025, 12, 1)),
-                deprecated: Some(ModelDeprecation::Active),
-                structured_output: None,
-                prefill: None,
-                subscription: Some(false),
-                features: vec![TEMP_REQUIRES_NO_REASONING, STREAMING_UNSUPPORTED],
-            },
-        },
-        Entry {
-            aliases: &["gpt-5.4-2026-03-05"],
-            value: ModelDetails {
-                id: id("gpt-5.4"),
-                display_name: Some("GPT-5.4".to_owned()),
-                context_window: Some(1_050_000),
-                max_output_tokens: Some(128_000),
-                reasoning: Some(ReasoningDetails::leveled(
-                    false, true, true, true, true, false,
-                )),
-                knowledge_cutoff: Some(date(2025, 8, 31)),
-                deprecated: Some(ModelDeprecation::Active),
-                structured_output: None,
-                prefill: None,
-                subscription: Some(false),
-                features: vec![TEMP_REQUIRES_NO_REASONING],
-            },
-        },
-        Entry {
-            aliases: &["gpt-5.4-pro-2026-03-05"],
-            value: ModelDetails {
-                id: id("gpt-5.4-pro"),
-                display_name: Some("GPT-5.4 pro".to_owned()),
-                context_window: Some(1_050_000),
-                max_output_tokens: Some(128_000),
-                reasoning: Some(
-                    ReasoningDetails::leveled(false, false, true, true, true, false).always_on(),
-                ),
-                knowledge_cutoff: Some(date(2025, 8, 31)),
-                deprecated: Some(ModelDeprecation::Active),
-                structured_output: None,
-                prefill: None,
-                subscription: Some(false),
-                features: vec![TEMP_REQUIRES_NO_REASONING],
-            },
-        },
-        Entry {
-            aliases: &["gpt-5.4-mini-2026-03-17"],
-            value: ModelDetails {
-                id: id("gpt-5.4-mini"),
-                display_name: Some("GPT-5.4 mini".to_owned()),
-                context_window: Some(400_000),
-                max_output_tokens: Some(128_000),
-                reasoning: Some(ReasoningDetails::leveled(
-                    false, true, true, true, true, false,
-                )),
-                knowledge_cutoff: Some(date(2025, 8, 31)),
-                deprecated: Some(ModelDeprecation::Active),
-                structured_output: None,
-                prefill: None,
-                subscription: Some(false),
-                features: vec![TEMP_REQUIRES_NO_REASONING],
-            },
-        },
-        Entry {
-            aliases: &["gpt-5.4-nano-2026-03-17"],
-            value: ModelDetails {
-                id: id("gpt-5.4-nano"),
-                display_name: Some("GPT-5.4 nano".to_owned()),
-                context_window: Some(400_000),
-                max_output_tokens: Some(128_000),
-                reasoning: Some(ReasoningDetails::leveled(
-                    false, true, true, true, true, false,
-                )),
-                knowledge_cutoff: Some(date(2025, 8, 31)),
-                deprecated: Some(ModelDeprecation::Active),
-                structured_output: None,
-                prefill: None,
-                subscription: Some(false),
-                features: vec![TEMP_REQUIRES_NO_REASONING],
-            },
-        },
-        // Codex's ultra-fast tier, served only through a subscription.
-        Entry {
-            aliases: &[],
-            value: ModelDetails {
-                id: id("gpt-5.3-codex-spark"),
-                display_name: Some("GPT-5.3 Codex Spark".to_owned()),
-                context_window: Some(400_000),
-                max_output_tokens: Some(128_000),
-                reasoning: Some(
-                    ReasoningDetails::leveled(false, true, true, true, false, false).always_on(),
-                ),
-                knowledge_cutoff: Some(date(2025, 8, 31)),
-                deprecated: Some(ModelDeprecation::Active),
-                structured_output: None,
-                prefill: None,
-                subscription: Some(true),
-                features: vec![TEMP_REQUIRES_NO_REASONING],
-            },
-        },
-        Entry {
-            aliases: &[],
-            value: ModelDetails {
-                id: id("gpt-5.3-codex"),
-                display_name: Some("GPT-5.3 Codex".to_owned()),
-                context_window: Some(400_000),
-                max_output_tokens: Some(128_000),
-                reasoning: Some(
-                    ReasoningDetails::leveled(false, true, true, true, true, false).always_on(),
-                ),
-                knowledge_cutoff: Some(date(2025, 8, 31)),
-                deprecated: Some(ModelDeprecation::Active),
-                structured_output: None,
-                prefill: None,
-                subscription: Some(false),
-                features: vec![TEMP_REQUIRES_NO_REASONING],
-            },
-        },
-        Entry {
-            aliases: &[],
-            value: ModelDetails {
-                id: id("gpt-5.3-chat-latest"),
-                display_name: Some("GPT-5.3 Chat".to_owned()),
-                context_window: Some(128_000),
-                max_output_tokens: Some(16_384),
-                reasoning: Some(
-                    ReasoningDetails::leveled(false, true, true, true, true, false).always_on(),
-                ),
-                knowledge_cutoff: Some(date(2025, 8, 31)),
-                deprecated: Some(ModelDeprecation::deprecated(
-                    &"recommended replacement: gpt-5.5",
-                    Some(date(2026, 8, 10)),
-                )),
-                structured_output: None,
-                prefill: None,
-                subscription: Some(false),
-                features: vec![TEMP_REQUIRES_NO_REASONING],
-            },
-        },
-        Entry {
-            aliases: &[],
-            value: ModelDetails {
-                id: id("gpt-5.2-codex"),
-                display_name: Some("GPT-5.2 Codex".to_owned()),
-                context_window: Some(400_000),
-                max_output_tokens: Some(128_000),
-                // Reasoning.effort supports: low, medium, high, xhigh (no none)
-                reasoning: Some(
-                    ReasoningDetails::leveled(false, true, true, true, true, false).always_on(),
-                ),
-                knowledge_cutoff: Some(date(2025, 8, 31)),
-                deprecated: Some(ModelDeprecation::deprecated(
-                    &"recommended replacement: gpt-5.5",
-                    Some(date(2026, 7, 23)),
-                )),
-                structured_output: None,
-                prefill: None,
-                subscription: Some(false),
-                features: vec![TEMP_REQUIRES_NO_REASONING],
-            },
-        },
-        Entry {
-            aliases: &["gpt-5.2-pro-2025-12-11"],
-            value: ModelDetails {
-                id: id("gpt-5.2-pro"),
-                display_name: Some("GPT-5.2 pro".to_owned()),
-                context_window: Some(400_000),
-                max_output_tokens: Some(128_000),
-                reasoning: Some(
-                    ReasoningDetails::leveled(false, false, true, true, true, false).always_on(),
-                ),
-                knowledge_cutoff: Some(date(2025, 8, 31)),
-                deprecated: Some(ModelDeprecation::Active),
-                structured_output: None,
-                prefill: None,
-                subscription: Some(false),
-                features: vec![TEMP_REQUIRES_NO_REASONING],
-            },
-        },
-        Entry {
-            aliases: &["gpt-5.2-2025-12-11"],
-            value: ModelDetails {
-                id: id("gpt-5.2"),
-                display_name: Some("GPT-5.2".to_owned()),
-                context_window: Some(400_000),
-                max_output_tokens: Some(128_000),
-                // Reasoning.effort supports: none (default), low, medium, high, xhigh
-                reasoning: Some(ReasoningDetails::leveled(
-                    false, true, true, true, true, false,
-                )),
-                knowledge_cutoff: Some(date(2025, 8, 31)),
-                deprecated: Some(ModelDeprecation::Active),
-                structured_output: None,
-                prefill: None,
-                subscription: Some(false),
-                features: vec![TEMP_REQUIRES_NO_REASONING],
-            },
-        },
-        Entry {
-            aliases: &[],
-            value: ModelDetails {
-                id: id("gpt-5.2-chat-latest"),
-                display_name: Some("GPT-5.2 Chat".to_owned()),
-                context_window: Some(128_000),
-                max_output_tokens: Some(16_384),
-                reasoning: Some(ReasoningDetails::leveled(
-                    false, true, true, true, true, false,
-                )),
-                knowledge_cutoff: Some(date(2025, 8, 31)),
-                deprecated: Some(ModelDeprecation::deprecated(
-                    &"recommended replacement: gpt-5.5",
-                    Some(date(2026, 8, 10)),
-                )),
-                structured_output: None,
-                prefill: None,
-                subscription: Some(false),
-                features: vec![TEMP_REQUIRES_NO_REASONING],
-            },
-        },
-        Entry {
-            aliases: &[],
-            value: ModelDetails {
-                id: id("gpt-5.1-codex-max"),
-                display_name: Some("GPT-5.1-Codex-Max".to_owned()),
-                context_window: Some(400_000),
-                max_output_tokens: Some(128_000),
-                reasoning: Some(ReasoningDetails::budgetted(0, None)),
-                knowledge_cutoff: Some(date(2024, 9, 30)),
-                deprecated: Some(ModelDeprecation::deprecated(
-                    &"recommended replacement: gpt-5.5",
-                    Some(date(2026, 7, 23)),
-                )),
-                structured_output: None,
-                prefill: None,
-                subscription: Some(false),
-                features: vec![TEMP_REQUIRES_NO_REASONING],
-            },
-        },
-        Entry {
-            aliases: &[],
-            value: ModelDetails {
-                id: id("gpt-5.1-codex"),
-                display_name: Some("GPT-5.1 Codex".to_owned()),
-                context_window: Some(400_000),
-                max_output_tokens: Some(128_000),
-                reasoning: Some(ReasoningDetails::budgetted(0, None)),
-                knowledge_cutoff: Some(date(2024, 9, 30)),
-                deprecated: Some(ModelDeprecation::deprecated(
-                    &"recommended replacement: gpt-5.5",
-                    Some(date(2026, 7, 23)),
-                )),
-                structured_output: None,
-                prefill: None,
-                subscription: Some(false),
-                features: vec![TEMP_REQUIRES_NO_REASONING],
-            },
-        },
-        Entry {
-            aliases: &[],
-            value: ModelDetails {
-                id: id("gpt-5.1-codex-mini"),
-                display_name: Some("GPT-5.1 Codex mini".to_owned()),
-                context_window: Some(400_000),
-                max_output_tokens: Some(128_000),
-                reasoning: Some(ReasoningDetails::budgetted(0, None)),
-                knowledge_cutoff: Some(date(2024, 9, 30)),
-                deprecated: Some(ModelDeprecation::deprecated(
-                    &"recommended replacement: gpt-5.4-mini",
-                    Some(date(2026, 7, 23)),
-                )),
-                structured_output: None,
-                prefill: None,
-                subscription: Some(false),
-                features: vec![TEMP_REQUIRES_NO_REASONING],
-            },
-        },
-        Entry {
-            aliases: &["gpt-5.1-2025-11-13"],
-            value: ModelDetails {
-                id: id("gpt-5.1"),
-                display_name: Some("GPT-5.1".to_owned()),
-                context_window: Some(400_000),
-                max_output_tokens: Some(128_000),
-                // Reasoning.effort supports: none (default), low, medium, high
-                reasoning: Some(ReasoningDetails::leveled(
-                    false, true, true, true, false, false,
-                )),
-                knowledge_cutoff: Some(date(2024, 9, 30)),
-                deprecated: Some(ModelDeprecation::Active),
-                structured_output: None,
-                prefill: None,
-                subscription: Some(false),
-                features: vec![TEMP_REQUIRES_NO_REASONING],
-            },
-        },
-        Entry {
-            aliases: &[],
-            value: ModelDetails {
-                id: id("gpt-5.1-chat-latest"),
-                display_name: Some("GPT-5.1 Chat".to_owned()),
-                context_window: Some(128_000),
-                max_output_tokens: Some(16_384),
-                reasoning: Some(ReasoningDetails::leveled(
-                    false, true, true, true, false, false,
-                )),
-                knowledge_cutoff: Some(date(2024, 9, 30)),
-                deprecated: Some(ModelDeprecation::deprecated(
-                    &"recommended replacement: gpt-5.5",
-                    Some(date(2026, 7, 23)),
-                )),
-                structured_output: None,
-                prefill: None,
-                subscription: Some(false),
-                features: vec![TEMP_REQUIRES_NO_REASONING],
-            },
-        },
-        Entry {
-            aliases: &[],
-            value: ModelDetails {
-                id: id("gpt-5-codex"),
-                display_name: Some("GPT-5-Codex".to_owned()),
-                context_window: Some(400_000),
-                max_output_tokens: Some(128_000),
-                reasoning: Some(ReasoningDetails::budgetted(0, None)),
-                knowledge_cutoff: Some(date(2024, 9, 30)),
-                deprecated: Some(ModelDeprecation::deprecated(
-                    &"recommended replacement: gpt-5.5",
-                    Some(date(2026, 7, 23)),
-                )),
-                structured_output: None,
-                prefill: None,
-                subscription: Some(false),
-                features: vec![TEMP_REQUIRES_NO_REASONING],
-            },
-        },
-        Entry {
-            aliases: &[],
-            value: ModelDetails {
-                id: id("gpt-5"),
-                display_name: Some("GPT-5".to_owned()),
-                context_window: Some(400_000),
-                max_output_tokens: Some(128_000),
-                // Reasoning.effort supports: minimal, low, medium, high
-                reasoning: Some(
-                    ReasoningDetails::leveled(true, true, true, true, false, false).always_on(),
-                ),
-                knowledge_cutoff: Some(date(2024, 9, 30)),
-                // Deprecated without an announced retirement date; only the
-                // 2025-08-07 snapshot has a scheduled shutdown (2026-12-11).
-                deprecated: Some(ModelDeprecation::deprecated(
-                    &"recommended replacement: gpt-5.5",
-                    None,
-                )),
-                structured_output: None,
-                prefill: None,
-                subscription: Some(false),
-                features: vec![TEMP_REQUIRES_NO_REASONING],
-            },
-        },
-        Entry {
-            aliases: &[],
-            value: ModelDetails {
-                id: id("gpt-5-2025-08-07"),
-                display_name: Some("GPT-5".to_owned()),
-                context_window: Some(400_000),
-                max_output_tokens: Some(128_000),
-                // Reasoning.effort supports: minimal, low, medium, high
-                reasoning: Some(
-                    ReasoningDetails::leveled(true, true, true, true, false, false).always_on(),
-                ),
-                knowledge_cutoff: Some(date(2024, 9, 30)),
-                deprecated: Some(ModelDeprecation::deprecated(
-                    &"recommended replacement: gpt-5.5",
-                    Some(date(2026, 12, 11)),
-                )),
-                structured_output: None,
-                prefill: None,
-                subscription: Some(false),
-                features: vec![TEMP_REQUIRES_NO_REASONING],
-            },
-        },
-        Entry {
-            aliases: &["gpt-5-pro-2025-10-06"],
-            value: ModelDetails {
-                id: id("gpt-5-pro"),
-                display_name: Some("GPT-5 pro".to_owned()),
-                context_window: Some(400_000),
-                max_output_tokens: Some(128_000),
-                reasoning: Some(
-                    ReasoningDetails::leveled(false, false, false, true, false, false).always_on(),
-                ),
-                knowledge_cutoff: Some(date(2024, 9, 30)),
-                deprecated: Some(ModelDeprecation::deprecated(
-                    &"recommended replacement: gpt-5.5-pro",
-                    Some(date(2026, 12, 11)),
-                )),
-                structured_output: None,
-                prefill: None,
-                subscription: Some(false),
-                features: vec![TEMP_REQUIRES_NO_REASONING],
-            },
-        },
-        Entry {
-            aliases: &[],
-            value: ModelDetails {
-                id: id("gpt-5-chat-latest"),
-                display_name: Some("GPT-5 Chat".to_owned()),
-                context_window: Some(128_000),
-                max_output_tokens: Some(16_384),
-                reasoning: Some(
-                    ReasoningDetails::leveled(true, true, true, true, false, false).always_on(),
-                ),
-                knowledge_cutoff: Some(date(2024, 9, 30)),
-                deprecated: Some(ModelDeprecation::deprecated(
-                    &"recommended replacement: gpt-5.5",
-                    Some(date(2026, 7, 23)),
-                )),
-                structured_output: None,
-                prefill: None,
-                subscription: Some(false),
-                features: vec![TEMP_REQUIRES_NO_REASONING],
-            },
-        },
-        Entry {
-            aliases: &["gpt-5-mini-2025-08-07"],
-            value: ModelDetails {
-                id: id("gpt-5-mini"),
-                display_name: Some("GPT-5 mini".to_owned()),
-                context_window: Some(400_000),
-                max_output_tokens: Some(128_000),
-                reasoning: Some(ReasoningDetails::budgetted(0, None)),
-                knowledge_cutoff: Some(date(2024, 5, 31)),
-                deprecated: Some(ModelDeprecation::deprecated(
-                    &"recommended replacement: gpt-5.4-mini",
-                    Some(date(2026, 12, 11)),
-                )),
-                structured_output: None,
-                prefill: None,
-                subscription: Some(false),
-                features: vec![TEMP_REQUIRES_NO_REASONING],
-            },
-        },
-        Entry {
-            aliases: &["gpt-5-nano-2025-08-07"],
-            value: ModelDetails {
-                id: id("gpt-5-nano"),
-                display_name: Some("GPT-5 nano".to_owned()),
-                context_window: Some(400_000),
-                max_output_tokens: Some(128_000),
-                reasoning: Some(ReasoningDetails::budgetted(0, None)),
-                knowledge_cutoff: Some(date(2024, 5, 31)),
-                deprecated: Some(ModelDeprecation::deprecated(
-                    &"recommended replacement: gpt-5.4-nano",
-                    Some(date(2026, 12, 11)),
-                )),
-                structured_output: None,
-                prefill: None,
-                subscription: Some(false),
-                features: vec![],
-            },
-        },
-        Entry {
-            aliases: &["o4-mini-2025-04-16"],
-            value: ModelDetails {
-                id: id("o4-mini"),
-                display_name: Some("o4-mini".to_owned()),
-                context_window: Some(200_000),
-                max_output_tokens: Some(100_000),
-                reasoning: Some(ReasoningDetails::budgetted(0, None)),
-                knowledge_cutoff: Some(date(2024, 6, 1)),
-                deprecated: Some(ModelDeprecation::deprecated(
-                    &"recommended replacement: gpt-5.4-mini",
-                    Some(date(2026, 10, 23)),
-                )),
-                structured_output: None,
-                prefill: None,
-                subscription: Some(false),
-                features: vec![],
-            },
-        },
-        Entry {
-            aliases: &["o3-mini-2025-01-31"],
-            value: ModelDetails {
-                id: id("o3-mini"),
-                display_name: Some("o3-mini".to_owned()),
-                context_window: Some(200_000),
-                max_output_tokens: Some(100_000),
-                reasoning: Some(ReasoningDetails::budgetted(0, None)),
-                knowledge_cutoff: Some(date(2023, 10, 1)),
-                deprecated: Some(ModelDeprecation::deprecated(
-                    &"recommended replacement: gpt-5.5",
-                    Some(date(2026, 10, 23)),
-                )),
-                structured_output: None,
-                prefill: None,
-                subscription: Some(false),
-                features: vec![],
-            },
-        },
-        Entry {
-            aliases: &["o3-2025-04-16"],
-            value: ModelDetails {
-                id: id("o3"),
-                display_name: Some("o3".to_owned()),
-                context_window: Some(200_000),
-                max_output_tokens: Some(100_000),
-                reasoning: Some(ReasoningDetails::budgetted(0, None)),
-                knowledge_cutoff: Some(date(2024, 6, 1)),
-                deprecated: Some(ModelDeprecation::deprecated(
-                    &"recommended replacement: gpt-5.5",
-                    Some(date(2026, 12, 11)),
-                )),
-                structured_output: None,
-                prefill: None,
-                subscription: Some(false),
-                features: vec![],
-            },
-        },
-        Entry {
-            aliases: &["o3-pro-2025-06-10"],
-            value: ModelDetails {
-                id: id("o3-pro"),
-                display_name: Some("o3-pro".to_owned()),
-                context_window: Some(200_000),
-                max_output_tokens: Some(100_000),
-                reasoning: Some(ReasoningDetails::budgetted(0, None)),
-                knowledge_cutoff: Some(date(2024, 6, 1)),
-                deprecated: Some(ModelDeprecation::deprecated(
-                    &"recommended replacement: gpt-5.5-pro",
-                    Some(date(2026, 12, 11)),
-                )),
-                structured_output: None,
-                prefill: None,
-                subscription: Some(false),
-                features: vec![],
-            },
-        },
-        Entry {
-            aliases: &["o1-2024-12-17"],
-            value: ModelDetails {
-                id: id("o1"),
-                display_name: Some("o1".to_owned()),
-                context_window: Some(200_000),
-                max_output_tokens: Some(100_000),
-                reasoning: Some(ReasoningDetails::budgetted(0, None)),
-                knowledge_cutoff: Some(date(2023, 10, 1)),
-                deprecated: Some(ModelDeprecation::deprecated(
-                    &"recommended replacement: gpt-5.5",
-                    Some(date(2026, 10, 23)),
-                )),
-                structured_output: None,
-                prefill: None,
-                subscription: Some(false),
-                features: vec![],
-            },
-        },
-        Entry {
-            aliases: &["o1-pro-2025-03-19"],
-            value: ModelDetails {
-                id: id("o1-pro"),
-                display_name: Some("o1-pro".to_owned()),
-                context_window: Some(200_000),
-                max_output_tokens: Some(100_000),
-                reasoning: Some(ReasoningDetails::budgetted(0, None)),
-                knowledge_cutoff: Some(date(2023, 10, 1)),
-                deprecated: Some(ModelDeprecation::deprecated(
-                    &"recommended replacement: gpt-5.5-pro",
-                    Some(date(2026, 10, 23)),
-                )),
-                structured_output: None,
-                prefill: None,
-                subscription: Some(false),
-                features: vec![],
-            },
-        },
-        Entry {
-            aliases: &["gpt-4.1-2025-04-14"],
-            value: ModelDetails {
-                id: id("gpt-4.1"),
-                display_name: Some("GPT-4.1".to_owned()),
-                context_window: Some(1_047_576),
-                max_output_tokens: Some(32_768),
-                reasoning: Some(ReasoningDetails::unsupported()),
-                knowledge_cutoff: Some(date(2024, 6, 1)),
-                deprecated: Some(ModelDeprecation::Active),
-                structured_output: None,
-                prefill: None,
-                subscription: Some(false),
-                features: vec![],
-            },
-        },
-        Entry {
-            aliases: &["gpt-4o-2024-08-06", "gpt-4o-2024-11-20"],
-            value: ModelDetails {
-                id: id("gpt-4o"),
-                display_name: Some("GPT-4o".to_owned()),
-                context_window: Some(128_000),
-                max_output_tokens: Some(16_384),
-                reasoning: Some(ReasoningDetails::unsupported()),
-                knowledge_cutoff: Some(date(2023, 10, 1)),
-                // Deprecated without an announced retirement date; only the
-                // 2024-05-13 snapshot has a scheduled shutdown (2026-10-23).
-                deprecated: Some(ModelDeprecation::deprecated(
-                    &"recommended replacement: gpt-5.5",
-                    None,
-                )),
-                structured_output: None,
-                prefill: None,
-                subscription: Some(false),
-                features: vec![],
-            },
-        },
-        Entry {
-            aliases: &["gpt-4.1-nano-2025-04-14"],
-            value: ModelDetails {
-                id: id("gpt-4.1-nano"),
-                display_name: Some("GPT-4.1 nano".to_owned()),
-                context_window: Some(1_047_576),
-                max_output_tokens: Some(32_768),
-                reasoning: Some(ReasoningDetails::unsupported()),
-                knowledge_cutoff: Some(date(2024, 6, 1)),
-                deprecated: Some(ModelDeprecation::deprecated(
-                    &"recommended replacement: gpt-5.4-nano",
-                    Some(date(2026, 10, 23)),
-                )),
-                structured_output: None,
-                prefill: None,
-                subscription: Some(false),
-                features: vec![],
-            },
-        },
-        Entry {
-            aliases: &["gpt-4o-mini-2024-07-18"],
-            value: ModelDetails {
-                id: id("gpt-4o-mini"),
-                display_name: Some("GPT-4o mini".to_owned()),
-                context_window: Some(128_000),
-                max_output_tokens: Some(16_384),
-                reasoning: Some(ReasoningDetails::unsupported()),
-                knowledge_cutoff: Some(date(2023, 10, 1)),
-                deprecated: Some(ModelDeprecation::Active),
-                structured_output: None,
-                prefill: None,
-                subscription: Some(false),
-                features: vec![],
-            },
-        },
-        Entry {
-            aliases: &["gpt-4.1-mini-2025-04-14"],
-            value: ModelDetails {
-                id: id("gpt-4.1-mini"),
-                display_name: Some("GPT-4.1 mini".to_owned()),
-                context_window: Some(1_047_576),
-                max_output_tokens: Some(32_768),
-                reasoning: Some(ReasoningDetails::unsupported()),
-                knowledge_cutoff: Some(date(2024, 6, 1)),
-                deprecated: Some(ModelDeprecation::Active),
-                structured_output: None,
-                prefill: None,
-                subscription: Some(false),
-                features: vec![],
-            },
-        },
-        Entry {
-            aliases: &[],
-            value: ModelDetails {
-                id: id("gpt-oss-120b"),
-                display_name: Some("gpt-oss-120b".to_owned()),
-                context_window: Some(131_072),
-                max_output_tokens: Some(131_072),
-                reasoning: Some(ReasoningDetails::budgetted(0, None)),
-                knowledge_cutoff: Some(date(2024, 6, 1)),
-                deprecated: Some(ModelDeprecation::Active),
-                structured_output: None,
-                prefill: None,
-                subscription: Some(false),
-                features: vec![],
-            },
-        },
-        Entry {
-            aliases: &[],
-            value: ModelDetails {
-                id: id("gpt-oss-20b"),
-                display_name: Some("gpt-oss-20b".to_owned()),
-                context_window: Some(131_072),
-                max_output_tokens: Some(131_072),
-                reasoning: Some(ReasoningDetails::budgetted(0, None)),
-                knowledge_cutoff: Some(date(2024, 6, 1)),
-                deprecated: Some(ModelDeprecation::Active),
-                structured_output: None,
-                prefill: None,
-                subscription: Some(false),
-                features: vec![],
-            },
-        },
-        Entry {
-            aliases: &["o3-deep-research-2025-06-26"],
-            value: ModelDetails {
-                id: id("o3-deep-research"),
-                display_name: Some("o3-deep-research".to_owned()),
-                context_window: Some(200_000),
-                max_output_tokens: Some(100_000),
-                reasoning: Some(ReasoningDetails::budgetted(0, None)),
-                knowledge_cutoff: Some(date(2024, 6, 1)),
-                deprecated: Some(ModelDeprecation::deprecated(
-                    &"recommended replacement: gpt-5.5-pro",
-                    Some(date(2026, 7, 23)),
-                )),
-                structured_output: None,
-                prefill: None,
-                subscription: Some(false),
-                features: vec![],
-            },
-        },
-        Entry {
-            aliases: &["o4-mini-deep-research-2025-06-26"],
-            value: ModelDetails {
-                id: id("o4-mini-deep-research"),
-                display_name: Some("o4-mini-deep-research".to_owned()),
-                context_window: Some(200_000),
-                max_output_tokens: Some(100_000),
-                reasoning: Some(ReasoningDetails::budgetted(0, None)),
-                knowledge_cutoff: Some(date(2024, 6, 1)),
-                deprecated: Some(ModelDeprecation::deprecated(
-                    &"recommended replacement: gpt-5.5-pro",
-                    Some(date(2026, 7, 23)),
-                )),
-                structured_output: None,
-                prefill: None,
-                subscription: Some(false),
-                features: vec![],
-            },
-        },
-    ])
-});
 
 /// Filter out unknown event types from the OpenAI SSE stream.
 ///
@@ -2813,10 +1708,15 @@ fn map_event(
         | ResponseFailed { response } => {
             *reasoning = ReasoningState::default();
             let incomplete_reason = response.incomplete_details.map(|d| d.reason);
-            match map_non_streaming_finish_reason(response.status, incomplete_reason) {
-                Ok(event) => vec![Ok(event)],
-                Err(error) => vec![Err(StreamError::other(error.to_string()))],
-            }
+            let finished = map_non_streaming_finish_reason(response.status, incomplete_reason)
+                .map_err(|error| StreamError::other(error.to_string()));
+            let notices = input_transformation_notices(
+                response
+                    .input_transformations
+                    .as_deref()
+                    .unwrap_or_default(),
+            );
+            notices.into_iter().map(Ok).chain([finished]).collect()
         }
         Error { error } => vec![Err(classify_stream_error(error))],
 
@@ -3540,6 +2440,35 @@ fn parse_reasoning_mode(value: &str, model: &ModelDetails) -> Option<types::Reas
     }
 }
 
+/// Build `prompt_cache_options` for a model with explicit prompt caching.
+///
+/// - `off`: explicit mode with no marked breakpoints, disabling cache reads and
+///   writes.
+/// - `short`: `None`, using the API's 30-minute default TTL.
+/// - `long`: 12-hour TTL (`"12h"`).
+/// - `Custom`: rounded to the nearer of 30 minutes and 12 hours.
+fn prompt_cache_options(policy: CachePolicy) -> Option<types::PromptCacheOptions> {
+    // 6h15m, halfway between the 30-minute and 12-hour TTLs.
+    const LONG_TTL_FROM: Duration = Duration::from_mins(375);
+
+    let long = match policy {
+        CachePolicy::Off => {
+            return Some(types::PromptCacheOptions {
+                mode: Some(types::PromptCacheMode::Explicit),
+                ttl: None,
+            });
+        }
+        CachePolicy::Short => false,
+        CachePolicy::Long => true,
+        CachePolicy::Custom(duration) => duration >= LONG_TTL_FROM,
+    };
+
+    long.then(|| types::PromptCacheOptions {
+        mode: None,
+        ttl: Some("12h".to_owned()),
+    })
+}
+
 /// Map a requested tier onto OpenAI's `service_tier` field.
 ///
 /// `off` omits the field, which leaves the project's own default tier in force.
@@ -3559,11 +2488,14 @@ fn convert_service_tier(tier: ServiceTier) -> Option<types::ServiceTier> {
 ///
 /// The `max` effort is only sent to models that support it; others degrade to
 /// `xhigh`.
+/// Models absent from the catalog clamp `none` and `minimal` (`Xlow`) to `low`,
+/// since OpenAI models from GPT-6 Astra onward reject both.
 fn convert_reasoning(
     reasoning: CustomReasoningConfig,
     model: &ModelDetails,
 ) -> types::ReasoningConfig {
     let supports_max = model.reasoning.is_some_and(|r| r.supports_max_effort());
+    let unknown = model.reasoning.is_none();
 
     // Always request reasoning summaries so they're captured in the
     // conversation. The display layer handles visibility.
@@ -3574,6 +2506,9 @@ fn convert_reasoning(
             .abs_to_rel(model.max_output_tokens)
             .unwrap_or(ReasoningEffort::Auto)
         {
+            ReasoningEffort::None | ReasoningEffort::Xlow if unknown => {
+                Some(types::ReasoningEffort::Low)
+            }
             ReasoningEffort::None => Some(types::ReasoningEffort::None),
             ReasoningEffort::Max if supports_max => Some(types::ReasoningEffort::Max),
             ReasoningEffort::Max | ReasoningEffort::XHigh => Some(types::ReasoningEffort::XHigh),
@@ -3803,6 +2738,10 @@ mod latency_tests;
 #[cfg(test)]
 #[path = "openai/redeem_tests.rs"]
 mod redeem_tests;
+
+#[cfg(test)]
+#[path = "openai/subscription_request_tests.rs"]
+mod subscription_request_tests;
 
 #[cfg(test)]
 #[path = "openai/switchable_tests.rs"]

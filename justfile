@@ -550,6 +550,14 @@ git-merge REF="main" *ARGS: _install-jp _install-tools
 # tabs and session conversations, and `→` on a conversation lists `jp` commands
 # to run in its tab. `n` creates a worktree on a new branch from `main`, `/`
 # filters, `s` sorts, and `a` toggles idle worktrees.
+#
+# Also drives a merge queue: `m` toggles the queue label on the selected pull
+# request, and `p` pauses or resumes the queue. Labeled pull requests (or
+# stacks, from the bottom up to the highest labeled pull request) are updated
+# with the default branch and merged one entry at a time once all checks pass.
+# The queue label and merge method are read from the `dash.queueLabel` and
+# `dash.queueMergeMethod` git config keys, defaulting to `merge-when-green` and
+# the first method allowed by the repository (`squash`, `merge`, or `rebase`).
 [group('github')]
 dash:
     @cargo run {{quiet_flag}} --package dash
@@ -1995,17 +2003,17 @@ chat-take HOST DIR WORKTREE="../jp-chat-take":
 # accept edits from. It checks `jp ticket`, `jp rfd`, and `jp wiki` were built
 # from the same site files as `jp vite`, so all four are installed first.
 [group('docs')]
-develop-docs *FLAGS="--host --allowedHosts --open": _docs-install _install-jp _install-site-plugins
+develop-docs *FLAGS="--host --allowedHosts --open": _install-jp _install-site-plugins
     jp vite serve -- {{FLAGS}}
 
 # Open the RFD priority board for drag-and-drop reordering.
 #
 # Starts the docs dev server and opens the board at `/rfd/priority`. Dragging
 # rows and toggling "in development" writes `docs/rfd/.priority.json`; commit that
-# file to publish the new order. The board is read-only in the production build
-# — the write endpoint only exists on the dev server.
+# file to publish the new order. The board is read-only in the production build;
+# the write endpoint only exists on the dev server.
 [group('rfd')]
-rfd-manage: _docs-install _install-jp _install-site-plugins
+rfd-manage: _install-jp _install-site-plugins
     jp vite serve -- --host --allowedHosts --open /rfd/priority
 
 # Test the documentation site's own tooling.
@@ -2279,19 +2287,21 @@ lint-ci: (_rustup_component "clippy") _install_ci_matchers
         exit 1
     fi
 
-    # `affected-crates` assumes that only crates under `crates/plugins/command/`
-    # and `.config/jp/tools` read files outside their own crate directory, and
-    # selects them whenever `docs/` or `.jp/` changes. Any other crate that
-    # resolves paths above `CARGO_MANIFEST_DIR` would be skipped on Windows PRs
-    # that only modify those external files. This check matches `.rs` files that
-    # combine `CARGO_MANIFEST_DIR` with a `"../../` string literal.
+    # `affected-crates` assumes that only crates under `crates/plugins/command/`,
+    # `crates/internal/md-html`, and `.config/jp/tools` read files outside their
+    # own crate directory, and selects them whenever `docs/` or `.jp/` changes.
+    # Any other crate that resolves paths above `CARGO_MANIFEST_DIR` would be
+    # skipped on Windows PRs that only modify those external files. This check
+    # matches `.rs` files that combine `CARGO_MANIFEST_DIR` with a `"../../`
+    # string literal.
     escaping=$(grep -rlE --include='*.rs' '"(\.\./){2,}' crates .config/jp/tools \
-        | grep -vE '^(crates/plugins/command/|\.config/jp/tools/)' \
+        | grep -vE '^(crates/plugins/command/|crates/internal/md-html/|\.config/jp/tools/)' \
         | while IFS= read -r file; do grep -l 'CARGO_MANIFEST_DIR' "$file" || true; done)
     if [ -n "$escaping" ]; then
         echo "$escaping" | sed 's/^/error: reads outside its crate: /' >&2
-        echo "error: \`just affected-crates\` only tracks external file reads for command plugins" >&2
-        echo "error: and \`.config/jp/tools\`. Move the test there, or update \`affected-crates\`." >&2
+        echo "error: \`just affected-crates\` only tracks external file reads for command" >&2
+        echo "error: plugins, \`md-html\`, and \`.config/jp/tools\`. Move the test into one of" >&2
+        echo "error: those, or update \`affected-crates\` and this check." >&2
         exit 1
     fi
 
@@ -2410,10 +2420,11 @@ test-affected-ci BASE *ARGS:
 # `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `.gitattributes`,
 # `.config/insta.yaml`, `justfile`, or `.github/workflows/rust.yml`.
 #
-# Crates under `crates/plugins/command/` and `.config/jp/tools` read repository
-# files outside their own directory (enforced by `lint-ci`). Changes under
-# `docs/`, `.jp/`, or `crates/plugins/command/vite/site/` select all command
-# plugins and `tools` (plus their dependents).
+# Crates under `crates/plugins/command/`, `crates/internal/md-html`, and
+# `.config/jp/tools` read repository files outside their own directory
+# (enforced by `lint-ci`). Changes under `docs/`, `.jp/`, or
+# `crates/plugins/command/vite/site/` select all of them (plus their
+# dependents).
 #
 # Known non-crate paths that do not affect Rust tests (`.config/rustqual/`,
 # `.config/supply-chain/`, other `.github/` files, `apps/`, `deny.toml`,
@@ -2453,7 +2464,7 @@ affected-crates BASE="origin/main":
           def grow: . as $s
                     | ([$s[], ($s[] | $rdeps[.] // [] | .[])] | unique) as $n
                     | if ($n | length) == ($s | length) then $s else ($n | grow) end;
-          [$pkgs[] | select(.dir | test("^crates/plugins/command/|^\\.config/jp/tools$")) | .id] as $readers
+          [$pkgs[] | select(.dir | test("^crates/plugins/command/|^crates/internal/md-html$|^\\.config/jp/tools$")) | .id] as $readers
         | "(^|/)Cargo\\.(toml|lock)$|^(rust-toolchain\\.toml|\\.gitattributes|\\.config/insta\\.yaml|justfile|\\.github/workflows/rust\\.yml)$" as $global
         | "^(docs|\\.jp)/|^crates/plugins/command/vite/site/" as $read
         | "^(\\.config/(rustqual|supply-chain)/|\\.github/|apps/|deny\\.toml$|\\.clippy\\.toml$)" as $inert
@@ -2699,7 +2710,7 @@ _install-serve-web *args:
     mv -f "$dir/.jp-serve-web.new" "$dir/jp-serve-web"
     echo "Installed jp-serve-web to $dir" >&2
 
-# Build and install the `bookworm` MCP server that `.jp/config.toml` runs.
+# Build and install the `bookworm` MCP server.
 _install-bookworm *args:
     #!/usr/bin/env sh
     set -eu

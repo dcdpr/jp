@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use camino::Utf8PathBuf;
 use chrono::TimeZone as _;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -5,7 +7,8 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use super::*;
 use crate::{
     app::Update,
-    model::{JpRecent, JpRun, JpSession, Terminal, Worktree},
+    model::{JpRecent, JpRun, JpSession, StackPlace, Terminal, Worktree},
+    queue::{QueueRole, QueueState, Step},
     source::jp::JpState,
 };
 
@@ -43,10 +46,17 @@ fn pr(number: u64, head: &str, checks: Checks, threads: u32) -> PullRequest {
         title: format!("PR {number}"),
         url: format!("https://github.com/dcdpr/jp/pull/{number}"),
         head: head.to_owned(),
+        sha: format!("sha-{number}"),
         draft: false,
         checks,
         threads,
         answered: threads,
+        labeled: false,
+        base: None,
+        stack: None,
+        remote_branch: None,
+        mergeable: None,
+        queue: None,
     }
 }
 
@@ -131,14 +141,13 @@ fn queue_and_review() -> App {
 fn test_screen_shows_one_line_per_worktree_until_expanded() {
     let app = queue_and_review();
 
-    assert_eq!(render(&app, 110, 6), vec![
-        "dash  2 active of 3 worktrees   enter open · →/space expand · n new · / filter · s sort \
-         · o PR · a all · r ref",
-        "WORKTREE        BRANCH          JP           CONVERSATION                         PR      \
-         CI            REVIEW",
+    assert_eq!(render(&app, 116, 6), vec![
+        "dash  2 active of 3 worktrees   enter open · →/space expand · n new · m queue · p pause \
+         · / filter · s sort · o PR ·",
+        "WORKTREE        BRANCH          JP           CONVERSATION       PR      CI            \
+         REVIEW  QUEUE",
         "gh-merge-queue  gh-merge-queue  waiting 2m   Merge queue",
-        "review          fix-replies                                                       #1132   \
-         ✓ 14/14       3/3",
+        "review          fix-replies                                     #1132   ✓ 14/14       3/3",
         "",
         "",
     ]);
@@ -154,12 +163,11 @@ fn test_screen_shows_how_long_ago_jp_ran_in_an_idle_worktree() {
     }];
     app.apply(Update::Jp(Ok(jp)));
 
-    let lines = screen(&app, 110, 6);
+    let lines = screen(&app, 116, 6);
 
     assert_eq!(
         lines[3].text().trim_end(),
-        "review          fix-replies     5m ago                                            #1132   \
-         ✓ 14/14       3/3"
+        "review          fix-replies     5m ago                          #1132   ✓ 14/14       3/3"
     );
     // Dimmed, so it reads as a time rather than a status.
     assert!(
@@ -234,6 +242,113 @@ fn test_conversation_titles_hold_still_as_ages_tick() {
 }
 
 #[test]
+fn test_screen_shows_each_pull_requests_place_in_the_queue() {
+    let mut app = queue_and_review();
+    let mut prs = vec![
+        PullRequest {
+            labeled: true,
+            ..pr(1132, "fix-replies", PASSED, 3)
+        },
+        PullRequest {
+            labeled: true,
+            draft: true,
+            ..pr(1193, "feature/stacks", PASSED, 0)
+        },
+    ];
+    queue::assign(&mut prs, None, &HashMap::new());
+    app.apply(Update::PullRequests(Ok(prs)));
+
+    let lines = render(&app, 116, 6);
+    assert!(lines[0].contains(" · queue: 1 "), "{lines:?}");
+    assert_eq!(
+        lines[3],
+        "review           fix-replies                                    #1132   ✓ 14/14       \
+         3/3     queued 1"
+    );
+}
+
+#[test]
+fn test_screen_shows_what_the_queue_does_with_its_front() {
+    let mut app = queue_and_review();
+    app.apply(Update::PullRequests(Ok(vec![
+        PullRequest {
+            labeled: true,
+            queue: Some(QueueState::Front(Step::WaitingForChecks)),
+            ..pr(1132, "fix-replies", PASSED, 3)
+        },
+        PullRequest {
+            labeled: true,
+            queue: Some(QueueState::Conflicts),
+            ..pr(1140, "gh-merge-queue", PASSED, 0)
+        },
+    ])));
+
+    let lines = render(&app, 120, 6);
+    assert!(
+        lines[0]
+            .starts_with("dash  2 active of 3 worktrees · queue: 1 · ▶ #1132 waiting for CI   "),
+        "{lines:?}"
+    );
+    assert!(lines[2].ends_with("conflicts"), "{lines:?}");
+    assert!(lines[3].ends_with("▶ waiting for CI"), "{lines:?}");
+}
+
+#[test]
+fn test_screen_shows_a_stacked_pull_requests_place_in_its_stack() {
+    let mut app = queue_and_review();
+    app.apply(Update::PullRequests(Ok(vec![PullRequest {
+        labeled: true,
+        stack: Some(StackPlace {
+            stack: 4,
+            position: 2,
+            size: 3,
+            branch: "fix-replies".to_owned(),
+            below: None,
+        }),
+        queue: Some(QueueState::Waiting { position: 1 }),
+        ..pr(1132, "fix-replies", PASSED, 3)
+    }])));
+
+    assert!(
+        render(&app, 110, 6)[3].ends_with("3/3     queued 1 · 2/3"),
+        "{:?}",
+        render(&app, 110, 6)
+    );
+}
+
+#[test]
+fn test_screen_shows_a_queue_edit_before_github_confirms_it() {
+    let mut app = queue_and_review();
+    app.queue.edits.insert(1132, true);
+
+    let lines = render(&app, 116, 6);
+    assert_eq!(
+        lines[3],
+        "review          fix-replies                                     #1132   ✓ 14/14       \
+         3/3     adding…"
+    );
+}
+
+#[test]
+fn test_header_says_when_the_queue_is_paused_or_driven_elsewhere() {
+    let mut app = queue_and_review();
+    app.apply(Update::PullRequests(Ok(vec![PullRequest {
+        labeled: true,
+        queue: Some(QueueState::Front(Step::Merging)),
+        ..pr(1132, "fix-replies", PASSED, 3)
+    }])));
+
+    app.apply(Update::Queue(QueueRole::Watching));
+    assert!(
+        render(&app, 120, 5)[0]
+            .starts_with("dash  2 active of 3 worktrees · queue: 1 · watching   "),
+    );
+
+    app.handle(key('p'));
+    assert!(render(&app, 120, 5)[0].starts_with("dash  2 active of 3 worktrees · queue paused   "),);
+}
+
+#[test]
 fn test_screen_lists_pull_requests_without_a_worktree_last() {
     let mut app = App::default();
     app.apply(Update::Worktrees(Ok(vec![worktree(
@@ -252,13 +367,11 @@ fn test_screen_lists_pull_requests_without_a_worktree_last() {
 
     // Unchecked-out PR rows leave the JP column blank even before the JP
     // source responds.
-    assert_eq!(render(&app, 110, 6)[1..4], [
-        "WORKTREE         BRANCH          JP           CONVERSATION                        PR      \
-         CI            REVIEW",
-        "review           fix-replies     …                                                #1132   \
-         ✓ 14/14       3/3",
-        "create worktree  feature/stacks                                                   #1193   \
-         ● 3/5         -",
+    assert_eq!(render(&app, 116, 6)[1..4], [
+        "WORKTREE         BRANCH          JP           CONVERSATION      PR      CI            \
+         REVIEW  QUEUE",
+        "review           fix-replies     …                              #1132   ✓ 14/14       3/3",
+        "create worktree  feature/stacks                                 #1193   ● 3/5         -",
     ]);
 }
 
@@ -337,13 +450,14 @@ fn test_screen_draws_the_sort_menu_over_the_table() {
         .map(|line| line.text().trim_end().to_owned())
         .collect();
 
-    assert_eq!(text[2..10], [
+    assert_eq!(text[2..11], [
         "              ╭ Sort by ─────────────────────╮",
         "              │ 1 Worktree name ✓            │",
         "              │ 2 Branch name                │",
         "              │ 3 Pull request, newest first │",
         "              │ 4 Recent JP activity         │",
         "              │ 5 CI, failing first          │",
+        "              │ 6 Merge queue order          │",
         "              │ enter sort · esc close       │",
         "              ╰──────────────────────────────╯",
     ]);
@@ -422,9 +536,9 @@ fn test_screen_marks_sources_without_data() {
     app.handle(key('a'));
 
     // JP failed (`?`); GitHub has not answered yet (`…`).
-    assert_eq!(render(&app, 80, 5)[1..], [
-        "WORKTREE  BRANCH  JP           CONVERSATION         PR      CI            REVIEW",
-        "a         a       ?                                 …       …             …",
+    assert_eq!(render(&app, 106, 5)[1..], [
+        "WORKTREE  BRANCH  JP           CONVERSATION           PR      CI            REVIEW  QUEUE",
+        "a         a       ?                                   …       …             …       …",
         "",
         "jp: no workspace",
     ]);

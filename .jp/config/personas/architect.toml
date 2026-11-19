@@ -14,7 +14,6 @@ extends = [
     "../skill/project-discourse.toml",
     "../skill/rfd.toml",
     "../skill/wiki.toml",
-    "../skill/rust-docs.toml",
     "../skill/unix.toml",
 ]
 

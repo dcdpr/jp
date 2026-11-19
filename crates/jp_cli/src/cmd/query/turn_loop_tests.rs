@@ -7395,8 +7395,8 @@ async fn a_tool_prompt_hides_the_window_and_restores_it() {
     assert!(test_result.is_ok(), "Test timed out");
 }
 
-/// A prompt backend that reads the conversation from disk each time a prompt
-/// opens, recording whether it held an unanswered question at that moment.
+/// Prompt backend that reads the conversation from disk whenever a prompt opens
+/// and records whether it had a pending inquiry at that point.
 struct DiskObservingPromptBackend {
     inner: MockPromptBackend,
     fs: Arc<FsStorageBackend>,
@@ -7568,6 +7568,8 @@ async fn a_question_for_the_user_is_on_disk_before_its_prompt_opens() {
         assert_eq!(*prompts.seen.lock().unwrap(), [true]);
         assert_eq!(*pending_after_answer.lock().unwrap(), [Some(0)]);
 
+        // Load the stream directly rather than through `pending_on_disk` so a
+        // load error fails the test instead of returning `false`.
         let stream = fs
             .load_conversation_stream(&lock.id(), &PartialAppConfig::empty())
             .expect("the conversation is on disk");

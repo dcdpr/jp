@@ -117,7 +117,8 @@ pub(crate) struct Host<'a> {
     /// Answers a question routed to an assistant instead of the user.
     pub inquiry_backend: &'a Arc<dyn InquiryBackend>,
 
-    /// Active conversation for recording and flushing inquiry events.
+    /// The conversation where inquiry events are recorded and flushed to disk
+    /// before prompting the user.
     pub conv: &'a mut ConversationMut,
 
     /// What the user asked to remember for the turn, and the inquiry counter.
@@ -2037,9 +2038,9 @@ impl ToolCoordinator {
         );
 
         if host.interactive && target.is_user() {
-            // Flush before opening the prompt so external readers see an
-            // unanswered InquiryRequest while the conversation lock is held.
-            // Flush errors are non-fatal; the phase-end flush retries.
+            // Flush the InquiryRequest to disk before opening the prompt so
+            // external readers see an unanswered inquiry while the conversation
+            // lock is held. If the flush fails, the phase-end flush retries.
             if let Err(error) = host.conv.flush() {
                 warn!(%error, "Failed to persist a question before asking it.");
             }

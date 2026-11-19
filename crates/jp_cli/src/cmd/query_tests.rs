@@ -30,7 +30,10 @@ use jp_llm::{
 use jp_mcp::{Startup, StartupSet, id::McpServerId, server::tool_definitions};
 use jp_printer::{OutputFormat, Printer, SharedBuffer};
 use jp_storage::{
-    backend::{ConversationFilter, FsStorageBackend, LoadBackend},
+    backend::{
+        ConversationFilter, FsStorageBackend, LoadBackend, NullLockBackend, NullPersistBackend,
+        ReadOnlySessionBackend,
+    },
     load::projected_conversation_ids,
 };
 use jp_workspace::{
@@ -52,6 +55,7 @@ use super::{
 };
 use crate::{
     Cli, Globals, KeyValueOrPath, Resolved,
+    bootstrap::ExecutionContext,
     cli::flag::{ArgPrompts, Parsed, SettleError},
     cmd::{
         Commands,
@@ -4306,6 +4310,66 @@ fn run_failing_before_the_turn_stores_no_conversation() {
 
     assert_eq!(stored_conversation_ids(tmp.path()), []);
     assert_store_needs_no_repair(tmp.path());
+}
+
+// Under `--no-persist`, a failed inline query does not write a recovery draft
+// or create a user-local conversation directory.
+#[test]
+fn run_failing_no_persist_query_leaves_no_conversation_directory() {
+    let session = Session {
+        id: SessionId::new("jp-cli-no-persist-draft-test").unwrap(),
+        source: SessionSource::env("JP_SESSION"),
+    };
+    let tmp = camino_tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let fs = Arc::new(test_backend(root));
+    let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+
+    // Use the same no-op persistence, lock, and read-only session backends that
+    // `load_workspace` configures for `--no-persist`.
+    let workspace = Workspace::in_memory(root).with_backend(Arc::clone(&fs));
+    let sessions = Arc::new(ReadOnlySessionBackend::new(workspace.sessions().clone()));
+    let workspace = workspace
+        .with_persist(Arc::new(NullPersistBackend))
+        .with_locker(Arc::new(NullLockBackend))
+        .with_sessions(sessions);
+
+    let mut config = config_with_model(ProviderId::Test, "mock");
+    config.assistant.request.max_retries = 0;
+
+    let mut ctx = Ctx::new(
+        ExecutionContext::for_workspace(&workspace),
+        workspace,
+        Some(fs),
+        Runtime::new().unwrap(),
+        Globals {
+            persist: false,
+            ..Globals::default()
+        },
+        config,
+        Some(session),
+        printer,
+    );
+
+    let error = run_query(&mut ctx, &["--new", "Reply with: ok"]).unwrap_err();
+    assert_eq!(error.message.as_deref(), Some("Stream error"));
+
+    let user_conversations = test_backend(root)
+        .user_storage_path()
+        .unwrap()
+        .join("conversations");
+    let dirs: Vec<String> = std::fs::read_dir(&user_conversations)
+        .map(|entries| {
+            entries
+                .map(|entry| entry.unwrap())
+                .filter(|entry| entry.path().is_dir())
+                .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                .collect()
+        })
+        .unwrap_or_default();
+    assert_eq!(dirs, Vec::<String>::new());
+
+    assert_store_needs_no_repair(root);
 }
 
 // A run that renames the conversation composes its draft in the directory the

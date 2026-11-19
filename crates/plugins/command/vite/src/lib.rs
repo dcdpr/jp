@@ -71,8 +71,9 @@ struct Args {
 enum Command {
     /// Set up a VitePress site in the source directory.
     ///
-    /// Writes `package.json`, `.vitepress/config.mts`, the theme entry, and a
-    /// homepage, which are yours from then on.
+    /// Writes `package.json`, `.vitepress/config.mts`, the theme entry, a
+    /// homepage, and `.gitignore`, which are yours from then on.
+    /// The site installs its dependencies with Yarn 4, through Corepack.
     /// Existing files with different contents are overwritten if they are
     /// tracked by git with no uncommitted changes; otherwise `--force` is
     /// required.
@@ -116,9 +117,18 @@ enum Command {
     /// Run the dev server, keeping the site's settings in step with the
     /// configuration.
     ///
+    /// Installs the site's dependencies first using the site's package manager.
+    /// An existing lockfile is never modified; the install fails if the
+    /// lockfile does not match `package.json`.
     /// The RFD and ticket pages can be edited only here.
     /// Arguments after `--` go to `vitepress dev`.
     Serve {
+        /// Install the site's dependencies without network access.
+        ///
+        /// Fails if any dependency is missing from the package manager's cache.
+        #[arg(long)]
+        offline: bool,
+
         /// Arguments for `vitepress dev`, such as `--open`.
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         vitepress: Vec<String>,
@@ -257,9 +267,10 @@ where
             &SyncFlags { check, force, yes },
             &mut session,
         ),
-        Command::Serve { vitepress } => {
+        Command::Serve { offline, vitepress } => {
             let Session { stdin, mut stdout } = session;
-            let result = serve::serve(stdin, &mut stdout, root, &options, &init.config, &vitepress);
+            let flags = serve::Flags { offline, vitepress };
+            let result = serve::serve(stdin, &mut stdout, root, &options, &init.config, &flags);
             return finish(&mut stdout, result.map(|()| String::new()));
         }
     };
@@ -321,8 +332,8 @@ fn init_site<R: BufRead, W: Write>(
         .all(|(_, existing)| *existing == Existing::Same)
     {
         return Ok(format!(
-            "{}/ already has the package.json, configuration, theme, and homepage `jp vite init` \
-             writes.\n",
+            "{}/ already has the package.json, configuration, theme, homepage, and .gitignore `jp \
+             vite init` writes.\n",
             shown(root, &site_dir)
         ));
     }

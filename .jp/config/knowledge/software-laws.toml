@@ -137,6 +137,11 @@ re-deriving what each concept means every time.
 The canonical glossary lives at `docs/wiki/00dxybd-ubiquitous-language.md`. Consult it before \
 introducing a term, and update it when the vocabulary shifts.
 
+The glossary covers JP itself: the `jp_*` crates, the `jp` command line, and their \
+documentation. A command plugin (`crates/plugins/command/*`) names its own concepts, may use \
+a glossary word for a different one, and keeps its terms out of the glossary. Where a plugin \
+means a JP concept, it uses the glossary's term for it.
+
 - **Use the exact existing term.** When the code calls something a `Turn`, don't silently \
   start calling it a \"message\" in a comment, a \"round\" in documentation, or an \
   \"exchange\" in a commit. Paraphrasing feels natural in prose but drifts the language and \

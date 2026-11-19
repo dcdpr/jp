@@ -5,7 +5,7 @@ use openai_responses::types::{
     PromptCacheBreakpointMode, PromptCacheOptions, Request, Role,
 };
 
-use super::{fold_system_into_instructions, prepare_subscription_request};
+use super::subscription_request::{fold_system_into_instructions, prepare_subscription_request};
 
 /// The two-message shape JP builds for a plain query: a system prompt split
 /// into blocks, then the user's turn.

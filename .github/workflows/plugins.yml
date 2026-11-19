@@ -85,7 +85,12 @@ jobs:
             # Asset names are uniform across platforms (`jp-<id>-<target>`).
             # The installer re-adds `.exe` on Windows, and `build-registry`
             # builds extension-less download URLs.
-            cp "$bin" "staged/jp-${id}-${{ matrix.target }}"
+            #
+            # Not `cp`: the MSYS `cp` on the Windows runner appends `.exe` to
+            # the destination when the source has it. Modes are not kept, but
+            # the artifact upload drops them anyway and the installer marks
+            # the binary executable.
+            cat "$bin" > "staged/jp-${id}-${{ matrix.target }}"
           done
 
           ls -la staged/
