@@ -4,6 +4,7 @@ mod cli;
 mod cmd;
 mod config_pipeline;
 mod ctx;
+mod deferred_report;
 mod editor;
 #[cfg(test)]
 mod env_testing;
@@ -68,7 +69,6 @@ use crate::{
     cli::flag::{ArgPrompts, Parsed},
     cmd::{plugin::help::print_root_section, target::resolve_request},
     config_pipeline::{ConfigPipeline, ConfigReset, ConfigResetEvents, build_partial_over},
-    load_failure::LoadFailureNotice,
     shutdown::{on_shutdown, until_shutdown},
 };
 
@@ -521,7 +521,7 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
 
     // Held until the run ends, whichever way it ends, so the report follows the
     // command's own output.
-    let _load_failures = LoadFailureNotice::new(printer.clone(), &report.invalid);
+    let _load_failures = load_failure::notice(printer.clone(), &report.invalid);
 
     // Populate the conversation index. This does NOT load the contents of
     // individual conversations, this is done lazily as needed.

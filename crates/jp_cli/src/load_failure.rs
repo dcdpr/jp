@@ -2,9 +2,8 @@
 //!
 //! Startup validation finds conversation directories JP cannot load and leaves
 //! them where they are.
-//! [`LoadFailureNotice`] prints the report on stderr after the command's own
-//! output: [`render_text`] for the text formats, [`render_json`] for the JSON
-//! formats.
+//! [`notice`] prints the report on stderr after the command's own output:
+//! [`render_text`] for the text formats, [`render_json`] for the JSON formats.
 
 use camino::{Utf8Path, Utf8PathBuf};
 use crossterm::style::Stylize as _;
@@ -13,6 +12,8 @@ use jp_printer::Printer;
 use jp_storage::validate::{FileError, InvalidConversation, ValidationError};
 use serde::Serialize;
 use tracing::warn;
+
+use crate::deferred_report::DeferredReport;
 
 /// The most failures the text report lists one by one; above it, it gives a
 /// count.
@@ -49,66 +50,20 @@ impl LoadFailure<'_> {
     }
 }
 
-/// Prints the load-failure report on stderr when dropped.
+/// Log each failure, and return the report printed on stderr when it drops.
 ///
-/// The report is printed past `--quiet`: conversations JP cannot load are never
-/// left unsaid.
-/// Under the JSON output formats it is one record per failure.
-pub(crate) struct LoadFailureNotice {
-    printer: Printer,
-    lines: Vec<String>,
-    /// Whether `lines` are JSON records, printed without the printer's
-    /// `{"message": ...}` wrapping.
-    raw: bool,
-}
-
-impl LoadFailureNotice {
-    /// Log each failure and prepare the report for `printer`'s output format.
-    pub(crate) fn new(printer: Printer, invalid: &[InvalidConversation]) -> Self {
-        let failures: Vec<_> = invalid.iter().map(LoadFailure::from).collect();
-        for failure in &failures {
-            failure.log();
-        }
-
-        let format = printer.format();
-        let json = format
-            .is_json()
-            .then(|| render_json(&failures, format.is_json_pretty()));
-
-        let (lines, raw) = match json {
-            Some(Ok(records)) => (records, true),
-            Some(Err(error)) => {
-                // The printer wraps text in a JSON record, so the stream stays
-                // parseable either way.
-                warn!(%error, "Failed to serialize the load-failure report.");
-                (render_text(&failures).into_iter().collect(), false)
-            }
-            None => (render_text(&failures).into_iter().collect(), false),
-        };
-
-        Self {
-            printer,
-            lines,
-            raw,
-        }
+/// Under the JSON output formats the report is one record per failure.
+pub(crate) fn notice(printer: Printer, invalid: &[InvalidConversation]) -> DeferredReport {
+    let failures: Vec<_> = invalid.iter().map(LoadFailure::from).collect();
+    for failure in &failures {
+        failure.log();
     }
-}
 
-impl Drop for LoadFailureNotice {
-    fn drop(&mut self) {
-        if self.lines.is_empty() {
-            return;
-        }
-
-        for line in self.lines.drain(..) {
-            if self.raw {
-                self.printer.error_println_raw(line);
-            } else {
-                self.printer.error_println(line);
-            }
-        }
-        self.printer.flush();
-    }
+    DeferredReport::new(
+        printer,
+        || render_text(&failures),
+        |pretty| render_json(&failures, pretty),
+    )
 }
 
 impl<'a> From<&'a InvalidConversation> for LoadFailure<'a> {
@@ -203,7 +158,7 @@ struct ConversationContext<'a> {
 
 /// One step of the error chain, outermost first.
 #[derive(Serialize)]
-struct Cause {
+pub(crate) struct Cause {
     code: &'static str,
     message: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -242,23 +197,24 @@ impl<'a> From<&'a LoadFailure<'a>> for Record<'a> {
                     path: &failure.path,
                 },
             },
-            causes: causes(failure),
+            causes: causes(&failure.path, failure.error),
         }
     }
 }
 
-fn causes(failure: &LoadFailure<'_>) -> Vec<Cause> {
-    match failure.error {
+/// The error chain of the conversation directory at `dir`, outermost first.
+pub(crate) fn causes(dir: &Utf8Path, error: &ValidationError) -> Vec<Cause> {
+    match error {
         ValidationError::InvalidDirname => {
             vec![Cause::new("invalid_dirname", "invalid directory name")]
         }
         ValidationError::MissingFile { file } => vec![Cause {
-            path: Some(failure.path.join(file.name())),
+            path: Some(dir.join(file.name())),
             ..Cause::new("file_missing", "missing file")
         }],
         ValidationError::UnreadableFile { file, source } => vec![
             Cause {
-                path: Some(failure.path.join(file.name())),
+                path: Some(dir.join(file.name())),
                 ..Cause::new("file_unreadable", "failed to load file")
             },
             file_cause(source),

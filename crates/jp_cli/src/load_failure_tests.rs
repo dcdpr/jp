@@ -209,7 +209,7 @@ fn the_text_report_prints_when_the_notice_drops_even_under_quiet() {
     let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
     let printer = printer.with_chrome(Chrome::Silenced);
 
-    let notice = LoadFailureNotice::new(printer.clone(), &invalid);
+    let report = notice(printer.clone(), &invalid);
     printer.flush();
     assert_eq!(
         err.lock().as_str(),
@@ -217,7 +217,7 @@ fn the_text_report_prints_when_the_notice_drops_even_under_quiet() {
         "nothing is printed before the drop"
     );
 
-    drop(notice);
+    drop(report);
 
     assert_eq!(out.lock().as_str(), "");
     assert_eq!(
@@ -234,7 +234,7 @@ fn the_json_report_prints_raw_records_even_under_quiet() {
     let (printer, out, err) = Printer::memory(OutputFormat::Json);
     let printer = printer.with_chrome(Chrome::Silenced);
 
-    drop(LoadFailureNotice::new(printer, &invalid));
+    drop(notice(printer, &invalid));
 
     assert_eq!(out.lock().as_str(), "");
     assert_eq!(
@@ -257,7 +257,7 @@ fn the_json_report_prints_raw_records_even_under_quiet() {
 fn nothing_prints_when_every_conversation_loads() {
     let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
 
-    drop(LoadFailureNotice::new(printer.clone(), &[]));
+    drop(notice(printer.clone(), &[]));
     printer.flush();
 
     assert_eq!(out.lock().as_str(), "");
