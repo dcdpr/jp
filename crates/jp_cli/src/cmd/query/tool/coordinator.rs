@@ -357,9 +357,9 @@ struct Batch {
 
     /// Whether each result is shown under a `<tool> result` header.
     ///
-    /// Set when more than one call with visible chrome is released: all call
-    /// headers are printed before any tool runs, so results do not immediately
-    /// follow their own call header.
+    /// Set at release when more than one call header is on screen, including
+    /// those of declined calls: all call headers are printed before any tool
+    /// runs, so results do not immediately follow their own call header.
     labelled: bool,
 
     /// Whether the progress row was claimed for the released calls.
@@ -495,6 +495,13 @@ struct Call {
 
     /// Whether the call was released to run.
     released: bool,
+
+    /// Whether the call's header reached the screen, ahead of its approval
+    /// prompt or when it was announced.
+    ///
+    /// A call declined at its prompt keeps this, since its header stays on
+    /// screen above the results of the calls that ran.
+    shown: bool,
 
     /// What was drawn for the call ahead of its approval prompt, and the
     /// arguments it was drawn from.
@@ -788,6 +795,16 @@ impl ToolCoordinator {
         }
 
         PreRender::Ready(self.render_executor(executor, renderer))
+    }
+
+    /// Whether [`render_executor`] draws a header for this call.
+    ///
+    /// [`render_executor`]: Self::render_executor
+    fn draws_header(&self, executor: &dyn Executor) -> bool {
+        let name = executor.tool_name();
+        !self.is_hidden(name)
+            && (!self.parameter_style(name).runs_formatter()
+                || executor.formatted_arguments().is_some())
     }
 
     /// Render one tool call's arguments for display, returning the content to
@@ -1238,6 +1255,7 @@ impl ToolCoordinator {
             decided: false,
             announced: false,
             released: false,
+            shown: false,
             pre_render: None,
             question: None,
             review: None,
@@ -1894,10 +1912,13 @@ impl ToolCoordinator {
                 let call = &mut batch.calls[index];
                 call.pre_render = match self.pre_render_for_prompt(executor.as_ref(), host.renderer)
                 {
-                    PreRender::Ready(content) => Some(PreRendered {
-                        content,
-                        arguments: executor.arguments(),
-                    }),
+                    PreRender::Ready(content) => {
+                        call.shown |= self.draws_header(executor.as_ref());
+                        Some(PreRendered {
+                            content,
+                            arguments: executor.arguments(),
+                        })
+                    }
                     PreRender::Deferred => None,
                 };
                 call.wait = Wait::Approval(Box::new(info.clone()));
@@ -1928,6 +1949,7 @@ impl ToolCoordinator {
             pre.content
         } else {
             host.renderer.focus(&call.tool_id);
+            call.shown |= self.draws_header(call.executor.as_ref());
             self.render_executor(call.executor.as_ref(), host.renderer)
         };
         let Some(content) = content else {
@@ -1956,11 +1978,9 @@ impl ToolCoordinator {
         }
 
         debug!(tools = admitted.len(), "Starting tool execution.");
-        let shown = admitted
-            .iter()
-            .filter(|&&index| !self.is_hidden(&batch.calls[index].tool_name))
-            .count();
-        batch.labelled = shown > 1;
+        // Every call was decided before release, so every header this batch
+        // will draw is already on screen, including those of declined calls.
+        batch.labelled = batch.calls.iter().filter(|call| call.shown).count() > 1;
 
         // Claimed before the sinks below, not after: `StatusRegion::source`
         // copies the region it is asked of, so a sink taken from the inert

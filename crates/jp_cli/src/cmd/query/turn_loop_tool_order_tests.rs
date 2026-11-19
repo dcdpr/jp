@@ -14,7 +14,10 @@ use std::{
 
 use camino::Utf8PathBuf;
 use inquire::InquireError;
-use jp_config::{AppConfig, Config as _, conversation::tool::PartialToolConfig};
+use jp_config::{
+    AppConfig, Config as _,
+    conversation::tool::{PartialToolConfig, style::InlineResults},
+};
 use jp_conversation::event::InquiryId;
 use jp_inquire::{InlineOption, ReplyEditMode, ReplyOutcome, prompt::PromptBackend};
 use jp_printer::{Printer, SharedBuffer};
@@ -777,6 +780,48 @@ async fn approvals_follow_the_order_the_calls_were_sent_in() {
             ToolCallResponse {
                 id: "call_b".into(),
                 result: Ok("result".into()),
+            },
+        ]);
+    }))
+    .await
+    .unwrap();
+}
+
+/// A call declined at its prompt was still shown, so the result of the call
+/// that ran is labelled with its tool rather than left under the declined
+/// call's header.
+#[tokio::test]
+async fn a_result_is_labelled_when_a_shown_call_is_declined() {
+    Box::pin(timeout(Duration::from_secs(10), async {
+        let mut config = asking_tools(&["cargo_check", "cargo_test"]);
+        for (_, tool) in config.conversation.tools.iter_mut() {
+            if let Some(style) = tool.style.as_mut() {
+                style.inline_results = InlineResults::Full;
+            }
+        }
+        let (transcript, responses) = run_calls(
+            &config,
+            asking_source(&["cargo_check", "cargo_test"]),
+            &[("call_check", "cargo_check"), ("call_test", "cargo_test")],
+            &['y', 'n'],
+        )
+        .await;
+
+        assert_eq!(
+            transcript,
+            "\n── jp (anthropic/test) \
+             ─────────────────────────────────────────────────────────\n\nCalling tool \
+             cargo_check(n: 0)\n[prompt: Run local cargo_check tool?]\nCalling tool cargo_test(n: \
+             1)\n[prompt: Run local cargo_test tool?]\n\ncargo_check result\n\nresult\n\n"
+        );
+        assert_eq!(responses, vec![
+            ToolCallResponse {
+                id: "call_check".into(),
+                result: Ok("result".into()),
+            },
+            ToolCallResponse {
+                id: "call_test".into(),
+                result: Ok("Tool skipped by user.".into()),
             },
         ]);
     }))
