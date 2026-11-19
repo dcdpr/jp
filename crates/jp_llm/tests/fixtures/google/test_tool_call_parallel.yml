@@ -104,8 +104,7 @@ when:
                 "args": {
                   "city": "Tokyo"
                 }
-              },
-              "thoughtSignature": "skip_thought_signature_validator"
+              }
             }
           ],
           "role": "model"
