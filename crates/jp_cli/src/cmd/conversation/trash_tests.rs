@@ -226,23 +226,72 @@ fn no_persist_untrash_moves_nothing() {
     assert!(!f.conversations.join("17941219991").exists());
 }
 
-// The picker lists conversations from the index, which holds none of the ones
-// this command exists for; resolving it to nothing would trash nothing quietly.
+fn picker(filter: PickerFilter) -> PositionalIds<false, true> {
+    PositionalIds::from_targets(vec![ConversationTarget::Picker(filter)])
+}
+
+// `?` opens the live-conversation picker. Without a user to answer it, the
+// command fails the way every picker does, not with a refusal of the picker.
 #[test]
-fn refuses_the_picker() {
+fn trash_picker_needs_a_user() {
+    let mut f = fixture(true);
+    write_dir(&f.conversations, "17941219991", &[
+        ("metadata.json", "{}"),
+        ("events.json", "[]"),
+    ]);
+    f.ctx.term.args.no_interactive = true;
+
+    let error = Trash {
+        target: picker(PickerFilter::default()),
+    }
+    .run(&mut f.ctx)
+    .unwrap_err();
+
+    let expected: cmd::Error = Error::NoConversationTarget {
+        session: false,
+        multi: true,
+        allow_new: false,
+    }
+    .into();
+    assert_eq!(error.message, expected.message);
+    assert!(f.conversations.join("17941219991").is_dir());
+}
+
+// The trash moves live conversations only, so a picker over the archive would
+// offer conversations it then cannot move.
+#[test]
+fn trash_refuses_the_archived_picker() {
     let mut f = fixture(true);
 
     let error = Trash {
-        target: PositionalIds::from_targets(vec![ConversationTarget::Picker(
-            PickerFilter::default(),
-        )]),
+        target: picker(PickerFilter {
+            archived: true,
+            ..PickerFilter::default()
+        }),
     }
     .run(&mut f.ctx)
     .unwrap_err();
 
     assert_eq!(
         error.message.as_deref(),
-        Some("`jp conversation trash` takes conversation IDs; it has no picker.")
+        Some("`jp conversation trash` moves live conversations; archived ones cannot be picked.")
+    );
+}
+
+// No picker lists the trash yet.
+#[test]
+fn untrash_refuses_the_picker() {
+    let mut f = fixture(true);
+
+    let error = Untrash {
+        target: picker(PickerFilter::default()),
+    }
+    .run(&mut f.ctx)
+    .unwrap_err();
+
+    assert_eq!(
+        error.message.as_deref(),
+        Some("`jp conversation untrash` takes conversation IDs; it has no picker.")
     );
 }
 

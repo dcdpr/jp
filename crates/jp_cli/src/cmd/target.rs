@@ -822,7 +822,9 @@ pub(crate) fn resolve_picker(
         .ok_or(Error::NoConversationSelected)
 }
 
-fn resolve_multi_picker(
+/// Multi-select picker over live conversations, or the target error when no
+/// user is available to answer it.
+pub(crate) fn resolve_multi_picker(
     workspace: &Workspace,
     session: Option<&Session>,
     filter: &PickerFilter,

@@ -18,7 +18,7 @@ use crate::{
     cmd::{
         self, ConversationLoadRequest, Output,
         conversation_id::{ConversationIds as _, PositionalIds},
-        target::ConversationTarget,
+        target::{ConversationTarget, TargetGrammar, resolve_multi_picker},
     },
     ctx::Ctx,
     error::Error,
@@ -233,15 +233,18 @@ fn failure_summary(
 /// The targeted IDs: typed IDs as they are, keywords resolved against the
 /// conversation index.
 ///
-/// The picker is refused: it lists the index, which holds none of the
-/// conversations these commands exist for.
+/// For `trash`, `?` opens the multi-select picker over live conversations;
+/// conversations that fail to load are not in it, and are reached by ID.
+/// The archived picker is refused, because the trash only moves live
+/// conversations.
+/// `untrash` has no picker.
 fn resolve_ids(
     ctx: &Ctx,
-    target: &PositionalIds<false, true>,
+    targets: &PositionalIds<false, true>,
     action: Action,
 ) -> Result<Vec<ConversationId>, cmd::Error> {
     let mut ids = vec![];
-    for target in target.ids() {
+    for target in targets.ids() {
         match target {
             ConversationTarget::Id(id) => ids.push(*id),
             ConversationTarget::Help => {
@@ -250,6 +253,24 @@ fn resolve_ids(
                     multi: true,
                 }
                 .into());
+            }
+            ConversationTarget::Picker(filter) if matches!(action, Action::Trash) => {
+                if filter.archived {
+                    return Err(
+                        "`jp conversation trash` moves live conversations; archived ones cannot \
+                         be picked."
+                            .into(),
+                    );
+                }
+                let grammar = TargetGrammar::from_args(targets, false);
+                let interactive = crate::stdin_interactive(ctx.term.args.no_interactive);
+                ids.extend(resolve_multi_picker(
+                    &ctx.workspace,
+                    ctx.session.as_ref(),
+                    filter,
+                    grammar,
+                    interactive,
+                )?);
             }
             ConversationTarget::Picker(_) => {
                 return Err(format!(
