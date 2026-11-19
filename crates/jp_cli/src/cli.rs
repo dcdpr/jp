@@ -276,15 +276,15 @@ pub(crate) struct Globals {
     pub(crate) log: Option<String>,
 }
 
-/// The global options whose values accumulate over the whole command line:
+/// Global options whose values accumulate across the entire command line:
 /// `--cfg` and `-v`.
 ///
-/// Clap propagates a `global` argument by giving every command the values of
-/// the deepest one that set it, so a `--cfg` written before the subcommand
-/// would be lost to one written after it.
-/// These are declared on every command instead (see
-/// [`Globals::declare_on_subcommands`]), each keeping its own values, and read
-/// back level by level from the root down, which is command-line order.
+/// Clap propagates a `global` argument by copying the values from the deepest
+/// command that set it to every level, so a `--cfg` passed before the
+/// subcommand would be overwritten by one passed after it.
+/// Instead, these options are declared on every command (see
+/// [`Globals::declare_on_subcommands`]) so each level keeps its own values, and
+/// are collected from the root down in command-line order.
 fn accumulating_args() -> [Arg; 2] {
     [
         Arg::new("config")
@@ -487,8 +487,8 @@ impl Globals {
     }
 
     fn from_matches(matches: &ArgMatches) -> Self {
-        // A plugin's command is not declared, so its matches hold neither
-        // option; `try_get_*` skips it where `get_*` would panic.
+        // External subcommands (plugins) do not have these options declared on
+        // them; `try_get_*` skips those levels instead of panicking.
         Self {
             config: levels(matches)
                 .filter_map(|level| {

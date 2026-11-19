@@ -130,7 +130,7 @@ pub struct DisplayStyleConfig {
     /// Each result then gets a `<tool> result` header naming the tool it came
     /// from, shaded with this color.
     ///
-    /// If unset, the header uses `background`.
+    /// If unset, falls back to `background`.
     /// Accepts the same values as `background`.
     pub result_header_background: Option<Color>,
 

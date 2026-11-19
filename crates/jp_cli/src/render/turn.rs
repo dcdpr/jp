@@ -101,14 +101,16 @@ pub struct TurnRenderer {
     /// settings as the live path's `tool_chrome_visible` predicate.
     tool_chrome_shown: bool,
 
-    /// Tool calls requested whose responses have not been rendered yet.
+    /// Number of requested tool calls whose responses have not been rendered
+    /// yet.
     unanswered_calls: usize,
 
-    /// Tool calls shown since the last time no call was waiting on its
-    /// response, one per fanned-out operation.
+    /// Visible tool call operations rendered in the current batch (since
+    /// `unanswered_calls` was last `0`).
     ///
-    /// With more than one, every call is shown before any result, so each
-    /// result is labelled with its tool.
+    /// When a batch has more than one visible call, all call headers appear
+    /// before any result, so each result is rendered with a `<tool> result`
+    /// header.
     batch_calls: usize,
 }
 

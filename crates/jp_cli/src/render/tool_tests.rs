@@ -1095,8 +1095,6 @@ fn preparing_line_fills_to_the_edge_under_a_region() {
     );
 }
 
-/// Backgrounds a tool's own style sets: `237` for the call, `235` for the
-/// header above its result.
 fn tool_backgrounds() -> ToolBackgrounds {
     ToolBackgrounds {
         call: Some(Color::Ansi256(237)),
@@ -1121,8 +1119,9 @@ fn a_labelled_result_is_shown_under_a_header_naming_its_tool() {
     );
 }
 
-/// A header opens with one blank line whether or not the result above owed one,
-/// so two labelled results are not separated by two.
+/// Each result header emits one leading blank line and clears any pending
+/// separator, so consecutive labelled results have a single blank line between
+/// them.
 #[test]
 fn a_labelled_result_is_separated_from_the_result_before_it() {
     let (renderer, err, _) = create_renderer();
@@ -1169,8 +1168,6 @@ fn a_labelled_result_that_shows_nothing_has_no_header() {
     assert_eq!(strip_ansi(&err.lock()), "");
 }
 
-/// A tool's own background is what identifies it, so it shades the call even
-/// when the call continues a reasoning region.
 #[test]
 fn a_tool_background_takes_precedence_over_the_reasoning_region() {
     let (mut renderer, err, _) = create_renderer();
@@ -1231,8 +1228,6 @@ fn the_result_header_is_shaded_with_its_own_background() {
     );
 }
 
-/// Without a header background of its own, the header takes the background of
-/// the result it names, here the reasoning region the call continued.
 #[test]
 fn the_result_header_falls_back_to_the_result_background() {
     let (mut renderer, err, _) = create_renderer();

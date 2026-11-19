@@ -137,7 +137,6 @@ fn assign_background_accepts_an_index_or_a_hex_string() {
     );
 }
 
-/// One `*` entry shades every tool that does not pick its own color.
 #[test]
 fn background_fills_from_the_defaults_block() {
     let filled = PartialDisplayStyleConfig::default().fill_from(PartialDisplayStyleConfig {

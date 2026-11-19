@@ -355,11 +355,11 @@ struct Batch {
     /// Whether the approved calls were released to run.
     released: bool,
 
-    /// Whether each result is shown under a header naming its tool.
+    /// Whether each result is shown under a `<tool> result` header.
     ///
-    /// Set when more than one call with visible chrome was released: every call
-    /// is shown before any of them runs, so a result cannot follow its own
-    /// call.
+    /// Set when more than one call with visible chrome is released: all call
+    /// headers are printed before any tool runs, so results do not immediately
+    /// follow their own call header.
     labelled: bool,
 
     /// Whether the progress row was claimed for the released calls.
@@ -864,12 +864,10 @@ impl ToolCoordinator {
             })
     }
 
-    /// The backgrounds this tool's chrome is drawn against, per
-    /// `conversation.tools.<name>.style.background` and
-    /// `result_header_background`.
+    /// Return the configured background colors for `tool_name`'s chrome.
     ///
-    /// A tool with no config entry takes them from the `*` defaults block,
-    /// matching replay.
+    /// Falls back to the `*` defaults block when `tool_name` has no explicit
+    /// config entry.
     pub fn backgrounds(&self, tool_name: &str) -> ToolBackgrounds {
         self.tools_config.get(tool_name).map_or_else(
             || ToolBackgrounds::from(&self.tools_config.defaults.style),

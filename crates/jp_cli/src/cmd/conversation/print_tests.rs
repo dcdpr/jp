@@ -2248,8 +2248,6 @@ fn replay_keeps_the_gap_after_a_result_when_reasoning_renders_nothing() {
     );
 }
 
-/// Calls requested together are all shown before any of their results, so each
-/// result is labelled with the tool it came from, as it is live.
 #[test]
 fn replay_labels_the_results_of_calls_made_together() {
     let mut config = AppConfig::new_test();

@@ -29,7 +29,6 @@ fn a_global_option_after_the_subcommand_is_read() {
     assert_eq!(cli.globals.format, CliFormat::Json);
 }
 
-/// Every `--cfg` is applied, wherever it is written, in command-line order.
 #[test]
 fn cfg_on_both_sides_of_the_subcommand_keeps_every_value_in_order() {
     let cli = parse(&[

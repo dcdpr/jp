@@ -48,13 +48,13 @@ pub(crate) const fn output_lines(rows: WindowRows) -> OutputLines {
     }
 }
 
-/// The backgrounds a tool's own style draws its chrome against.
+/// Background colors configured in a tool's `style` block.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub(crate) struct ToolBackgrounds {
-    /// The call header, arguments, prompts, and result.
+    /// Background color for the call header, arguments, prompts, and result.
     pub call: Option<Color>,
 
-    /// The `<tool> result` header above a labelled result.
+    /// Background color for the `<tool> result` header above a labelled result.
     pub result_header: Option<Color>,
 }
 
@@ -207,15 +207,13 @@ impl ToolRenderer {
         self.drawn.store(true, Ordering::Relaxed);
     }
 
-    /// Record the backgrounds a tool call is drawn against, at the tool-call
-    /// boundary.
+    /// Record the background colors for a tool call at the tool-call boundary.
     ///
     /// `region` is `Some` when the tool continues a reasoning region (the live
     /// boundary returned a background), `None` otherwise.
     /// A background from the tool's own style takes precedence over `region`.
-    /// The result keys the tool's permanent header and result shading by `id`,
-    /// and also becomes the currently-active region for the live temp/progress
-    /// line.
+    /// The resolved background is stored under `id` to shade the tool's header
+    /// and result, and becomes the active region for the live preparing line.
     pub(crate) fn set_region(
         &mut self,
         id: &str,
@@ -470,7 +468,7 @@ impl ToolRenderer {
     ///
     /// The header is shaded with the call's result-header background, falling
     /// back to the background of the result itself.
-    /// A result that shows nothing gets no header either.
+    /// Omitted when the result produces no visible output.
     pub fn render_labelled_result(
         &self,
         response: &ToolCallResponse,
@@ -503,9 +501,9 @@ impl ToolRenderer {
         let (ext, inner_content) = split_result_content(response.content());
         let path = write_results_file(ext.as_deref(), &inner_content);
 
-        // Filtered ahead of the highlighter, which adds JP's own styling. The
-        // span is closed after the lines that are kept, not at the end of the
-        // text a truncated result cuts.
+        // Sanitized before syntax highlighting adds JP's own ANSI sequences.
+        // `write_tool_output` closes the span after the kept lines so
+        // truncation does not discard the closing reset.
         let shown = sanitize_unclosed(&inner_content, ContentClass::ToolOutput, self.sanitize());
 
         let max_lines = match inline_results {
@@ -542,10 +540,9 @@ impl ToolRenderer {
 
     /// Write the `<tool> result` header above the result of call `id`.
     fn render_result_header(&self, id: &str, name: &str, region: Option<&DefaultBackground>) {
-        // One blank line above the header, as an unlabelled result opens with,
-        // which also settles any separator a previous result owes. It is
-        // shaded like the result rather than the header, so the header is one
-        // row tall.
+        // Emit the leading blank line (settling any pending separator from an
+        // earlier result) using the result's background so the header itself
+        // stays one row tall.
         self.separator.store(false, Ordering::Relaxed);
         self.write_chrome(region, |w| w.write_char('\n'));
         let header_region = self.result_headers.get(id).or(region);
@@ -611,7 +608,7 @@ impl ToolRenderer {
         });
     }
 
-    /// Write the link to the file holding the full result, as `style` asks.
+    /// Write the link to the temp file holding the full result.
     fn render_results_file_link(
         &self,
         region: Option<&DefaultBackground>,
@@ -777,8 +774,8 @@ impl ToolRenderer {
     }
 }
 
-/// Split a tool result into the language it is written in, if one is known, and
-/// its content without a surrounding code fence.
+/// Extract the language tag (if detected) and unwrapped body from a tool
+/// result.
 ///
 /// A JSON result is pretty-printed and reported as `json`.
 /// A fenced result reports its fence's language; an unfenced one is reported as
@@ -819,8 +816,8 @@ fn split_result_content(raw: &str) -> (Option<String>, String) {
     (ext, lines.join("\n"))
 }
 
-/// Write the full result to a file in the temp directory, named for `ext`, and
-/// return its path.
+/// Write the full result to a file in the temp directory using `ext` as the
+/// file extension, and return its path.
 ///
 /// A failed write is ignored: the link then points at a missing file, and the
 /// result still reaches the assistant.

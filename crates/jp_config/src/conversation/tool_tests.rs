@@ -98,7 +98,6 @@ fn parameters_tool_in_the_defaults_is_accepted_when_only_subprocess_tools_inheri
     assert!(config.is_ok(), "{config:?}");
 }
 
-/// A `'*'` background reaches a tool that sets other style keys of its own.
 #[test]
 fn a_defaults_background_reaches_a_tool_with_its_own_style() {
     let config = build_assigned(&[
@@ -120,8 +119,6 @@ fn a_defaults_background_reaches_a_tool_with_its_own_style() {
     assert_eq!(style.result_header_background(), Some(Color::Ansi256(234)));
 }
 
-/// A later layer setting one style key of a tool keeps the keys an earlier layer
-/// set on the same tool.
 #[test]
 fn a_later_layer_merges_into_a_tool_style_field_by_field() {
     use schematic::PartialConfig as _;
