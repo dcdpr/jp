@@ -18,6 +18,7 @@ use jp_conversation::ConversationId;
 use jp_printer::Printer;
 use jp_storage::{
     backend::{FsStorageBackend, LockBackend as _},
+    trash::{TRASH_DIR, TRASHED_FILE},
     validate::{ManagedFile, ValidationError, validate_conversation_dir},
 };
 use serde::Serialize;
@@ -27,9 +28,6 @@ use crate::{
     deferred_report::DeferredReport,
     load_failure::{Cause, causes},
 };
-
-const TRASH_DIR: &str = ".trash";
-const TRASHED_FILE: &str = "TRASHED.md";
 
 /// The sentence in every `TRASHED.md` startup validation wrote.
 ///

@@ -6,7 +6,7 @@
 - **Parent**: W-00dxybb
 - **Label**: domain=conversation
 - **Summary**: The glossary's Conversation cluster: Turn, Event ID, Label, and
-  what makes a conversation active, live, or archived.
+  what makes a conversation active, live, archived, or trashed.
 
 The Conversation cluster covers JP's central abstraction: the persistent record
 of "talking to the assistant" and the event log that backs it.
@@ -69,10 +69,11 @@ picker, and the `recent` / `newest` / `+pinned` target keywords.
 `LoadBackend::load_conversation_index` with a default `ConversationFilter`.
 `Workspace::conversations()` iterates the resulting index.
 
-**In context.** Live and **Archived** are the two values of a conversation's
-*location* — mutually exclusive, and a conversation is always in exactly one.
+**In context.** Live, **Archived**, and **Trashed** are the values of a
+conversation's *location* — mutually exclusive, and a conversation is always in
+exactly one.
 This is a separate axis from flags such as **Pinned**, which apply to a
-conversation in either location.
+conversation in any location.
 
 **Not the same as.** The **Active Conversation** (the single conversation the
 current session is working on, which is one particular live conversation).
@@ -98,6 +99,22 @@ is the source of truth.
 
 **Not the same as.** A removed conversation (archiving is reversible with `jp c
 unarchive`; removal is not).
+
+### Trashed Conversation
+
+A conversation the user has set aside in the trash, typically one that fails to
+load or a query draft that was never sent.
+Nothing reads the trash: a trashed conversation is not listed, loaded, targeted
+by keywords, or reported, until the user moves it back.
+JP never trashes a conversation on its own.
+
+**Implementation.** The `conversations/.trash/` directory of each storage root,
+managed by `jp_storage::trash`; a `TRASHED.md` beside the conversation's files
+records when and how it was moved.
+
+**Not the same as.** An **Archived Conversation** (archived conversations must
+load, and are still reachable with archive keywords; the trash holds any
+conversation directory and is reachable only by ID).
 
 ### Label
 

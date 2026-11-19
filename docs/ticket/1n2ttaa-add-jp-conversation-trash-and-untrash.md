@@ -1,6 +1,6 @@
 # Add jp conversation trash and untrash
 
-- **Status**: Todo
+- **Status**: Done
 - **Authors**: jp
 - **Date**: 2026-11-18
 - **Label**: client=cli
@@ -22,10 +22,12 @@ Every other command resolves ids through the conversation index, which excludes
 them.
 Target resolution for these commands reads the directory listing directly.
 
-- [ ] `trash` works on valid and invalid conversations, in either storage root
-- [ ] `untrash` restores to the live partition and refuses to overwrite a live
+- [x] `trash` works on valid, invalid, and unstored (draft-only) conversations,
+      in either storage root
+- [x] `trash` and `untrash` accept several ids in one call
+- [x] `untrash` restores to the live partition and refuses to overwrite a live
       directory with the same id
-- [ ] The end-of-command load-failure report names `jp c trash` as one way to
+- [x] The end-of-command load-failure report names `jp c trash` as one way to
       clear an entry
 
 ## Comments
@@ -39,3 +41,37 @@ Target resolution for these commands reads the directory listing directly.
 and their tests) was deleted with T-1n2tta8, because nothing called it any more.
 Restore it from git history when `jp c trash` lands; the `TRASHED.md` wording
 ("failed workspace sanitization") should change for a user-initiated trash.
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-19T13:44:44Z
+
+Done.
+
+- **Storage:** `jp_storage::trash` was rewritten rather than restored.
+  The old code renamed a collision to `{dirname}-1`, which parses as ID plus
+  title, so untrash could not tell copies apart.
+  The trash now holds at most one entry per conversation per root.
+  `trash` refuses a conversation the trash already holds (`AlreadyTrashed`), and
+  `untrash` refuses when a live directory exists (`Exists`).
+  Both hold the conversation lock, check before moving anything, and move every
+  root's copy.
+  `TRASHED.md` reads "Moved here by `jp conversation trash` on <date>.
+  Run `jp conversation untrash <id>` to move it back."
+  It doesn't contain the auto-trash sentence, so the one-time restore never
+  picks it up (tested).
+- **CLI:** `jp c trash <id>...` / `jp c untrash <id>...`, with at least one ID
+  required.
+  Typed IDs bypass the index; keywords and `-` (stdin) still resolve.
+  The picker is refused, and `help` prints keyword help.
+  Each failure is reported on stderr and the remaining IDs still run, then the
+  command fails with "Failed to move N of M conversations to the trash."
+  There is no confirmation prompt, since untrash reverses it.
+  The command refuses to run under `--no-persist`.
+- **Report hint:** when the load-failure report lists failures, its last line is
+  `Run \`jp conversation trash <ids>\` to move them to the trash.` Directories
+  whose name isn't an ID are left out of the command.
+- **Glossary:** added *Trashed Conversation* to W-00dxybc.
+
+Unchanged: the JSON load-failure records carry no hint.
