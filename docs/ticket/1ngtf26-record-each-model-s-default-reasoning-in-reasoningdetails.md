@@ -24,8 +24,8 @@ lets JP display the effective reasoning level for a request.
 
 - [ ] Add the default enabled state (on, off, or unknown) and the default level
       to `ReasoningDetails`.
-      OpenRouter's `default_effort` is the level used when reasoning is
-      enabled, not evidence that reasoning is on by default.
+      OpenRouter's `default_effort` is the level used when reasoning is enabled,
+      not evidence that reasoning is on by default.
 - [ ] Populate both from Ollama, OpenRouter (making `default_enabled` optional
       in `jp_openrouter`), and the hosted catalogs.
 - [ ] Use the default enabled state when a provider determines whether `auto`
