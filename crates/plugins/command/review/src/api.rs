@@ -63,12 +63,11 @@ pub(crate) struct Reply {
 }
 
 impl Reply {
-    /// A reply with `status`, whose body is `value` as JSON.
-    // Not split into `ok`, `created`, and so on: rustqual takes a `.ok()` whose
-    // receiver type it can't infer, such as `env::var(..).ok()`, for a call to
-    // any method named `ok` in the workspace. The caller then counts as calling
-    // workspace code, and its `unsafe` blocks are reported as new CX-006
-    // findings.
+    /// Serialize `value` as a JSON response with `status`.
+    // Do not add an `ok` constructor: rustqual matches `.ok()` calls with
+    // uninferred receiver types (such as `env::var(..).ok()`) against any
+    // inherent method named `ok` in the workspace, reclassifying those callers
+    // as `Integration` and flagging their `unsafe` blocks as `CX-006`.
     pub(crate) fn new(status: StatusCode, value: &impl Serialize) -> Result<Self, ApiError> {
         Ok(Self {
             status,

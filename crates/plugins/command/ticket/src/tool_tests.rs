@@ -914,8 +914,6 @@ fn a_shorter_title_answer_that_still_does_not_fit_ends_the_call() {
     assert!(ids(&dir).is_empty(), "a refused title filed a ticket");
 }
 
-/// An answer that is no title at all, such as a model's report of its work, is
-/// quoted only as far as its first line, so the refusal stays readable.
 #[test]
 fn a_shorter_title_answer_that_is_no_title_is_quoted_in_part() {
     let dir = Utf8TempDir::new().unwrap();

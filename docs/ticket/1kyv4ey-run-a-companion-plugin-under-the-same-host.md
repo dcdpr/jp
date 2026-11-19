@@ -100,13 +100,11 @@ Filed while designing RFD 136 (`jp-review`), which initially spawns a nested
 - **From**: jp
 - **Date**: 2026-11-18T20:06:09Z
 
-The review frontend will be served by `jp review serve` itself, as a
-Rust/WebAssembly UI built with Leptos, rather than by the documentation site
-(drafts "Browser UIs in Rust with Leptos" and "Browser Frontend for the Review
-Engine").
-`jp vite serve` therefore no longer needs to run `jp review serve` beside it,
-and that was the only case this ticket names.
+The review frontend will be served directly by `jp review serve` as a
+Rust/WebAssembly UI built with Leptos rather than by the documentation site (RFD
+139, RFD 140).
+`jp vite serve` therefore no longer needs to run `jp review serve` alongside it,
+which was the only motivating use case in this ticket.
 
-I'm leaving the ticket open for the next pair of plugins that has to run under
-one host.
-If no such pair appears, it can be closed.
+Leaving the ticket open for the next pair of plugins that needs to run under a
+single host; if none arises, this ticket can be closed.

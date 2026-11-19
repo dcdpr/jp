@@ -8,27 +8,29 @@
 - **Label**: type=bug
 
 Promoting a draft rewrites references to a *different* document when the draft's
-slot once belonged to another draft that is still cited somewhere.
+slot previously belonged to another draft that is still cited in the repository.
 
-Seen when D38 was promoted to RFD 140 (the review frontend): T-0571g2h cited
+Observed when D38 was promoted to RFD 140 (the review frontend): T-0571g2h cited
 `[RFD D38]` for "root-qualified extends paths".
-That draft was created as D38 in `809bba6af` and renumbered to D61 in
-`c078a9b8d`, which left the ticket's citation dangling.
-`jp rfd draft` later gave the empty D38 slot to the review frontend, and
-promoting it turned the ticket's two citations into `[RFD 140]`, pointing them
-at the wrong RFD with no warning.
-(The ticket is fixed by hand.)
+That earlier draft was created as D38 in `809bba6af` and renumbered to D61 in
+`c078a9b8d`, leaving the citation in T-0571g2h pointing at `D38`.
+`jp rfd draft` later allocated the free D38 slot to the review frontend, and
+promoting it rewrote both citations in T-0571g2h to `[RFD 140]`, silently
+pointing them at the wrong RFD.
+(T-0571g2h has been fixed manually.)
 
 Cause:
 
-- `next_draft_slot` (`crates/plugins/command/rfd/src/id.rs`) counts a slot as
-  free when no file in `drafts/` takes it, even if documents still cite it.
+- `next_draft_slot` (`crates/plugins/command/rfd/src/id.rs`) treats a slot as
+  free whenever no file in `drafts/` uses it, even if other documents still cite
+  that draft ID.
 
-- `draft_rules` (`crates/plugins/command/rfd/src/cmd/promote.rs`) rewrites the
-  bare `Dnn` citation and token in every RFD, draft, and ticket, whether or not
-  the reference means the file being promoted.
+- `draft_rules` (`crates/plugins/command/rfd/src/cmd/promote.rs`) rewrites every
+  `Dnn` citation and token across all RFDs, drafts, and tickets without
+  verifying which draft the citation referred to.
 
-- [ ] `jp rfd draft` skips a slot that any RFD, draft, or ticket still cites.
+- [ ] Skip any draft slot in `jp rfd draft` that is still cited by an RFD,
+      draft, or ticket.
 
-- [ ] Report citations of a draft id that no file has, so they get fixed instead
-      of adopted.
+- [ ] Report dangling draft citations (draft IDs with no matching file in
+      `drafts/`) so they can be fixed before a slot is reused.

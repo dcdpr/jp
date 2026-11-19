@@ -10,53 +10,54 @@
 
 ## Summary
 
-JP's browser UIs are written in Rust, compiled to WebAssembly, and rendered in
-the browser with Leptos.
-A plugin embeds its UI in its binary and serves it beside the JSON API the UI
-calls, and the repository gains no JavaScript for it.
+JP's browser UIs are written in Rust, compiled to WebAssembly, and rendered on
+the client with Leptos.
+Each command plugin embeds its compiled UI bundle in its binary and serves it
+alongside its JSON API, adding no handwritten JavaScript to the repository.
 
 ## Context
 
-JP serves three things to a browser:
+JP has three browser-facing surfaces:
 
-- `jp-vite`'s documentation site, a VitePress app in Vue whose site files are
-  synced into each workspace that uses it.
-- `jp serve web`, which renders pages on the server with maud and runs
-  hand-written scripts that `just typecheck-js` checks.
-  It is a prototype, due to be rewritten.
-- `jp review serve`, a JSON API whose browser frontend [RFD 136] left out of
-  scope.
+- `jp-vite`'s documentation site, a VitePress and Vue application whose files
+  are synced into each workspace that uses it.
+- `jp serve web`, a prototype that renders HTML on the server with maud and runs
+  handwritten JavaScript checked by `just typecheck-js`; it is scheduled for a
+  rewrite.
+- `jp review serve`, a local JSON API whose browser frontend [RFD 136] deferred.
 
-`jp-vite` stays as it is; beyond it, the project takes on no more JavaScript.
+`jp-vite` remains on VitePress and Vue, but new browser UIs will not add more
+JavaScript to the repository.
 
-A review frontend needs code running in the browser that server rendering can't
+The review frontend requires client-side behavior that server rendering cannot
 replace:
 
-- It maps a text selection to the source bytes it covers, through the spans
-  md-html writes ([RFD 124]).
-- It highlights commented ranges without rewriting the rendered HTML, through
-  the CSS Custom Highlight API.
-- It updates comments in place while the assistant answers them.
+- Mapping DOM text selections to source byte offsets through the `data-s` and
+  `data-e` spans emitted by `md-html` ([RFD 124]).
+- Highlighting commented ranges without mutating the rendered DOM, using the
+  [CSS Custom Highlight API][highlight].
+- Updating comment threads in place as the assistant replies during a pass.
 
-The Rust side already has what a WebAssembly client needs: `wasm-bindgen`,
-`js-sys`, and `web-sys` are in `Cargo.lock` as transitive dependencies, and the
-types a client reads from the server are Rust structs.
+The workspace already carries the core WebAssembly bindings (`wasm-bindgen`,
+`js-sys`, and `web-sys`) as transitive dependencies in `Cargo.lock`, and the API
+payloads exchanged with the server are already defined as Rust structs.
 
 ## Decision
 
 ### Stack
 
-Browser UIs are Rust compiled for `wasm32-unknown-unknown` and rendered in the
-browser with Leptos, pinned to `0.9.0-rc1` until 0.9.0 is released.
+Browser UIs are written in Rust, compiled for `wasm32-unknown-unknown`, and
+rendered in the browser with Leptos (pinned to `0.9.0-rc1` until `0.9.0` is
+released).
 
-Rendering is client-side only.
-The plugin serves a static HTML shell, the compiled bundle, and the JSON API the
-bundle calls.
-There is no server-side rendering or hydration, and the server doesn't depend on
-Leptos.
+Rendering is strictly client-side.
+The plugin serves a static HTML shell, the compiled WebAssembly bundle, and the
+JSON API that the client calls.
+There is no server-side rendering or hydration, and the server crate does not
+depend on Leptos.
 
-Views use Leptos's builder API rather than the `view!` macro, as Leptos's own
-[`counter_without_macros`][counter] example does:
+Views use Leptos's builder syntax rather than the `view!` macro, following
+Leptos's [`counter_without_macros`][counter] example:
 
 ```rust
 div().child((
@@ -67,185 +68,203 @@ div().child((
 ))
 ```
 
-rustfmt formats it, rust-analyzer completes it, and clippy reads it as ordinary
-Rust.
+Builder syntax is standard Rust: `rustfmt` formats it, `rust-analyzer` completes
+it, and `clippy` lints it without macro-expansion indirection or `leptosfmt`.
 
-The repository holds no JavaScript for these UIs.
-The browser runs the module `wasm-bindgen` generates at build time, which the
-HTML shell starts with a one-line module script.
-Browser APIs that `web-sys` exposes only behind `web_sys_unstable_apis`, such as
-the Custom Highlight API, get small `#[wasm_bindgen]` extern declarations in
-Rust.
+The repository contains no JavaScript source files for these UIs.
+At build time, `wasm-bindgen` generates the JS glue module, and the HTML shell
+loads it with a one-line `<script type="module">`.
+Browser APIs that `web-sys` gates behind `web_sys_unstable_apis` (such as the
+CSS Custom Highlight API) are bound directly in Rust with small
+`#[wasm_bindgen]` `extern` blocks.
 
 ### Crates
 
-A plugin with a browser UI has two crates beside its own, both workspace
-members:
+A plugin with a browser UI adds two sibling crates to the workspace:
 
-| Crate                             | Builds for      | Holds                                                             |
-| --------------------------------- | --------------- | ----------------------------------------------------------------- |
-| `<plugin>/api`, `jp-<plugin>-api` | host and wasm32 | The JSON API's request and response types, with serde and no I/O. |
-| `<plugin>/ui`, `jp-<plugin>-ui`   | host and wasm32 | The browser UI.                                                   |
+| Crate                              | Target          | Role                                                           |
+| ---------------------------------- | --------------- | -------------------------------------------------------------- |
+| `<plugin>/api` (`jp-<plugin>-api`) | host and wasm32 | Request and response types for the JSON API (`serde`, no I/O). |
+| `<plugin>/ui` (`jp-<plugin>-ui`)   | host and wasm32 | Client-side Leptos UI.                                         |
 
-The server serializes the `api` types and the UI deserializes the same ones, so
-the two can't drift apart.
-A change that breaks the UI's use of a type, such as a renamed field or a
-variant an exhaustive `match` doesn't handle, fails to compile.
-A new field the UI should show, or a field whose meaning changes, compiles
-either way: the `api` crate's tests pin the JSON each type reads and writes, and
-the server's endpoint tests check what the values mean, such as the version an
-anchor defaults to.
+Because the server serializes and the UI deserializes the same `api` types,
+wire-format changes cannot silently drift between server and client.
+Renaming a field or adding an enum variant that an exhaustive `match` does not
+handle fails compilation immediately.
+Semantic changes and newly added optional fields are covered by tests: unit
+tests in the `api` crate pin the serialized JSON representation of each type,
+and endpoint tests in the server crate verify behavior (such as default anchor
+versions).
 
-The `ui` crate keeps its logic in plain functions over owned data: turning a
-selection into a byte range, laying out comment cards, deciding when to poll.
-Components and DOM bindings stay thin.
-The crate builds on the host as well, so `cargo check`, clippy, rustqual,
-rust-analyzer, and `cargo test` cover it with the rest of the workspace.
+The `ui` crate keeps domain and layout logic in pure functions over owned types
+(mapping selections to byte ranges, positioning comment cards, and scheduling
+polls) while keeping reactive components and DOM bindings thin.
+Because `ui` also compiles on the host target, `cargo check`, `clippy`,
+`rustqual`, `rust-analyzer`, and `cargo test` check it alongside the rest of the
+workspace.
 
 ### Testing
 
-- Logic is unit-tested on the host, in `_tests.rs` files, like the rest of the
-  workspace.
-- Code that needs a DOM is tested with `wasm-bindgen-test`, configured with
-  `run_in_browser`: `wasm-bindgen-test-runner` mounts components in a headless
-  browser, and the test asserts on the resulting DOM.
+- Pure UI logic is unit-tested on the host in `_tests.rs` files, matching the
+  rest of the workspace.
+- DOM interactions and mounted components are tested with
+  [`wasm-bindgen-test`][wbt] configured with `run_in_browser`, running inside a
+  headless browser via `wasm-bindgen-test-runner`.
 
 ### Building and embedding
 
-- `rust-toolchain.toml` lists the `wasm32-unknown-unknown` target.
-- `just build-ui <plugin>` builds the `ui` crate for wasm32 under a
-  `wasm-release` profile tuned for size, runs `wasm-bindgen --target web` into
-  `target/ui/<plugin>/`, and copies the UI's stylesheet beside it.
-  The recipe installs the `wasm-bindgen` CLI at the version `Cargo.lock` pins
-  for the `wasm-bindgen` crate, since the CLI refuses a module built against
-  another version.
-- The plugin's build script embeds the bundle when `JP_<PLUGIN>_UI` names its
-  directory (`JP_REVIEW_UI`), and otherwise embeds a placeholder page that says
-  how to build the UI.
-  A `JP_<PLUGIN>_UI` naming a directory without a bundle fails the build rather
-  than falling back to the placeholder.
-  The build script runs no cargo.
-- `just install-plugin <plugin>` builds the bundle before installing a plugin
-  that has a `ui` crate.
-  A plain `cargo install` gives the API and the placeholder.
-- A plugin installed from a checkout or from Git may serve the placeholder.
-  A published plugin ships the bundle built from its own source revision: its
-  release build sets `JP_<PLUGIN>_UI`, and fails without the bundle.
-  `just plugin-build`, which builds the published binaries, learns to build and
-  name the bundle in the change that gives the first published plugin a `ui`
-  crate.
+- `rust-toolchain.toml` includes the `wasm32-unknown-unknown` target.
+- `just build-ui <plugin>` compiles the `ui` crate for `wasm32-unknown-unknown`
+  using a size-optimized `wasm-release` profile, runs `wasm-bindgen --target
+  web` into `target/ui/<plugin>/`, and copies the UI's stylesheet into that
+  directory.
+  The recipe installs the `wasm-bindgen` CLI at the exact version pinned for the
+  `wasm-bindgen` crate in `Cargo.lock`, because the CLI rejects modules compiled
+  against a mismatched crate version.
+- When `JP_<PLUGIN>_UI` (e.g. `JP_REVIEW_UI`) is set at compile time, the
+  plugin's `build.rs` embeds the bundle from that directory; if the directory
+  does not contain a valid bundle, `build.rs` fails the build rather than
+  falling back.
+  When `JP_<PLUGIN>_UI` is unset, `build.rs` embeds a placeholder HTML page
+  explaining how to build the UI.
+  `build.rs` never invokes `cargo`.
+- `just install-plugin <plugin>` runs `just build-ui <plugin>` before installing
+  any plugin that has a `ui` crate.
+  Running `cargo install` directly installs the plugin binary with the JSON API
+  and the placeholder page.
+- While local or Git installs without `JP_<PLUGIN>_UI` may serve the placeholder
+  page, published plugin binaries must embed the bundle built from the same
+  revision: release builds set `JP_<PLUGIN>_UI` and fail if the bundle is
+  missing.
+  `just plugin-build` will be updated to build and pass the bundle when the
+  first published plugin gains a `ui` crate.
 
 ### Tooling for the assistant
 
-The cargo tools already run optional passes behind tool options (`wiki_check`,
-`qual_check`, `site_check`).
-Two more:
+The workspace's `cargo_check` and `cargo_test` tools already gate optional
+verification passes behind tool options (`wiki_check`, `qual_check`,
+`site_check`).
+This RFD adds two options for WebAssembly crates:
 
-- `cargo_check`'s `wasm_check` also runs clippy for `wasm32-unknown-unknown` on
+- `wasm_check` on `cargo_check` runs `clippy` for `wasm32-unknown-unknown` on
   every browser crate.
-- `cargo_test`'s `wasm_test` also runs every browser crate's browser tests.
+- `wasm_test` on `cargo_test` runs the headless-browser test suite for every
+  browser crate.
 
-A browser crate says what it is in its manifest, which the tools, `just`, and CI
-read through `cargo metadata`:
+Browser crates declare themselves in `Cargo.toml`, where the tools, `just`, and
+CI discover them via `cargo metadata`:
 
 ```toml
 [package.metadata.jp]
 wasm = true
 ```
 
-A `web-development` skill turns both options on and carries the conventions in
-this RFD.
-A `web-dev` persona loads it on top of `dev`, as `app-dev` adds the macOS app's
-tools; other personas build nothing for wasm32.
+A `web-development` skill enables both options and documents the conventions
+from this RFD.
+A `web-dev` persona layers that skill on top of `dev` (paralleling `app-dev` for
+the macOS app), while other personas skip `wasm32` builds.
 
 ### CI
 
-A path-filtered `web` workflow, like `app.yml`, runs when a browser crate, an
-`api` crate, md-html, `Cargo.lock`, or `rust-toolchain.toml` changes.
-It lints the browser crates for wasm32, runs their browser tests in the runner's
-Chrome through ChromeDriver, and builds every bundle.
+A path-filtered `web` GitHub Actions workflow (modeled on `app.yml`) runs
+whenever a browser crate, an `api` crate, `md-html`, `Cargo.lock`, or
+`rust-toolchain.toml` changes.
+It runs `clippy` on all browser crates for `wasm32-unknown-unknown`, executes
+their browser tests in headless Chrome via ChromeDriver, and builds every UI
+bundle.
 
 ## Consequences
 
-Easier:
+Benefits:
 
-- One language and toolchain from the store to the page.
-- The compiler checks the client's use of the server's wire types.
-- UI logic is tested like the rest of the code, with the same tools.
-- The `jp serve web` rewrite starts from a decided stack, without JavaScript.
+- A single language and toolchain from on-disk storage to the browser DOM.
+- Compile-time verification that client code matches the server's request and
+  response types.
+- Host-side unit tests and lints run on UI logic with the workspace's standard
+  Rust tooling.
+- A settled, JavaScript-free architecture for rewriting `jp serve web`.
 
-Harder:
+Costs:
 
-- A build step outside a plain `cargo build`, a pinned `wasm-bindgen` CLI, and a
-  second target.
-- A plugin built without its bundle serves the placeholder, so `cargo install`
-  alone doesn't produce the UI.
-- Leptos and its dependencies enter cargo-vet and cargo-deny, and compile in
-  every host build of the workspace.
-- A pre-release dependency, whose API can change before 0.9.0.
-- A change that breaks only the wasm32 build passes other personas' checks; the
-  `web-dev` persona or CI catches it, as with the macOS app.
-- A WebAssembly bundle is larger than equivalent hand-written scripts, which
-  matters little for a server on the user's own machine.
+- Building a full plugin UI requires a `wasm-bindgen` post-processing step and
+  the `wasm32-unknown-unknown` target outside a plain `cargo build`.
+- Installing a plugin with plain `cargo install` (without building the bundle
+  first) serves the placeholder page instead of the UI.
+- Leptos and its dependency tree must be audited in `cargo-vet` and `cargo-deny`
+  and are compiled during host workspace builds.
+- Leptos `0.9.0-rc1` is a pre-release dependency whose API may change before
+  `0.9.0`.
+- Target-specific `wasm32` build failures are caught only under the `web-dev`
+  persona or in CI, matching the tradeoff for the macOS app.
+- WebAssembly bundles are larger than minimal handwritten scripts, though bundle
+  size is negligible for a local loopback server.
 
 ## Alternatives
 
-- **Server-rendered pages with small scripts**, as `jp serve web` has.
-  Selection mapping and highlights still need client code, so this means
-  JavaScript or a WebAssembly component anyway, and the server grows an
-  HTML-shaped surface beside its JSON API.
-- **Server-rendered pages with WebAssembly islands** for selection: two
-  rendering models in one UI, and full reloads to show updates.
-- **Vue in `jp-vite`**: more JavaScript, and a plugin's UI tied to the
-  documentation site's sync and release cycle.
-- **Other Rust frameworks**: Dioxus builds and bundles through its own CLI
-  (`dx`); Yew renders through a virtual DOM and is less active; Sycamore has
-  fine-grained reactivity like Leptos, with a smaller ecosystem.
-- **Leptos's `view!` macro**: shorter, but needs `leptosfmt` beside rustfmt, and
-  errors point into the macro's expansion.
-- **Trunk or cargo-leptos**: both download `wasm-bindgen` and `wasm-opt`
-  binaries while building, where a UI needs only `cargo build` and
+- **Server-rendered HTML with small scripts** (as in `jp serve web`).
+  Mapping selections to source byte offsets and rendering CSS custom highlights
+  still require client-side code, and server rendering forces the plugin to
+  maintain an HTML view layer alongside its JSON API.
+- **Server-rendered HTML with WebAssembly islands** for selection handling.
+  Splits the UI across two rendering models and requires full-page or fragment
+  reloads to reflect live state changes.
+- **Vue components inside `jp-vite`**.
+  Adds more JavaScript and couples a command plugin's UI to the documentation
+  site's sync and release cycle.
+- **Other Rust UI frameworks**.
+  Dioxus relies on its own `dx` build CLI; Yew uses a virtual DOM and sees less
+  active development; Sycamore offers fine-grained reactivity similar to Leptos
+  but with a smaller ecosystem.
+- **Leptos's `view!` macro**.
+  More concise than builder syntax, but requires `leptosfmt` alongside `rustfmt`
+  and produces diagnostics that point into macro expansions.
+- **Trunk or `cargo-leptos`**.
+  Both tools download external `wasm-bindgen` and `wasm-opt` binaries during
+  builds, whereas JP's client-only bundles require only `cargo build` and
   `wasm-bindgen`.
-- **Building the bundle in the plugin's build script**: `cargo install` alone
-  would produce the UI, but the script still needs the `wasm-bindgen` CLI, or
-  compiles its library into every build of the plugin, and runs cargo inside
-  cargo under the environment clippy and coverage set.
-- **Gating the `ui` crate to wasm32**: host builds wouldn't compile Leptos, but
-  rust-analyzer and the host checks would skip the components, and a wire-type
-  change that breaks the UI's build would pass every persona but `web-dev`.
+- **Compiling the WebAssembly bundle inside `build.rs`**.
+  Would allow a plain `cargo install` to embed the UI, but still requires an
+  external `wasm-bindgen` binary (or compiling `wasm-bindgen-cli-support` into
+  every build script) and spawns nested `cargo` invocations that inherit host
+  `clippy` or coverage flags.
+- **Restricting the `ui` crate to `cfg(target_arch = "wasm32")`**.
+  Avoids compiling Leptos on the host, but prevents `rust-analyzer` and default
+  host checks from inspecting UI components, allowing `api` changes that break
+  the UI to pass outside `web-dev`.
 
 ## Risks and Open Questions
 
-- **Leptos on the host.** The decision assumes Leptos builds for the host as it
-  does for wasm32.
-  If it doesn't, or adds more than about 10% to a cold `cargo check
-  --workspace`, the `ui` crate's components move behind `cfg(target_arch =
-  "wasm32")`.
-- **rustqual and browser tests.** rustqual may not count `#[wasm_bindgen_test]`
-  functions as tests, and report components as untested; the fix belongs in
-  `qual`, not in markers.
-- **nextest.** `cargo_test` runs nextest; whether nextest can drive
-  `wasm-bindgen-test-runner` decides whether the browser pass reuses its output
-  parsing or runs `cargo test`.
-- **A WebDriver.** Browser tests need ChromeDriver locally, or `safaridriver
-  --enable` run once on macOS.
-- **Leptos 0.9.0-rc1** may change before 0.9.0.
+- **Host compilation overhead.** This design assumes Leptos compiles cleanly on
+  the host target without significant overhead.
+  If host compilation fails or adds more than roughly 10% to a cold `cargo check
+  --workspace`, component modules in `ui` crates will be gated behind
+  `#[cfg(target_arch = "wasm32")]`.
+- **`rustqual` test recognition.** `rustqual` may not recognize
+  `#[wasm_bindgen_test]` functions as tests and could flag UI components as
+  untested; if so, `qual` should be updated rather than adding suppression
+  markers.
+- **`nextest` integration.** `cargo_test` uses `cargo nextest`; if `nextest`
+  cannot drive `wasm-bindgen-test-runner`, `wasm_test` will invoke `cargo test
+  --target wasm32-unknown-unknown` directly.
+- **Local WebDriver availability.** Running browser tests locally requires
+  `chromedriver` on `PATH` (or running `safaridriver --enable` once on macOS).
+- **Leptos `0.9.0-rc1` stability.** Minor API adjustments may be required when
+  upgrading to the final `0.9.0` release.
 
 ## Implementation Plan
 
-One phase, landing with the first plugin that has a browser UI, since nothing
-exercises it before then:
+A single phase, landing alongside the first plugin browser UI ([RFD 140]):
 
-1. `wasm32-unknown-unknown` in `rust-toolchain.toml`, the `wasm-release`
-   profile, workspace members for `*/api` and `*/ui`, `just build-ui`, and
-   `install-plugin` building bundles.
-2. `wasm_check` and `wasm_test` in the cargo tools, the `web-development` skill,
-   and the `web-dev` persona.
-3. The `web` CI workflow.
-4. cargo-vet and cargo-deny entries for Leptos's dependencies.
+1. Add `wasm32-unknown-unknown` to `rust-toolchain.toml`, configure the
+   `wasm-release` profile, add workspace glob patterns for `*/api` and `*/ui`,
+   and add `just build-ui` and bundle building in `just install-plugin`.
+2. Add `wasm_check` and `wasm_test` to `cargo_check` and `cargo_test`, and
+   create the `web-development` skill and `web-dev` persona.
+3. Add the path-filtered `web` CI workflow.
+4. Add `cargo-vet` and `cargo-deny` entries for Leptos and its dependencies.
 
-Release builds stay as they are until a published plugin gets a `ui` crate, as
-[Building and embedding](#building-and-embedding) describes.
+Release builds remain unchanged until a published plugin gains a `ui` crate (see
+[Building and embedding](#building-and-embedding)).
 
 ## References
 

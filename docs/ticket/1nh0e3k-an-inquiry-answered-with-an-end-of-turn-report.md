@@ -8,56 +8,52 @@
 - **Label**: relevant-rfd=034
 - **Label**: type=bug
 
-Asked by `ticket_create` for a shorter title ("Shorter title, at most 60
-characters?"), the inquiry model answered with 2235 characters: a plain-text
-report of the turn's work, ending with "A 44-character title would work: …",
-all inside the structured `answer` field.
-The ticket tool refused it, and the turn's own model filed the ticket again with
-a shorter title.
+When `ticket_create` prompted for a shorter title ("Shorter title, at most 60
+characters?"), the inquiry model returned a 2,235-character plain-text report of
+the turn's work inside the structured `answer` field, ending with "A
+44-character title would work: …".
+`ticket_create` rejected the oversized answer, and the primary turn model then
+retried `ticket_create` with a valid title.
 
-The conversation ran the `rfd-implementor` persona, whose instructions say "End
-every turn with a markdown report"; the user had asked for plain text instead of
-the formal sections.
-The inquiry's request couldn't be inspected, so the report's shape is the
-evidence that the model followed that instruction.
+The conversation was running the `rfd-implementor` persona, whose instructions
+require ending every turn with a summary report (the user had requested plain
+text instead of the default Markdown sections).
 
-## Why the instruction reaches the inquiry
+## Why the persona instruction reaches the inquiry
 
 - `build_inquiry_backend` (`crates/jp_cli/src/cmd/query/turn_loop.rs`) builds
-  the inquiry's sections from `conversation.inquiry.assistant`, which takes
-  undeclared keys from `assistant` ([RFD 034]), so a persona's instructions
-  reach every inquiry.
-  This workspace answers inquiries with `haiku`.
+  the inquiry system prompt from `conversation.inquiry.assistant`, which
+  inherits unset fields from `assistant` ([RFD 034]), including the active
+  persona's `instructions`.
+  This workspace runs inquiries on `haiku`.
 - `LlmInquiryBackend::inquire` (`crates/jp_cli/src/cmd/query/tool/inquiry.rs`)
-  puts the question as a new turn (`events.start_turn`), which is what the
-  persona's instruction is about.
-- `inquiry_prompt` asks for "only the answer to this question", against a system
-  prompt that says how every turn ends.
-- A text question can't state a length limit, so the answer schema is
-  `{"answer": {"type": "string"}}`, and only the question's prose holds the
-  answer to 60 characters.
+  appends the inquiry question as a new turn (`events.start_turn`), matching the
+  persona instruction's trigger ("End every turn with...").
+- `inquiry_prompt` asks for "only the answer to this question", competing
+  directly with the system prompt instruction.
+- `Question::text` cannot express a maximum length in JSON Schema, so the schema
+  is `{"answer": {"type": "string"}}` and the 60-character limit exists only in
+  the question text.
 
-## Mitigated in this workspace
+## Mitigations in this workspace
 
-- `.jp/config.toml` declares `conversation.inquiry.assistant.instructions`,
-  which replaces the persona's instructions for inquiries instead of adding to
-  them.
-- `ticket_create` quotes an unusable answer only as far as its first line, cut
-  at twice the limit.
+- `.jp/config.toml` defines `conversation.inquiry.assistant.instructions`,
+  overriding the persona's `instructions` during inquiries instead of appending
+  to them.
+- `ticket_create` truncates rejected title answers in its error message to the
+  first line (up to twice the character limit).
 
-## Options for the host
+## Host options
 
-1. Say in `inquiry_prompt` that the question doesn't end a turn, so instructions
-   about how a turn ends don't apply.
-   Cheap, and unproven against a model.
-2. Let a text question carry a length limit in `jp_tool`'s `AnswerType::Text`.
-   The host puts it in the schema (`maxLength`) and checks the answer before
-   re-running the tool, asking once more with the reason when it doesn't fit.
-   A protocol change for plugins; `ticket_create` would set the limit.
-3. Stop inheriting `instructions` into inquiries by default, keeping
-   `system_prompt_sections`.
-   That reverses part of [RFD 034], which carries the whole assistant through on
-   purpose.
+1. Clarify in `inquiry_prompt` that answering a tool inquiry is not the end of a
+   conversation turn, so end-of-turn reporting instructions do not apply.
+2. Add an optional length bound to `jp_tool::AnswerType::Text` so the host can
+   include `maxLength` in the inquiry JSON Schema and validate the response
+   before re-running the tool.
+   This requires a plugin protocol update; `ticket_create` would set the limit.
+3. Stop inheriting `assistant.instructions` into
+   `conversation.inquiry.assistant` by default while still inheriting
+   `system_prompt_sections` (partially reversing [RFD 034]).
 
-Option 2 fixes the failure for any question with a checkable constraint; option
-1 is the cheap guard for the rest.
+Option 2 enforces length constraints at the schema and host level; option 1 is a
+low-cost prompt guard for unconstrained text questions.
