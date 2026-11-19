@@ -420,6 +420,7 @@ fn default_cancellation_response(_: &()) -> schematic::TransformResult<Option<St
 impl AssignKeyValue for PartialToolsDefaultsConfig {
     fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
+            "" => kv.try_merge_object(self)?,
             "enable" => self.enable = kv.try_some_object_bool_or_from_str()?,
             _ if kv.p("enable") => self.enable.assign(kv)?,
             "run" => self.run = kv.try_some_from_str()?,
