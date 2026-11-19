@@ -188,6 +188,19 @@ impl DisplayStyleConfig {
     }
 }
 
+impl PartialDisplayStyleConfig {
+    /// Assign `background` or `result_header_background`, whichever `kv` names.
+    fn assign_background(&mut self, kv: KvAssignment) -> AssignResult {
+        let field = if kv.key_string() == "background" {
+            &mut self.background
+        } else {
+            &mut self.result_header_background
+        };
+        *field = kv.try_some_number_or_from_str()?;
+        Ok(())
+    }
+}
+
 impl AssignKeyValue for PartialDisplayStyleConfig {
     fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
@@ -198,10 +211,7 @@ impl AssignKeyValue for PartialDisplayStyleConfig {
             "results_file_link" => self.results_file_link = kv.try_some_from_str()?,
             "parameters" => self.parameters = kv.try_some_from_str()?,
             "print_stderr" => self.print_stderr = kv.try_some_bool()?,
-            "background" => self.background = kv.try_some_number_or_from_str()?,
-            "result_header_background" => {
-                self.result_header_background = kv.try_some_number_or_from_str()?;
-            }
+            "background" | "result_header_background" => self.assign_background(kv)?,
             _ if kv.p("error") => self.error.assign(kv)?,
             _ => return missing_key(&kv),
         }
