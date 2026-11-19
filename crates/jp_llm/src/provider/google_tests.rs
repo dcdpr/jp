@@ -961,9 +961,9 @@ mod trailing_thought_signature {
         );
     }
 
-    /// Gemini signs only the first of a step's parallel function calls, and
+    /// Gemini signs only the first parallel function call in a step, and
     /// expects the history back in that shape: the signature on the first call,
-    /// no signature field on the others, and every response after every call.
+    /// no signature on subsequent calls, and a response for each call.
     ///
     /// See: <https://ai.google.dev/gemini-api/docs/thought-signatures>
     #[test]
@@ -1035,9 +1035,9 @@ mod trailing_thought_signature {
         assert_eq!(responses, [Some("call_paris"), Some("call_london")]);
     }
 
-    /// A step's first function call without a signature, such as one from
-    /// another model's history, gets the dummy that skips validation; the calls
-    /// after it get none.
+    /// When a step's first function call has no signature (such as history from
+    /// another model), it receives the dummy signature that skips validation;
+    /// subsequent calls receive none.
     #[test]
     fn unsigned_parallel_function_calls_get_the_dummy_on_the_first_call_only() {
         let mut events = ConversationStream::new_test();

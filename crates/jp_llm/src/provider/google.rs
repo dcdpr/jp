@@ -1251,13 +1251,14 @@ fn convert_tools(tools: Vec<ToolDefinition>) -> Vec<types::Tool> {
         .collect()
 }
 
-/// Give the first function call of each model step a thought signature if it
-/// has none, so Gemini skips validating it.
+/// Assign a dummy thought signature to the first function call of each model
+/// step if it has none, so Gemini skips signature validation.
 ///
-/// Gemini rejects a step whose first function call lacks a signature, which a
-/// call from another model's history or a stripped signature would.
-/// It signs only the first of a step's parallel calls, so the calls after it
-/// keep no signature.
+/// Gemini rejects a model step whose first function call lacks a signature,
+/// such as a call from another model's history or one with a stripped
+/// signature.
+/// Because Gemini signs only the first parallel function call in a step,
+/// subsequent calls remain unsigned.
 ///
 /// See: <https://ai.google.dev/gemini-api/docs/thought-signatures>
 fn sign_first_function_calls(contents: &mut [types::Content]) {
