@@ -22,7 +22,11 @@ Recording the default lets JP determine whether `auto` (reasoning enabled at a
 model-selected level) requires an explicit enable flag for a given model, and
 lets JP display the effective reasoning level for a request.
 
-- [ ] Add the default reasoning level to `ReasoningDetails`.
-- [ ] Populate it from Ollama, OpenRouter, and the hosted catalogs.
-- [ ] Use it when a provider determines whether `auto` requires an explicit
-      enable flag.
+- [ ] Add the default enabled state (on, off, or unknown) and the default level
+      to `ReasoningDetails`.
+      OpenRouter's `default_effort` is the level used when reasoning is
+      enabled, not evidence that reasoning is on by default.
+- [ ] Populate both from Ollama, OpenRouter (making `default_enabled` optional
+      in `jp_openrouter`), and the hosted catalogs.
+- [ ] Use the default enabled state when a provider determines whether `auto`
+      requires an explicit enable flag.

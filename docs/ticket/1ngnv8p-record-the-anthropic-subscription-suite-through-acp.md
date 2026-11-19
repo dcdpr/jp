@@ -36,11 +36,20 @@ Claude Code picks the thinking mode when `thinking` is omitted, so request
 assertions on this route compare what JP sends to the adapter, not the Messages
 API body.
 
+Tool cases need a tool host.
+`chat_completion_stream` passes `mcp_endpoint: None`, and `acp::stream` returns
+`ToolHostRequired` when tools are present, so the route must run through
+`start_query` with a test MCP endpoint serving the case's tools.
+The adapter executes tools itself (`ToolExecution::Agent`), so the test endpoint
+answers each tool call rather than the runner appending a tool response.
+
 Land before or with T-19mv6rh, which deletes the direct flow these cassettes
 depend on.
 
 - [ ] Add an ACP route for the shared suite that records through the ACP
       cassette tap.
+- [ ] Add a test MCP tool host for the ACP route that answers each case's tool
+      calls, and run the route through `start_query`.
 - [ ] Remove the `records_new_cases` skip for the Anthropic subscription route.
 - [ ] Record every `every_route` case against ACP and delete
       `tests/fixtures/anthropic_subscription/`.

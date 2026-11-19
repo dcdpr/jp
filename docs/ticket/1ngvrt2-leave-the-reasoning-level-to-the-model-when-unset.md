@@ -63,6 +63,12 @@ Recording the per-model default in `ReasoningDetails` is tracked in T-1ngtf26.
 - [ ] Resolve unset to send no level in `custom_reasoning_config` for leveled
       and adaptive models; keep `medium` for budgeted models.
 - [ ] Implement unset and `auto` per provider as specified above.
+- [ ] In Anthropic `create_request`, distinguish unset from `off` when
+      `custom_reasoning_config` returns `None`: unset sends adaptive thinking
+      with `display: summarized` and no effort; only `off` sends `disabled`.
+- [ ] Test on `claude-haiku-5-5` that unset sends summarized adaptive thinking
+      without an effort, and `off` sends `thinking: disabled`.
 - [ ] Update the `reasoning` doc comment in `jp_config::model::parameters`.
 - [ ] Re-record OpenAI (API and subscription), OpenRouter, Cerebras, Ollama,
-      llama.cpp, and Google.
+      llama.cpp, and Google, plus the Anthropic API route if T-1ngvrt3 has moved
+      it to a 5.x model.

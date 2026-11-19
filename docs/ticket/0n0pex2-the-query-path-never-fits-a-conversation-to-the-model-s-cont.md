@@ -76,5 +76,9 @@ the window rather than comparing the input against the window alone.
 Google does not document whether the API rejects such a request or clamps the
 output, so clamping may be silent, like T-0de0hry on Cerebras.
 
-With long decode (T-1nfjjv6), `promptTokenCount` sums every hop's input and
-overstates the context size; the fit check should use the first hop's count.
+With long decode (T-1nfjjv6), each hop's `promptTokenCount` includes the output
+of earlier hops, so summing them overstates usage.
+Usage accounting takes the first hop's count as the prompt size.
+The preflight fit check is a separate question: it must count or estimate the
+request about to be sent (history, the previous turn's full output, and new
+attachments) rather than reuse a recorded count.

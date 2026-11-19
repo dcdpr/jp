@@ -55,19 +55,25 @@ streams; Google's hops continue from the exact stop point without overlap.
 
 Each hop reports its own `usageMetadata`, and every hop's `promptTokenCount`
 includes the output of all earlier hops.
-Summing them overstates the context size: in Google's example, a 1,000-token
+Summing them overstates the prompt size: in Google's example, a 1,000-token
 prompt reports about 397,000 input tokens across four hops.
-Compaction and context-window fitting (T-0n0pex2, T-0n0pgw6) must use the first
-hop's `promptTokenCount` as the prompt size.
+Usage accounting (T-0n0pgw6) must use the first hop's `promptTokenCount` as the
+prompt size.
+That count does not size the next request, which re-sends this turn's full
+output; the preflight fit check (T-0n0pex2) estimates the request about to be
+sent instead.
 
 ## Relation to the Interactions API
 
-On the Interactions API, the server runs the continuation loop when `background`
-is `true`.
-If T-1fev134 migrates the provider to the Interactions API, long decode only
-requires setting `background` and polling, and the client-side `generateContent`
-loop is unnecessary.
-Decide T-1fev134 first.
+JP does not use background mode or server-side storage.
+Google's server-run long decode requires `background: true` and `store: true`,
+so it is out of scope on either API.
+
+On the Interactions API, a foreground segment stops at 65,536 tokens with
+`status: requires_continuation` and a `continuation_token`, so a migration under
+T-1fev134 (`store: false`) keeps the client-side loop.
+The request and status shapes differ between the two APIs, so decide T-1fev134
+before implementing the loop.
 
 - [ ] Add `Continuation` (and a catch-all) to `FinishReason`,
       `continuation_token` to `Candidate`, and `continuation_token` to the
