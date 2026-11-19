@@ -65,3 +65,28 @@ A known gap: a projected conversation whose workspace copy is broken but whose
 user-local copy is valid stays indexed.
 If the broken copy has the newer mtime, loading picks it and fails.
 The report names the broken path.
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-19T11:50:51Z
+- **Re**: #1
+
+Revised after review of the terminal text:
+
+- **Text:** the path is dropped.
+  The count and each conversation ID are bold yellow.
+  A broken file now reads `metadata.json: invalid JSON at line 1, column 2`.
+- **JSON:** each failure is one typed record on stderr, not a `{"message": ...}`
+  wrapper.
+  Its fields are `level`, `code` (`conversation_load_failed`), `message`,
+  `context.conversation` (`id`, `dirname`, `path`), and `causes`, the error
+  chain one step per entry.
+  A cause's `code` is one of `invalid_dirname`, `file_missing`,
+  `file_unreadable`, `io_error`, or `json_invalid`; `json_invalid` carries
+  `line` and `column`.
+- **Typed errors:** `jp_storage::validate::ValidationError` has three variants:
+  `InvalidDirname`, `MissingFile { file }`, and `UnreadableFile { file, source
+  }`, with `ManagedFile` and `FileError` both typed.
+  Neither `jp c repair` nor the report has to parse error strings.
+- **`--quiet`:** its help states that load failures are still reported.

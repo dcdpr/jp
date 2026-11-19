@@ -323,7 +323,7 @@ impl LoadBackend for FsStorageBackend {
                     .id()
                     .is_some_and(|id| self.storage.is_conversation_locked(&id.to_string()));
                 if locked {
-                    debug!(%entry, "Not reporting a locked conversation.");
+                    debug!(%entry, "Ignoring locked conversation.");
                 }
                 !locked
             })

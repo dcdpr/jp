@@ -68,6 +68,7 @@ use crate::{
     cli::flag::{ArgPrompts, Parsed},
     cmd::{plugin::help::print_root_section, target::resolve_request},
     config_pipeline::{ConfigPipeline, ConfigReset, ConfigResetEvents, build_partial_over},
+    load_failure::LoadFailureNotice,
     shutdown::{on_shutdown, until_shutdown},
 };
 
@@ -517,16 +518,10 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
 
     trace!("Sanitizing workspace.");
     let report = workspace.sanitize()?;
-    for invalid in &report.invalid {
-        warn!(path = %invalid.path(), error = %invalid.error, "Conversation failed to load.");
-    }
 
     // Held until the run ends, whichever way it ends, so the report follows the
     // command's own output.
-    let _load_failures = LoadFailureNotice {
-        printer: printer.clone(),
-        report: load_failure::render(&report.invalid.iter().map(Into::into).collect::<Vec<_>>()),
-    };
+    let _load_failures = LoadFailureNotice::new(printer.clone(), &report.invalid);
 
     // Populate the conversation index. This does NOT load the contents of
     // individual conversations, this is done lazily as needed.
@@ -649,26 +644,6 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
     cleanup_workspace_session_records();
 
     output.map_err(Into::into)
-}
-
-/// Prints the load-failure report on stderr when dropped.
-///
-/// The report is printed past `--quiet`, and as a JSON record under
-/// `--format=json`: conversations that cannot be loaded are never left unsaid.
-struct LoadFailureNotice {
-    printer: Printer,
-    report: Option<String>,
-}
-
-impl Drop for LoadFailureNotice {
-    fn drop(&mut self) {
-        let Some(report) = self.report.take() else {
-            return;
-        };
-
-        self.printer.error_println(report);
-        self.printer.flush();
-    }
 }
 
 /// Source-split cleanup of the user-global session → active-workspace store.

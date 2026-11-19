@@ -92,7 +92,7 @@ help_heading: Some("Global Options")
 conflicts: []
 set: ["global"]
 help: Some("Suppress chrome: progress indicators, status lines, and tool call headers")
-long_help: Some("Suppress chrome: progress indicators, status lines, and tool call headers.\n\nCommand output and the assistant's response still go to stdout, and a failing run still reports its error. Redirect them (`>/dev/null`, `2>/dev/null`) to drop those as well.\n\nTracing written to stderr by `-v` or `--log-file=-` is suppressed too. The trace log file still records the run in full.")
+long_help: Some("Suppress chrome: progress indicators, status lines, and tool call headers.\n\nCommand output and the assistant's response still go to stdout, and a failing run still reports its error. Conversations that fail to load are still reported. Redirect them (`>/dev/null`, `2>/dev/null`) to drop those as well.\n\nTracing written to stderr by `-v` or `--log-file=-` is suppressed too. The trace log file still records the run in full.")
 
 ### no_interactive
 short: None

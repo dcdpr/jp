@@ -183,6 +183,10 @@ fn test_invalid_dirname_is_detected() {
         result.invalid[0].error,
         ValidationError::InvalidDirname
     ));
+    assert_eq!(
+        result.invalid[0].error.to_string(),
+        "invalid directory name"
+    );
 }
 
 #[test]
@@ -202,8 +206,11 @@ fn test_missing_metadata_is_detected() {
     assert_eq!(result.invalid.len(), 1);
     assert!(matches!(
         result.invalid[0].error,
-        ValidationError::MissingMetadata
+        ValidationError::MissingFile {
+            file: ManagedFile::Metadata
+        }
     ));
+    assert_eq!(result.invalid[0].error.to_string(), "missing metadata.json");
 }
 
 #[test]
@@ -224,8 +231,15 @@ fn test_corrupt_metadata_is_detected() {
     assert_eq!(result.invalid.len(), 1);
     assert!(matches!(
         result.invalid[0].error,
-        ValidationError::CorruptMetadata { .. }
+        ValidationError::UnreadableFile {
+            file: ManagedFile::Metadata,
+            source: FileError::Json(_),
+        }
     ));
+    assert_eq!(
+        result.invalid[0].error.to_string(),
+        "metadata.json: invalid JSON at line 1, column 2"
+    );
 }
 
 #[test]
@@ -242,8 +256,11 @@ fn test_missing_events_is_detected() {
     assert_eq!(result.invalid.len(), 1);
     assert!(matches!(
         result.invalid[0].error,
-        ValidationError::MissingEvents
+        ValidationError::MissingFile {
+            file: ManagedFile::Events
+        }
     ));
+    assert_eq!(result.invalid[0].error.to_string(), "missing events.json");
 }
 
 #[test]
@@ -261,8 +278,15 @@ fn test_corrupt_events_is_detected() {
     assert_eq!(result.invalid.len(), 1);
     assert!(matches!(
         result.invalid[0].error,
-        ValidationError::CorruptEvents { .. }
+        ValidationError::UnreadableFile {
+            file: ManagedFile::Events,
+            source: FileError::Json(_),
+        }
     ));
+    assert_eq!(
+        result.invalid[0].error.to_string(),
+        "events.json: invalid JSON at line 1, column 2"
+    );
 }
 
 // A fresh conversation composes its query draft in its directory before the
@@ -443,7 +467,10 @@ fn a_rewritten_events_file_is_validated_again() {
     assert!(result.valid.is_empty());
     assert!(matches!(
         result.invalid[0].error,
-        ValidationError::CorruptEvents { .. }
+        ValidationError::UnreadableFile {
+            file: ManagedFile::Events,
+            ..
+        }
     ));
 }
 
@@ -523,7 +550,10 @@ fn a_scan_of_a_just_modified_file_is_not_reused_by_the_next_process() {
     assert!(result.valid.is_empty());
     assert!(matches!(
         result.invalid[0].error,
-        ValidationError::CorruptEvents { .. }
+        ValidationError::UnreadableFile {
+            file: ManagedFile::Events,
+            ..
+        }
     ));
 }
 
@@ -559,7 +589,10 @@ fn a_same_stamp_rewrite_just_after_a_scan_is_read_again() {
     assert!(result.valid.is_empty());
     assert!(matches!(
         result.invalid[0].error,
-        ValidationError::CorruptEvents { .. }
+        ValidationError::UnreadableFile {
+            file: ManagedFile::Events,
+            ..
+        }
     ));
 }
 
