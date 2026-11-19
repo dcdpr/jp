@@ -30,7 +30,7 @@ value_delimiter: None
 default_values: []
 help_heading: Some("Global Options")
 conflicts: []
-set: ["global"]
+set: []
 help: Some("Override a configuration value for the duration of the command")
 long_help: None
 
@@ -70,7 +70,7 @@ value_delimiter: None
 default_values: ["0"]
 help_heading: Some("Global Options")
 conflicts: []
-set: ["global"]
+set: []
 help: Some("Increase verbosity of logging")
 long_help: Some("Increase verbosity of logging.\n\nCan be specified multiple times to increase verbosity.\n\nDefaults to printing \"error\" messages. For each increase in verbosity, the log level is set to \"warn\", \"info\", \"debug\", and \"trace\" respectively.")
 
@@ -346,6 +346,46 @@ set: []
 help: Some("Path to initialize the workspace at. Defaults to the current directory")
 long_help: None
 
+### config
+short: Some('c')
+long: Some("cfg")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::KeyValueOrPath
+possible_values: []
+value_names: Some(["KEY=VALUE"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Override a configuration value for the duration of the command")
+long_help: None
+
+### verbose
+short: Some('v')
+long: Some("verbose")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Count
+num_args: Some(0)
+value_type: u8
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: ["0"]
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Increase verbosity of logging")
+long_help: Some("Increase verbosity of logging.\n\nCan be specified multiple times to increase verbosity.\n\nDefaults to printing \"error\" messages. For each increase in verbosity, the log level is set to \"warn\", \"info\", \"debug\", and \"trace\" respectively.")
+
 ### help
 short: Some('h')
 long: Some("help")
@@ -377,6 +417,46 @@ hidden: false
 external_subcommands: None
 set: ["subcommand_required", "arg_required_else_help", "disable_help_subcommand"]
 usage: Usage: jp config [OPTIONS] <COMMAND>
+
+### config
+short: Some('c')
+long: Some("cfg")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::KeyValueOrPath
+possible_values: []
+value_names: Some(["KEY=VALUE"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Override a configuration value for the duration of the command")
+long_help: None
+
+### verbose
+short: Some('v')
+long: Some("verbose")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Count
+num_args: Some(0)
+value_type: u8
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: ["0"]
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Increase verbosity of logging")
+long_help: Some("Increase verbosity of logging.\n\nCan be specified multiple times to increase verbosity.\n\nDefaults to printing \"error\" messages. For each increase in verbosity, the log level is set to \"warn\", \"info\", \"debug\", and \"trace\" respectively.")
 
 ### help
 short: Some('h')
@@ -449,6 +529,46 @@ conflicts: []
 set: []
 help: Some("List available syntax highlighting themes")
 long_help: None
+
+### config
+short: Some('c')
+long: Some("cfg")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::KeyValueOrPath
+possible_values: []
+value_names: Some(["KEY=VALUE"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Override a configuration value for the duration of the command")
+long_help: None
+
+### verbose
+short: Some('v')
+long: Some("verbose")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Count
+num_args: Some(0)
+value_type: u8
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: ["0"]
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Increase verbosity of logging")
+long_help: Some("Increase verbosity of logging.\n\nCan be specified multiple times to increase verbosity.\n\nDefaults to printing \"error\" messages. For each increase in verbosity, the log level is set to \"warn\", \"info\", \"debug\", and \"trace\" respectively.")
 
 ### help
 short: Some('h')
@@ -562,6 +682,46 @@ conflicts: []
 set: []
 help: Some("Conversation ID or keyword")
 long_help: Some("Conversation ID, Interactive Filter/Picker, Alias, or Multi-Target Keyword.\n\nInteractive Filter/Picker:\n  ?                             select from all\n  ?p, ?pinned                   select from pinned\n  ?a, ?archived                 select from archived\n\nConversation Aliases:\n  r, recent                     target most recently activated in workspace\n  n, newest                     target newest created\n  p, pinned                     target most recently pinned\n  a, archived                   target most recently archived\n\nMulti-Target Keywords:\n  +l, +live                     target all live conversations\n  +p, +pinned                   target all pinned\n  +a, +archived                 target all archived\n  -                             read IDs from stdin, one per line\n\nWhen multiple IDs are given, only literal conversation IDs are accepted.")
+
+### config
+short: Some('c')
+long: Some("cfg")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::KeyValueOrPath
+possible_values: []
+value_names: Some(["KEY=VALUE"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Override a configuration value for the duration of the command")
+long_help: None
+
+### verbose
+short: Some('v')
+long: Some("verbose")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Count
+num_args: Some(0)
+value_type: u8
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: ["0"]
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Increase verbosity of logging")
+long_help: Some("Increase verbosity of logging.\n\nCan be specified multiple times to increase verbosity.\n\nDefaults to printing \"error\" messages. For each increase in verbosity, the log level is set to \"warn\", \"info\", \"debug\", and \"trace\" respectively.")
 
 ### help
 short: Some('h')
@@ -695,6 +855,46 @@ conflicts: []
 set: []
 help: Some("Format all configuration files")
 long_help: None
+
+### config
+short: Some('c')
+long: Some("cfg")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::KeyValueOrPath
+possible_values: []
+value_names: Some(["KEY=VALUE"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Override a configuration value for the duration of the command")
+long_help: None
+
+### verbose
+short: Some('v')
+long: Some("verbose")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Count
+num_args: Some(0)
+value_type: u8
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: ["0"]
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Increase verbosity of logging")
+long_help: Some("Increase verbosity of logging.\n\nCan be specified multiple times to increase verbosity.\n\nDefaults to printing \"error\" messages. For each increase in verbosity, the log level is set to \"warn\", \"info\", \"debug\", and \"trace\" respectively.")
 
 ### help
 short: Some('h')
@@ -1369,6 +1569,46 @@ set: []
 help: Some("Mount an external path into the workspace as a symlink and grant the assistant access to it")
 long_help: Some("Mount an external path into the workspace as a symlink and grant the assistant access to it.\n\nForm: `[TOOL:][NAME=]PATH[:MODE]`. `NAME` is the workspace-relative location for the symlink, `PATH` is the external target, and `MODE` is `ro` (default) or `rw`. Without `NAME=`, `PATH` must exist and the symlink is named after its last segment; a leading `TOOL:` is then a tool only if the rest of the path exists and the whole value does not. `rw` requires a `TOOL:` prefix; without a `TOOL:` prefix the grant applies to all enabled local and command plugin tools. Repeat the flag to mount several paths.")
 
+### config
+short: Some('c')
+long: Some("cfg")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::KeyValueOrPath
+possible_values: []
+value_names: Some(["KEY=VALUE"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Override a configuration value for the duration of the command")
+long_help: None
+
+### verbose
+short: Some('v')
+long: Some("verbose")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Count
+num_args: Some(0)
+value_type: u8
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: ["0"]
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Increase verbosity of logging")
+long_help: Some("Increase verbosity of logging.\n\nCan be specified multiple times to increase verbosity.\n\nDefaults to printing \"error\" messages. For each increase in verbosity, the log level is set to \"warn\", \"info\", \"debug\", and \"trace\" respectively.")
+
 ### help
 short: Some('h')
 long: Some("help")
@@ -1400,6 +1640,46 @@ hidden: false
 external_subcommands: None
 set: ["subcommand_required", "arg_required_else_help", "disable_help_subcommand"]
 usage: Usage: jp attachment [OPTIONS] <COMMAND>
+
+### config
+short: Some('c')
+long: Some("cfg")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::KeyValueOrPath
+possible_values: []
+value_names: Some(["KEY=VALUE"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Override a configuration value for the duration of the command")
+long_help: None
+
+### verbose
+short: Some('v')
+long: Some("verbose")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Count
+num_args: Some(0)
+value_type: u8
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: ["0"]
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Increase verbosity of logging")
+long_help: Some("Increase verbosity of logging.\n\nCan be specified multiple times to increase verbosity.\n\nDefaults to printing \"error\" messages. For each increase in verbosity, the log level is set to \"warn\", \"info\", \"debug\", and \"trace\" respectively.")
 
 ### help
 short: Some('h')
@@ -1453,6 +1733,46 @@ set: []
 help: Some("One or more attachments to add to the context")
 long_help: Some("One or more attachments to add to the context.\n\nIf the attachment is pointing to a file, then a file attachment is added, otherwise the attachment type can be added as a prefix.\n\nFor example, to add a `summary` attachment, use `summary://<path>`.")
 
+### config
+short: Some('c')
+long: Some("cfg")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::KeyValueOrPath
+possible_values: []
+value_names: Some(["KEY=VALUE"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Override a configuration value for the duration of the command")
+long_help: None
+
+### verbose
+short: Some('v')
+long: Some("verbose")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Count
+num_args: Some(0)
+value_type: u8
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: ["0"]
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Increase verbosity of logging")
+long_help: Some("Increase verbosity of logging.\n\nCan be specified multiple times to increase verbosity.\n\nDefaults to printing \"error\" messages. For each increase in verbosity, the log level is set to \"warn\", \"info\", \"debug\", and \"trace\" respectively.")
+
 ### help
 short: Some('h')
 long: Some("help")
@@ -1505,6 +1825,46 @@ set: []
 help: None
 long_help: None
 
+### config
+short: Some('c')
+long: Some("cfg")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::KeyValueOrPath
+possible_values: []
+value_names: Some(["KEY=VALUE"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Override a configuration value for the duration of the command")
+long_help: None
+
+### verbose
+short: Some('v')
+long: Some("verbose")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Count
+num_args: Some(0)
+value_type: u8
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: ["0"]
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Increase verbosity of logging")
+long_help: Some("Increase verbosity of logging.\n\nCan be specified multiple times to increase verbosity.\n\nDefaults to printing \"error\" messages. For each increase in verbosity, the log level is set to \"warn\", \"info\", \"debug\", and \"trace\" respectively.")
+
 ### help
 short: Some('h')
 long: Some("help")
@@ -1536,6 +1896,46 @@ hidden: false
 external_subcommands: None
 set: ["disable_help_subcommand"]
 usage: Usage: jp attachment ls [OPTIONS]
+
+### config
+short: Some('c')
+long: Some("cfg")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::KeyValueOrPath
+possible_values: []
+value_names: Some(["KEY=VALUE"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Override a configuration value for the duration of the command")
+long_help: None
+
+### verbose
+short: Some('v')
+long: Some("verbose")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Count
+num_args: Some(0)
+value_type: u8
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: ["0"]
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Increase verbosity of logging")
+long_help: Some("Increase verbosity of logging.\n\nCan be specified multiple times to increase verbosity.\n\nDefaults to printing \"error\" messages. For each increase in verbosity, the log level is set to \"warn\", \"info\", \"debug\", and \"trace\" respectively.")
 
 ### help
 short: Some('h')
@@ -1589,6 +1989,46 @@ set: ["required"]
 help: Some("The attachment URL to preview")
 long_help: None
 
+### config
+short: Some('c')
+long: Some("cfg")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::KeyValueOrPath
+possible_values: []
+value_names: Some(["KEY=VALUE"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Override a configuration value for the duration of the command")
+long_help: None
+
+### verbose
+short: Some('v')
+long: Some("verbose")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Count
+num_args: Some(0)
+value_type: u8
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: ["0"]
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Increase verbosity of logging")
+long_help: Some("Increase verbosity of logging.\n\nCan be specified multiple times to increase verbosity.\n\nDefaults to printing \"error\" messages. For each increase in verbosity, the log level is set to \"warn\", \"info\", \"debug\", and \"trace\" respectively.")
+
 ### help
 short: Some('h')
 long: Some("help")
@@ -1641,6 +2081,46 @@ set: []
 help: Some("One or more attachments to add to the context")
 long_help: Some("One or more attachments to add to the context.\n\nIf the attachment is pointing to a file, then a file attachment is added, otherwise the attachment type can be added as a prefix.\n\nFor example, to add a `summary` attachment, use `summary://<path>`.")
 
+### config
+short: Some('c')
+long: Some("cfg")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::KeyValueOrPath
+possible_values: []
+value_names: Some(["KEY=VALUE"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Override a configuration value for the duration of the command")
+long_help: None
+
+### verbose
+short: Some('v')
+long: Some("verbose")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Count
+num_args: Some(0)
+value_type: u8
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: ["0"]
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Increase verbosity of logging")
+long_help: Some("Increase verbosity of logging.\n\nCan be specified multiple times to increase verbosity.\n\nDefaults to printing \"error\" messages. For each increase in verbosity, the log level is set to \"warn\", \"info\", \"debug\", and \"trace\" respectively.")
+
 ### help
 short: Some('h')
 long: Some("help")
@@ -1672,6 +2152,46 @@ hidden: false
 external_subcommands: None
 set: ["subcommand_required", "arg_required_else_help", "disable_help_subcommand"]
 usage: Usage: jp conversation [OPTIONS] <COMMAND>
+
+### config
+short: Some('c')
+long: Some("cfg")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::KeyValueOrPath
+possible_values: []
+value_names: Some(["KEY=VALUE"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Override a configuration value for the duration of the command")
+long_help: None
+
+### verbose
+short: Some('v')
+long: Some("verbose")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Count
+num_args: Some(0)
+value_type: u8
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: ["0"]
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Increase verbosity of logging")
+long_help: Some("Increase verbosity of logging.\n\nCan be specified multiple times to increase verbosity.\n\nDefaults to printing \"error\" messages. For each increase in verbosity, the log level is set to \"warn\", \"info\", \"debug\", and \"trace\" respectively.")
 
 ### help
 short: Some('h')
@@ -1805,6 +2325,46 @@ conflicts: []
 set: []
 help: Some("Skip confirmation prompts")
 long_help: None
+
+### config
+short: Some('c')
+long: Some("cfg")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::KeyValueOrPath
+possible_values: []
+value_names: Some(["KEY=VALUE"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Override a configuration value for the duration of the command")
+long_help: None
+
+### verbose
+short: Some('v')
+long: Some("verbose")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Count
+num_args: Some(0)
+value_type: u8
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: ["0"]
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Increase verbosity of logging")
+long_help: Some("Increase verbosity of logging.\n\nCan be specified multiple times to increase verbosity.\n\nDefaults to printing \"error\" messages. For each increase in verbosity, the log level is set to \"warn\", \"info\", \"debug\", and \"trace\" respectively.")
 
 ### help
 short: Some('h')
@@ -1998,6 +2558,46 @@ set: []
 help: Some("Only show conversations carrying this label")
 long_help: Some("Only show conversations carrying this label.\n\n`key=value` matches when the key holds that value, a bare `key` matches any value. Repeat the flag to require several; every selector must match.")
 
+### config
+short: Some('c')
+long: Some("cfg")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::KeyValueOrPath
+possible_values: []
+value_names: Some(["KEY=VALUE"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Override a configuration value for the duration of the command")
+long_help: None
+
+### verbose
+short: Some('v')
+long: Some("verbose")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Count
+num_args: Some(0)
+value_type: u8
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: ["0"]
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Increase verbosity of logging")
+long_help: Some("Increase verbosity of logging.\n\nCan be specified multiple times to increase verbosity.\n\nDefaults to printing \"error\" messages. For each increase in verbosity, the log level is set to \"warn\", \"info\", \"debug\", and \"trace\" respectively.")
+
 ### help
 short: Some('h')
 long: Some("help")
@@ -2049,6 +2649,46 @@ conflicts: []
 set: []
 help: Some("Conversation ID or keyword")
 long_help: Some("Conversation ID, Interactive Filter/Picker, Alias, or Multi-Target Keyword.\n\nInteractive Filter/Picker:\n  ?                             select from all\n  ?p, ?pinned                   select from pinned\n  ?s, ?session                  select from session\n  ?a, ?archived                 select from archived\n\nConversation Aliases:\n  ., active                     target the session's active conversation\n  r, recent                     target most recently activated in workspace\n  n, newest                     target newest created\n  p, pinned                     target most recently pinned\n  s, session                    target the session's previous conversation\n  a, archived                   target most recently archived\n\nMulti-Target Keywords:\n  +l, +live                     target all live conversations\n  +p, +pinned                   target all pinned\n  +s, +session                  target all activated in session\n  +a, +archived                 target all archived\n  -                             read IDs from stdin, one per line\n\nWhen multiple IDs are given, only literal conversation IDs are accepted.")
+
+### config
+short: Some('c')
+long: Some("cfg")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::KeyValueOrPath
+possible_values: []
+value_names: Some(["KEY=VALUE"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Override a configuration value for the duration of the command")
+long_help: None
+
+### verbose
+short: Some('v')
+long: Some("verbose")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Count
+num_args: Some(0)
+value_type: u8
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: ["0"]
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Increase verbosity of logging")
+long_help: Some("Increase verbosity of logging.\n\nCan be specified multiple times to increase verbosity.\n\nDefaults to printing \"error\" messages. For each increase in verbosity, the log level is set to \"warn\", \"info\", \"debug\", and \"trace\" respectively.")
 
 ### help
 short: Some('h')
@@ -2162,6 +2802,46 @@ conflicts: []
 set: []
 help: Some("Match conversations created before the specified time.")
 long_help: Some("Match conversations created before the specified time.\n\nAccepts the same formats as `--created-since`. The range is half-open (`--created-before` is exclusive), so `--created-since X --created-before Y` matches everything in `[X, Y)`.")
+
+### config
+short: Some('c')
+long: Some("cfg")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::KeyValueOrPath
+possible_values: []
+value_names: Some(["KEY=VALUE"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Override a configuration value for the duration of the command")
+long_help: None
+
+### verbose
+short: Some('v')
+long: Some("verbose")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Count
+num_args: Some(0)
+value_type: u8
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: ["0"]
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Increase verbosity of logging")
+long_help: Some("Increase verbosity of logging.\n\nCan be specified multiple times to increase verbosity.\n\nDefaults to printing \"error\" messages. For each increase in verbosity, the log level is set to \"warn\", \"info\", \"debug\", and \"trace\" respectively.")
 
 ### help
 short: Some('h')
@@ -2396,6 +3076,46 @@ conflicts: ["local", "pin", "expires_at", "no_expires_at", "title", "no_title"]
 set: []
 help: Some("Open `base_config.json` in `$EDITOR`")
 long_help: None
+
+### config
+short: Some('c')
+long: Some("cfg")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::KeyValueOrPath
+possible_values: []
+value_names: Some(["KEY=VALUE"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Override a configuration value for the duration of the command")
+long_help: None
+
+### verbose
+short: Some('v')
+long: Some("verbose")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Count
+num_args: Some(0)
+value_type: u8
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: ["0"]
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Increase verbosity of logging")
+long_help: Some("Increase verbosity of logging.\n\nCan be specified multiple times to increase verbosity.\n\nDefaults to printing \"error\" messages. For each increase in verbosity, the log level is set to \"warn\", \"info\", \"debug\", and \"trace\" respectively.")
 
 ### help
 short: Some('h')
@@ -2668,6 +3388,46 @@ conflicts: []
 set: []
 help: Some("Set a custom title for the forked conversation")
 long_help: None
+
+### config
+short: Some('c')
+long: Some("cfg")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::KeyValueOrPath
+possible_values: []
+value_names: Some(["KEY=VALUE"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Override a configuration value for the duration of the command")
+long_help: None
+
+### verbose
+short: Some('v')
+long: Some("verbose")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Count
+num_args: Some(0)
+value_type: u8
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: ["0"]
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Increase verbosity of logging")
+long_help: Some("Increase verbosity of logging.\n\nCan be specified multiple times to increase verbosity.\n\nDefaults to printing \"error\" messages. For each increase in verbosity, the log level is set to \"warn\", \"info\", \"debug\", and \"trace\" respectively.")
 
 ### help
 short: Some('h')
@@ -3041,6 +3801,46 @@ set: []
 help: Some("Run conversation compaction rules")
 long_help: Some("Compact the conversation.\n\nWithout a value, applies the compaction rules from the resolved configuration.\n\nWith a DSL value (e.g. `--compact=s:..-3`), applies an inline compaction rule. Multiple `--compact=SPEC` flags add multiple rules.\n\nBoth forms compose: bare `--compact` includes config rules, each `--compact=SPEC` adds a DSL rule.\n\nDSL format: POLICIES[:RANGE]\n\nPolicies are joined with `+`:\n- `r` / `reasoning`: strip reasoning blocks\n- `s` / `summary`: generate an LLM summary\n- `t` / `tools` (or `t=MODE`): strip tool calls; bare strips both, or MODE is one of `strip`/`s`, `strip-requests`/`sreq`, `strip-responses`/`sres`, `omit`/`o`\n\nA policy can carry options after a `,`:\n- `over=SIZE`: compact only items larger than SIZE (`512KB`, `1MB`, or a byte count). Each half of a tool call is judged on its own size; `omit` is judged on the pair combined. Not accepted on `summary`.\n\nRange: FROM..TO (1-based, inclusive on both ends, so 1..5 is turns 1-5), single number, or .. for all\n\nA negative bound counts from the end, where -1 is the last turn: ..-3 compacts through the third turn from the end, leaving the final two alone\n\nExamples: s:..-3, r+t, t=sreq:5..-3, r:-20, t=sres,over=1mb, r,over=16kb+t=sres,over=1mb:..-3")
 
+### config
+short: Some('c')
+long: Some("cfg")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::KeyValueOrPath
+possible_values: []
+value_names: Some(["KEY=VALUE"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Override a configuration value for the duration of the command")
+long_help: None
+
+### verbose
+short: Some('v')
+long: Some("verbose")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Count
+num_args: Some(0)
+value_type: u8
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: ["0"]
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Increase verbosity of logging")
+long_help: Some("Increase verbosity of logging.\n\nCan be specified multiple times to increase verbosity.\n\nDefaults to printing \"error\" messages. For each increase in verbosity, the log level is set to \"warn\", \"info\", \"debug\", and \"trace\" respectively.")
+
 ### help
 short: Some('h')
 long: Some("help")
@@ -3152,6 +3952,46 @@ conflicts: []
 set: []
 help: Some("Print the candidate titles without applying one")
 long_help: None
+
+### config
+short: Some('c')
+long: Some("cfg")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::KeyValueOrPath
+possible_values: []
+value_names: Some(["KEY=VALUE"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Override a configuration value for the duration of the command")
+long_help: None
+
+### verbose
+short: Some('v')
+long: Some("verbose")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Count
+num_args: Some(0)
+value_type: u8
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: ["0"]
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Increase verbosity of logging")
+long_help: Some("Increase verbosity of logging.\n\nCan be specified multiple times to increase verbosity.\n\nDefaults to printing \"error\" messages. For each increase in verbosity, the log level is set to \"warn\", \"info\", \"debug\", and \"trace\" respectively.")
 
 ### help
 short: Some('h')
@@ -3545,6 +4385,46 @@ set: []
 help: Some("Restrict the search to specific parts of the conversation")
 long_help: Some("Restrict the search to specific parts of the conversation.\n\nRepeat the flag (`--scope user --scope assistant`) or comma-separate the values (`--scope user,assistant`). If omitted, every part is searched. Meta-scopes `chat` and `tool` expand to their concrete members.")
 
+### config
+short: Some('c')
+long: Some("cfg")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::KeyValueOrPath
+possible_values: []
+value_names: Some(["KEY=VALUE"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Override a configuration value for the duration of the command")
+long_help: None
+
+### verbose
+short: Some('v')
+long: Some("verbose")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Count
+num_args: Some(0)
+value_type: u8
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: ["0"]
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Increase verbosity of logging")
+long_help: Some("Increase verbosity of logging.\n\nCan be specified multiple times to increase verbosity.\n\nDefaults to printing \"error\" messages. For each increase in verbosity, the log level is set to \"warn\", \"info\", \"debug\", and \"trace\" respectively.")
+
 ### help
 short: Some('h')
 long: Some("help")
@@ -3596,6 +4476,46 @@ conflicts: []
 set: ["global"]
 help: Some("Conversation ID or keyword")
 long_help: Some("Conversation ID, Interactive Filter/Picker, Alias, or Multi-Target Keyword.\n\nInteractive Filter/Picker:\n  ?                             select from all\n  ?p, ?pinned                   select from pinned\n  ?s, ?session                  select from session\n  ?a, ?archived                 select from archived\n\nConversation Aliases:\n  ., active                     target the session's active conversation\n  r, recent                     target most recently activated in workspace\n  n, newest                     target newest created\n  p, pinned                     target most recently pinned\n  s, session                    target the session's previous conversation\n  a, archived                   target most recently archived\n\nMulti-Target Keywords:\n  +l, +live                     target all live conversations\n  +p, +pinned                   target all pinned\n  +s, +session                  target all activated in session\n  +a, +archived                 target all archived\n  -                             read IDs from stdin, one per line\n\nWhen multiple IDs are given, only literal conversation IDs are accepted.")
+
+### config
+short: Some('c')
+long: Some("cfg")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::KeyValueOrPath
+possible_values: []
+value_names: Some(["KEY=VALUE"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Override a configuration value for the duration of the command")
+long_help: None
+
+### verbose
+short: Some('v')
+long: Some("verbose")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Count
+num_args: Some(0)
+value_type: u8
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: ["0"]
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Increase verbosity of logging")
+long_help: Some("Increase verbosity of logging.\n\nCan be specified multiple times to increase verbosity.\n\nDefaults to printing \"error\" messages. For each increase in verbosity, the log level is set to \"warn\", \"info\", \"debug\", and \"trace\" respectively.")
 
 ### help
 short: Some('h')
@@ -3649,6 +4569,46 @@ set: ["required"]
 help: Some("The labels to apply, as `key=value` or a bare `key` for an empty value")
 long_help: Some("The labels to apply, as `key=value` or a bare `key` for an empty value.\n\n`:name` resolves the `conversation.labels.name` rule and applies whatever it produces. Values are taken literally, so they may contain commas. Naming one key several times acts on all of its values at once.")
 
+### config
+short: Some('c')
+long: Some("cfg")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::KeyValueOrPath
+possible_values: []
+value_names: Some(["KEY=VALUE"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Override a configuration value for the duration of the command")
+long_help: None
+
+### verbose
+short: Some('v')
+long: Some("verbose")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Count
+num_args: Some(0)
+value_type: u8
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: ["0"]
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Increase verbosity of logging")
+long_help: Some("Increase verbosity of logging.\n\nCan be specified multiple times to increase verbosity.\n\nDefaults to printing \"error\" messages. For each increase in verbosity, the log level is set to \"warn\", \"info\", \"debug\", and \"trace\" respectively.")
+
 ### help
 short: Some('h')
 long: Some("help")
@@ -3700,6 +4660,46 @@ conflicts: []
 set: ["required"]
 help: Some("The labels to apply, as `key=value` or a bare `key` for an empty value")
 long_help: Some("The labels to apply, as `key=value` or a bare `key` for an empty value.\n\n`:name` resolves the `conversation.labels.name` rule and applies whatever it produces. Values are taken literally, so they may contain commas. Naming one key several times acts on all of its values at once.")
+
+### config
+short: Some('c')
+long: Some("cfg")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::KeyValueOrPath
+possible_values: []
+value_names: Some(["KEY=VALUE"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Override a configuration value for the duration of the command")
+long_help: None
+
+### verbose
+short: Some('v')
+long: Some("verbose")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Count
+num_args: Some(0)
+value_type: u8
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: ["0"]
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Increase verbosity of logging")
+long_help: Some("Increase verbosity of logging.\n\nCan be specified multiple times to increase verbosity.\n\nDefaults to printing \"error\" messages. For each increase in verbosity, the log level is set to \"warn\", \"info\", \"debug\", and \"trace\" respectively.")
 
 ### help
 short: Some('h')
@@ -3753,6 +4753,46 @@ set: []
 help: Some("The labels to remove, as a bare `key` or a `key=value` pair")
 long_help: Some("The labels to remove, as a bare `key` or a `key=value` pair.\n\nA bare key removes every value it holds. With none given, every label is removed.\n\nRemoving a label the conversation doesn't carry is not an error, but it is reported.")
 
+### config
+short: Some('c')
+long: Some("cfg")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::KeyValueOrPath
+possible_values: []
+value_names: Some(["KEY=VALUE"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Override a configuration value for the duration of the command")
+long_help: None
+
+### verbose
+short: Some('v')
+long: Some("verbose")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Count
+num_args: Some(0)
+value_type: u8
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: ["0"]
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Increase verbosity of logging")
+long_help: Some("Increase verbosity of logging.\n\nCan be specified multiple times to increase verbosity.\n\nDefaults to printing \"error\" messages. For each increase in verbosity, the log level is set to \"warn\", \"info\", \"debug\", and \"trace\" respectively.")
+
 ### help
 short: Some('h')
 long: Some("help")
@@ -3784,6 +4824,46 @@ hidden: false
 external_subcommands: None
 set: ["disable_help_subcommand"]
 usage: Usage: jp conversation label ls [OPTIONS]
+
+### config
+short: Some('c')
+long: Some("cfg")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::KeyValueOrPath
+possible_values: []
+value_names: Some(["KEY=VALUE"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Override a configuration value for the duration of the command")
+long_help: None
+
+### verbose
+short: Some('v')
+long: Some("verbose")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Count
+num_args: Some(0)
+value_type: u8
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: ["0"]
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Increase verbosity of logging")
+long_help: Some("Increase verbosity of logging.\n\nCan be specified multiple times to increase verbosity.\n\nDefaults to printing \"error\" messages. For each increase in verbosity, the log level is set to \"warn\", \"info\", \"debug\", and \"trace\" respectively.")
 
 ### help
 short: Some('h')
@@ -4037,6 +5117,46 @@ set: []
 help: Some("Print the compacted view (what the LLM sees) instead of the full history")
 long_help: None
 
+### config
+short: Some('c')
+long: Some("cfg")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::KeyValueOrPath
+possible_values: []
+value_names: Some(["KEY=VALUE"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Override a configuration value for the duration of the command")
+long_help: None
+
+### verbose
+short: Some('v')
+long: Some("verbose")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Count
+num_args: Some(0)
+value_type: u8
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: ["0"]
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Increase verbosity of logging")
+long_help: Some("Increase verbosity of logging.\n\nCan be specified multiple times to increase verbosity.\n\nDefaults to printing \"error\" messages. For each increase in verbosity, the log level is set to \"warn\", \"info\", \"debug\", and \"trace\" respectively.")
+
 ### help
 short: Some('h')
 long: Some("help")
@@ -4148,6 +5268,46 @@ conflicts: []
 set: []
 help: Some("Print the path to `base_config.json`")
 long_help: None
+
+### config
+short: Some('c')
+long: Some("cfg")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::KeyValueOrPath
+possible_values: []
+value_names: Some(["KEY=VALUE"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Override a configuration value for the duration of the command")
+long_help: None
+
+### verbose
+short: Some('v')
+long: Some("verbose")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Count
+num_args: Some(0)
+value_type: u8
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: ["0"]
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Increase verbosity of logging")
+long_help: Some("Increase verbosity of logging.\n\nCan be specified multiple times to increase verbosity.\n\nDefaults to printing \"error\" messages. For each increase in verbosity, the log level is set to \"warn\", \"info\", \"debug\", and \"trace\" respectively.")
 
 ### help
 short: Some('h')
@@ -4302,6 +5462,46 @@ set: []
 help: Some("Skip confirmation prompts")
 long_help: None
 
+### config
+short: Some('c')
+long: Some("cfg")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::KeyValueOrPath
+possible_values: []
+value_names: Some(["KEY=VALUE"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Override a configuration value for the duration of the command")
+long_help: None
+
+### verbose
+short: Some('v')
+long: Some("verbose")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Count
+num_args: Some(0)
+value_type: u8
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: ["0"]
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Increase verbosity of logging")
+long_help: Some("Increase verbosity of logging.\n\nCan be specified multiple times to increase verbosity.\n\nDefaults to printing \"error\" messages. For each increase in verbosity, the log level is set to \"warn\", \"info\", \"debug\", and \"trace\" respectively.")
+
 ### help
 short: Some('h')
 long: Some("help")
@@ -4354,6 +5554,46 @@ set: []
 help: Some("Conversation ID or keyword")
 long_help: Some("Conversation ID, Interactive Filter/Picker, Alias, or Multi-Target Keyword.\n\nInteractive Filter/Picker:\n  ?                             select from all\n  ?p, ?pinned                   select from pinned\n  ?a, ?archived                 select from archived\n\nConversation Aliases:\n  r, recent                     target most recently activated in workspace\n  n, newest                     target newest created\n  p, pinned                     target most recently pinned\n  a, archived                   target most recently archived\n\nMulti-Target Keywords:\n  +l, +live                     target all live conversations\n  +p, +pinned                   target all pinned\n  +a, +archived                 target all archived\n  -                             read IDs from stdin, one per line\n\nWhen multiple IDs are given, only literal conversation IDs are accepted.")
 
+### config
+short: Some('c')
+long: Some("cfg")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::KeyValueOrPath
+possible_values: []
+value_names: Some(["KEY=VALUE"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Override a configuration value for the duration of the command")
+long_help: None
+
+### verbose
+short: Some('v')
+long: Some("verbose")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Count
+num_args: Some(0)
+value_type: u8
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: ["0"]
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Increase verbosity of logging")
+long_help: Some("Increase verbosity of logging.\n\nCan be specified multiple times to increase verbosity.\n\nDefaults to printing \"error\" messages. For each increase in verbosity, the log level is set to \"warn\", \"info\", \"debug\", and \"trace\" respectively.")
+
 ### help
 short: Some('h')
 long: Some("help")
@@ -4386,6 +5626,46 @@ external_subcommands: None
 set: ["subcommand_required", "arg_required_else_help", "disable_help_subcommand"]
 usage: Usage: jp plugin [OPTIONS] <COMMAND>
 
+### config
+short: Some('c')
+long: Some("cfg")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::KeyValueOrPath
+possible_values: []
+value_names: Some(["KEY=VALUE"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Override a configuration value for the duration of the command")
+long_help: None
+
+### verbose
+short: Some('v')
+long: Some("verbose")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Count
+num_args: Some(0)
+value_type: u8
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: ["0"]
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Increase verbosity of logging")
+long_help: Some("Increase verbosity of logging.\n\nCan be specified multiple times to increase verbosity.\n\nDefaults to printing \"error\" messages. For each increase in verbosity, the log level is set to \"warn\", \"info\", \"debug\", and \"trace\" respectively.")
+
 ### help
 short: Some('h')
 long: Some("help")
@@ -4417,6 +5697,46 @@ hidden: false
 external_subcommands: None
 set: ["disable_help_subcommand"]
 usage: Usage: jp plugin list [OPTIONS]
+
+### config
+short: Some('c')
+long: Some("cfg")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::KeyValueOrPath
+possible_values: []
+value_names: Some(["KEY=VALUE"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Override a configuration value for the duration of the command")
+long_help: None
+
+### verbose
+short: Some('v')
+long: Some("verbose")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Count
+num_args: Some(0)
+value_type: u8
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: ["0"]
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Increase verbosity of logging")
+long_help: Some("Increase verbosity of logging.\n\nCan be specified multiple times to increase verbosity.\n\nDefaults to printing \"error\" messages. For each increase in verbosity, the log level is set to \"warn\", \"info\", \"debug\", and \"trace\" respectively.")
 
 ### help
 short: Some('h')
@@ -4470,6 +5790,46 @@ set: ["required"]
 help: Some("Name of the plugin to install (e.g. \"serve-web\")")
 long_help: None
 
+### config
+short: Some('c')
+long: Some("cfg")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::KeyValueOrPath
+possible_values: []
+value_names: Some(["KEY=VALUE"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Override a configuration value for the duration of the command")
+long_help: None
+
+### verbose
+short: Some('v')
+long: Some("verbose")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Count
+num_args: Some(0)
+value_type: u8
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: ["0"]
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Increase verbosity of logging")
+long_help: Some("Increase verbosity of logging.\n\nCan be specified multiple times to increase verbosity.\n\nDefaults to printing \"error\" messages. For each increase in verbosity, the log level is set to \"warn\", \"info\", \"debug\", and \"trace\" respectively.")
+
 ### help
 short: Some('h')
 long: Some("help")
@@ -4522,6 +5882,46 @@ set: ["required"]
 help: Some("The plugin's name: its file name without `jp-`")
 long_help: None
 
+### config
+short: Some('c')
+long: Some("cfg")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::KeyValueOrPath
+possible_values: []
+value_names: Some(["KEY=VALUE"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Override a configuration value for the duration of the command")
+long_help: None
+
+### verbose
+short: Some('v')
+long: Some("verbose")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Count
+num_args: Some(0)
+value_type: u8
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: ["0"]
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Increase verbosity of logging")
+long_help: Some("Increase verbosity of logging.\n\nCan be specified multiple times to increase verbosity.\n\nDefaults to printing \"error\" messages. For each increase in verbosity, the log level is set to \"warn\", \"info\", \"debug\", and \"trace\" respectively.")
+
 ### help
 short: Some('h')
 long: Some("help")
@@ -4553,6 +5953,46 @@ hidden: false
 external_subcommands: None
 set: ["disable_help_subcommand"]
 usage: Usage: jp plugin update [OPTIONS]
+
+### config
+short: Some('c')
+long: Some("cfg")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::KeyValueOrPath
+possible_values: []
+value_names: Some(["KEY=VALUE"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Override a configuration value for the duration of the command")
+long_help: None
+
+### verbose
+short: Some('v')
+long: Some("verbose")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Count
+num_args: Some(0)
+value_type: u8
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: ["0"]
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Increase verbosity of logging")
+long_help: Some("Increase verbosity of logging.\n\nCan be specified multiple times to increase verbosity.\n\nDefaults to printing \"error\" messages. For each increase in verbosity, the log level is set to \"warn\", \"info\", \"debug\", and \"trace\" respectively.")
 
 ### help
 short: Some('h')
@@ -4606,6 +6046,46 @@ set: ["required"]
 help: Some("Path to the plugin binary, a file named `jp-<name>`")
 long_help: None
 
+### config
+short: Some('c')
+long: Some("cfg")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::KeyValueOrPath
+possible_values: []
+value_names: Some(["KEY=VALUE"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Override a configuration value for the duration of the command")
+long_help: None
+
+### verbose
+short: Some('v')
+long: Some("verbose")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Count
+num_args: Some(0)
+value_type: u8
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: ["0"]
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Increase verbosity of logging")
+long_help: Some("Increase verbosity of logging.\n\nCan be specified multiple times to increase verbosity.\n\nDefaults to printing \"error\" messages. For each increase in verbosity, the log level is set to \"warn\", \"info\", \"debug\", and \"trace\" respectively.")
+
 ### help
 short: Some('h')
 long: Some("help")
@@ -4658,6 +6138,46 @@ set: ["required"]
 help: Some("The plugin's name: its file name without `jp-`")
 long_help: None
 
+### config
+short: Some('c')
+long: Some("cfg")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::KeyValueOrPath
+possible_values: []
+value_names: Some(["KEY=VALUE"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Override a configuration value for the duration of the command")
+long_help: None
+
+### verbose
+short: Some('v')
+long: Some("verbose")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Count
+num_args: Some(0)
+value_type: u8
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: ["0"]
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Increase verbosity of logging")
+long_help: Some("Increase verbosity of logging.\n\nCan be specified multiple times to increase verbosity.\n\nDefaults to printing \"error\" messages. For each increase in verbosity, the log level is set to \"warn\", \"info\", \"debug\", and \"trace\" respectively.")
+
 ### help
 short: Some('h')
 long: Some("help")
@@ -4689,6 +6209,46 @@ hidden: false
 external_subcommands: None
 set: ["subcommand_required", "arg_required_else_help", "disable_help_subcommand"]
 usage: Usage: jp workspace [OPTIONS] <COMMAND>
+
+### config
+short: Some('c')
+long: Some("cfg")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::KeyValueOrPath
+possible_values: []
+value_names: Some(["KEY=VALUE"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Override a configuration value for the duration of the command")
+long_help: None
+
+### verbose
+short: Some('v')
+long: Some("verbose")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Count
+num_args: Some(0)
+value_type: u8
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: ["0"]
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Increase verbosity of logging")
+long_help: Some("Increase verbosity of logging.\n\nCan be specified multiple times to increase verbosity.\n\nDefaults to printing \"error\" messages. For each increase in verbosity, the log level is set to \"warn\", \"info\", \"debug\", and \"trace\" respectively.")
 
 ### help
 short: Some('h')
@@ -4762,6 +6322,46 @@ set: []
 help: Some("Keep using this workspace even from inside another one")
 long_help: Some("Keep using this workspace even from inside another one.\n\nWithout it, standing in a different workspace makes JP ask which of the two you meant. With it, the selection wins and JP stops asking; every run from elsewhere reports the workspace it used.\n\nA later `jp workspace use` without `--always` releases it, and `jp workspace use cwd` clears the selection outright.")
 
+### config
+short: Some('c')
+long: Some("cfg")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::KeyValueOrPath
+possible_values: []
+value_names: Some(["KEY=VALUE"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Override a configuration value for the duration of the command")
+long_help: None
+
+### verbose
+short: Some('v')
+long: Some("verbose")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Count
+num_args: Some(0)
+value_type: u8
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: ["0"]
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Increase verbosity of logging")
+long_help: Some("Increase verbosity of logging.\n\nCan be specified multiple times to increase verbosity.\n\nDefaults to printing \"error\" messages. For each increase in verbosity, the log level is set to \"warn\", \"info\", \"debug\", and \"trace\" respectively.")
+
 ### help
 short: Some('h')
 long: Some("help")
@@ -4793,6 +6393,46 @@ hidden: false
 external_subcommands: None
 set: ["disable_help_subcommand"]
 usage: Usage: jp workspace ls [OPTIONS]
+
+### config
+short: Some('c')
+long: Some("cfg")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::KeyValueOrPath
+possible_values: []
+value_names: Some(["KEY=VALUE"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Override a configuration value for the duration of the command")
+long_help: None
+
+### verbose
+short: Some('v')
+long: Some("verbose")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Count
+num_args: Some(0)
+value_type: u8
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: ["0"]
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Increase verbosity of logging")
+long_help: Some("Increase verbosity of logging.\n\nCan be specified multiple times to increase verbosity.\n\nDefaults to printing \"error\" messages. For each increase in verbosity, the log level is set to \"warn\", \"info\", \"debug\", and \"trace\" respectively.")
 
 ### help
 short: Some('h')
@@ -4846,6 +6486,46 @@ set: []
 help: Some("The workspace to show. See `jp w use help` for the grammar")
 long_help: Some("The workspace to show. See `jp w use help` for the grammar.\n\nAlso settable with the global `--workspace` flag, but not both at once. Defaults to the session's active workspace, then the cwd-derived one.")
 
+### config
+short: Some('c')
+long: Some("cfg")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::KeyValueOrPath
+possible_values: []
+value_names: Some(["KEY=VALUE"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Override a configuration value for the duration of the command")
+long_help: None
+
+### verbose
+short: Some('v')
+long: Some("verbose")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Count
+num_args: Some(0)
+value_type: u8
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: ["0"]
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Increase verbosity of logging")
+long_help: Some("Increase verbosity of logging.\n\nCan be specified multiple times to increase verbosity.\n\nDefaults to printing \"error\" messages. For each increase in verbosity, the log level is set to \"warn\", \"info\", \"debug\", and \"trace\" respectively.")
+
 ### help
 short: Some('h')
 long: Some("help")
@@ -4877,6 +6557,46 @@ hidden: false
 external_subcommands: None
 set: ["subcommand_required", "arg_required_else_help", "disable_help_subcommand"]
 usage: Usage: jp provider [OPTIONS] <COMMAND>
+
+### config
+short: Some('c')
+long: Some("cfg")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::KeyValueOrPath
+possible_values: []
+value_names: Some(["KEY=VALUE"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Override a configuration value for the duration of the command")
+long_help: None
+
+### verbose
+short: Some('v')
+long: Some("verbose")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Count
+num_args: Some(0)
+value_type: u8
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: ["0"]
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Increase verbosity of logging")
+long_help: Some("Increase verbosity of logging.\n\nCan be specified multiple times to increase verbosity.\n\nDefaults to printing \"error\" messages. For each increase in verbosity, the log level is set to \"warn\", \"info\", \"debug\", and \"trace\" respectively.")
 
 ### help
 short: Some('h')
@@ -4910,6 +6630,46 @@ external_subcommands: None
 set: ["subcommand_required", "arg_required_else_help", "disable_help_subcommand"]
 usage: Usage: jp provider llm [OPTIONS] <COMMAND>
 
+### config
+short: Some('c')
+long: Some("cfg")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::KeyValueOrPath
+possible_values: []
+value_names: Some(["KEY=VALUE"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Override a configuration value for the duration of the command")
+long_help: None
+
+### verbose
+short: Some('v')
+long: Some("verbose")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Count
+num_args: Some(0)
+value_type: u8
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: ["0"]
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Increase verbosity of logging")
+long_help: Some("Increase verbosity of logging.\n\nCan be specified multiple times to increase verbosity.\n\nDefaults to printing \"error\" messages. For each increase in verbosity, the log level is set to \"warn\", \"info\", \"debug\", and \"trace\" respectively.")
+
 ### help
 short: Some('h')
 long: Some("help")
@@ -4941,6 +6701,46 @@ hidden: false
 external_subcommands: None
 set: ["subcommand_required", "arg_required_else_help", "disable_help_subcommand"]
 usage: Usage: jp provider llm auth [OPTIONS] <COMMAND>
+
+### config
+short: Some('c')
+long: Some("cfg")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::KeyValueOrPath
+possible_values: []
+value_names: Some(["KEY=VALUE"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Override a configuration value for the duration of the command")
+long_help: None
+
+### verbose
+short: Some('v')
+long: Some("verbose")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Count
+num_args: Some(0)
+value_type: u8
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: ["0"]
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Increase verbosity of logging")
+long_help: Some("Increase verbosity of logging.\n\nCan be specified multiple times to increase verbosity.\n\nDefaults to printing \"error\" messages. For each increase in verbosity, the log level is set to \"warn\", \"info\", \"debug\", and \"trace\" respectively.")
 
 ### help
 short: Some('h')
@@ -5114,6 +6914,46 @@ set: []
 help: Some("Use an existing runtime login directory instead of allocating one. Must be absolute. Existing registrations retain their original directory. For Anthropic, the default is `<JP user data dir>/data/claude/<name>`")
 long_help: None
 
+### config
+short: Some('c')
+long: Some("cfg")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::KeyValueOrPath
+possible_values: []
+value_names: Some(["KEY=VALUE"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Override a configuration value for the duration of the command")
+long_help: None
+
+### verbose
+short: Some('v')
+long: Some("verbose")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Count
+num_args: Some(0)
+value_type: u8
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: ["0"]
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Increase verbosity of logging")
+long_help: Some("Increase verbosity of logging.\n\nCan be specified multiple times to increase verbosity.\n\nDefaults to printing \"error\" messages. For each increase in verbosity, the log level is set to \"warn\", \"info\", \"debug\", and \"trace\" respectively.")
+
 ### help
 short: Some('h')
 long: Some("help")
@@ -5145,6 +6985,46 @@ hidden: false
 external_subcommands: None
 set: ["disable_help_subcommand"]
 usage: Usage: jp provider llm auth list [OPTIONS]
+
+### config
+short: Some('c')
+long: Some("cfg")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::KeyValueOrPath
+possible_values: []
+value_names: Some(["KEY=VALUE"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Override a configuration value for the duration of the command")
+long_help: None
+
+### verbose
+short: Some('v')
+long: Some("verbose")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Count
+num_args: Some(0)
+value_type: u8
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: ["0"]
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Increase verbosity of logging")
+long_help: Some("Increase verbosity of logging.\n\nCan be specified multiple times to increase verbosity.\n\nDefaults to printing \"error\" messages. For each increase in verbosity, the log level is set to \"warn\", \"info\", \"debug\", and \"trace\" respectively.")
 
 ### help
 short: Some('h')
@@ -5217,6 +7097,46 @@ conflicts: []
 set: []
 help: Some("The name of the credential to remove")
 long_help: Some("The name of the credential to remove.\n\nWhen omitted, removes the sole stored credential.")
+
+### config
+short: Some('c')
+long: Some("cfg")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_cli::KeyValueOrPath
+possible_values: []
+value_names: Some(["KEY=VALUE"])
+value_delimiter: None
+default_values: []
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Override a configuration value for the duration of the command")
+long_help: None
+
+### verbose
+short: Some('v')
+long: Some("verbose")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Count
+num_args: Some(0)
+value_type: u8
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: ["0"]
+help_heading: Some("Global Options")
+conflicts: []
+set: []
+help: Some("Increase verbosity of logging")
+long_help: Some("Increase verbosity of logging.\n\nCan be specified multiple times to increase verbosity.\n\nDefaults to printing \"error\" messages. For each increase in verbosity, the log level is set to \"warn\", \"info\", \"debug\", and \"trace\" respectively.")
 
 ### help
 short: Some('h')
