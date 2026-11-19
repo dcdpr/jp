@@ -51,10 +51,7 @@ fn one_failure_is_listed_in_the_singular() {
 
     assert_eq!(
         report.as_deref(),
-        Some(
-            "1 conversation failed to load:\n  jp-c17636257526: missing metadata.json\nRun `jp \
-             conversation trash jp-c17636257526` to move it to the trash."
-        )
+        Some("1 conversation failed to load:\n  jp-c17636257526: missing metadata.json")
     );
 }
 
@@ -74,22 +71,8 @@ fn up_to_three_failures_are_listed() {
         Some(
             "3 conversations failed to load:\n  jp-c17636257526: missing metadata.json\n  \
              jp-c17636257527: metadata.json: invalid JSON at line 1, column 2\n  not-a-valid-id: \
-             invalid directory name\nRun `jp conversation trash jp-c17636257526 jp-c17636257527` \
-             to move them to the trash."
+             invalid directory name"
         )
-    );
-}
-
-// A directory whose name is not a conversation ID cannot be named to `jp c
-// trash`, so with nothing else to suggest the report gives no command.
-#[test]
-fn no_command_is_suggested_for_directories_that_are_not_ids() {
-    let dirname = ValidationError::InvalidDirname;
-    let report = plain(&[failure("not-a-valid-id", &dirname)]);
-
-    assert_eq!(
-        report.as_deref(),
-        Some("1 conversation failed to load:\n  not-a-valid-id: invalid directory name")
     );
 }
 
@@ -118,8 +101,7 @@ fn the_count_and_conversations_are_highlighted() {
     assert_eq!(
         listed,
         format!(
-            "{} failed to load:\n  {}: missing metadata.json\nRun `jp conversation trash \
-             jp-c17636257526` to move it to the trash.",
+            "{} failed to load:\n  {}: missing metadata.json",
             "1 conversation".bold().yellow(),
             "jp-c17636257526".bold().yellow(),
         )
@@ -241,7 +223,7 @@ fn the_text_report_prints_when_the_notice_drops_even_under_quiet() {
     assert_eq!(
         strip_ansi_escapes::strip_str(err.lock().as_str()),
         "1 conversation failed to load:\n  jp-c17941219994: metadata.json: invalid JSON at line \
-         1, column 2\nRun `jp conversation trash jp-c17941219994` to move it to the trash.\n"
+         1, column 2\n"
     );
 }
 

@@ -20,10 +20,6 @@ What bypassing costs:
   JSON formats on its own output only.
   An error message carrying ANSI styling reaches the terminal, or a `"message"`
   JSON string, unstripped.
-  `jp conversation trash` works around this by stripping ANSI itself when pretty
-  printing is off (`run_batch` in
-  `crates/jp_cli/src/cmd/conversation/trash.rs`); other commands have no
-  workaround.
 
 - **No ordering.** The error isn't serialized against output the printer has
   queued, so it relies on the printer having been flushed first.
@@ -40,6 +36,5 @@ What bypassing costs:
 - [ ] Check errors raised before the printer exists today (argument parsing,
       format resolution) still print, and say so in the commit
 
-- [ ] Remove the ANSI-stripping workaround from `jp conversation trash`, with a
-      test that the failure summary is plain under `--format=text` and inside
-      the JSON `message`
+- [ ] Test that a styled error message is plain under `--format=text` and
+      inside the JSON `message`

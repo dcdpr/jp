@@ -21,7 +21,6 @@ mod rm;
 mod show;
 pub(crate) mod summarize;
 mod title;
-mod trash;
 mod unarchive;
 mod use_;
 
@@ -33,8 +32,7 @@ pub(crate) struct Conversation {
 
 impl CommandArgs for Conversation {
     fn augment(cmd: Command) -> Command {
-        let cmd = cmd
-            .subcommand_required(true)
+        cmd.subcommand_required(true)
             .arg_required_else_help(true)
             .subcommand(
                 rm::Rm::augment(Command::new("rm"))
@@ -111,9 +109,17 @@ impl CommandArgs for Conversation {
             .subcommand(
                 path::Path::augment(Command::new("path"))
                     .about("Print the filesystem path to a conversation"),
-            );
-
-        partition_subcommands(cmd)
+            )
+            .subcommand(
+                archive::Archive::augment(Command::new("archive"))
+                    .about("Archive conversations")
+                    .visible_alias("a"),
+            )
+            .subcommand(
+                unarchive::Unarchive::augment(Command::new("unarchive"))
+                    .about("Unarchive conversations")
+                    .visible_alias("ua"),
+            )
     }
 
     fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
@@ -132,42 +138,11 @@ impl CommandArgs for Conversation {
             ("path", sub) => Commands::Path(path::Path::from_matches(sub)?),
             ("archive", sub) => Commands::Archive(archive::Archive::from_matches(sub)?),
             ("unarchive", sub) => Commands::Unarchive(unarchive::Unarchive::from_matches(sub)?),
-            ("trash", sub) => Commands::Trash(trash::Trash::from_matches(sub)?),
-            ("untrash", sub) => Commands::Untrash(trash::Untrash::from_matches(sub)?),
             (name, _) => return Err(unread_subcommand(name)),
         };
 
         Ok(Self { command })
     }
-}
-
-/// The subcommands that move conversations between the live list, the archive,
-/// and the trash.
-fn partition_subcommands(cmd: Command) -> Command {
-    cmd.subcommand(
-        archive::Archive::augment(Command::new("archive"))
-            .about("Archive conversations")
-            .visible_alias("a"),
-    )
-    .subcommand(
-        unarchive::Unarchive::augment(Command::new("unarchive"))
-            .about("Unarchive conversations")
-            .visible_alias("ua"),
-    )
-    .subcommand(
-        trash::Trash::augment(Command::new("trash"))
-            .about("Move conversations to the trash")
-            .long_about(
-                "Move conversations to the trash.\n\nWorks on any conversation directory, \
-                 including ones that fail to load and unsent query drafts. Trashed conversations \
-                 are not listed, loaded, or reported until `jp conversation untrash` moves them \
-                 back.",
-            ),
-    )
-    .subcommand(
-        trash::Untrash::augment(Command::new("untrash"))
-            .about("Move conversations back out of the trash"),
-    )
 }
 
 impl Conversation {
@@ -187,8 +162,6 @@ impl Conversation {
             Commands::Use(args) => args.run(ctx, handles),
             Commands::Archive(args) => args.run(ctx, handles).await,
             Commands::Unarchive(args) => args.run(ctx),
-            Commands::Trash(args) => args.run(ctx),
-            Commands::Untrash(args) => args.run(ctx),
         }
     }
 
@@ -208,8 +181,6 @@ impl Conversation {
             Commands::Use(args) => args.conversation_load_request(),
             Commands::Archive(args) => args.conversation_load_request(),
             Commands::Unarchive(args) => args.conversation_load_request(),
-            Commands::Trash(args) => args.conversation_load_request(),
-            Commands::Untrash(args) => args.conversation_load_request(),
         }
     }
 }
@@ -235,9 +206,7 @@ impl IntoPartialAppConfig for Conversation {
             | Commands::List(_)
             | Commands::Use(_)
             | Commands::Archive(_)
-            | Commands::Unarchive(_)
-            | Commands::Trash(_)
-            | Commands::Untrash(_) => Ok(partial),
+            | Commands::Unarchive(_) => Ok(partial),
         }
     }
 }
@@ -258,6 +227,4 @@ enum Commands {
     Path(path::Path),
     Archive(archive::Archive),
     Unarchive(unarchive::Unarchive),
-    Trash(trash::Trash),
-    Untrash(trash::Untrash),
 }

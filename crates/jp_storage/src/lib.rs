@@ -8,7 +8,6 @@ pub mod value;
 
 pub mod load;
 mod scan;
-pub mod trash;
 pub mod validate;
 
 use std::{fs, io, time::SystemTime};

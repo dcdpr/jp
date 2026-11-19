@@ -167,30 +167,6 @@ fn leaves_entries_jp_did_not_trash_alone() {
     assert!(other_note.join("TRASHED.md").is_file());
 }
 
-// A conversation the user trashed stays trashed, even when the restore has not
-// yet run in that root.
-#[test]
-fn leaves_conversations_the_user_trashed_alone() {
-    let (_tmp, backend, conversations) = setup();
-    let live = conversations.join("17941219995");
-    fs::create_dir_all(&live).unwrap();
-    fs::write(live.join("events.json"), EVENTS).unwrap();
-    backend
-        .trash_conversation(&id("17941219995"), "2026-11-19T12:00:00Z".parse().unwrap())
-        .unwrap();
-
-    let roots = restore_auto_trashed(&backend);
-
-    assert!(roots[0].restored.is_empty());
-    assert!(roots[0].left.is_empty());
-    assert!(
-        conversations
-            .join(".trash/17941219995/events.json")
-            .is_file()
-    );
-    assert!(!live.exists());
-}
-
 // What was left is reported once; a later run does not look at the trash again.
 #[test]
 fn runs_once_per_root() {

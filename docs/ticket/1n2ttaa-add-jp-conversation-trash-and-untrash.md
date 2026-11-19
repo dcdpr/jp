@@ -95,3 +95,20 @@ Revised after text review:
   the real operations.
   They check the lock without taking it, so nothing is written, not even a lock
   file.
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-19T17:04:38Z
+
+Withdrawn.
+Once JP no longer moves conversations on its own, a trash only postpones a
+decision, and archive already covers "keep it, out of the way" for conversations
+that load.
+`jp conversation trash`/`untrash`, `jp_storage::trash`, the trash picker, the
+load-failure trash hint, and the *Trashed Conversation* glossary entry are
+removed.
+
+The part worth keeping, reaching conversations that fail to load by ID, moves to
+`jp c rm`: T-1nmc61k.
+The one-time restore of auto-trashed conversations (T-1n2tta9) stays.

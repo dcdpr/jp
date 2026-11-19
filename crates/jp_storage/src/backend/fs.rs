@@ -28,7 +28,6 @@ use crate::{
     load::load_json,
     load_conversation_id_from_entry,
     lock::LockInfo,
-    trash::{Moved, TrashError},
     validate::{InvalidConversation, ValidationResult},
 };
 
@@ -202,45 +201,11 @@ impl FsStorageBackend {
     /// The directories need not exist.
     #[must_use]
     pub fn conversations_dirs(&self) -> Vec<Utf8PathBuf> {
-        self.storage.conversations_dirs()
-    }
-
-    /// Move conversation `id` into the trash of every storage root that holds
-    /// it.
-    ///
-    /// See [`Storage::trash_conversation`].
-    pub fn trash_conversation(
-        &self,
-        id: &ConversationId,
-        now: DateTime<Utc>,
-    ) -> std::result::Result<Vec<Moved>, TrashError> {
-        self.storage.trash_conversation(id, now)
-    }
-
-    /// Move conversation `id` back out of the trash of every storage root that
-    /// holds it.
-    ///
-    /// See [`Storage::untrash_conversation`].
-    pub fn untrash_conversation(
-        &self,
-        id: &ConversationId,
-    ) -> std::result::Result<Vec<Moved>, TrashError> {
-        self.storage.untrash_conversation(id)
-    }
-
-    /// The moves [`Self::trash_conversation`] would make, without making them.
-    ///
-    /// See [`Storage::plan_trash`].
-    pub fn plan_trash(&self, id: &ConversationId) -> std::result::Result<Vec<Moved>, TrashError> {
-        self.storage.plan_trash(id)
-    }
-
-    /// The moves [`Self::untrash_conversation`] would make, without making
-    /// them.
-    ///
-    /// See [`Storage::plan_untrash`].
-    pub fn plan_untrash(&self, id: &ConversationId) -> std::result::Result<Vec<Moved>, TrashError> {
-        self.storage.plan_untrash(id)
+        [Some(self.storage.path()), self.storage.user_storage_path()]
+            .into_iter()
+            .flatten()
+            .map(|root| root.join(CONVERSATIONS_DIR))
+            .collect()
     }
 
     /// Check every conversation directory in both roots without moving any.
