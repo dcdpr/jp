@@ -1,6 +1,6 @@
 # Restore conversations JP trashed on its own
 
-- **Status**: Todo
+- **Status**: Done
 - **Authors**: jp
 - **Date**: 2026-11-18
 - **Label**: client=cli
@@ -23,7 +23,36 @@ can be deleted cleanly once users no longer have auto-trashed data.
 | Has `events.json`, no `metadata.json` | Move back; reported as a load failure, fixable with `jp conversation repair` |
 | Anything else                         | Leave in `.trash/`, list in the report                                       |
 
-- [ ] Runs once per storage root, gated by a marker file
-- [ ] Skips conversations whose lock is held, and retries them on a later run
-- [ ] Never overwrites a live directory with the same id
-- [ ] Prints what it moved and what it left, once
+- [x] Runs once per storage root, gated by a marker file
+- [x] Skips conversations whose lock is held, and retries them on a later run
+- [x] Never overwrites a live directory with the same id
+- [x] Prints what it moved and what it left, once
+
+## Comments
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-19T12:15:04Z
+
+Done, in `jp_cli::trash_restore`.
+The module and its call in `run_inner` are all that needs deleting later.
+
+- **What counts as auto-trashed:** an entry whose `TRASHED.md` contains "failed
+  workspace sanitization".
+  Anything else in `.trash/` is left alone and not reported.
+- **Classification:** uses the new
+  `jp_storage::validate::validate_conversation_dir`, the same checks startup
+  validation runs on one directory.
+- **Live conversations:** an entry is left when a live directory for its ID
+  exists in *either* storage root, not just its own.
+  Moving a trashed copy beside a live projected one could make loading pick the
+  trashed copy.
+- **Marker:** `.trash/.auto-trash-restored`, written only once nothing in that
+  trash is waiting on a lock or a failed move.
+  Left entries are reported once and not looked at again.
+- **When it runs:** after the workspace opens and before startup validation,
+  never under `--no-persist`.
+  Its report prints just before the load-failure report, past `--quiet`, and as
+  one typed record per trash under `--format=json`.
+- `TRASHED.md` is deleted from every entry moved back.

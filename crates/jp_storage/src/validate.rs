@@ -391,6 +391,38 @@ enum Validated {
     Unstored(UnstoredConversation),
 }
 
+/// What a conversation directory that passes validation holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DirContents {
+    /// A stored conversation.
+    Stored,
+
+    /// None of the managed files; see [`UnstoredConversation`].
+    Unstored,
+}
+
+/// Check one conversation directory the way startup validation checks each
+/// directory under `conversations/`.
+///
+/// The directory can live anywhere; its name must still parse as a
+/// [`ConversationId`].
+/// Reads the directory's files and changes nothing on disk.
+///
+/// # Errors
+///
+/// Returns the reason the directory fails validation.
+pub fn validate_conversation_dir(dir: &Utf8Path) -> Result<DirContents, ValidationError> {
+    let (Some(parent), Some(dirname)) = (dir.parent(), dir.file_name()) else {
+        return Err(ValidationError::InvalidDirname);
+    };
+
+    match validate_entry(parent, dirname, dir, &ScanCache::default()) {
+        Ok(Validated::Stored(..)) => Ok(DirContents::Stored),
+        Ok(Validated::Unstored(_)) => Ok(DirContents::Unstored),
+        Err(invalid) => Err(invalid.error),
+    }
+}
+
 /// Validate a single conversation directory entry.
 ///
 /// Returns [`ScannedDir`] alongside a stored conversation when `metadata.json`

@@ -328,6 +328,47 @@ fn a_directory_without_managed_files_is_unstored() {
     ]);
 }
 
+// One directory, wherever it lives, gets the checks a directory under
+// `conversations/` gets at startup.
+#[test]
+fn a_single_directory_is_validated_outside_the_conversations_dir() {
+    let tmp = tempdir().unwrap();
+    let elsewhere = tmp.path().join("elsewhere");
+
+    let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
+    write_valid(&elsewhere, &id);
+    let stored = elsewhere.join(CONVERSATIONS_DIR).join(id.to_dirname(None));
+    assert!(matches!(
+        validate_conversation_dir(&stored),
+        Ok(DirContents::Stored)
+    ));
+
+    let unstored = tmp.path().join("17636257527");
+    fs::create_dir_all(&unstored).unwrap();
+    fs::write(unstored.join("QUERY_MESSAGE.md"), "typed request").unwrap();
+    assert!(matches!(
+        validate_conversation_dir(&unstored),
+        Ok(DirContents::Unstored)
+    ));
+
+    let missing_metadata = tmp.path().join("17636257528");
+    fs::create_dir_all(&missing_metadata).unwrap();
+    fs::write(missing_metadata.join(EVENTS_FILE), "[]").unwrap();
+    assert!(matches!(
+        validate_conversation_dir(&missing_metadata),
+        Err(ValidationError::MissingFile {
+            file: ManagedFile::Metadata
+        })
+    ));
+
+    let not_an_id = tmp.path().join("not-an-id");
+    fs::create_dir_all(&not_an_id).unwrap();
+    assert!(matches!(
+        validate_conversation_dir(&not_an_id),
+        Err(ValidationError::InvalidDirname)
+    ));
+}
+
 #[test]
 fn test_skips_files_and_dot_dirs() {
     let tmp = tempdir().unwrap();

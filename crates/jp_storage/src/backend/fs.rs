@@ -195,6 +195,19 @@ impl FsStorageBackend {
         self.storage.conversation_base_config_path(id)
     }
 
+    /// The live `conversations/` directory of each storage root, workspace
+    /// first.
+    ///
+    /// The directories need not exist.
+    #[must_use]
+    pub fn conversations_dirs(&self) -> Vec<Utf8PathBuf> {
+        [Some(self.storage.path()), self.storage.user_storage_path()]
+            .into_iter()
+            .flatten()
+            .map(|root| root.join(CONVERSATIONS_DIR))
+            .collect()
+    }
+
     /// Check every conversation directory in both roots without moving any.
     ///
     /// Sorts each directory into valid, unstored, or invalid.
