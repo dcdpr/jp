@@ -1038,10 +1038,14 @@ mod trailing_thought_signature {
     /// When a step's first function call has no signature (such as history from
     /// another model), it receives the dummy signature that skips validation;
     /// subsequent calls receive none.
+    /// Gemini validates every step of the current turn, so each parallel batch
+    /// gets its own dummy.
     #[test]
-    fn unsigned_parallel_function_calls_get_the_dummy_on_the_first_call_only() {
+    fn unsigned_parallel_function_calls_get_the_dummy_on_the_first_call_of_each_step() {
         let mut events = ConversationStream::new_test();
-        events.start_turn(ChatRequest::from("Weather in Paris and London?"));
+        events.start_turn(ChatRequest::from(
+            "Weather in Paris, London, Berlin and Rome?",
+        ));
         events.extend([
             ConversationEvent::now(ToolCallRequest::new(
                 "call_paris".to_owned(),
@@ -1053,16 +1057,42 @@ mod trailing_thought_signature {
                 "weather".to_owned(),
                 Map::from_iter([("city".to_owned(), json!("London"))]),
             )),
+            ConversationEvent::now(ToolCallResponse {
+                id: "call_paris".to_owned(),
+                result: Ok("15C".to_owned()),
+            }),
+            ConversationEvent::now(ToolCallResponse {
+                id: "call_london".to_owned(),
+                result: Ok("12C".to_owned()),
+            }),
+            ConversationEvent::now(ToolCallRequest::new(
+                "call_berlin".to_owned(),
+                "weather".to_owned(),
+                Map::from_iter([("city".to_owned(), json!("Berlin"))]),
+            )),
+            ConversationEvent::now(ToolCallRequest::new(
+                "call_rome".to_owned(),
+                "weather".to_owned(),
+                Map::from_iter([("city".to_owned(), json!("Rome"))]),
+            )),
         ]);
 
         let contents = convert_events(events);
-        let signatures: Vec<_> = contents[1]
+        assert_eq!(contents.len(), 4);
+
+        let first_step: Vec<_> = contents[1]
             .parts
             .iter()
             .map(|part| part.thought_signature.as_deref())
             .collect();
+        assert_eq!(first_step, [Some(THOUGHT_SIGNATURE_DUMMY_VALUE), None]);
 
-        assert_eq!(signatures, [Some(THOUGHT_SIGNATURE_DUMMY_VALUE), None]);
+        let second_step: Vec<_> = contents[3]
+            .parts
+            .iter()
+            .map(|part| part.thought_signature.as_deref())
+            .collect();
+        assert_eq!(second_step, [Some(THOUGHT_SIGNATURE_DUMMY_VALUE), None]);
     }
 
     /// Empty parts without a signature carry nothing and stay skipped.
