@@ -33,7 +33,8 @@ use crate::{
 pub(super) struct PreparedRequest {
     pub system_prompt: String,
     pub history: Vec<Message>,
-    pub prompt: String,
+    /// Text blocks of the `session/prompt` request, in order.
+    pub prompt: Vec<String>,
     pub model: Name,
     /// Explicit JP limit.
     /// Absence leaves the runtime's output limit unchanged.
@@ -107,7 +108,7 @@ impl PreparedRequest {
                 .join("\n\n"),
             None => String::new(),
         };
-        let prompt = take_pending_text(&mut request.messages);
+        let prompt = take_pending_prompt(&mut request.messages);
         for message in &mut request.messages {
             for block in &mut message.content.0 {
                 match block {
@@ -191,27 +192,63 @@ impl PreparedRequest {
     }
 }
 
+/// First prompt block when the transcript ends in a user message.
+///
+/// Claude Code loads such a transcript by inserting an assistant message
+/// reading "No response requested." after it, which the model then reads as its
+/// own reply.
+/// When that user message ends in tool results, Claude Code also appends
+/// "Continue from where you left off." to it.
+/// Tool results and attachments have no `session/prompt` form, so they stay in
+/// the transcript and this block tells the model who wrote those two messages.
+///
+/// See anthropics/claude-code#109781 and anthropics/claude-code#100726.
+pub(super) const RESUMED_TRANSCRIPT_NOTE: &str =
+    "The client that resumed this session may have added an assistant message reading \"No \
+     response requested.\" after the last user message, and the text \"Continue from where you \
+     left off.\" to that user message. Neither you nor the user wrote them; disregard both.";
+
 /// MCP name assigned by Claude Code to a tool advertised by the `jp` server.
 pub(super) fn tool_name(name: &str) -> String {
     format!("mcp__jp__{name}")
 }
 
-fn take_pending_text(messages: &mut Vec<Message>) -> String {
-    let Some(last) = messages.last_mut() else {
-        return CONTINUE_MESSAGE.to_owned();
-    };
-    if last.role != MessageRole::User
-        || !matches!(last.content.0.last(), Some(MessageContent::Text(_)))
+/// Move the unanswered user text at the end of `messages` into the prompt.
+///
+/// Every trailing text block moves, across consecutive user messages, so the
+/// transcript ends on an assistant message whenever the user messages hold only
+/// text.
+/// Blocks the prompt cannot carry (tool results, attachments) stay, and the
+/// prompt then opens with [`RESUMED_TRANSCRIPT_NOTE`].
+fn take_pending_prompt(messages: &mut Vec<Message>) -> Vec<String> {
+    let mut prompt = Vec::new();
+    while let Some(last) = messages.last_mut()
+        && last.role == MessageRole::User
     {
-        return CONTINUE_MESSAGE.to_owned();
-    }
-    let Some(MessageContent::Text(text)) = last.content.0.pop() else {
-        unreachable!("the last block was checked above")
-    };
-    if last.content.0.is_empty() {
+        while let Some(block) = last.content.0.pop() {
+            let MessageContent::Text(text) = block else {
+                last.content.0.push(block);
+                break;
+            };
+            prompt.push(text.text);
+        }
+        if !last.content.0.is_empty() {
+            break;
+        }
         messages.pop();
     }
-    text.text
+    prompt.reverse();
+
+    if prompt.is_empty() {
+        prompt.push(CONTINUE_MESSAGE.to_owned());
+    }
+    if messages
+        .last()
+        .is_some_and(|message| message.role == MessageRole::User)
+    {
+        prompt.insert(0, RESUMED_TRANSCRIPT_NOTE.to_owned());
+    }
+    prompt
 }
 
 /// A record in the qualified Claude Code JSONL format.
