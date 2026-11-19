@@ -199,8 +199,11 @@ impl PreparedRequest {
 /// own reply.
 /// When that user message ends in tool results, Claude Code also appends
 /// "Continue from where you left off." to it.
-/// Tool results and attachments have no `session/prompt` form, so they stay in
-/// the transcript and this block tells the model who wrote those two messages.
+/// Tool results have no `session/prompt` form, and attachments stay in the
+/// transcript as native `document` blocks with their title and context, in the
+/// cached prefix.
+/// Either leaves a user message at the end of the transcript, so this block
+/// tells the model who wrote those two messages.
 ///
 /// See anthropics/claude-code#109781 and anthropics/claude-code#100726.
 pub(super) const RESUMED_TRANSCRIPT_NOTE: &str =
@@ -219,9 +222,11 @@ pub(super) fn tool_name(name: &str) -> String {
 /// Moves every trailing text block across consecutive user messages, so the
 /// transcript ends on an assistant message whenever the trailing user messages
 /// contain only text.
-/// Non-text blocks (tool results and document attachments) cannot be sent in
-/// `session/prompt`, so they remain in `messages` and the returned prompt opens
-/// with [`RESUMED_TRANSCRIPT_NOTE`].
+/// Tool results and document attachments remain in `messages`: tool results
+/// have no `session/prompt` form, and attachments keep their native `document`
+/// blocks there instead of being converted to ACP resources.
+/// When either remains, the returned prompt opens with
+/// [`RESUMED_TRANSCRIPT_NOTE`].
 fn take_pending_prompt(messages: &mut Vec<Message>) -> Vec<String> {
     let mut prompt = Vec::new();
     while let Some(last) = messages.last_mut()
