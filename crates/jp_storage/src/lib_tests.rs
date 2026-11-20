@@ -12,8 +12,11 @@ use jp_conversation::{
 use test_log::test;
 
 use super::*;
-use crate::backend::{
-    ConversationFilter, FsStorageBackend, LoadBackend as _, Projection, StoragePresence,
+use crate::{
+    backend::{
+        ConversationFilter, FsStorageBackend, LoadBackend as _, Projection, StoragePresence,
+    },
+    validate::{DirContents, ManagedFile, ValidationError},
 };
 
 #[test]
@@ -299,6 +302,51 @@ fn live_conversation_dirs_match_the_id_exactly() {
         workspace.join("17941219994"),
         user.join("17941219994-a-title"),
     ]);
+}
+
+// What the store holds for a conversation the index leaves out, as typed
+// state: callers render it, storage only reports it.
+#[test]
+fn an_unlisted_conversation_reports_its_files_title_and_directories() {
+    let tmp = tempdir().unwrap();
+    let backend = FsStorageBackend::new(&tmp.path().join("ws"))
+        .unwrap()
+        .with_user_storage(&tmp.path().join("user"), None, "abc")
+        .unwrap();
+    let workspace = tmp.path().join("ws").join(CONVERSATIONS_DIR);
+    let user = tmp.path().join("user").join("abc").join(CONVERSATIONS_DIR);
+    let id = |s| ConversationId::try_from_deciseconds_str(s).unwrap();
+
+    let broken = workspace.join("17941219991-fix-the-loader");
+    fs::create_dir_all(&broken).unwrap();
+    fs::write(
+        broken.join(METADATA_FILE),
+        r#"{"title":"Fix the loader","last_activated_at":"2026-01-01T00:00:00Z"}"#,
+    )
+    .unwrap();
+    let found = backend.unlisted_conversation(&id("17941219991")).unwrap();
+    assert_eq!(found.locations, [broken]);
+    assert_eq!(found.title.as_deref(), Some("Fix the loader"));
+    assert!(matches!(
+        found.state,
+        Err(ValidationError::MissingFile {
+            file: ManagedFile::Events
+        })
+    ));
+
+    let draft = user.join("17941219992");
+    fs::create_dir_all(&draft).unwrap();
+    fs::write(draft.join("QUERY_MESSAGE.md"), "typed").unwrap();
+    let found = backend.unlisted_conversation(&id("17941219992")).unwrap();
+    assert_eq!(found.locations, [draft]);
+    assert_eq!(found.title, None);
+    assert!(matches!(found.state, Ok(DirContents::Unstored)));
+
+    fs::create_dir_all(workspace.join("17941219993")).unwrap();
+    let found = backend.unlisted_conversation(&id("17941219993")).unwrap();
+    assert!(matches!(found.state, Ok(DirContents::Empty)));
+
+    assert!(backend.unlisted_conversation(&id("17941219994")).is_none());
 }
 
 #[test]

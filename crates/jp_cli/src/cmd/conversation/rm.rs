@@ -1,14 +1,8 @@
-use std::sync::Arc;
-
-use camino::Utf8PathBuf;
 use clap::{ArgMatches, Command};
 use crossterm::style::Stylize as _;
 use jp_conversation::ConversationId;
-use jp_storage::{
-    backend::{FsStorageBackend, LoadBackend as _, LockBackend as _, PersistBackend as _},
-    validate::{DirContents, validate_conversation_dir},
-};
-use jp_workspace::{ConversationHandle, Error as WorkspaceError, Workspace};
+use jp_storage::validate::{DirContents, ValidationError};
+use jp_workspace::{ConversationHandle, Workspace};
 
 use crate::{
     cli::CommandArgs,
@@ -88,7 +82,7 @@ impl Rm {
         for removal in removals {
             let done = match removal {
                 Removal::Loaded(handle) => remove(ctx, handle, active_id, force).await?,
-                Removal::Unloaded { fs, id } => remove_unloaded(ctx, &fs, id, force)?,
+                Removal::Unloaded(id) => remove_unloaded(ctx, id, force)?,
             };
             if done {
                 removed += 1;
@@ -162,83 +156,57 @@ enum Removal {
     Loaded(ConversationHandle),
 
     /// A conversation the index leaves out, because it fails to load or was
-    /// never stored, that had live directories when it was resolved.
-    Unloaded {
-        fs: Arc<FsStorageBackend>,
-        id: ConversationId,
-    },
+    /// never stored.
+    Unloaded(ConversationId),
 }
 
 /// Resolve typed IDs: through the index when the conversation loads, otherwise
-/// by its live directories on disk.
+/// as an unlisted conversation the store holds.
 ///
 /// Every ID is resolved before anything is removed, so one unknown ID fails the
 /// run without touching the others.
 fn resolve_literal(ctx: &Ctx, ids: &[ConversationId]) -> Result<Vec<Removal>, cmd::Error> {
     ids.iter()
-        .map(|id| {
-            let not_found = match ctx.workspace.acquire_conversation(id) {
-                Ok(handle) => return Ok(Removal::Loaded(handle)),
-                Err(error) => error,
-            };
-
-            let unloaded = ctx
-                .fs_backend
-                .as_ref()
-                .filter(|fs| !fs.live_conversation_dirs(id).is_empty())
-                .map(|fs| Removal::Unloaded {
-                    fs: Arc::clone(fs),
-                    id: *id,
-                });
-            unloaded.ok_or_else(|| crate::error::Error::from(not_found).into())
+        .map(|id| match ctx.workspace.acquire_conversation(id) {
+            Ok(handle) => Ok(Removal::Loaded(handle)),
+            Err(_) if ctx.workspace.unlisted_conversation(id).is_some() => {
+                Ok(Removal::Unloaded(*id))
+            }
+            Err(not_found) => Err(crate::error::Error::from(not_found).into()),
         })
         .collect()
 }
 
 /// Remove a conversation the index leaves out, asking first unless `force`.
 ///
-/// Its live directories, title, and status are read while its lock is held, so
-/// the prompt describes exactly what the removal deletes.
-/// Under `--no-persist` it checks the lock without taking it and deletes
-/// nothing.
-/// Returns whether the conversation was (or, in a dry run, would be) removed.
-fn remove_unloaded(
-    ctx: &Ctx,
-    fs: &FsStorageBackend,
-    id: ConversationId,
-    force: bool,
-) -> Result<bool, cmd::Error> {
-    let dry_run = !ctx.term.args.persist;
-    let locked = || cmd::Error::from(format!("Conversation {id} is in use by another process."));
-
-    let _guard = if dry_run {
-        if fs.is_conversation_locked(&id) {
-            return Err(locked());
-        }
-        None
-    } else {
-        Some(fs.try_lock(&id.to_string(), None)?.ok_or_else(locked)?)
-    };
-
-    let dirs = fs.live_conversation_dirs(&id);
-    if dirs.is_empty() {
-        // Removed by another process since it was resolved.
-        return Err(
-            crate::error::Error::from(WorkspaceError::not_found("Conversation", &id)).into(),
-        );
-    }
+/// What the prompt shows is read while the conversation's lock is held, so it
+/// describes exactly what the removal deletes.
+/// Returns whether the conversation was removed.
+fn remove_unloaded(ctx: &Ctx, id: ConversationId, force: bool) -> Result<bool, cmd::Error> {
+    let lock = ctx
+        .workspace
+        .lock_unlisted_conversation(&id)
+        .map_err(crate::error::Error::from)?
+        .ok_or_else(|| format!("Conversation {id} is in use by another process."))?;
 
     if !force {
-        let title = stored_title(fs, &id);
-        let status = unloaded_status(&dirs);
-        if !confirm_unloaded_removal(ctx, id, title.as_deref(), status.as_deref(), &dirs)? {
+        let conversation = lock.conversation();
+        let status = unloaded_status(&conversation.state);
+        let confirmed = confirm_unloaded_removal(
+            ctx,
+            id,
+            conversation.title.as_deref(),
+            status.as_deref(),
+            &conversation.locations,
+        )?;
+        if !confirmed {
             return Ok(false);
         }
     }
 
-    if !dry_run {
-        fs.remove(&id)?;
-    }
+    ctx.workspace
+        .remove_unlisted_conversation(lock)
+        .map_err(crate::error::Error::from)?;
     Ok(true)
 }
 
@@ -247,27 +215,13 @@ fn remove_unloaded(
 ///
 /// A conversation the index leaves out can load by the time it is removed, when
 /// another process finished writing it after this run's scan.
-fn unloaded_status(dirs: &[Utf8PathBuf]) -> Option<String> {
-    let mut contents = vec![];
-    for dir in dirs {
-        match validate_conversation_dir(dir) {
-            Ok(found) => contents.push(found),
-            Err(error) => return Some(format!("unable to load: {error}")),
-        }
+fn unloaded_status(state: &Result<DirContents, ValidationError>) -> Option<String> {
+    match state {
+        Err(error) => Some(format!("unable to load: {error}")),
+        Ok(DirContents::Stored) => None,
+        Ok(DirContents::Empty) => Some("empty conversation directory".to_owned()),
+        Ok(DirContents::Unstored) => Some("no conversation files".to_owned()),
     }
-
-    if contents.contains(&DirContents::Stored) {
-        None
-    } else if contents.iter().all(|found| *found == DirContents::Empty) {
-        Some("empty conversation directory".to_owned())
-    } else {
-        Some("no conversation files".to_owned())
-    }
-}
-
-/// The title stored for conversation `id`, if its metadata loads and has one.
-fn stored_title(fs: &FsStorageBackend, id: &ConversationId) -> Option<String> {
-    fs.load_conversation_metadata(id).ok()?.title
 }
 
 /// Remove one conversation, asking first unless `force` says the caller already

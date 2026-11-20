@@ -19,6 +19,7 @@ pub mod session;
 pub(crate) mod session_mapping;
 pub mod session_store;
 mod state;
+mod unlisted;
 
 use std::{
     collections::HashMap,
@@ -51,6 +52,7 @@ pub use sanitize::SanitizeReport;
 pub use session_mapping::SessionOverview;
 use state::State;
 use tracing::{debug, trace, warn};
+pub use unlisted::UnlistedLock;
 
 use crate::session::Session;
 

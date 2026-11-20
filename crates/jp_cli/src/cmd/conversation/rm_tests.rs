@@ -7,7 +7,10 @@ use crossterm::style::Stylize as _;
 use jp_config::AppConfig;
 use jp_conversation::{Conversation, ConversationId};
 use jp_printer::{OutputFormat, Printer, SharedBuffer};
-use jp_storage::backend::{FsStorageBackend, LockBackend as _};
+use jp_storage::{
+    backend::{FsStorageBackend, LockBackend as _, NullLockBackend, NullPersistBackend},
+    validate::{DirContents, FileError, ManagedFile, ValidationError},
+};
 use jp_workspace::Workspace;
 use tokio::runtime::Runtime;
 
@@ -208,6 +211,9 @@ struct Store {
 
 /// A `Ctx` over a workspace on disk with user-local storage, and nobody
 /// available to answer a prompt.
+///
+/// Without `persist`, the workspace writes and locks through the null backends,
+/// as `load_workspace` sets it up for `--no-persist`.
 fn store(persist: bool) -> Store {
     let tmp = camino_tempfile::tempdir().unwrap();
     let root = tmp.path().to_owned();
@@ -221,7 +227,12 @@ fn store(persist: bool) -> Store {
     let user = root.join("user").join("abc").join("conversations");
 
     let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
-    let ws = Workspace::in_memory(&root).with_backend(Arc::clone(&fs));
+    let mut ws = Workspace::in_memory(&root).with_backend(Arc::clone(&fs));
+    if !persist {
+        ws = ws
+            .with_persist(Arc::new(NullPersistBackend))
+            .with_locker(Arc::new(NullLockBackend));
+    }
     let mut ctx = Ctx::new(
         ExecutionContext::for_workspace(&ws),
         ws,
@@ -436,57 +447,30 @@ fn no_persist_removes_nothing_and_says_so() {
 
 #[test]
 fn the_status_says_why_a_conversation_does_not_load() {
-    let tmp = camino_tempfile::tempdir().unwrap();
-    let broken = write_dir(tmp.path(), "17941219991", &[("metadata.json", "not json")]);
-    let draft = write_dir(tmp.path(), "17941219992", &[("QUERY_MESSAGE.md", "typed")]);
-    let empty = write_dir(tmp.path(), "17941219993", &[]);
+    let corrupt = Err(ValidationError::UnreadableFile {
+        file: ManagedFile::Metadata,
+        source: FileError::Json(serde_json::from_str::<serde_json::Value>("not json").unwrap_err()),
+    });
 
     assert_eq!(
-        unloaded_status(&[broken]).as_deref(),
+        unloaded_status(&corrupt).as_deref(),
         Some("unable to load: metadata.json: invalid JSON at line 1, column 2")
     );
     assert_eq!(
-        unloaded_status(&[draft]).as_deref(),
+        unloaded_status(&Ok(DirContents::Unstored)).as_deref(),
         Some("no conversation files")
     );
     assert_eq!(
-        unloaded_status(&[empty]).as_deref(),
+        unloaded_status(&Ok(DirContents::Empty)).as_deref(),
         Some("empty conversation directory")
     );
 }
 
-// The title is whatever the stored metadata says, as for any conversation: a
-// conversation whose metadata is missing or does not parse has none.
-#[test]
-fn the_title_comes_from_the_stored_metadata() {
-    let tmp = camino_tempfile::tempdir().unwrap();
-    let fs = FsStorageBackend::new(tmp.path()).unwrap();
-    let conversations = tmp.path().join("conversations");
-    write_dir(&conversations, "17941219991-fix-the-loader", &[(
-        "metadata.json",
-        r#"{"title":"Fix the loader","last_activated_at":"2026-01-01T00:00:00Z"}"#,
-    )]);
-    write_dir(&conversations, "17941219992", &[("events.json", "[]")]);
-
-    assert_eq!(
-        stored_title(&fs, &id("17941219991")).as_deref(),
-        Some("Fix the loader")
-    );
-    assert_eq!(stored_title(&fs, &id("17941219992")), None);
-}
-
-// The status is read under the conversation's lock, so a conversation another
+// The state is read under the conversation's lock, so a conversation another
 // process finished writing after this run's scan has no status to report.
 #[test]
 fn a_conversation_that_loads_has_no_status() {
-    let tmp = camino_tempfile::tempdir().unwrap();
-    let fs = FsStorageBackend::new(tmp.path()).unwrap();
-    fs.write_test_conversation(&id("17941219993"), &Conversation::default());
-
-    assert_eq!(
-        unloaded_status(&fs.live_conversation_dirs(&id("17941219993"))),
-        None
-    );
+    assert_eq!(unloaded_status(&Ok(DirContents::Stored)), None);
 }
 
 #[test]

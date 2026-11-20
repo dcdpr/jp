@@ -19,7 +19,7 @@ use tracing::debug;
 
 use super::{
     ConversationFilter, ConversationIndexEntry, ConversationLockGuard, LoadBackend, LockBackend,
-    PersistBackend, Projection, SanitizeReport, SessionBackend,
+    PersistBackend, Projection, SanitizeReport, SessionBackend, UnlistedConversation,
 };
 use crate::{
     CONVERSATIONS_DIR, LoadError, Storage, conversation_dirs_for_id, dir_entries,
@@ -28,7 +28,10 @@ use crate::{
     load::load_json,
     load_conversation_id_from_entry,
     lock::LockInfo,
-    validate::{InvalidConversation, ValidationResult},
+    validate::{
+        DirContents, InvalidConversation, ValidationError, ValidationResult,
+        validate_conversation_dir,
+    },
 };
 
 /// Filesystem-backed storage that delegates to `Storage`.
@@ -223,14 +226,6 @@ impl FsStorageBackend {
             .collect()
     }
 
-    /// Whether another process holds conversation `id`'s lock.
-    ///
-    /// Checks without taking the lock, so nothing is written.
-    #[must_use]
-    pub fn is_conversation_locked(&self, id: &ConversationId) -> bool {
-        self.storage.is_conversation_locked(&id.to_string())
-    }
-
     /// Check every conversation directory in both roots without moving any.
     ///
     /// Sorts each directory into valid, unstored, or invalid.
@@ -366,6 +361,44 @@ impl LoadBackend for FsStorageBackend {
 
         Ok(SanitizeReport { invalid })
     }
+
+    fn unlisted_conversation(&self, id: &ConversationId) -> Option<UnlistedConversation> {
+        let locations = self.live_conversation_dirs(id);
+        if locations.is_empty() {
+            return None;
+        }
+
+        let state = combined_state(&locations);
+        let title = self
+            .storage
+            .load_conversation_metadata(id)
+            .ok()
+            .and_then(|metadata| metadata.title);
+
+        Some(UnlistedConversation {
+            id: *id,
+            locations,
+            state,
+            title,
+        })
+    }
+}
+
+/// The validation state of one conversation held in `dirs`; see
+/// [`UnlistedConversation::state`].
+fn combined_state(dirs: &[Utf8PathBuf]) -> std::result::Result<DirContents, ValidationError> {
+    let mut contents = vec![];
+    for dir in dirs {
+        contents.push(validate_conversation_dir(dir)?);
+    }
+
+    Ok(if contents.contains(&DirContents::Stored) {
+        DirContents::Stored
+    } else if contents.iter().all(|found| *found == DirContents::Empty) {
+        DirContents::Empty
+    } else {
+        DirContents::Unstored
+    })
 }
 
 impl LockBackend for FsStorageBackend {

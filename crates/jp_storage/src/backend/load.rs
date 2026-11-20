@@ -2,11 +2,15 @@
 
 use std::fmt::Debug;
 
+use camino::Utf8PathBuf;
 use chrono::{DateTime, Utc};
 use jp_config::PartialAppConfig;
 use jp_conversation::{Conversation, ConversationEvent, ConversationId, ConversationStream};
 
-use crate::{LoadError, validate::InvalidConversation};
+use crate::{
+    LoadError,
+    validate::{DirContents, InvalidConversation, ValidationError},
+};
 
 /// Controls which storage partition to scan.
 ///
@@ -126,6 +130,39 @@ pub trait LoadBackend: Send + Sync + Debug {
     /// report, because it may be partway through a write.
     /// In-memory backends hold only valid data and return an empty report.
     fn sanitize(&self) -> crate::error::Result<SanitizeReport>;
+
+    /// What the store holds for conversation `id`, read without loading the
+    /// conversation, so it describes one that fails to load or was never
+    /// stored.
+    ///
+    /// `None` when the store holds nothing for `id`.
+    /// In-memory backends hold only conversations that load, and return `None`.
+    fn unlisted_conversation(&self, _id: &ConversationId) -> Option<UnlistedConversation> {
+        None
+    }
+}
+
+/// A conversation's stored files, as [`LoadBackend::unlisted_conversation`]
+/// found them.
+#[derive(Debug)]
+pub struct UnlistedConversation {
+    pub id: ConversationId,
+
+    /// Where the store holds the conversation; for filesystem backends, its
+    /// directories, workspace first.
+    pub locations: Vec<Utf8PathBuf>,
+
+    /// The conversation's files as startup validation checks them.
+    ///
+    /// The first failure when any location fails, otherwise
+    /// [`DirContents::Stored`] when any location holds a stored conversation,
+    /// [`DirContents::Empty`] when every location is empty, and
+    /// [`DirContents::Unstored`] otherwise.
+    pub state: Result<DirContents, ValidationError>,
+
+    /// The title stored in the conversation's metadata, when the metadata loads
+    /// and has one.
+    pub title: Option<String>,
 }
 
 /// The conversations [`LoadBackend::sanitize`] found it cannot load.
