@@ -17,12 +17,8 @@ rm` without modifying anything on disk.
 
 - [ ] Lists conversations with no turns and a query draft as unsent drafts, as
       a notice: what a run interrupted before its turn leaves, and what the
-      one-time draft migration (`jp_cli::draft_migration`) made of older
-      draft-only directories
-- [ ] Lists the unstored conversation directories still left
-      (`SanitizeReport::unstored`): empty ones, and draft-only ones the
-      migration skipped because the conversation also has a directory in the
-      other storage root
+      one-time trash restore made of the draft-only directories older versions
+      trashed
 - [ ] Suggests removing all listed unsent drafts with one command,
       `jp conversation rm <id> <id> ...`, and shows each draft's first line so
       the user sees what they would lose

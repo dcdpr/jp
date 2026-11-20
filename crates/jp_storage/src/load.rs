@@ -167,10 +167,8 @@ pub fn projected_conversation_ids(storage_dir: &Utf8Path) -> Vec<ConversationId>
 ///
 /// Dot-prefixed entries (`.trash/`, leftover `.tmp`/`.staging-`/`.old-` dirs
 /// from older versions) are skipped by [`load_conversation_id_from_entry`].
-/// Directories holding none of the managed files are skipped too: they hold no
-/// stored conversation (see [`UnstoredConversation`]).
-///
-/// [`UnstoredConversation`]: crate::validate::UnstoredConversation
+/// Directories holding none of the conversation files are skipped too: they
+/// hold no stored conversation.
 fn scan_conversation_ids(path: &Utf8Path) -> Vec<ConversationId> {
     let entries: Vec<_> = dir_entries(path).collect();
     entries

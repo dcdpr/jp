@@ -1,7 +1,7 @@
 use clap::{ArgMatches, Command};
 use crossterm::style::Stylize as _;
 use jp_conversation::ConversationId;
-use jp_storage::validate::{DirContents, ValidationError};
+use jp_storage::validate::ValidationError;
 use jp_workspace::{ConversationHandle, Workspace};
 
 use crate::{
@@ -215,13 +215,11 @@ fn remove_unloaded(ctx: &Ctx, id: ConversationId, force: bool) -> Result<bool, c
 ///
 /// A conversation the index leaves out can load by the time it is removed, when
 /// another process finished writing it after this run's scan.
-fn unloaded_status(state: &Result<DirContents, ValidationError>) -> Option<String> {
-    match state {
-        Err(error) => Some(format!("unable to load: {error}")),
-        Ok(DirContents::Stored) => None,
-        Ok(DirContents::Empty) => Some("empty conversation directory".to_owned()),
-        Ok(DirContents::Unstored) => Some("no conversation files".to_owned()),
-    }
+fn unloaded_status(state: &Result<(), ValidationError>) -> Option<String> {
+    state
+        .as_ref()
+        .err()
+        .map(|error| format!("unable to load: {error}"))
 }
 
 /// Remove one conversation, asking first unless `force` says the caller already

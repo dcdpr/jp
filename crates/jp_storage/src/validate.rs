@@ -9,7 +9,7 @@ use tracing::{debug, trace};
 pub use crate::location::StorageLocation;
 use crate::{
     BASE_CONFIG_FILE, CONVERSATIONS_DIR, EVENTS_FILE, IMPORT_STAGING_PREFIX, METADATA_FILE,
-    Storage, dir_entries, holds_managed_files,
+    Storage, dir_entries,
     scan::{DirStamps, EventsSummary, SCAN_CACHE_FILE, ScanCache, ScannedDir},
     value::{cleanup_tmp_files, has_tmp_files},
 };
@@ -19,10 +19,6 @@ use crate::{
 pub struct ValidationResult {
     /// Conversations that passed all validation checks.
     pub valid: Vec<ValidConversation>,
-
-    /// Directories named for a conversation that hold none of the managed
-    /// files.
-    pub unstored: Vec<UnstoredConversation>,
 
     /// Conversations that failed one or more validation checks.
     pub invalid: Vec<InvalidConversation>,
@@ -41,19 +37,6 @@ pub struct ValidConversation {
 
     /// The directory name on disk.
     pub dirname: String,
-}
-
-/// A directory named for a conversation whose first write never happened.
-///
-/// It holds none of the managed files (`metadata.json`, `base_config.json`,
-/// `events.json`), only whatever was put there before the conversation was
-/// stored, such as the query draft of a run that ended before its first write.
-/// It is not a conversation: it is never indexed, never loaded, and never
-/// reported as a validation failure.
-#[derive(Debug)]
-pub struct UnstoredConversation {
-    pub id: ConversationId,
-    pub path: Utf8PathBuf,
 }
 
 /// A conversation directory that failed validation.
@@ -456,39 +439,15 @@ fn validate_root(
 
     for ((entry, _), outcome) in named.into_iter().zip(outcomes) {
         match outcome {
-            Ok(Validated::Stored(valid, scan)) => {
+            Ok((valid, scan)) => {
                 result.valid.push(valid);
                 if let Some(scan) = scan {
                     scanned.push((entry.into_path(), scan));
                 }
             }
-            Ok(Validated::Unstored(unstored)) => result.unstored.push(unstored),
             Err(e) => result.invalid.push(e),
         }
     }
-}
-
-/// A conversation directory that passed validation.
-enum Validated {
-    /// A stored conversation, with its scan record when its file stamps are
-    /// complete.
-    Stored(ValidConversation, Option<ScannedDir>),
-
-    /// A directory holding none of the managed files.
-    Unstored(UnstoredConversation),
-}
-
-/// What a conversation directory that passes validation holds.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DirContents {
-    /// A stored conversation.
-    Stored,
-
-    /// Files, but none of the managed ones; see [`UnstoredConversation`].
-    Unstored,
-
-    /// Nothing at all.
-    Empty,
 }
 
 /// Check one conversation directory's files the way startup validation checks
@@ -500,8 +459,8 @@ pub enum DirContents {
 /// # Errors
 ///
 /// Returns the reason the directory fails validation.
-pub fn validate_conversation_dir(dir: &Utf8Path) -> Result<DirContents, ValidationError> {
-    check_files(dir, &ScanCache::default()).map(|(contents, _)| contents)
+pub fn validate_conversation_dir(dir: &Utf8Path) -> Result<(), ValidationError> {
+    check_files(dir, &ScanCache::default()).map(|_| ())
 }
 
 /// Validate a single conversation directory entry named for `id`.
@@ -511,21 +470,15 @@ fn validate_entry(
     id: ConversationId,
     entry_path: &Utf8Path,
     cache: &ScanCache,
-) -> Result<Validated, InvalidConversation> {
+) -> Result<(ValidConversation, Option<ScannedDir>), InvalidConversation> {
     match check_files(entry_path, cache) {
-        Ok((DirContents::Stored, scan)) => Ok(Validated::Stored(
+        Ok(scan) => Ok((
             ValidConversation {
                 id,
                 dirname: dirname.to_owned(),
             },
             scan,
         )),
-        Ok((DirContents::Unstored | DirContents::Empty, _)) => {
-            Ok(Validated::Unstored(UnstoredConversation {
-                id,
-                path: entry_path.to_path_buf(),
-            }))
-        }
         Err(error) => Err(InvalidConversation {
             conversations_dir: conversations_dir.to_path_buf(),
             id,
@@ -535,31 +488,16 @@ fn validate_entry(
     }
 }
 
-/// Check the managed files in `dir`.
+/// Check the conversation files in `dir`.
 ///
-/// Returns [`ScannedDir`] alongside a stored conversation when `metadata.json`
-/// and `events.json` both have valid file stamps.
-fn check_files(
-    dir: &Utf8Path,
-    cache: &ScanCache,
-) -> Result<(DirContents, Option<ScannedDir>), ValidationError> {
-    if !holds_managed_files(dir) {
-        let empty = dir
-            .read_dir_utf8()
-            .is_ok_and(|mut entries| entries.next().is_none());
-        let contents = if empty {
-            DirContents::Empty
-        } else {
-            DirContents::Unstored
-        };
-        return Ok((contents, None));
-    }
-
+/// Returns [`ScannedDir`] when `metadata.json` and `events.json` both have
+/// valid file stamps.
+fn check_files(dir: &Utf8Path, cache: &ScanCache) -> Result<Option<ScannedDir>, ValidationError> {
     // Capture file stamps before reading any files so a mid-check write keeps
     // the older stamp and is re-read on the next scan.
     let stamps = DirStamps::of(dir);
     if let Some(scan) = cache.get(dir, &stamps) {
-        return Ok((DirContents::Stored, Some(scan)));
+        return Ok(Some(scan));
     }
 
     let path = |part: ConversationPart| dir.join(part.file_name());
@@ -596,7 +534,7 @@ fn check_files(
     let summary = validate_events(&events_path)
         .map_err(|error| unreadable(ConversationPart::Events, error))?;
 
-    Ok((DirContents::Stored, stamps.scanned(summary)))
+    Ok(stamps.scanned(summary))
 }
 
 /// Confirm `metadata.json` is a valid JSON object.

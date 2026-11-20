@@ -29,10 +29,7 @@ use crate::{
     load_conversation_id_from_entry,
     location::StorageLocation,
     lock::LockInfo,
-    validate::{
-        DirContents, InvalidConversation, ValidationError, ValidationResult,
-        validate_conversation_dir,
-    },
+    validate::{InvalidConversation, ValidationResult, validate_conversation_dir},
 };
 
 /// Filesystem-backed storage that delegates to `Storage`.
@@ -229,7 +226,7 @@ impl FsStorageBackend {
 
     /// Check every conversation directory in both roots without moving any.
     ///
-    /// Sorts each directory into valid, unstored, or invalid.
+    /// Sorts each directory into valid or invalid.
     /// See [`Storage::validate_conversations`] for the checks.
     #[must_use]
     pub fn validate_conversations(&self) -> ValidationResult {
@@ -362,14 +359,7 @@ impl LoadBackend for FsStorageBackend {
             .collect();
         invalid.sort_by_key(InvalidConversation::path);
 
-        let mut unstored: Vec<_> = validation
-            .unstored
-            .into_iter()
-            .filter(|entry| unlocked(&entry.id))
-            .collect();
-        unstored.sort_by(|a, b| a.path.cmp(&b.path));
-
-        Ok(SanitizeReport { invalid, unstored })
+        Ok(SanitizeReport { invalid })
     }
 
     fn unlisted_conversation(&self, id: &ConversationId) -> Option<UnlistedConversation> {
@@ -378,7 +368,9 @@ impl LoadBackend for FsStorageBackend {
             return None;
         }
 
-        let state = combined_state(&dirs);
+        let state = dirs
+            .iter()
+            .try_for_each(|dir| validate_conversation_dir(dir));
         let locations = dirs
             .iter()
             .map(|dir| StorageLocation::of_path(dir))
@@ -396,23 +388,6 @@ impl LoadBackend for FsStorageBackend {
             title,
         })
     }
-}
-
-/// The validation state of one conversation held in `dirs`; see
-/// [`UnlistedConversation::state`].
-fn combined_state(dirs: &[Utf8PathBuf]) -> std::result::Result<DirContents, ValidationError> {
-    let mut contents = vec![];
-    for dir in dirs {
-        contents.push(validate_conversation_dir(dir)?);
-    }
-
-    Ok(if contents.contains(&DirContents::Stored) {
-        DirContents::Stored
-    } else if contents.iter().all(|found| *found == DirContents::Empty) {
-        DirContents::Empty
-    } else {
-        DirContents::Unstored
-    })
 }
 
 impl LockBackend for FsStorageBackend {

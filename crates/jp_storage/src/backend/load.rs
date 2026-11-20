@@ -8,9 +8,7 @@ use jp_conversation::{Conversation, ConversationEvent, ConversationId, Conversat
 
 use crate::{
     LoadError,
-    validate::{
-        DirContents, InvalidConversation, StorageLocation, UnstoredConversation, ValidationError,
-    },
+    validate::{InvalidConversation, StorageLocation, ValidationError},
 };
 
 /// Controls which storage partition to scan.
@@ -133,8 +131,7 @@ pub trait LoadBackend: Send + Sync + Debug {
     fn sanitize(&self) -> crate::error::Result<SanitizeReport>;
 
     /// What the store holds for conversation `id`, read without loading the
-    /// conversation, so it describes one that fails to load or was never
-    /// stored.
+    /// conversation, so it describes one that fails to load.
     ///
     /// `None` when the store holds nothing for `id`.
     /// In-memory backends hold only conversations that load, and return `None`.
@@ -153,13 +150,9 @@ pub struct UnlistedConversation {
     /// directories, workspace first.
     pub locations: Vec<StorageLocation>,
 
-    /// The conversation's files as startup validation checks them.
-    ///
-    /// The first failure when any location fails, otherwise
-    /// [`DirContents::Stored`] when any location holds a stored conversation,
-    /// [`DirContents::Empty`] when every location is empty, and
-    /// [`DirContents::Unstored`] otherwise.
-    pub state: Result<DirContents, ValidationError>,
+    /// The conversation's files as startup validation checks them: the first
+    /// failure when any location fails.
+    pub state: Result<(), ValidationError>,
 
     /// The title stored in the conversation's metadata, when the metadata loads
     /// and has one.
@@ -171,8 +164,4 @@ pub struct UnlistedConversation {
 pub struct SanitizeReport {
     /// Conversation directories that failed validation, sorted by path.
     pub invalid: Vec<InvalidConversation>,
-
-    /// Conversation directories holding none of the conversation files, sorted
-    /// by path.
-    pub unstored: Vec<UnstoredConversation>,
 }

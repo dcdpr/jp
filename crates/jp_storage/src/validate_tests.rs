@@ -286,12 +286,11 @@ fn test_corrupt_events_is_detected() {
     );
 }
 
-// A fresh conversation composes its query draft in its directory before the
-// first write stores anything, and a run that ends in between leaves the draft
-// there as the only copy of what the user typed. That is a conversation not yet
-// stored, not a broken one.
+// A conversation is stored before anything else is written into its directory,
+// so a directory without the conversation's files is missing them, whatever
+// else it holds.
 #[test]
-fn a_directory_without_managed_files_is_unstored() {
+fn a_directory_without_conversation_files_is_invalid() {
     let tmp = tempdir().unwrap();
     let storage = Storage::new(tmp.path()).unwrap();
     let convs = tmp.path().join(CONVERSATIONS_DIR);
@@ -305,23 +304,16 @@ fn a_directory_without_managed_files_is_unstored() {
 
     let result = storage.validate_conversations();
     assert!(result.valid.is_empty());
-    assert!(result.invalid.is_empty());
 
-    let mut unstored: Vec<_> = result
-        .unstored
+    let mut invalid: Vec<_> = result
+        .invalid
         .iter()
-        .map(|entry| (entry.id, entry.path.clone()))
+        .map(|entry| (entry.path(), entry.error.to_string()))
         .collect();
-    unstored.sort();
-    assert_eq!(unstored, [
-        (
-            ConversationId::try_from_deciseconds_str("17636257526").unwrap(),
-            drafted
-        ),
-        (
-            ConversationId::try_from_deciseconds_str("17636257527").unwrap(),
-            empty
-        ),
+    invalid.sort();
+    assert_eq!(invalid, [
+        (drafted, "missing metadata".to_owned()),
+        (empty, "missing metadata".to_owned()),
     ]);
 }
 
@@ -335,24 +327,16 @@ fn a_single_directory_is_validated_outside_the_conversations_dir() {
     let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
     write_valid(&elsewhere, &id);
     let stored = elsewhere.join(CONVERSATIONS_DIR).join(id.to_dirname(None));
-    assert!(matches!(
-        validate_conversation_dir(&stored),
-        Ok(DirContents::Stored)
-    ));
-
-    let unstored = tmp.path().join("17636257527");
-    fs::create_dir_all(&unstored).unwrap();
-    fs::write(unstored.join("QUERY_MESSAGE.md"), "typed request").unwrap();
-    assert!(matches!(
-        validate_conversation_dir(&unstored),
-        Ok(DirContents::Unstored)
-    ));
+    assert_eq!(validate_conversation_dir(&stored), Ok(()));
 
     let empty = tmp.path().join("17636257529");
     fs::create_dir_all(&empty).unwrap();
     assert!(matches!(
         validate_conversation_dir(&empty),
-        Ok(DirContents::Empty)
+        Err(ValidationError::Missing {
+            part: ConversationPart::Metadata,
+            ..
+        })
     ));
 
     // The checks are on the files alone, whatever the directory is named.

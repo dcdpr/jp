@@ -9,9 +9,7 @@ use jp_conversation::{Conversation, ConversationId};
 use jp_printer::{OutputFormat, Printer, SharedBuffer};
 use jp_storage::{
     backend::{FsStorageBackend, LockBackend as _, NullLockBackend, NullPersistBackend},
-    validate::{
-        ConversationPart, DirContents, Position, ReadError, StorageLocation, ValidationError,
-    },
+    validate::{ConversationPart, Position, ReadError, StorageLocation, ValidationError},
 };
 use jp_workspace::Workspace;
 use tokio::runtime::Runtime;
@@ -462,21 +460,13 @@ fn the_status_says_why_a_conversation_does_not_load() {
         unloaded_status(&corrupt).as_deref(),
         Some("unable to load: metadata: malformed at line 1, column 2")
     );
-    assert_eq!(
-        unloaded_status(&Ok(DirContents::Unstored)).as_deref(),
-        Some("no conversation files")
-    );
-    assert_eq!(
-        unloaded_status(&Ok(DirContents::Empty)).as_deref(),
-        Some("empty conversation directory")
-    );
 }
 
 // The state is read under the conversation's lock, so a conversation another
 // process finished writing after this run's scan has no status to report.
 #[test]
 fn a_conversation_that_loads_has_no_status() {
-    assert_eq!(unloaded_status(&Ok(DirContents::Stored)), None);
+    assert_eq!(unloaded_status(&Ok(())), None);
 }
 
 #[test]

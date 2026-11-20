@@ -4032,17 +4032,12 @@ fn stored_conversation_ids(root: &Utf8Path) -> Vec<ConversationId> {
 /// Assert every conversation directory in the store holds a valid, stored
 /// conversation.
 ///
-/// A directory left behind without its managed files is not indexed, so an id
-/// assertion alone does not catch it.
+/// A directory left behind without the conversation's files is not indexed, so
+/// an id assertion alone does not catch it.
 fn assert_store_holds_only_conversations(root: &Utf8Path) {
     let result = test_backend(root).validate_conversations();
 
     assert!(result.invalid.is_empty(), "invalid: {:?}", result.invalid);
-    assert!(
-        result.unstored.is_empty(),
-        "unstored: {:?}",
-        result.unstored
-    );
 }
 
 /// Run `jp query <args>` to completion, without `parse_query`'s `--no-edit`:

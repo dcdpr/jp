@@ -16,7 +16,7 @@ use crate::{
     backend::{
         ConversationFilter, FsStorageBackend, LoadBackend as _, Projection, StoragePresence,
     },
-    validate::{ConversationPart, DirContents, StorageLocation, ValidationError},
+    validate::{ConversationPart, StorageLocation, ValidationError},
 };
 
 #[test]
@@ -189,10 +189,10 @@ fn load_conversation_index_still_skips_trash() {
     assert!(ids.is_empty(), ".trash should still be invisible to scan");
 }
 
-// A directory holding none of the managed files was never stored, so there is
-// no conversation to list or load, only a query draft waiting to be sent.
+// A directory holding none of the conversation's files has nothing to list or
+// load, whatever else it holds.
 #[test]
-fn load_conversation_index_skips_unstored_directories() {
+fn load_conversation_index_skips_directories_without_conversation_files() {
     let tmp = tempdir().unwrap();
     let storage = Storage::new(tmp.path()).unwrap();
     let convs = tmp.path().join(CONVERSATIONS_DIR);
@@ -200,9 +200,9 @@ fn load_conversation_index_skips_unstored_directories() {
     let stored = ConversationId::try_from_deciseconds_str("17636257521").unwrap();
     write_valid_conv_dir(&convs, &stored);
 
-    let unstored = convs.join("17636257522");
-    fs::create_dir_all(&unstored).unwrap();
-    fs::write(unstored.join("QUERY_MESSAGE.md"), "typed request").unwrap();
+    let drafted = convs.join("17636257522");
+    fs::create_dir_all(&drafted).unwrap();
+    fs::write(drafted.join("QUERY_MESSAGE.md"), "typed request").unwrap();
 
     let ids: Vec<_> = storage
         .load_conversation_index(ConversationFilter::default())
@@ -341,11 +341,13 @@ fn an_unlisted_conversation_reports_its_files_title_and_directories() {
     let found = backend.unlisted_conversation(&id("17941219992")).unwrap();
     assert_eq!(found.locations, [StorageLocation::new(draft.as_str())]);
     assert_eq!(found.title, None);
-    assert!(matches!(found.state, Ok(DirContents::Unstored)));
-
-    fs::create_dir_all(workspace.join("17941219993")).unwrap();
-    let found = backend.unlisted_conversation(&id("17941219993")).unwrap();
-    assert!(matches!(found.state, Ok(DirContents::Empty)));
+    assert_eq!(
+        found.state,
+        Err(ValidationError::Missing {
+            part: ConversationPart::Metadata,
+            location: StorageLocation::new(draft.join(METADATA_FILE).as_str()),
+        })
+    );
 
     assert!(backend.unlisted_conversation(&id("17941219994")).is_none());
 }

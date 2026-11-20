@@ -179,10 +179,11 @@ fn test_only_invalid_conversations_produce_an_empty_index() {
     assert_eq!(ws.conversations().count(), 0);
 }
 
-// The shape an interrupted `jp query --new` leaves: the request the user typed,
-// in a directory the conversation's first write never reached.
+// The shape an older `jp query --new` left when interrupted: the request the
+// user typed, in a directory the conversation's first write never reached. It
+// is reported, and the draft stays where it is.
 #[test]
-fn test_unstored_conversation_is_left_in_place_and_not_indexed() {
+fn test_a_draft_without_conversation_files_is_reported_and_left_in_place() {
     let (_tmp, backend, mut ws) = setup();
 
     let id = ConversationId::try_from(datetime!(2024-01-01 00:00:00 Z)).unwrap();
@@ -191,14 +192,13 @@ fn test_unstored_conversation_is_left_in_place_and_not_indexed() {
     fs::write(dir.join("QUERY_MESSAGE.md"), "typed request").unwrap();
 
     let report = ws.sanitize().unwrap();
-    assert!(report.invalid.is_empty());
     assert_eq!(
         report
-            .unstored
+            .invalid
             .iter()
-            .map(|unstored| (unstored.id, unstored.path.clone()))
+            .map(|invalid| (invalid.id, invalid.error.to_string()))
             .collect::<Vec<_>>(),
-        [(id, dir.clone())]
+        [(id, "missing metadata".to_owned())]
     );
     assert_eq!(
         fs::read_to_string(dir.join("QUERY_MESSAGE.md")).unwrap(),
@@ -209,18 +209,17 @@ fn test_unstored_conversation_is_left_in_place_and_not_indexed() {
     assert_eq!(ws.conversations().count(), 0);
 }
 
-// Another process may be about to store the conversation it is composing in.
+// Another process may be between the writes of the conversation's files.
 #[test]
-fn test_a_locked_unstored_conversation_is_not_reported() {
+fn test_a_locked_conversation_without_files_is_not_reported() {
     let (_tmp, backend, mut ws) = setup();
 
     let id = ConversationId::try_from(datetime!(2024-01-01 00:00:00 Z)).unwrap();
     let dir = backend.build_conversation_dir(&id, None, true);
     fs::create_dir_all(&dir).unwrap();
-    fs::write(dir.join("QUERY_MESSAGE.md"), "typed request").unwrap();
     let _held = backend.try_lock(&id.to_string(), None).unwrap().unwrap();
 
-    assert!(ws.sanitize().unwrap().unstored.is_empty());
+    assert!(ws.sanitize().unwrap().invalid.is_empty());
 }
 
 #[test]
