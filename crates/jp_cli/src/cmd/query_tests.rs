@@ -2524,76 +2524,6 @@ async fn a_conversation_keeps_the_default_plugin_policy_it_was_created_under() {
     );
 }
 
-/// A backend with user-local storage and a conversation directory in it,
-/// holding the draft `jp query` would have composed.
-///
-/// The temp dir comes back so the caller keeps it alive.
-fn draft_fixture() -> (FsStorageBackend, ConversationId, Utf8PathBuf, Utf8TempDir) {
-    let tmp = camino_tempfile::tempdir().unwrap();
-    let fs = FsStorageBackend::new(&tmp.path().join(".jp"))
-        .unwrap()
-        .with_user_storage(&tmp.path().join("user"), None, "abc")
-        .unwrap();
-
-    let id = make_id(1_700_000_000);
-    let dir = fs.build_conversation_dir(&id, None, true);
-    std::fs::create_dir_all(&dir).unwrap();
-
-    let path = dir.join(editor::QUERY_FILENAME);
-    std::fs::write(&path, "the request this turn sent").unwrap();
-
-    (fs, id, path, tmp)
-}
-
-/// A draft replaced while the turn ran belongs to whoever wrote it: a plugin
-/// through `write_draft`, or another `jp` process.
-/// A successful turn removes the request it sent, not text it never saw.
-#[test]
-fn cleanup_keeps_a_draft_written_after_the_request() {
-    let (fs, id, path, _tmp) = draft_fixture();
-    let at_send = draft_fingerprint(Some(&fs), &id);
-
-    std::fs::write(&path, "the follow-up typed during the turn").unwrap();
-
-    cleanup_query_message_file(
-        Some(&fs),
-        &id,
-        DraftRemoval::IfUnchanged(at_send.as_deref()),
-    );
-
-    assert_eq!(
-        std::fs::read_to_string(&path).unwrap(),
-        "the follow-up typed during the turn"
-    );
-}
-
-#[test]
-fn cleanup_removes_the_draft_the_turn_sent() {
-    let (fs, id, path, _tmp) = draft_fixture();
-    let at_send = draft_fingerprint(Some(&fs), &id);
-
-    cleanup_query_message_file(
-        Some(&fs),
-        &id,
-        DraftRemoval::IfUnchanged(at_send.as_deref()),
-    );
-
-    assert!(!path.exists(), "the request that was sent is cleaned up");
-}
-
-/// An emptied editor buffer discards the draft it was seeded from, whatever it
-/// now holds.
-#[test]
-fn cleanup_any_removes_a_replaced_draft() {
-    let (fs, id, path, _tmp) = draft_fixture();
-
-    std::fs::write(&path, "something else entirely").unwrap();
-
-    cleanup_query_message_file(Some(&fs), &id, DraftRemoval::Any);
-
-    assert!(!path.exists());
-}
-
 #[test]
 fn resolve_new_title_uses_leading_heading() {
     assert_eq!(
@@ -4058,12 +3988,17 @@ fn editor_ctx(
     // it five times with backoff is time these tests would only spend waiting.
     config.assistant.request.max_retries = 0;
 
+    // A run that stores what it does, as `jp query` without `--no-persist` is:
+    // the derived default of `Globals` reads as `--no-persist`.
     let mut ctx = Ctx::new(
         crate::bootstrap::ExecutionContext::for_workspace(&workspace),
         workspace,
         Some(fs),
         Runtime::new().unwrap(),
-        Globals::default(),
+        Globals {
+            persist: true,
+            ..Globals::default()
+        },
         config,
         Some(session.clone()),
         printer,
@@ -4432,6 +4367,69 @@ fn run_renaming_query_keeps_the_composed_draft() {
     let storage = FsStorageBackend::new(&tmp.path().join(".jp")).unwrap();
     let metadata = storage.load_conversation_metadata(&id).unwrap();
     assert_eq!(metadata.title.as_deref(), Some("New"));
+}
+
+// A query draft never sits in a directory without the conversation's own
+// files: the `--new` conversation is stored before the editor writes the draft.
+// The editor here records what its directory holds when it opens, as the
+// request it sends.
+#[test]
+fn run_new_query_stores_the_conversation_before_the_draft() {
+    let session = Session {
+        id: SessionId::new("jp-cli-draft-order-test").unwrap(),
+        source: SessionSource::env("JP_SESSION"),
+    };
+    let (mut ctx, _out, _err, tmp) = editor_ctx(
+        &session,
+        r#"sh -c 'LC_ALL=C ls "$(dirname "$1")" > "$1"' jp-editor"#,
+    );
+
+    let error = run_query(&mut ctx, &["--new"]).unwrap_err();
+    assert_eq!(error.message.as_deref(), Some("Stream error"));
+
+    let [id] = <[ConversationId; 1]>::try_from(stored_conversation_ids(tmp.path())).unwrap();
+    let dir = test_backend(tmp.path())
+        .find_user_local_conversation_dir(&id)
+        .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(dir.join(editor::QUERY_FILENAME)).unwrap(),
+        "QUERY_MESSAGE.md\nbase_config.json\nevents.json\nmetadata.json\n"
+    );
+    assert_store_holds_only_conversations(tmp.path());
+}
+
+// Under `--no-persist` nothing is written to storage, the editor's draft
+// included.
+#[test]
+fn run_no_persist_editor_query_writes_no_draft() {
+    let session = Session {
+        id: SessionId::new("jp-cli-no-persist-editor-test").unwrap(),
+        source: SessionSource::env("JP_SESSION"),
+    };
+    let (ctx, _out, _err, tmp) = editor_ctx(
+        &session,
+        r#"sh -c 'printf "typed request\n" > "$1"' jp-editor"#,
+    );
+    let mut ctx = no_persist(ctx);
+
+    let error = run_query(&mut ctx, &["--new"]).unwrap_err();
+    assert_eq!(error.message.as_deref(), Some("Stream error"));
+
+    let backend = test_backend(tmp.path());
+    let user = backend.user_storage_path().unwrap();
+    assert!(!user.join("conversations").exists());
+    assert_eq!(stored_conversation_ids(tmp.path()), []);
+}
+
+/// `ctx` as `load_workspace` sets it up for `--no-persist`: writes and locks go
+/// to the null backends.
+fn no_persist(mut ctx: Ctx) -> Ctx {
+    let workspace = std::mem::replace(&mut ctx.workspace, Workspace::in_memory("/unused"));
+    ctx.workspace = workspace
+        .with_persist(Arc::new(NullPersistBackend))
+        .with_locker(Arc::new(NullLockBackend));
+    ctx.term.args.persist = false;
+    ctx
 }
 
 // The other side of the deferral for `--tmp`: a query that does go ahead stores
