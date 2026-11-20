@@ -16,8 +16,11 @@ pub(crate) mod workspace;
 
 use std::{fmt, iter, num::NonZeroU8};
 
+use camino::Utf8Path;
 use clap::{ArgMatches, Command, error::ErrorKind, value_parser};
+use crossterm::style::Stylize as _;
 use jp_config::PartialAppConfig;
+use jp_conversation::ConversationId;
 use jp_workspace::Workspace;
 use serde_json::Value;
 pub(crate) use target::ConversationLoadRequest;
@@ -1126,20 +1129,32 @@ impl From<jp_storage::Error> for Error {
                 ("id", id.to_string().into()),
             ]
             .into(),
-            Error::ConversationExists { id, from, existing } => [
-                (
-                    "message",
-                    "Another copy of this conversation is in the way; nothing was moved.".into(),
-                ),
-                ("id", id.to_string().into()),
-                ("from", from.to_string().into()),
-                ("existing", existing.to_string().into()),
-            ]
-            .into(),
+            Error::ConversationExists { id, from, existing } => {
+                conversation_exists(id, &from, &existing)
+            }
         };
 
         Self::from(metadata)
     }
+}
+
+/// The error for a conversation moved from `from` onto `existing`, another copy
+/// of it.
+fn conversation_exists(
+    id: ConversationId,
+    from: &Utf8Path,
+    existing: &Utf8Path,
+) -> Vec<(&'static str, Value)> {
+    let subject = format!("Conversation {id}").bold().yellow();
+
+    vec![
+        (
+            "message",
+            format!("{subject} already exists at destination").into(),
+        ),
+        ("from", from.to_string().into()),
+        ("existing", existing.to_string().into()),
+    ]
 }
 
 impl From<jp_id::Error> for Error {
