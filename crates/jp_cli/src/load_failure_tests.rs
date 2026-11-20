@@ -1,4 +1,4 @@
-use std::io;
+use std::{fs, io};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use crossterm::style::Stylize as _;
@@ -243,6 +243,22 @@ fn the_text_report_prints_when_the_notice_drops_even_under_quiet() {
         "1 conversation failed to load:\n  jp-c17941219994: metadata.json: invalid JSON at line \
          1, column 2\nRun `jp conversation rm jp-c17941219994` to remove it.\n"
     );
+}
+
+// The report prints after the command, so a conversation the command removed
+// (`jp c rm`) or fixed is not reported as failing, nor offered for removal.
+#[test]
+fn a_conversation_the_command_dealt_with_is_not_reported() {
+    let tmp = camino_tempfile::tempdir().unwrap();
+    let invalid = validated_store(tmp.path());
+    let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
+
+    let report = notice(printer.clone(), &invalid);
+    fs::remove_dir_all(tmp.path().join("conversations/17941219994")).unwrap();
+    drop(report);
+    printer.flush();
+
+    assert_eq!(err.lock().as_str(), "");
 }
 
 #[test]

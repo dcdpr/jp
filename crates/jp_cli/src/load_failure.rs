@@ -4,12 +4,16 @@
 //! them where they are.
 //! [`notice`] prints the report on stderr after the command's own output:
 //! [`render_text`] for the text formats, [`render_json`] for the JSON formats.
+//! Each directory is checked again when the report prints, so one the command
+//! removed or fixed is left out.
 
 use camino::{Utf8Path, Utf8PathBuf};
 use crossterm::style::Stylize as _;
 use jp_conversation::ConversationId;
 use jp_printer::Printer;
-use jp_storage::validate::{FileError, InvalidConversation, ValidationError};
+use jp_storage::validate::{
+    FileError, InvalidConversation, ValidationError, validate_conversation_dir,
+};
 use serde::Serialize;
 use tracing::warn;
 
@@ -53,17 +57,58 @@ impl LoadFailure<'_> {
 /// Log each failure, and return the report printed on stderr when it drops.
 ///
 /// Under the JSON output formats the report is one record per failure.
-pub(crate) fn notice(printer: Printer, invalid: &[InvalidConversation]) -> DeferredReport {
-    let failures: Vec<_> = invalid.iter().map(LoadFailure::from).collect();
-    for failure in &failures {
+pub(crate) fn notice(printer: Printer, invalid: &[InvalidConversation]) -> LoadFailureNotice {
+    for failure in invalid.iter().map(LoadFailure::from) {
         failure.log();
     }
 
-    DeferredReport::new(
+    LoadFailureNotice {
         printer,
-        || render_text(&failures),
-        |pretty| render_json(&failures, pretty),
-    )
+        dirs: invalid.iter().map(InvalidConversation::path).collect(),
+    }
+}
+
+/// The load-failure report, printed on stderr when dropped.
+///
+/// Holds the directories that failed startup validation, and reports those that
+/// still exist and still fail when it drops.
+pub(crate) struct LoadFailureNotice {
+    printer: Printer,
+    dirs: Vec<Utf8PathBuf>,
+}
+
+impl Drop for LoadFailureNotice {
+    fn drop(&mut self) {
+        let still_failing: Vec<_> = self
+            .dirs
+            .drain(..)
+            .filter(|dir| dir.is_dir())
+            .filter_map(|dir| {
+                validate_conversation_dir(&dir)
+                    .err()
+                    .map(|error| (dir, error))
+            })
+            .collect();
+
+        let failures: Vec<_> = still_failing
+            .iter()
+            .map(|(dir, error)| {
+                let dirname = dir.file_name().unwrap_or_default();
+                LoadFailure {
+                    id: ConversationId::try_from_dirname(dirname).ok(),
+                    dirname,
+                    path: dir.clone(),
+                    error,
+                }
+            })
+            .collect();
+
+        drop(DeferredReport::new(
+            self.printer.clone(),
+            || render_text(&failures),
+            |pretty| render_json(&failures, pretty),
+        ));
+    }
 }
 
 impl<'a> From<&'a InvalidConversation> for LoadFailure<'a> {
