@@ -1,4 +1,9 @@
-use std::{fs, sync::Arc};
+use std::{
+    fs,
+    sync::{Arc, mpsc},
+    thread,
+    time::Duration,
+};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::Utf8TempDir;
@@ -375,8 +380,10 @@ fn an_id_with_no_directory_is_not_found() {
     assert_eq!(error.message, expected.message);
 }
 
+// Nobody can be asked whether to keep waiting, so a held conversation fails
+// the run the same way it does for a conversation that loads.
 #[test]
-fn refuses_a_conversation_another_process_holds() {
+fn refuses_a_conversation_another_process_holds_when_nobody_can_wait() {
     let mut s = store(true);
     let dir = write_dir(&s.workspace, "17941219991", &[(
         "metadata.json",
@@ -391,9 +398,46 @@ fn refuses_a_conversation_another_process_holds() {
 
     assert_eq!(
         error.message.as_deref(),
-        Some("Conversation jp-c17941219991 is in use by another process.")
+        Some("Timed out waiting for lock on conversation jp-c17941219991")
     );
     assert!(dir.is_dir());
+}
+
+// With someone there to wait, the run waits for the holder to let go, the same
+// as for a conversation that loads.
+#[test]
+fn waits_for_a_conversation_another_process_holds() {
+    // On a thread of its own, with a deadline: a wait that never sees the lock
+    // free ends at the contention prompt, which blocks on a terminal the test
+    // does not have.
+    let (done, finished) = mpsc::channel();
+    thread::spawn(move || {
+        let mut s = store(true);
+        s.ctx.term.interactive = true;
+        let dir = write_dir(&s.workspace, "17941219991", &[(
+            "metadata.json",
+            "not json",
+        )]);
+        let lock =
+            s.fs.try_lock(&id("17941219991").to_string(), None)
+                .unwrap()
+                .unwrap();
+        let holder = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(500));
+            drop(lock);
+        });
+
+        let result = run(&mut s, rm_ids(&["17941219991"], &["--no-confirm"]));
+        holder.join().unwrap();
+        done.send((result.map_err(|error| error.message), dir.exists()))
+            .unwrap();
+    });
+
+    let (result, exists) = finished
+        .recv_timeout(Duration::from_secs(5))
+        .expect("the removal did not finish once the holder let go");
+    assert_eq!(result, Ok(()));
+    assert!(!exists);
 }
 
 // Removal cannot be undone, so it is never assumed when nobody can be asked.

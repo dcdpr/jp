@@ -1144,6 +1144,20 @@ impl Workspace {
         Ok(())
     }
 
+    /// Whether no other holder has conversation `id`'s lock right now.
+    ///
+    /// Takes the lock and releases it again to find out, so another process can
+    /// take it a moment later.
+    /// A workspace without persistence takes no locks, and reports every one as
+    /// free.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the lock cannot be tried.
+    pub fn conversation_lock_is_free(&self, id: &ConversationId) -> Result<bool> {
+        Ok(self.locker.try_lock(&id.to_string(), None)?.is_some())
+    }
+
     /// Read the lock holder info for a conversation.
     #[must_use]
     pub fn conversation_lock_info(&self, id: &ConversationId) -> Option<LockInfo> {

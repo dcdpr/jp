@@ -9,6 +9,7 @@ use crate::{
     cli::CommandArgs,
     cmd::{
         ConversationLoadRequest, Output,
+        conversation::unarchive::unarchive_waiting,
         conversation_id::{ConversationIds as _, PositionalIds},
         target::{
             ConversationTarget, PickerFilter, TargetGrammar, resolve_archived_picker,
@@ -87,16 +88,16 @@ impl Use {
         self.grep.is_some() || self.range.is_set()
     }
 
-    pub(crate) fn run(self, ctx: &mut Ctx, handles: Vec<ConversationHandle>) -> Output {
+    pub(crate) async fn run(self, ctx: &mut Ctx, handles: Vec<ConversationHandle>) -> Output {
         if self.has_filter() {
-            return self.run_filtered(ctx);
+            return self.run_filtered(ctx).await;
         }
 
         // Archive targets bypass the normal resolution pipeline — the ID isn't
         // in the workspace index yet. We resolve + unarchive + activate in one
         // step.
         if self.is_archived() {
-            return self.run_unarchive(ctx);
+            return self.run_unarchive(ctx).await;
         }
 
         let handle = handles.into_iter().next().expect("Use requires a handle");
@@ -174,7 +175,7 @@ impl Use {
     }
 
     /// Resolve an archived conversation target, unarchive it, and activate it.
-    fn run_unarchive(&self, ctx: &mut Ctx) -> Output {
+    async fn run_unarchive(&self, ctx: &mut Ctx) -> Output {
         // Resolve the archive target to a concrete ID.
         let id = self
             .target
@@ -189,7 +190,7 @@ impl Use {
                 crate::error::Error::NotFound("conversation", "no archived conversations".into())
             })?;
 
-        let handle = ctx.workspace.unarchive_conversation(&id)?;
+        let handle = unarchive_waiting(ctx, id).await?;
 
         let id_fmt = id.to_string().bold().yellow();
         ctx.printer
@@ -210,7 +211,7 @@ impl Use {
     /// Resolve a handle by building a candidate set from the target, applying
     /// the range and grep filters, then either activating directly (when the
     /// survivor is unique) or opening a picker.
-    fn run_filtered(self, ctx: &mut Ctx) -> Output {
+    async fn run_filtered(self, ctx: &mut Ctx) -> Output {
         let session = ctx.session.as_ref();
 
         let target = self
@@ -283,7 +284,7 @@ impl Use {
 
         // 5. Activate (unarchive first if drawn from the archive partition).
         if archived_partition {
-            let handle = ctx.workspace.unarchive_conversation(&id)?;
+            let handle = unarchive_waiting(ctx, id).await?;
             let id_fmt = id.to_string().bold().yellow();
             ctx.printer
                 .println(format!("Unarchived conversation {id_fmt}"));

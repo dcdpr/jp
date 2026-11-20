@@ -1,12 +1,14 @@
 use clap::{ArgMatches, Command};
 use crossterm::style::Stylize as _;
 use jp_conversation::ConversationId;
+use jp_workspace::ConversationHandle;
 
 use crate::{
     cli::CommandArgs,
     cmd::{
         ConversationLoadRequest, Output,
         conversation_id::{ConversationIds as _, PositionalIds},
+        lock::wait_until_free,
         target::{ConversationTarget, PickerFilter, TargetGrammar, resolve_archived_picker},
     },
     ctx::Ctx,
@@ -41,7 +43,7 @@ impl Unarchive {
         ConversationLoadRequest::none()
     }
 
-    pub(crate) fn run(self, ctx: &mut Ctx) -> Output {
+    pub(crate) async fn run(self, ctx: &mut Ctx) -> Output {
         let ids = self.resolve_ids(ctx)?;
 
         for id in ids {
@@ -51,7 +53,7 @@ impl Unarchive {
                     id.to_string().bold()
                 ));
             } else {
-                ctx.workspace.unarchive_conversation(&id)?;
+                unarchive_waiting(ctx, id).await?;
                 ctx.printer.println(format!(
                     "Conversation {} unarchived.",
                     id.to_string().bold().yellow()
@@ -95,3 +97,20 @@ impl Unarchive {
         Ok(ids)
     }
 }
+
+/// Unarchive conversation `id`, waiting while another process holds it.
+pub(crate) async fn unarchive_waiting(
+    ctx: &mut Ctx,
+    id: ConversationId,
+) -> Result<ConversationHandle, crate::error::Error> {
+    loop {
+        match ctx.workspace.unarchive_conversation(&id) {
+            Err(jp_workspace::Error::LockFailed(_)) => wait_until_free(ctx, id).await?,
+            result => return Ok(result?),
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "unarchive_tests.rs"]
+mod tests;

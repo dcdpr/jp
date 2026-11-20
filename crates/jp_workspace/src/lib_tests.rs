@@ -1436,6 +1436,36 @@ fn test_unarchive_refuses_a_conversation_another_process_holds() {
     assert!(ws.acquire_conversation(&id).is_ok());
 }
 
+// The probe reports the lock as another process sees it, and holds nothing
+// after it returns.
+#[test]
+fn test_a_conversation_lock_is_free_unless_another_holder_has_it() {
+    let tmp = tempdir().unwrap();
+    let fs = FsStorageBackend::new(&tmp.path().join("storage")).unwrap();
+    let ws = workspace_with_fs(tmp.path(), &fs);
+    let id = ConversationId::try_from(datetime!(2024-06-01 00:00:00 Z)).unwrap();
+
+    assert!(ws.conversation_lock_is_free(&id).unwrap());
+    assert!(fs.try_lock(&id.to_string(), None).unwrap().is_some());
+
+    let held = fs.try_lock(&id.to_string(), None).unwrap().unwrap();
+    assert!(!ws.conversation_lock_is_free(&id).unwrap());
+    drop(held);
+    assert!(ws.conversation_lock_is_free(&id).unwrap());
+}
+
+// Without persistence no lock is ever taken, so none is ever waited for.
+#[test]
+fn test_a_workspace_without_persistence_sees_every_lock_as_free() {
+    let tmp = tempdir().unwrap();
+    let fs = FsStorageBackend::new(&tmp.path().join("storage")).unwrap();
+    let ws = workspace_with_fs(tmp.path(), &fs).without_persistence();
+    let id = ConversationId::try_from(datetime!(2024-06-01 00:00:00 Z)).unwrap();
+
+    let _held = fs.try_lock(&id.to_string(), None).unwrap().unwrap();
+    assert!(ws.conversation_lock_is_free(&id).unwrap());
+}
+
 #[test]
 fn test_unarchive_nonexistent_returns_error() {
     let tmp = tempdir().unwrap();

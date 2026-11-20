@@ -9,7 +9,7 @@ use crate::{
     cmd::{
         self, ConversationLoadRequest, Output,
         conversation_id::{ConversationIds as _, PositionalIds},
-        lock::{LockOutcome, LockRequest, acquire_lock},
+        lock::{LockOutcome, LockRequest, acquire_lock, wait_until_free},
         target::ConversationTarget,
         time::CreationRange,
     },
@@ -82,7 +82,7 @@ impl Rm {
         for removal in removals {
             let done = match removal {
                 Removal::Loaded(handle) => remove(ctx, handle, active_id, force).await?,
-                Removal::Unloaded(id) => remove_unloaded(ctx, id, force)?,
+                Removal::Unloaded(id) => remove_unloaded(ctx, id, force).await?,
             };
             if done {
                 removed += 1;
@@ -179,37 +179,40 @@ fn resolve_literal(ctx: &Ctx, ids: &[ConversationId]) -> Result<Vec<Removal>, cm
 ///
 /// What the prompt shows is read while the conversation's lock is held, so it
 /// describes exactly what the removal deletes.
+/// While another process holds the lock, waits as for any other conversation.
 /// Returns whether the conversation was removed.
-fn remove_unloaded(ctx: &Ctx, id: ConversationId, force: bool) -> Result<bool, cmd::Error> {
-    // `decide` can only answer yes or no, so a failed prompt answers no and its
-    // error is returned once the lock is released.
-    let mut prompt_error = None;
-    let removal = ctx.recovery.remove(&id, &mut |stored| {
-        if force {
-            return true;
+async fn remove_unloaded(ctx: &Ctx, id: ConversationId, force: bool) -> Result<bool, cmd::Error> {
+    loop {
+        // `decide` can only answer yes or no, so a failed prompt answers no and
+        // its error is returned once the lock is released.
+        let mut prompt_error = None;
+        let removal = ctx.recovery.remove(&id, &mut |stored| {
+            if force {
+                return true;
+            }
+
+            confirm_unloaded_removal(ctx, stored).unwrap_or_else(|error| {
+                prompt_error = Some(error);
+                false
+            })
+        })?;
+
+        if let Some(error) = prompt_error {
+            return Err(error.into());
         }
 
-        confirm_unloaded_removal(ctx, stored).unwrap_or_else(|error| {
-            prompt_error = Some(error);
-            false
-        })
-    })?;
-
-    if let Some(error) = prompt_error {
-        return Err(error.into());
-    }
-
-    match removal {
-        StorageRemoval::Removed => Ok(true),
-        StorageRemoval::Declined => Ok(false),
-        StorageRemoval::Locked => {
-            Err(format!("Conversation {id} is in use by another process.").into())
+        match removal {
+            StorageRemoval::Locked => wait_until_free(ctx, id).await?,
+            StorageRemoval::Removed => return Ok(true),
+            StorageRemoval::Declined => return Ok(false),
+            StorageRemoval::NotFound => {
+                return Err(crate::error::Error::from(jp_workspace::Error::not_found(
+                    "Conversation",
+                    &id,
+                ))
+                .into());
+            }
         }
-        StorageRemoval::NotFound => Err(crate::error::Error::from(jp_workspace::Error::not_found(
-            "Conversation",
-            &id,
-        ))
-        .into()),
     }
 }
 

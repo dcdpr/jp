@@ -84,7 +84,10 @@ fn run_without_contention_bumps_last_activated_at() {
         grep: None,
         range: CreationRange::default(),
     };
-    cmd.run(&mut ctx, vec![handle]).unwrap();
+    Runtime::new()
+        .unwrap()
+        .block_on(cmd.run(&mut ctx, vec![handle]))
+        .unwrap();
 
     // Session mapping points at the conversation.
     let session = ctx.session.clone().unwrap();
@@ -127,7 +130,10 @@ fn run_with_contention_skips_metadata_bump() {
         grep: None,
         range: CreationRange::default(),
     };
-    cmd.run(&mut ctx, vec![handle]).unwrap();
+    Runtime::new()
+        .unwrap()
+        .block_on(cmd.run(&mut ctx, vec![handle]))
+        .unwrap();
 
     // Session mapping was still written — that's the user-visible effect of
     // `jp c use X`, and it must succeed even when the conversation is busy.
@@ -207,7 +213,10 @@ fn filter_grep_single_match_activates_directly() {
         grep: Some("deployment".into()),
         range: CreationRange::default(),
     };
-    cmd.run(&mut ctx, vec![]).unwrap();
+    Runtime::new()
+        .unwrap()
+        .block_on(cmd.run(&mut ctx, vec![]))
+        .unwrap();
 
     let session = ctx.session.clone().unwrap();
     assert_eq!(
@@ -234,7 +243,10 @@ fn filter_grep_with_literal_id_match_activates() {
         grep: Some("rollout".into()),
         range: CreationRange::default(),
     };
-    cmd.run(&mut ctx, vec![]).unwrap();
+    Runtime::new()
+        .unwrap()
+        .block_on(cmd.run(&mut ctx, vec![]))
+        .unwrap();
 
     let session = ctx.session.clone().unwrap();
     assert_eq!(
@@ -260,7 +272,10 @@ fn filter_grep_with_literal_id_no_match_errors() {
         grep: Some("nonexistent".into()),
         range: CreationRange::default(),
     };
-    let err = cmd.run(&mut ctx, vec![]).unwrap_err();
+    let err = Runtime::new()
+        .unwrap()
+        .block_on(cmd.run(&mut ctx, vec![]))
+        .unwrap_err();
     assert!(
         format!("{err:?}").contains("no conversations match"),
         "expected NotFound error, got: {err:?}"
@@ -294,7 +309,10 @@ fn filter_range_narrows_then_grep_matches() {
             before: None,
         },
     };
-    cmd.run(&mut ctx, vec![]).unwrap();
+    Runtime::new()
+        .unwrap()
+        .block_on(cmd.run(&mut ctx, vec![]))
+        .unwrap();
 
     let session = ctx.session.clone().unwrap();
     assert_eq!(
@@ -364,7 +382,10 @@ fn filter_grep_drops_a_match_whose_stream_does_not_load() {
         grep: Some("deployment".into()),
         range: CreationRange::default(),
     };
-    cmd.run(&mut ctx, vec![]).unwrap();
+    Runtime::new()
+        .unwrap()
+        .block_on(cmd.run(&mut ctx, vec![]))
+        .unwrap();
 
     let session = ctx.session.clone().unwrap();
     assert_eq!(
