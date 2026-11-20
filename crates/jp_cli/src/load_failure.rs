@@ -7,12 +7,12 @@
 //! Each directory is checked again when the report prints, so one the command
 //! removed or fixed is left out.
 
-use camino::{Utf8Path, Utf8PathBuf};
+use camino::Utf8PathBuf;
 use crossterm::style::Stylize as _;
 use jp_conversation::ConversationId;
 use jp_printer::Printer;
 use jp_storage::validate::{
-    FileError, InvalidConversation, ValidationError, validate_conversation_dir,
+    InvalidConversation, ReadError, StorageLocation, ValidationError, validate_conversation_dir,
 };
 use serde::Serialize;
 use tracing::warn;
@@ -23,19 +23,18 @@ use crate::deferred_report::DeferredReport;
 #[derive(Debug)]
 pub(crate) struct LoadFailure<'a> {
     pub id: ConversationId,
-    pub dirname: &'a str,
-    pub path: Utf8PathBuf,
+    pub location: StorageLocation,
     pub error: &'a ValidationError,
 }
 
 impl LoadFailure<'_> {
-    /// Log the failure as one warning, shown with `-v`.
+    /// Log the failure as one warning.
     fn log(&self) {
         warn!(
             code = "conversation_load_failed",
             conversation = %self.id,
-            path = %self.path,
-            file = %self.path.join(self.error.file().name()),
+            location = %self.location,
+            part_location = %self.error.location(),
             error = %self.error,
             "Conversation failed to load."
         );
@@ -85,8 +84,7 @@ impl Drop for LoadFailureNotice {
             .iter()
             .map(|(id, dir, error)| LoadFailure {
                 id: *id,
-                dirname: dir.file_name().unwrap_or_default(),
-                path: dir.clone(),
+                location: StorageLocation::new(dir.as_str()),
                 error,
             })
             .collect();
@@ -103,8 +101,7 @@ impl<'a> From<&'a InvalidConversation> for LoadFailure<'a> {
     fn from(invalid: &'a InvalidConversation) -> Self {
         Self {
             id: invalid.id,
-            dirname: &invalid.dirname,
-            path: invalid.path(),
+            location: invalid.location(),
             error: &invalid.error,
         }
     }
@@ -186,7 +183,7 @@ struct Record<'a> {
     code: &'static str,
     message: &'static str,
     context: Context<'a>,
-    causes: Vec<Cause>,
+    causes: Vec<Cause<'a>>,
 }
 
 #[derive(Serialize)]
@@ -197,31 +194,33 @@ struct Context<'a> {
 #[derive(Serialize)]
 struct ConversationContext<'a> {
     id: String,
-    dirname: &'a str,
-    path: &'a Utf8Path,
+    location: &'a StorageLocation,
 }
 
 /// One step of the error chain, outermost first.
 #[derive(Serialize)]
-struct Cause {
+struct Cause<'a> {
     code: &'static str,
     message: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
-    path: Option<Utf8PathBuf>,
+    part: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    error: Option<String>,
+    location: Option<&'a StorageLocation>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     line: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     column: Option<usize>,
 }
 
-impl Cause {
+impl Cause<'_> {
     const fn new(code: &'static str, message: &'static str) -> Self {
         Self {
             code,
             message,
-            path: None,
+            part: None,
+            location: None,
             error: None,
             line: None,
             column: None,
@@ -238,43 +237,48 @@ impl<'a> From<&'a LoadFailure<'a>> for Record<'a> {
             context: Context {
                 conversation: ConversationContext {
                     id: failure.id.to_string(),
-                    dirname: failure.dirname,
-                    path: &failure.path,
+                    location: &failure.location,
                 },
             },
-            causes: causes(&failure.path, failure.error),
+            causes: causes(failure.error),
         }
     }
 }
 
-/// The error chain of the conversation directory at `dir`, outermost first.
-fn causes(dir: &Utf8Path, error: &ValidationError) -> Vec<Cause> {
+/// The error chain of a validation failure, outermost first.
+fn causes(error: &ValidationError) -> Vec<Cause<'_>> {
     match error {
-        ValidationError::MissingFile { file } => vec![Cause {
-            path: Some(dir.join(file.name())),
-            ..Cause::new("file_missing", "missing file")
+        ValidationError::Missing { part, location } => vec![Cause {
+            part: Some(part.code()),
+            location: Some(location),
+            ..Cause::new("part_missing", "missing conversation part")
         }],
-        ValidationError::UnreadableFile { file, source } => vec![
+        ValidationError::Unreadable {
+            part,
+            location,
+            error,
+        } => vec![
             Cause {
-                path: Some(dir.join(file.name())),
-                ..Cause::new("file_unreadable", "failed to load file")
+                part: Some(part.code()),
+                location: Some(location),
+                ..Cause::new("part_unreadable", "failed to load conversation part")
             },
-            file_cause(source),
+            read_cause(error),
         ],
     }
 }
 
-fn file_cause(source: &FileError) -> Cause {
-    match source {
-        FileError::Io(error) => Cause {
-            error: Some(error.to_string()),
-            ..Cause::new("io_error", "unable to read file")
+fn read_cause(error: &ReadError) -> Cause<'_> {
+    match error {
+        ReadError::Unavailable(message) => Cause {
+            error: Some(message),
+            ..Cause::new("unavailable", "unable to read")
         },
-        FileError::Json(error) => Cause {
-            error: Some(error.to_string()),
-            line: Some(error.line()),
-            column: Some(error.column()),
-            ..Cause::new("json_invalid", "unable to parse json")
+        ReadError::Malformed { message, position } => Cause {
+            error: Some(message),
+            line: position.map(|p| p.line),
+            column: position.map(|p| p.column),
+            ..Cause::new("malformed", "unable to parse")
         },
     }
 }

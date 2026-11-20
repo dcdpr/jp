@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
-use camino::Utf8PathBuf;
 use chrono::{DateTime, TimeZone as _, Utc};
 use jp_config::AppConfig;
 use jp_conversation::{Conversation, Labels};
 use jp_printer::{OutputFormat, Printer};
+use jp_storage::validate::StorageLocation;
 use jp_workspace::{ConversationLock, LockResult, Workspace};
 use tokio::runtime::Runtime;
 
@@ -233,8 +233,8 @@ fn unloaded_details_show_the_title_status_and_every_directory() {
         Some("Fix the loader"),
         Some("unable to load: missing events.json"),
         &[
-            Utf8PathBuf::from("/ws/.jp/conversations/10000"),
-            Utf8PathBuf::from("/user/conversations/10000-a-title"),
+            StorageLocation::new("/ws/.jp/conversations/10000"),
+            StorageLocation::new("/user/conversations/10000-a-title"),
         ],
         false,
     );
@@ -255,7 +255,7 @@ fn unloaded_details_leave_out_what_is_not_known() {
         make_id(1000),
         None,
         None,
-        &[Utf8PathBuf::from("/ws/.jp/conversations/10000")],
+        &[StorageLocation::new("/ws/.jp/conversations/10000")],
         false,
     );
     let details = details.to_string();
@@ -274,7 +274,7 @@ fn unloaded_details_show_a_title_as_plain_text() {
         make_id(1000),
         Some("Fix\x1b[2J the\r loader"),
         None,
-        &[Utf8PathBuf::from("/ws/.jp/conversations/10000")],
+        &[StorageLocation::new("/ws/.jp/conversations/10000")],
         false,
     );
     let details = details.to_string();

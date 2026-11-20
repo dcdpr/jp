@@ -27,6 +27,7 @@ use crate::{
     get_expiring_timestamp,
     load::load_json,
     load_conversation_id_from_entry,
+    location::StorageLocation,
     lock::LockInfo,
     validate::{
         DirContents, InvalidConversation, ValidationError, ValidationResult,
@@ -372,12 +373,16 @@ impl LoadBackend for FsStorageBackend {
     }
 
     fn unlisted_conversation(&self, id: &ConversationId) -> Option<UnlistedConversation> {
-        let locations = self.live_conversation_dirs(id);
-        if locations.is_empty() {
+        let dirs = self.live_conversation_dirs(id);
+        if dirs.is_empty() {
             return None;
         }
 
-        let state = combined_state(&locations);
+        let state = combined_state(&dirs);
+        let locations = dirs
+            .iter()
+            .map(|dir| StorageLocation::of_path(dir))
+            .collect();
         let title = self
             .storage
             .load_conversation_metadata(id)

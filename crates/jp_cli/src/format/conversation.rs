@@ -1,9 +1,9 @@
 use std::fmt;
 
-use camino::Utf8PathBuf;
 use chrono::{DateTime, Utc};
 use crossterm::style::Stylize as _;
 use jp_conversation::ConversationId;
+use jp_storage::validate::StorageLocation;
 use jp_term::table::{DetailItem, DetailRow, Details, details};
 use serde_json::json;
 
@@ -73,7 +73,7 @@ pub struct DetailsFmt {
     /// The conversation's directories on disk.
     ///
     /// Not in the [`Self::json`] payload.
-    pub paths: Vec<Utf8PathBuf>,
+    pub paths: Vec<StorageLocation>,
 
     /// Pretty-print the output.
     pub pretty: bool,
@@ -160,7 +160,7 @@ impl DetailsFmt {
     }
 
     #[must_use]
-    pub fn with_paths(mut self, paths: Vec<Utf8PathBuf>) -> Self {
+    pub fn with_paths(mut self, paths: Vec<StorageLocation>) -> Self {
         self.paths = paths;
         self
     }

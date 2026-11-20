@@ -9,7 +9,9 @@ use jp_conversation::{Conversation, ConversationId};
 use jp_printer::{OutputFormat, Printer, SharedBuffer};
 use jp_storage::{
     backend::{FsStorageBackend, LockBackend as _, NullLockBackend, NullPersistBackend},
-    validate::{DirContents, FileError, ManagedFile, ValidationError},
+    validate::{
+        ConversationPart, DirContents, Position, ReadError, StorageLocation, ValidationError,
+    },
 };
 use jp_workspace::Workspace;
 use tokio::runtime::Runtime;
@@ -447,14 +449,18 @@ fn no_persist_removes_nothing_and_says_so() {
 
 #[test]
 fn the_status_says_why_a_conversation_does_not_load() {
-    let corrupt = Err(ValidationError::UnreadableFile {
-        file: ManagedFile::Metadata,
-        source: FileError::Json(serde_json::from_str::<serde_json::Value>("not json").unwrap_err()),
+    let corrupt = Err(ValidationError::Unreadable {
+        part: ConversationPart::Metadata,
+        location: StorageLocation::new("/ws/.jp/conversations/17941219991/metadata.json"),
+        error: ReadError::Malformed {
+            message: "expected ident at line 1 column 2".to_owned(),
+            position: Some(Position { line: 1, column: 2 }),
+        },
     });
 
     assert_eq!(
         unloaded_status(&corrupt).as_deref(),
-        Some("unable to load: metadata.json: invalid JSON at line 1, column 2")
+        Some("unable to load: metadata: malformed at line 1, column 2")
     );
     assert_eq!(
         unloaded_status(&Ok(DirContents::Unstored)).as_deref(),

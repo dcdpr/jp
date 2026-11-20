@@ -1,11 +1,11 @@
-use std::{fs, slice, sync::Arc};
+use std::{fs, sync::Arc};
 
 use camino::Utf8PathBuf;
 use camino_tempfile::{Utf8TempDir, tempdir};
 use jp_conversation::{Conversation, ConversationId};
 use jp_storage::{
     backend::{FsStorageBackend, LockBackend as _, NullLockBackend, NullPersistBackend},
-    validate::{ManagedFile, ValidationError},
+    validate::{ConversationPart, StorageLocation, ValidationError},
 };
 use test_log::test;
 
@@ -38,11 +38,11 @@ fn a_conversation_that_fails_to_load_is_unlisted() {
 
     let found = ws.unlisted_conversation(&id("17941219991")).unwrap();
 
-    assert_eq!(found.locations, [dir]);
+    assert_eq!(found.locations, [StorageLocation::new(dir.as_str())]);
     assert!(matches!(
         found.state,
-        Err(ValidationError::UnreadableFile {
-            file: ManagedFile::Metadata,
+        Err(ValidationError::Unreadable {
+            part: ConversationPart::Metadata,
             ..
         })
     ));
@@ -67,7 +67,9 @@ fn removing_an_unlisted_conversation_deletes_its_directories() {
         .lock_unlisted_conversation(&id("17941219991"))
         .unwrap()
         .unwrap();
-    assert_eq!(lock.conversation().locations, slice::from_ref(&dir));
+    assert_eq!(lock.conversation().locations, [StorageLocation::new(
+        dir.as_str()
+    )]);
     ws.remove_unlisted_conversation(lock).unwrap();
 
     assert!(!dir.exists());

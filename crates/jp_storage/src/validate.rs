@@ -6,6 +6,7 @@ use rayon::prelude::*;
 use serde::de::IgnoredAny;
 use tracing::{debug, trace};
 
+pub use crate::location::StorageLocation;
 use crate::{
     BASE_CONFIG_FILE, CONVERSATIONS_DIR, EVENTS_FILE, IMPORT_STAGING_PREFIX, METADATA_FILE,
     Storage, dir_entries, holds_managed_files,
@@ -70,48 +71,80 @@ pub struct InvalidConversation {
     pub dirname: String,
 }
 
-/// The reason a conversation directory failed validation.
-#[derive(Debug, thiserror::Error)]
+/// The reason a stored conversation failed validation.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ValidationError {
-    /// A required managed file is missing.
+    /// A required part of the conversation is missing.
     ///
-    /// `metadata.json` and `events.json` are required; `base_config.json` is
-    /// optional, because older conversations pack the base config into
-    /// `events.json`.
-    #[error("missing {file}")]
-    MissingFile { file: ManagedFile },
+    /// The metadata and the events are required; the base config is optional,
+    /// because older conversations store it with the events.
+    #[error("missing {part}")]
+    Missing {
+        part: ConversationPart,
 
-    /// A managed file exists but could not be read or does not parse.
-    #[error("{file}: {source}")]
-    UnreadableFile {
-        file: ManagedFile,
+        /// Where the part was expected.
+        location: StorageLocation,
+    },
+
+    /// A part of the conversation exists but could not be read.
+    #[error("{part}: {error}")]
+    Unreadable {
+        part: ConversationPart,
+        location: StorageLocation,
         #[source]
-        source: FileError,
+        error: ReadError,
     },
 }
 
 impl ValidationError {
-    /// The managed file the failure is about.
+    /// The part of the conversation the failure is about.
     #[must_use]
-    pub const fn file(&self) -> ManagedFile {
+    pub const fn part(&self) -> ConversationPart {
         match self {
-            Self::MissingFile { file } | Self::UnreadableFile { file, .. } => *file,
+            Self::Missing { part, .. } | Self::Unreadable { part, .. } => *part,
+        }
+    }
+
+    /// Where the part is, or was expected.
+    #[must_use]
+    pub const fn location(&self) -> &StorageLocation {
+        match self {
+            Self::Missing { location, .. } | Self::Unreadable { location, .. } => location,
         }
     }
 }
 
-/// A file storage writes and owns inside a conversation directory.
+/// A part of a stored conversation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ManagedFile {
+pub enum ConversationPart {
     Metadata,
     BaseConfig,
     Events,
 }
 
-impl ManagedFile {
-    /// The file's name inside the conversation directory.
+impl ConversationPart {
+    /// The part's name, as text shows it.
     #[must_use]
     pub const fn name(self) -> &'static str {
+        match self {
+            Self::Metadata => "metadata",
+            Self::BaseConfig => "base config",
+            Self::Events => "events",
+        }
+    }
+
+    /// A stable identifier for the part, for machine-readable output.
+    #[must_use]
+    pub const fn code(self) -> &'static str {
+        match self {
+            Self::Metadata => "metadata",
+            Self::BaseConfig => "base_config",
+            Self::Events => "events",
+        }
+    }
+
+    /// The file the filesystem backend stores the part in.
+    pub(crate) const fn file_name(self) -> &'static str {
         match self {
             Self::Metadata => METADATA_FILE,
             Self::BaseConfig => BASE_CONFIG_FILE,
@@ -120,22 +153,59 @@ impl ManagedFile {
     }
 }
 
-impl fmt::Display for ManagedFile {
+impl fmt::Display for ConversationPart {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.name())
     }
 }
 
-/// Why a managed file that exists failed validation.
-#[derive(Debug, thiserror::Error)]
-pub enum FileError {
-    /// The file could not be read.
-    #[error(transparent)]
-    Io(#[from] io::Error),
+/// Why a part of a stored conversation that exists could not be read.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ReadError {
+    /// The backend could not hand the part over, e.g. for lack of permission.
+    #[error("{0}")]
+    Unavailable(String),
 
-    /// The file is not JSON, or not JSON of the shape the file holds.
-    #[error("invalid JSON at line {}, column {}", .0.line(), .0.column())]
-    Json(#[from] serde_json::Error),
+    /// The part was read, and does not have the shape the part has.
+    #[error("malformed{}", at(*position))]
+    Malformed {
+        message: String,
+
+        /// Where in the part's text the problem is, when it is text.
+        position: Option<Position>,
+    },
+}
+
+/// A place in a text, counted from 1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Position {
+    pub line: usize,
+    pub column: usize,
+}
+
+/// ` at line 1, column 2`, or nothing without a position.
+fn at(position: Option<Position>) -> String {
+    position.map_or_else(String::new, |p| {
+        format!(" at line {}, column {}", p.line, p.column)
+    })
+}
+
+impl From<io::Error> for ReadError {
+    fn from(error: io::Error) -> Self {
+        Self::Unavailable(error.to_string())
+    }
+}
+
+impl From<serde_json::Error> for ReadError {
+    fn from(error: serde_json::Error) -> Self {
+        Self::Malformed {
+            message: error.to_string(),
+            position: Some(Position {
+                line: error.line(),
+                column: error.column(),
+            }),
+        }
+    }
 }
 
 impl InvalidConversation {
@@ -143,6 +213,12 @@ impl InvalidConversation {
     #[must_use]
     pub fn path(&self) -> Utf8PathBuf {
         self.conversations_dir.join(&self.dirname)
+    }
+
+    /// Where the conversation is stored.
+    #[must_use]
+    pub fn location(&self) -> StorageLocation {
+        StorageLocation::of_path(&self.path())
     }
 }
 
@@ -486,34 +562,39 @@ fn check_files(
         return Ok((DirContents::Stored, Some(scan)));
     }
 
-    let unreadable = |file, source| ValidationError::UnreadableFile { file, source };
+    let path = |part: ConversationPart| dir.join(part.file_name());
+    let missing = |part| ValidationError::Missing {
+        part,
+        location: StorageLocation::of_path(&path(part)),
+    };
+    let unreadable = |part, error| ValidationError::Unreadable {
+        part,
+        location: StorageLocation::of_path(&path(part)),
+        error,
+    };
 
-    let metadata_path = dir.join(METADATA_FILE);
+    let metadata_path = path(ConversationPart::Metadata);
     if !metadata_path.is_file() {
-        return Err(ValidationError::MissingFile {
-            file: ManagedFile::Metadata,
-        });
+        return Err(missing(ConversationPart::Metadata));
     }
     validate_metadata(&metadata_path)
-        .map_err(|source| unreadable(ManagedFile::Metadata, source))?;
+        .map_err(|error| unreadable(ConversationPart::Metadata, error))?;
 
     // base_config.json is optional for backward compat (old conversations have
     // the base config packed into events.json), but if it exists it must be
     // valid JSON.
-    let base_config_path = dir.join(BASE_CONFIG_FILE);
+    let base_config_path = path(ConversationPart::BaseConfig);
     if base_config_path.is_file() {
         validate_json_file(&base_config_path)
-            .map_err(|source| unreadable(ManagedFile::BaseConfig, source))?;
+            .map_err(|error| unreadable(ConversationPart::BaseConfig, error))?;
     }
 
-    let events_path = dir.join(EVENTS_FILE);
+    let events_path = path(ConversationPart::Events);
     if !events_path.is_file() {
-        return Err(ValidationError::MissingFile {
-            file: ManagedFile::Events,
-        });
+        return Err(missing(ConversationPart::Events));
     }
-    let summary =
-        validate_events(&events_path).map_err(|source| unreadable(ManagedFile::Events, source))?;
+    let summary = validate_events(&events_path)
+        .map_err(|error| unreadable(ConversationPart::Events, error))?;
 
     Ok((DirContents::Stored, stamps.scanned(summary)))
 }
@@ -525,12 +606,12 @@ fn check_files(
 /// Content validation happens at load time.
 ///
 /// [`IgnoredAny`]: serde::de::IgnoredAny
-fn validate_metadata(path: &Utf8Path) -> Result<(), FileError> {
+fn validate_metadata(path: &Utf8Path) -> Result<(), ReadError> {
     validate_json_file(path)
 }
 
 /// Confirm a file is valid JSON.
-fn validate_json_file(path: &Utf8Path) -> Result<(), FileError> {
+fn validate_json_file(path: &Utf8Path) -> Result<(), ReadError> {
     let buf = fs::read(path)?;
     serde_json::from_slice::<IgnoredAny>(&buf)?;
     Ok(())
@@ -544,7 +625,7 @@ fn validate_json_file(path: &Utf8Path) -> Result<(), FileError> {
 /// `type` is the tag for the flattened `EventKind` enum on events, and an
 /// explicit `"config_delta"` tag on config deltas.
 /// This confirms the structural shape without materializing any event data.
-fn validate_events(path: &Utf8Path) -> Result<EventsSummary, FileError> {
+fn validate_events(path: &Utf8Path) -> Result<EventsSummary, ReadError> {
     let buf = fs::read(path)?;
     Ok(EventsSummary::parse(&buf)?)
 }

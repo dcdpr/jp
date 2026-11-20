@@ -7,6 +7,7 @@ pub mod resource_lock;
 pub mod value;
 
 pub mod load;
+mod location;
 mod scan;
 pub mod validate;
 

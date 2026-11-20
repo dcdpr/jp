@@ -16,7 +16,7 @@ use crate::{
     backend::{
         ConversationFilter, FsStorageBackend, LoadBackend as _, Projection, StoragePresence,
     },
-    validate::{DirContents, ManagedFile, ValidationError},
+    validate::{ConversationPart, DirContents, StorageLocation, ValidationError},
 };
 
 #[test]
@@ -325,20 +325,21 @@ fn an_unlisted_conversation_reports_its_files_title_and_directories() {
     )
     .unwrap();
     let found = backend.unlisted_conversation(&id("17941219991")).unwrap();
-    assert_eq!(found.locations, [broken]);
+    assert_eq!(found.locations, [StorageLocation::new(broken.as_str())]);
     assert_eq!(found.title.as_deref(), Some("Fix the loader"));
-    assert!(matches!(
+    assert_eq!(
         found.state,
-        Err(ValidationError::MissingFile {
-            file: ManagedFile::Events
+        Err(ValidationError::Missing {
+            part: ConversationPart::Events,
+            location: StorageLocation::new(broken.join(EVENTS_FILE).as_str()),
         })
-    ));
+    );
 
     let draft = user.join("17941219992");
     fs::create_dir_all(&draft).unwrap();
     fs::write(draft.join("QUERY_MESSAGE.md"), "typed").unwrap();
     let found = backend.unlisted_conversation(&id("17941219992")).unwrap();
-    assert_eq!(found.locations, [draft]);
+    assert_eq!(found.locations, [StorageLocation::new(draft.as_str())]);
     assert_eq!(found.title, None);
     assert!(matches!(found.state, Ok(DirContents::Unstored)));
 

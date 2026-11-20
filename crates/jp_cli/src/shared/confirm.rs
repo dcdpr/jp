@@ -10,13 +10,12 @@
 //! details describe the state the answer acts on and no other process can
 //! change that state while the question is open.
 
-use camino::Utf8PathBuf;
 use clap::{Arg, ArgAction, ArgMatches, Command};
 use crossterm::style::Stylize as _;
 use inquire::InquireError;
 use jp_conversation::ConversationId;
 use jp_inquire::{InlineOption, InlineSelect};
-use jp_storage::backend::Projection;
+use jp_storage::{backend::Projection, validate::StorageLocation};
 use jp_term::sanitize::strip_controls;
 use jp_workspace::ConversationLock;
 
@@ -202,7 +201,7 @@ pub(crate) fn confirm_unloaded_removal(
     id: ConversationId,
     title: Option<&str>,
     status: Option<&str>,
-    dirs: &[Utf8PathBuf],
+    dirs: &[StorageLocation],
 ) -> Result<bool> {
     let action = ConversationAction::Remove;
     ensure_answerable(ctx, action, id)?;
@@ -285,7 +284,7 @@ fn unloaded_details(
     id: ConversationId,
     title: Option<&str>,
     status: Option<&str>,
-    dirs: &[Utf8PathBuf],
+    dirs: &[StorageLocation],
     pretty: bool,
 ) -> DetailsFmt {
     DetailsFmt::new(id)

@@ -200,13 +200,11 @@ fn test_missing_metadata_is_detected() {
 
     let result = storage.validate_conversations();
     assert_eq!(result.invalid.len(), 1);
-    assert!(matches!(
-        result.invalid[0].error,
-        ValidationError::MissingFile {
-            file: ManagedFile::Metadata
-        }
-    ));
-    assert_eq!(result.invalid[0].error.to_string(), "missing metadata.json");
+    assert_eq!(result.invalid[0].error, ValidationError::Missing {
+        part: ConversationPart::Metadata,
+        location: StorageLocation::new(dir.join(METADATA_FILE).as_str()),
+    });
+    assert_eq!(result.invalid[0].error.to_string(), "missing metadata");
 }
 
 #[test]
@@ -225,16 +223,17 @@ fn test_corrupt_metadata_is_detected() {
 
     let result = storage.validate_conversations();
     assert_eq!(result.invalid.len(), 1);
-    assert!(matches!(
-        result.invalid[0].error,
-        ValidationError::UnreadableFile {
-            file: ManagedFile::Metadata,
-            source: FileError::Json(_),
-        }
-    ));
+    assert_eq!(result.invalid[0].error, ValidationError::Unreadable {
+        part: ConversationPart::Metadata,
+        location: StorageLocation::new(dir.join(METADATA_FILE).as_str()),
+        error: ReadError::Malformed {
+            message: "expected ident at line 1 column 2".to_owned(),
+            position: Some(Position { line: 1, column: 2 }),
+        },
+    });
     assert_eq!(
         result.invalid[0].error.to_string(),
-        "metadata.json: invalid JSON at line 1, column 2"
+        "metadata: malformed at line 1, column 2"
     );
 }
 
@@ -250,13 +249,11 @@ fn test_missing_events_is_detected() {
 
     let result = storage.validate_conversations();
     assert_eq!(result.invalid.len(), 1);
-    assert!(matches!(
-        result.invalid[0].error,
-        ValidationError::MissingFile {
-            file: ManagedFile::Events
-        }
-    ));
-    assert_eq!(result.invalid[0].error.to_string(), "missing events.json");
+    assert_eq!(result.invalid[0].error, ValidationError::Missing {
+        part: ConversationPart::Events,
+        location: StorageLocation::new(dir.join(EVENTS_FILE).as_str()),
+    });
+    assert_eq!(result.invalid[0].error.to_string(), "missing events");
 }
 
 #[test]
@@ -274,14 +271,18 @@ fn test_corrupt_events_is_detected() {
     assert_eq!(result.invalid.len(), 1);
     assert!(matches!(
         result.invalid[0].error,
-        ValidationError::UnreadableFile {
-            file: ManagedFile::Events,
-            source: FileError::Json(_),
+        ValidationError::Unreadable {
+            part: ConversationPart::Events,
+            error: ReadError::Malformed {
+                position: Some(Position { line: 1, column: 2 }),
+                ..
+            },
+            ..
         }
     ));
     assert_eq!(
         result.invalid[0].error.to_string(),
-        "events.json: invalid JSON at line 1, column 2"
+        "events: malformed at line 1, column 2"
     );
 }
 
@@ -360,8 +361,9 @@ fn a_single_directory_is_validated_outside_the_conversations_dir() {
     fs::write(missing_metadata.join(EVENTS_FILE), "[]").unwrap();
     assert!(matches!(
         validate_conversation_dir(&missing_metadata),
-        Err(ValidationError::MissingFile {
-            file: ManagedFile::Metadata
+        Err(ValidationError::Missing {
+            part: ConversationPart::Metadata,
+            ..
         })
     ));
 }
@@ -505,8 +507,8 @@ fn a_rewritten_events_file_is_validated_again() {
     assert!(result.valid.is_empty());
     assert!(matches!(
         result.invalid[0].error,
-        ValidationError::UnreadableFile {
-            file: ManagedFile::Events,
+        ValidationError::Unreadable {
+            part: ConversationPart::Events,
             ..
         }
     ));
@@ -588,8 +590,8 @@ fn a_scan_of_a_just_modified_file_is_not_reused_by_the_next_process() {
     assert!(result.valid.is_empty());
     assert!(matches!(
         result.invalid[0].error,
-        ValidationError::UnreadableFile {
-            file: ManagedFile::Events,
+        ValidationError::Unreadable {
+            part: ConversationPart::Events,
             ..
         }
     ));
@@ -627,8 +629,8 @@ fn a_same_stamp_rewrite_just_after_a_scan_is_read_again() {
     assert!(result.valid.is_empty());
     assert!(matches!(
         result.invalid[0].error,
-        ValidationError::UnreadableFile {
-            file: ManagedFile::Events,
+        ValidationError::Unreadable {
+            part: ConversationPart::Events,
             ..
         }
     ));

@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
+use jp_storage::validate::StorageLocation;
 use serde_json::json;
 
 use super::*;
@@ -33,8 +34,8 @@ fn details_show_the_status_beneath_the_title_and_the_paths_last() {
         .with_title(Some("Fix the loader"))
         .with_status(Some("unable to load: missing events.json"))
         .with_paths(vec![
-            "/ws/.jp/conversations/10000".into(),
-            "/user/conversations/10000-fix-the-loader".into(),
+            StorageLocation::new("/ws/.jp/conversations/10000"),
+            StorageLocation::new("/user/conversations/10000-fix-the-loader"),
         ])
         .with_pretty_printing(false);
 

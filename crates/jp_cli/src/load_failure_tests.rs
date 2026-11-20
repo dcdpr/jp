@@ -1,35 +1,39 @@
-use std::{fs, io};
+use std::fs;
 
-use camino::{Utf8Path, Utf8PathBuf};
+use camino::Utf8Path;
 use crossterm::style::Stylize as _;
 use jp_conversation::ConversationId;
 use jp_printer::{Chrome, OutputFormat};
 use jp_storage::{
     backend::FsStorageBackend,
-    validate::{FileError, ManagedFile, ValidationError},
+    validate::{ConversationPart, Position, ReadError, StorageLocation, ValidationError},
 };
 
 use super::*;
 
-fn failure<'a>(dirname: &'a str, error: &'a ValidationError) -> LoadFailure<'a> {
+fn failure<'a>(dirname: &str, error: &'a ValidationError) -> LoadFailure<'a> {
     LoadFailure {
         id: ConversationId::try_from_dirname(dirname).unwrap(),
-        dirname,
-        path: Utf8PathBuf::from(format!("/ws/.jp/conversations/{dirname}")),
+        location: StorageLocation::new(format!("/ws/.jp/conversations/{dirname}")),
         error,
     }
 }
 
 fn missing_metadata() -> ValidationError {
-    ValidationError::MissingFile {
-        file: ManagedFile::Metadata,
+    ValidationError::Missing {
+        part: ConversationPart::Metadata,
+        location: StorageLocation::new("/ws/.jp/conversations/17941219994/metadata.json"),
     }
 }
 
 fn corrupt_metadata() -> ValidationError {
-    ValidationError::UnreadableFile {
-        file: ManagedFile::Metadata,
-        source: FileError::Json(serde_json::from_str::<serde_json::Value>("not json").unwrap_err()),
+    ValidationError::Unreadable {
+        part: ConversationPart::Metadata,
+        location: StorageLocation::new("/ws/.jp/conversations/17941219994/metadata.json"),
+        error: ReadError::Malformed {
+            message: "expected ident at line 1 column 2".to_owned(),
+            position: Some(Position { line: 1, column: 2 }),
+        },
     }
 }
 
@@ -52,8 +56,8 @@ fn one_failure_is_listed_in_the_singular() {
     assert_eq!(
         report.as_deref(),
         Some(
-            "1 conversation failed to load:\n\n- jp-c17636257526: missing metadata.json\n\nRun \
-             `jp conversation rm jp-c17636257526` to remove it."
+            "1 conversation failed to load:\n\n- jp-c17636257526: missing metadata\n\nRun `jp \
+             conversation rm jp-c17636257526` to remove it."
         )
     );
 }
@@ -75,12 +79,12 @@ fn every_failure_is_listed() {
     let expected = [
         "6 conversations failed to load:",
         "",
-        "- jp-c17636257521: missing metadata.json",
-        "- jp-c17636257522: metadata.json: invalid JSON at line 1, column 2",
-        "- jp-c17636257523: missing metadata.json",
-        "- jp-c17636257524: missing metadata.json",
-        "- jp-c17636257525: missing metadata.json",
-        "- jp-c17636257526: missing metadata.json",
+        "- jp-c17636257521: missing metadata",
+        "- jp-c17636257522: metadata: malformed at line 1, column 2",
+        "- jp-c17636257523: missing metadata",
+        "- jp-c17636257524: missing metadata",
+        "- jp-c17636257525: missing metadata",
+        "- jp-c17636257526: missing metadata",
         "",
         "Run `jp conversation rm jp-c17636257521 jp-c17636257522 jp-c17636257523 jp-c17636257524 \
          jp-c17636257525 jp-c17636257526` to remove them.",
@@ -97,7 +101,7 @@ fn the_count_and_conversations_are_highlighted() {
     assert_eq!(
         listed,
         format!(
-            "{} failed to load:\n\n- {}: missing metadata.json\n\nRun `jp conversation rm \
+            "{} failed to load:\n\n- {}: missing metadata\n\nRun `jp conversation rm \
              jp-c17636257526` to remove it.",
             "1 conversation".bold().yellow(),
             "jp-c17636257526".bold().yellow(),
@@ -106,55 +110,57 @@ fn the_count_and_conversations_are_highlighted() {
 }
 
 #[test]
-fn a_missing_file_is_one_record_with_one_cause() {
+fn a_missing_part_is_one_record_with_one_cause() {
     let error = missing_metadata();
     let records = render_json(&[failure("17941219994", &error)], false).unwrap();
 
     assert_eq!(records, [concat!(
         r#"{"level":"warning","code":"conversation_load_failed","#,
         r#""message":"conversation failed to load","#,
-        r#""context":{"conversation":{"id":"jp-c17941219994","dirname":"17941219994","#,
-        r#""path":"/ws/.jp/conversations/17941219994"}},"#,
-        r#""causes":[{"code":"file_missing","message":"missing file","#,
-        r#""path":"/ws/.jp/conversations/17941219994/metadata.json"}]}"#,
+        r#""context":{"conversation":{"id":"jp-c17941219994","#,
+        r#""location":"/ws/.jp/conversations/17941219994"}},"#,
+        r#""causes":[{"code":"part_missing","message":"missing conversation part","#,
+        r#""part":"metadata","location":"/ws/.jp/conversations/17941219994/metadata.json"}]}"#,
     )]);
 }
 
-// The chain is split into one cause per step, so a script reads the file path
-// and the parse position as fields instead of parsing them out of prose.
+// The chain is split into one cause per step, so a script reads the part, its
+// location, and the parse position as fields instead of parsing them out of
+// prose.
 #[test]
-fn a_corrupt_file_lists_the_file_and_the_parse_error_as_causes() {
+fn a_malformed_part_lists_the_part_and_the_parse_error_as_causes() {
     let error = corrupt_metadata();
     let records = render_json(&[failure("17941219994", &error)], false).unwrap();
 
     assert_eq!(records, [concat!(
         r#"{"level":"warning","code":"conversation_load_failed","#,
         r#""message":"conversation failed to load","#,
-        r#""context":{"conversation":{"id":"jp-c17941219994","dirname":"17941219994","#,
-        r#""path":"/ws/.jp/conversations/17941219994"}},"#,
-        r#""causes":[{"code":"file_unreadable","message":"failed to load file","#,
-        r#""path":"/ws/.jp/conversations/17941219994/metadata.json"},"#,
-        r#"{"code":"json_invalid","message":"unable to parse json","#,
+        r#""context":{"conversation":{"id":"jp-c17941219994","#,
+        r#""location":"/ws/.jp/conversations/17941219994"}},"#,
+        r#""causes":[{"code":"part_unreadable","message":"failed to load conversation part","#,
+        r#""part":"metadata","location":"/ws/.jp/conversations/17941219994/metadata.json"},"#,
+        r#"{"code":"malformed","message":"unable to parse","#,
         r#""error":"expected ident at line 1 column 2","line":1,"column":2}]}"#,
     )]);
 }
 
 #[test]
-fn an_unreadable_file_lists_the_io_error_as_a_cause() {
-    let error = ValidationError::UnreadableFile {
-        file: ManagedFile::Events,
-        source: FileError::Io(io::Error::from(io::ErrorKind::PermissionDenied)),
+fn an_unavailable_part_lists_the_read_error_as_a_cause() {
+    let error = ValidationError::Unreadable {
+        part: ConversationPart::Events,
+        location: StorageLocation::new("/ws/.jp/conversations/17941219994/events.json"),
+        error: ReadError::Unavailable("permission denied".to_owned()),
     };
     let records = render_json(&[failure("17941219994", &error)], false).unwrap();
 
     assert_eq!(records, [concat!(
         r#"{"level":"warning","code":"conversation_load_failed","#,
         r#""message":"conversation failed to load","#,
-        r#""context":{"conversation":{"id":"jp-c17941219994","dirname":"17941219994","#,
-        r#""path":"/ws/.jp/conversations/17941219994"}},"#,
-        r#""causes":[{"code":"file_unreadable","message":"failed to load file","#,
-        r#""path":"/ws/.jp/conversations/17941219994/events.json"},"#,
-        r#"{"code":"io_error","message":"unable to read file","error":"permission denied"}]}"#,
+        r#""context":{"conversation":{"id":"jp-c17941219994","#,
+        r#""location":"/ws/.jp/conversations/17941219994"}},"#,
+        r#""causes":[{"code":"part_unreadable","message":"failed to load conversation part","#,
+        r#""part":"events","location":"/ws/.jp/conversations/17941219994/events.json"},"#,
+        r#"{"code":"unavailable","message":"unable to read","error":"permission denied"}]}"#,
     )]);
 }
 
@@ -190,8 +196,8 @@ fn the_text_report_prints_when_the_notice_drops_even_under_quiet() {
     assert_eq!(out.lock().as_str(), "");
     assert_eq!(
         strip_ansi_escapes::strip_str(err.lock().as_str()),
-        "1 conversation failed to load:\n\n- jp-c17941219994: metadata.json: invalid JSON at line \
-         1, column 2\n\nRun `jp conversation rm jp-c17941219994` to remove it.\n"
+        "1 conversation failed to load:\n\n- jp-c17941219994: metadata: malformed at line 1, \
+         column 2\n\nRun `jp conversation rm jp-c17941219994` to remove it.\n"
     );
 }
 
@@ -226,11 +232,11 @@ fn the_json_report_prints_raw_records_even_under_quiet() {
         concat!(
             r#"{"level":"warning","code":"conversation_load_failed","#,
             r#""message":"conversation failed to load","#,
-            r#""context":{"conversation":{"id":"jp-c17941219994","dirname":"17941219994","#,
-            r#""path":"[TMP]/conversations/17941219994"}},"#,
-            r#""causes":[{"code":"file_unreadable","message":"failed to load file","#,
-            r#""path":"[TMP]/conversations/17941219994/metadata.json"},"#,
-            r#"{"code":"json_invalid","message":"unable to parse json","#,
+            r#""context":{"conversation":{"id":"jp-c17941219994","#,
+            r#""location":"[TMP]/conversations/17941219994"}},"#,
+            r#""causes":[{"code":"part_unreadable","message":"failed to load conversation part","#,
+            r#""part":"metadata","location":"[TMP]/conversations/17941219994/metadata.json"},"#,
+            r#"{"code":"malformed","message":"unable to parse","#,
             r#""error":"expected ident at line 1 column 2","line":1,"column":2}]}"#,
             "\n",
         )

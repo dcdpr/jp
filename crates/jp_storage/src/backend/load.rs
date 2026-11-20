@@ -2,14 +2,15 @@
 
 use std::fmt::Debug;
 
-use camino::Utf8PathBuf;
 use chrono::{DateTime, Utc};
 use jp_config::PartialAppConfig;
 use jp_conversation::{Conversation, ConversationEvent, ConversationId, ConversationStream};
 
 use crate::{
     LoadError,
-    validate::{DirContents, InvalidConversation, UnstoredConversation, ValidationError},
+    validate::{
+        DirContents, InvalidConversation, StorageLocation, UnstoredConversation, ValidationError,
+    },
 };
 
 /// Controls which storage partition to scan.
@@ -148,9 +149,9 @@ pub trait LoadBackend: Send + Sync + Debug {
 pub struct UnlistedConversation {
     pub id: ConversationId,
 
-    /// Where the store holds the conversation; for filesystem backends, its
+    /// Where the store holds the conversation; for the filesystem backend, its
     /// directories, workspace first.
-    pub locations: Vec<Utf8PathBuf>,
+    pub locations: Vec<StorageLocation>,
 
     /// The conversation's files as startup validation checks them.
     ///
