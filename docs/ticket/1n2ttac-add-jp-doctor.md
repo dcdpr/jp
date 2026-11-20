@@ -14,7 +14,15 @@ restore left in an old `.trash/`), reporting each detected problem with a
 suggested fix.
 `jp doctor` is read-only: it suggests commands such as `jp c repair` and `jp c
 rm` without modifying anything on disk.
+It skips the steps every other command runs before its own code (the one-time
+trash restore, the startup scan and its cleanup of leftover `.tmp` files and
+import staging directories, the scan-cache write), so it reports the store as
+it is rather than as those steps leave it.
 
+- [ ] `jp doctor` runs without the pre-run step: no trash restore, no startup
+      scan, no load-failure report, and nothing written to disk
+- [ ] Reports leftover `.tmp` files and import staging directories, which the
+      startup scan of any other command removes
 - [ ] Lists conversations with no turns and a query draft as unsent drafts, as
       a notice: what a run interrupted before its turn leaves, and what the
       one-time trash restore made of the draft-only directories older versions
