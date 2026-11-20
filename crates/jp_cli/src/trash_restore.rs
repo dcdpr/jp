@@ -80,6 +80,9 @@ pub(crate) enum LeftReason {
     /// A live directory for the same conversation exists in some root.
     ConversationExists,
 
+    /// The entry's name is not a conversation ID.
+    NotAConversation,
+
     /// The entry fails validation in a way moving it back would not help.
     Invalid(ValidationError),
 }
@@ -88,6 +91,7 @@ impl fmt::Display for LeftReason {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::ConversationExists => f.write_str("a conversation with this ID exists"),
+            Self::NotAConversation => f.write_str("invalid directory name"),
             Self::Invalid(error) => error.fmt(f),
         }
     }
@@ -189,7 +193,7 @@ fn restore_entry(
     };
 
     let Ok(id) = ConversationId::try_from_dirname(dirname) else {
-        return left(None, LeftReason::Invalid(ValidationError::InvalidDirname));
+        return left(None, LeftReason::NotAConversation);
     };
     if let Err(error) = validate_conversation_dir(source)
         && !restorable_without_metadata(source, &error)
@@ -382,6 +386,7 @@ fn left_record<'a>(trash: &Utf8Path, left: &'a Left) -> LeftRecord<'a> {
             "a conversation with this ID exists",
             vec![],
         ),
+        LeftReason::NotAConversation => ("invalid_dirname", "invalid directory name", vec![]),
         LeftReason::Invalid(error) => (
             "conversation_invalid",
             "conversation failed validation",

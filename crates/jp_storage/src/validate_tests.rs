@@ -22,30 +22,6 @@ const ONE_EVENT: &str =
 /// [`TWO_EVENTS`] with a later last timestamp and the same size in bytes.
 const TWO_EVENTS_LATER: &str = r#"[{"timestamp":"2026-01-01T10:00:00Z","type":"chat_request","content":"a"},{"timestamp":"2026-01-09T11:30:00Z","type":"chat_response","content":"b"}]"#;
 
-// A conversation whose events are broken can still name itself, and that name
-// is what lets a user recognize it before removing it.
-#[test]
-fn stored_title_reads_metadata_whatever_else_fails() {
-    let tmp = tempdir().unwrap();
-    let dir = tmp.path().join("17941219994");
-    fs::create_dir_all(&dir).unwrap();
-
-    assert_eq!(stored_title(&dir), None, "no metadata.json");
-
-    fs::write(dir.join(METADATA_FILE), "not json").unwrap();
-    assert_eq!(stored_title(&dir), None, "unparseable metadata.json");
-
-    fs::write(dir.join(METADATA_FILE), r#"{"title":7}"#).unwrap();
-    assert_eq!(stored_title(&dir), None, "a title that is not a string");
-
-    fs::write(
-        dir.join(METADATA_FILE),
-        r#"{"title":"Fix the loader","last_activated_at":"not a date"}"#,
-    )
-    .unwrap();
-    assert_eq!(stored_title(&dir).as_deref(), Some("Fix the loader"));
-}
-
 /// Write a conversation with the given `events.json` body and no
 /// `base_config.json`, returning its directory.
 fn write_with_events(storage: &camino::Utf8Path, id: &ConversationId, events: &str) -> Utf8PathBuf {
@@ -189,8 +165,10 @@ fn test_valid_conversations_are_collected() {
     assert!(result.invalid.is_empty());
 }
 
+// A directory whose name is not a conversation ID is not a conversation, so it
+// cannot fail to load as one.
 #[test]
-fn test_invalid_dirname_is_detected() {
+fn a_directory_not_named_for_a_conversation_is_unrecognized() {
     let tmp = tempdir().unwrap();
     let storage = Storage::new(tmp.path()).unwrap();
 
@@ -199,18 +177,12 @@ fn test_invalid_dirname_is_detected() {
 
     let bad = tmp.path().join(CONVERSATIONS_DIR).join("not-a-valid-id");
     fs::create_dir_all(&bad).unwrap();
+    fs::write(bad.join(METADATA_FILE), "not json").unwrap();
 
     let result = storage.validate_conversations();
     assert_eq!(result.valid.len(), 1);
-    assert_eq!(result.invalid.len(), 1);
-    assert!(matches!(
-        result.invalid[0].error,
-        ValidationError::InvalidDirname
-    ));
-    assert_eq!(
-        result.invalid[0].error.to_string(),
-        "invalid directory name"
-    );
+    assert!(result.invalid.is_empty());
+    assert_eq!(result.unrecognized, [bad]);
 }
 
 #[test]
@@ -375,7 +347,15 @@ fn a_single_directory_is_validated_outside_the_conversations_dir() {
         Ok(DirContents::Unstored)
     ));
 
-    let missing_metadata = tmp.path().join("17636257528");
+    let empty = tmp.path().join("17636257529");
+    fs::create_dir_all(&empty).unwrap();
+    assert!(matches!(
+        validate_conversation_dir(&empty),
+        Ok(DirContents::Empty)
+    ));
+
+    // The checks are on the files alone, whatever the directory is named.
+    let missing_metadata = tmp.path().join("renamed");
     fs::create_dir_all(&missing_metadata).unwrap();
     fs::write(missing_metadata.join(EVENTS_FILE), "[]").unwrap();
     assert!(matches!(
@@ -383,13 +363,6 @@ fn a_single_directory_is_validated_outside_the_conversations_dir() {
         Err(ValidationError::MissingFile {
             file: ManagedFile::Metadata
         })
-    ));
-
-    let not_an_id = tmp.path().join("not-an-id");
-    fs::create_dir_all(&not_an_id).unwrap();
-    assert!(matches!(
-        validate_conversation_dir(&not_an_id),
-        Err(ValidationError::InvalidDirname)
     ));
 }
 

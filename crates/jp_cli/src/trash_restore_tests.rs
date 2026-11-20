@@ -291,10 +291,7 @@ fn up_to_three_left_conversations_are_listed() {
         vec![
             left("17941219993", LeftReason::ConversationExists),
             left("17941219994", missing_events()),
-            left(
-                "not-an-id",
-                LeftReason::Invalid(ValidationError::InvalidDirname),
-            ),
+            left("not-an-id", LeftReason::NotAConversation),
         ],
         &["17941219991"],
     )]);

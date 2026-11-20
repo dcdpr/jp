@@ -5,8 +5,8 @@ use clap::{ArgMatches, Command};
 use crossterm::style::Stylize as _;
 use jp_conversation::ConversationId;
 use jp_storage::{
-    backend::{FsStorageBackend, LockBackend as _, PersistBackend as _},
-    validate::{DirContents, stored_title, validate_conversation_dir},
+    backend::{FsStorageBackend, LoadBackend as _, LockBackend as _, PersistBackend as _},
+    validate::{DirContents, validate_conversation_dir},
 };
 use jp_workspace::{ConversationHandle, Error as WorkspaceError, Workspace};
 
@@ -229,7 +229,7 @@ fn remove_unloaded(
     }
 
     if !force {
-        let title = dirs.iter().find_map(|dir| stored_title(dir));
+        let title = stored_title(fs, &id);
         let status = unloaded_status(&dirs);
         if !confirm_unloaded_removal(ctx, id, title.as_deref(), status.as_deref(), &dirs)? {
             return Ok(false);
@@ -248,16 +248,26 @@ fn remove_unloaded(
 /// A conversation the index leaves out can load by the time it is removed, when
 /// another process finished writing it after this run's scan.
 fn unloaded_status(dirs: &[Utf8PathBuf]) -> Option<String> {
-    let mut stored = false;
+    let mut contents = vec![];
     for dir in dirs {
         match validate_conversation_dir(dir) {
-            Ok(DirContents::Stored) => stored = true,
-            Ok(DirContents::Unstored) => {}
+            Ok(found) => contents.push(found),
             Err(error) => return Some(format!("unable to load: {error}")),
         }
     }
 
-    (!stored).then(|| "never stored".to_owned())
+    if contents.contains(&DirContents::Stored) {
+        None
+    } else if contents.iter().all(|found| *found == DirContents::Empty) {
+        Some("empty conversation directory".to_owned())
+    } else {
+        Some("no conversation files".to_owned())
+    }
+}
+
+/// The title stored for conversation `id`, if its metadata loads and has one.
+fn stored_title(fs: &FsStorageBackend, id: &ConversationId) -> Option<String> {
+    fs.load_conversation_metadata(id).ok()?.title
 }
 
 /// Remove one conversation, asking first unless `force` says the caller already

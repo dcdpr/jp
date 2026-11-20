@@ -13,7 +13,7 @@ use super::*;
 
 fn failure<'a>(dirname: &'a str, error: &'a ValidationError) -> LoadFailure<'a> {
     LoadFailure {
-        id: ConversationId::try_from_dirname(dirname).ok(),
+        id: ConversationId::try_from_dirname(dirname).unwrap(),
         dirname,
         path: Utf8PathBuf::from(format!("/ws/.jp/conversations/{dirname}")),
         error,
@@ -52,61 +52,40 @@ fn one_failure_is_listed_in_the_singular() {
     assert_eq!(
         report.as_deref(),
         Some(
-            "1 conversation failed to load:\n  jp-c17636257526: missing metadata.json\nRun `jp \
-             conversation rm jp-c17636257526` to remove it."
+            "1 conversation failed to load:\n\n- jp-c17636257526: missing metadata.json\n\nRun \
+             `jp conversation rm jp-c17636257526` to remove it."
         )
     );
 }
 
+// However many there are: the report is the only place a user learns of them.
 #[test]
-fn up_to_three_failures_are_listed() {
+fn every_failure_is_listed() {
     let missing = missing_metadata();
     let corrupt = corrupt_metadata();
-    let dirname = ValidationError::InvalidDirname;
-    let report = plain(&[
+    let failures = [
+        failure("17636257521", &missing),
+        failure("17636257522", &corrupt),
+        failure("17636257523", &missing),
+        failure("17636257524", &missing),
+        failure("17636257525", &missing),
         failure("17636257526", &missing),
-        failure("17636257527", &corrupt),
-        failure("not-a-valid-id", &dirname),
-    ]);
+    ];
 
-    assert_eq!(
-        report.as_deref(),
-        Some(
-            "3 conversations failed to load:\n  jp-c17636257526: missing metadata.json\n  \
-             jp-c17636257527: metadata.json: invalid JSON at line 1, column 2\n  not-a-valid-id: \
-             invalid directory name\nRun `jp conversation rm jp-c17636257526 jp-c17636257527` to \
-             remove them."
-        )
-    );
-}
-
-// `jp c rm` only removes directories named for a conversation ID, so a
-// directory whose name is not one gets no command.
-#[test]
-fn no_command_is_suggested_for_directories_that_are_not_ids() {
-    let dirname = ValidationError::InvalidDirname;
-    let report = plain(&[failure("not-a-valid-id", &dirname)]);
-
-    assert_eq!(
-        report.as_deref(),
-        Some("1 conversation failed to load:\n  not-a-valid-id: invalid directory name")
-    );
-}
-
-#[test]
-fn more_than_three_failures_are_counted() {
-    let error = missing_metadata();
-    let report = plain(&[
-        failure("17636257521", &error),
-        failure("17636257522", &error),
-        failure("17636257523", &error),
-        failure("17636257524", &error),
-    ]);
-
-    assert_eq!(
-        report.as_deref(),
-        Some("4 conversations failed to load. Run with `-v` to list them.")
-    );
+    let expected = [
+        "6 conversations failed to load:",
+        "",
+        "- jp-c17636257521: missing metadata.json",
+        "- jp-c17636257522: metadata.json: invalid JSON at line 1, column 2",
+        "- jp-c17636257523: missing metadata.json",
+        "- jp-c17636257524: missing metadata.json",
+        "- jp-c17636257525: missing metadata.json",
+        "- jp-c17636257526: missing metadata.json",
+        "",
+        "Run `jp conversation rm jp-c17636257521 jp-c17636257522 jp-c17636257523 jp-c17636257524 \
+         jp-c17636257525 jp-c17636257526` to remove them.",
+    ];
+    assert_eq!(plain(&failures), Some(expected.join("\n")));
 }
 
 // The count and each conversation are what the user acts on, so they carry the
@@ -118,25 +97,10 @@ fn the_count_and_conversations_are_highlighted() {
     assert_eq!(
         listed,
         format!(
-            "{} failed to load:\n  {}: missing metadata.json\nRun `jp conversation rm \
+            "{} failed to load:\n\n- {}: missing metadata.json\n\nRun `jp conversation rm \
              jp-c17636257526` to remove it.",
             "1 conversation".bold().yellow(),
             "jp-c17636257526".bold().yellow(),
-        )
-    );
-
-    let counted = render_text(&[
-        failure("17636257521", &error),
-        failure("17636257522", &error),
-        failure("17636257523", &error),
-        failure("17636257524", &error),
-    ])
-    .unwrap();
-    assert_eq!(
-        counted,
-        format!(
-            "{} conversations failed to load. Run with `-v` to list them.",
-            "4".bold().yellow(),
         )
     );
 }
@@ -194,20 +158,6 @@ fn an_unreadable_file_lists_the_io_error_as_a_cause() {
     )]);
 }
 
-#[test]
-fn a_directory_that_is_not_a_conversation_id_has_a_null_id() {
-    let error = ValidationError::InvalidDirname;
-    let records = render_json(&[failure("not-a-valid-id", &error)], false).unwrap();
-
-    assert_eq!(records, [concat!(
-        r#"{"level":"warning","code":"conversation_load_failed","#,
-        r#""message":"conversation failed to load","#,
-        r#""context":{"conversation":{"id":null,"dirname":"not-a-valid-id","#,
-        r#""path":"/ws/.jp/conversations/not-a-valid-id"}},"#,
-        r#""causes":[{"code":"invalid_dirname","message":"invalid directory name"}]}"#,
-    )]);
-}
-
 /// Every conversation in a store holding one conversation whose `metadata.json`
 /// is not JSON, as startup validation reports them.
 fn validated_store(root: &Utf8Path) -> Vec<InvalidConversation> {
@@ -240,8 +190,8 @@ fn the_text_report_prints_when_the_notice_drops_even_under_quiet() {
     assert_eq!(out.lock().as_str(), "");
     assert_eq!(
         strip_ansi_escapes::strip_str(err.lock().as_str()),
-        "1 conversation failed to load:\n  jp-c17941219994: metadata.json: invalid JSON at line \
-         1, column 2\nRun `jp conversation rm jp-c17941219994` to remove it.\n"
+        "1 conversation failed to load:\n\n- jp-c17941219994: metadata.json: invalid JSON at line \
+         1, column 2\n\nRun `jp conversation rm jp-c17941219994` to remove it.\n"
     );
 }
 

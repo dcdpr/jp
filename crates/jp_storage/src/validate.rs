@@ -25,6 +25,11 @@ pub struct ValidationResult {
 
     /// Conversations that failed one or more validation checks.
     pub invalid: Vec<InvalidConversation>,
+
+    /// Directories under `conversations/` whose name is not a conversation ID.
+    ///
+    /// They are not conversations, so their contents are not checked.
+    pub unrecognized: Vec<Utf8PathBuf>,
 }
 
 /// A conversation directory that passed validation.
@@ -56,6 +61,8 @@ pub struct InvalidConversation {
     /// The conversations root this entry lives under.
     pub(crate) conversations_dir: Utf8PathBuf,
 
+    pub id: ConversationId,
+
     /// What went wrong.
     pub error: ValidationError,
 
@@ -66,10 +73,6 @@ pub struct InvalidConversation {
 /// The reason a conversation directory failed validation.
 #[derive(Debug, thiserror::Error)]
 pub enum ValidationError {
-    /// The directory name could not be parsed as a [`ConversationId`].
-    #[error("invalid directory name")]
-    InvalidDirname,
-
     /// A required managed file is missing.
     ///
     /// `metadata.json` and `events.json` are required; `base_config.json` is
@@ -89,13 +92,10 @@ pub enum ValidationError {
 
 impl ValidationError {
     /// The managed file the failure is about.
-    ///
-    /// `None` for a directory name that is not a conversation ID.
     #[must_use]
-    pub const fn file(&self) -> Option<ManagedFile> {
+    pub const fn file(&self) -> ManagedFile {
         match self {
-            Self::InvalidDirname => None,
-            Self::MissingFile { file } | Self::UnreadableFile { file, .. } => Some(*file),
+            Self::MissingFile { file } | Self::UnreadableFile { file, .. } => *file,
         }
     }
 }
@@ -144,13 +144,6 @@ impl InvalidConversation {
     pub fn path(&self) -> Utf8PathBuf {
         self.conversations_dir.join(&self.dirname)
     }
-
-    /// The conversation the directory is named for, or `None` when the
-    /// directory name does not parse as a conversation ID.
-    #[must_use]
-    pub fn id(&self) -> Option<ConversationId> {
-        ConversationId::try_from_dirname(&self.dirname).ok()
-    }
 }
 
 impl fmt::Display for InvalidConversation {
@@ -163,11 +156,13 @@ impl Storage {
     /// Scan all conversation directories and check structural integrity.
     ///
     /// This is a lightweight check that runs on every startup.
-    /// For each directory entry it verifies:
+    /// A directory whose name does not parse as a [`ConversationId`] is not a
+    /// conversation, and is listed in [`ValidationResult::unrecognized`]
+    /// without being checked.
+    /// For every other directory it verifies:
     ///
-    /// 1. The directory name parses as a [`ConversationId`].
-    /// 2. A `metadata.json` file exists and is valid JSON.
-    /// 3. An `events.json` file exists and is a JSON array where each element
+    /// 1. A `metadata.json` file exists and is valid JSON.
+    /// 2. An `events.json` file exists and is a JSON array where each element
     ///    contains `timestamp` and `type` fields.
     ///
     /// Field values are skipped via [`IgnoredAny`] without allocating.
@@ -327,8 +322,8 @@ impl Storage {
                 continue;
             }
 
-            // Unparseable directory names cannot be locked, and `validate_root`
-            // reports them as invalid.
+            // A directory whose name is not a conversation ID cannot be
+            // locked, and is not JP's to clean up.
             let Ok(id) = ConversationId::try_from_dirname(entry.file_name()) else {
                 continue;
             };
@@ -362,12 +357,28 @@ fn validate_root(
         })
         .collect();
 
-    let outcomes: Vec<_> = entries
+    let mut named = vec![];
+    for entry in entries {
+        match ConversationId::try_from_dirname(entry.file_name()) {
+            Ok(id) => named.push((entry, id)),
+            Err(_) => result.unrecognized.push(entry.into_path()),
+        }
+    }
+
+    let outcomes: Vec<_> = named
         .par_iter()
-        .map(|entry| validate_entry(conversations_dir, entry.file_name(), entry.path(), cache))
+        .map(|(entry, id)| {
+            validate_entry(
+                conversations_dir,
+                entry.file_name(),
+                *id,
+                entry.path(),
+                cache,
+            )
+        })
         .collect();
 
-    for (entry, outcome) in entries.into_iter().zip(outcomes) {
+    for ((entry, _), outcome) in named.into_iter().zip(outcomes) {
         match outcome {
             Ok(Validated::Stored(valid, scan)) => {
                 result.valid.push(valid);
@@ -397,97 +408,91 @@ pub enum DirContents {
     /// A stored conversation.
     Stored,
 
-    /// None of the managed files; see [`UnstoredConversation`].
+    /// Files, but none of the managed ones; see [`UnstoredConversation`].
     Unstored,
+
+    /// Nothing at all.
+    Empty,
 }
 
-/// Check one conversation directory the way startup validation checks each
-/// directory under `conversations/`.
+/// Check one conversation directory's files the way startup validation checks
+/// each directory under `conversations/`.
 ///
-/// The directory can live anywhere; its name must still parse as a
-/// [`ConversationId`].
+/// The directory can live anywhere and be named anything.
 /// Reads the directory's files and changes nothing on disk.
 ///
 /// # Errors
 ///
 /// Returns the reason the directory fails validation.
 pub fn validate_conversation_dir(dir: &Utf8Path) -> Result<DirContents, ValidationError> {
-    let (Some(parent), Some(dirname)) = (dir.parent(), dir.file_name()) else {
-        return Err(ValidationError::InvalidDirname);
-    };
-
-    match validate_entry(parent, dirname, dir, &ScanCache::default()) {
-        Ok(Validated::Stored(..)) => Ok(DirContents::Stored),
-        Ok(Validated::Unstored(_)) => Ok(DirContents::Unstored),
-        Err(invalid) => Err(invalid.error),
-    }
+    check_files(dir, &ScanCache::default()).map(|(contents, _)| contents)
 }
 
-/// The title recorded in the `metadata.json` of conversation directory `dir`.
-///
-/// Reads only the `title` field, so a title is found even when the rest of the
-/// file, or the conversation, fails validation.
-/// `None` when the file is missing, is not a JSON object, or holds no string
-/// `title`.
-#[must_use]
-pub fn stored_title(dir: &Utf8Path) -> Option<String> {
-    #[derive(serde::Deserialize)]
-    struct Titled {
-        title: Option<serde_json::Value>,
-    }
-
-    let buf = fs::read(dir.join(METADATA_FILE)).ok()?;
-    match serde_json::from_slice::<Titled>(&buf).ok()?.title? {
-        serde_json::Value::String(title) => Some(title),
-        _ => None,
-    }
-}
-
-/// Validate a single conversation directory entry.
-///
-/// Returns [`ScannedDir`] alongside a stored conversation when `metadata.json`
-/// and `events.json` both have valid file stamps.
+/// Validate a single conversation directory entry named for `id`.
 fn validate_entry(
     conversations_dir: &Utf8Path,
     dirname: &str,
+    id: ConversationId,
     entry_path: &Utf8Path,
     cache: &ScanCache,
 ) -> Result<Validated, InvalidConversation> {
-    let invalid = |error| InvalidConversation {
-        conversations_dir: conversations_dir.to_path_buf(),
-        error,
-        dirname: dirname.to_owned(),
-    };
-
-    let id = ConversationId::try_from_dirname(dirname)
-        .map_err(|_| invalid(ValidationError::InvalidDirname))?;
-
-    if !holds_managed_files(entry_path) {
-        return Ok(Validated::Unstored(UnstoredConversation {
+    match check_files(entry_path, cache) {
+        Ok((DirContents::Stored, scan)) => Ok(Validated::Stored(
+            ValidConversation {
+                id,
+                dirname: dirname.to_owned(),
+            },
+            scan,
+        )),
+        Ok((DirContents::Unstored | DirContents::Empty, _)) => {
+            Ok(Validated::Unstored(UnstoredConversation {
+                id,
+                path: entry_path.to_path_buf(),
+            }))
+        }
+        Err(error) => Err(InvalidConversation {
+            conversations_dir: conversations_dir.to_path_buf(),
             id,
-            path: entry_path.to_path_buf(),
-        }));
+            error,
+            dirname: dirname.to_owned(),
+        }),
     }
+}
 
-    let valid = ValidConversation {
-        id,
-        dirname: dirname.to_owned(),
-    };
+/// Check the managed files in `dir`.
+///
+/// Returns [`ScannedDir`] alongside a stored conversation when `metadata.json`
+/// and `events.json` both have valid file stamps.
+fn check_files(
+    dir: &Utf8Path,
+    cache: &ScanCache,
+) -> Result<(DirContents, Option<ScannedDir>), ValidationError> {
+    if !holds_managed_files(dir) {
+        let empty = dir
+            .read_dir_utf8()
+            .is_ok_and(|mut entries| entries.next().is_none());
+        let contents = if empty {
+            DirContents::Empty
+        } else {
+            DirContents::Unstored
+        };
+        return Ok((contents, None));
+    }
 
     // Capture file stamps before reading any files so a mid-check write keeps
     // the older stamp and is re-read on the next scan.
-    let stamps = DirStamps::of(entry_path);
-    if let Some(scan) = cache.get(entry_path, &stamps) {
-        return Ok(Validated::Stored(valid, Some(scan)));
+    let stamps = DirStamps::of(dir);
+    if let Some(scan) = cache.get(dir, &stamps) {
+        return Ok((DirContents::Stored, Some(scan)));
     }
 
-    let unreadable = |file, source| invalid(ValidationError::UnreadableFile { file, source });
+    let unreadable = |file, source| ValidationError::UnreadableFile { file, source };
 
-    let metadata_path = entry_path.join(METADATA_FILE);
+    let metadata_path = dir.join(METADATA_FILE);
     if !metadata_path.is_file() {
-        return Err(invalid(ValidationError::MissingFile {
+        return Err(ValidationError::MissingFile {
             file: ManagedFile::Metadata,
-        }));
+        });
     }
     validate_metadata(&metadata_path)
         .map_err(|source| unreadable(ManagedFile::Metadata, source))?;
@@ -495,22 +500,22 @@ fn validate_entry(
     // base_config.json is optional for backward compat (old conversations have
     // the base config packed into events.json), but if it exists it must be
     // valid JSON.
-    let base_config_path = entry_path.join(BASE_CONFIG_FILE);
+    let base_config_path = dir.join(BASE_CONFIG_FILE);
     if base_config_path.is_file() {
         validate_json_file(&base_config_path)
             .map_err(|source| unreadable(ManagedFile::BaseConfig, source))?;
     }
 
-    let events_path = entry_path.join(EVENTS_FILE);
+    let events_path = dir.join(EVENTS_FILE);
     if !events_path.is_file() {
-        return Err(invalid(ValidationError::MissingFile {
+        return Err(ValidationError::MissingFile {
             file: ManagedFile::Events,
-        }));
+        });
     }
     let summary =
         validate_events(&events_path).map_err(|source| unreadable(ManagedFile::Events, source))?;
 
-    Ok(Validated::Stored(valid, stamps.scanned(summary)))
+    Ok((DirContents::Stored, stamps.scanned(summary)))
 }
 
 /// Confirm `metadata.json` is a valid JSON object.

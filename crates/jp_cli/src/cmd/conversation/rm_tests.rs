@@ -439,12 +439,40 @@ fn the_status_says_why_a_conversation_does_not_load() {
     let tmp = camino_tempfile::tempdir().unwrap();
     let broken = write_dir(tmp.path(), "17941219991", &[("metadata.json", "not json")]);
     let draft = write_dir(tmp.path(), "17941219992", &[("QUERY_MESSAGE.md", "typed")]);
+    let empty = write_dir(tmp.path(), "17941219993", &[]);
 
     assert_eq!(
         unloaded_status(&[broken]).as_deref(),
         Some("unable to load: metadata.json: invalid JSON at line 1, column 2")
     );
-    assert_eq!(unloaded_status(&[draft]).as_deref(), Some("never stored"));
+    assert_eq!(
+        unloaded_status(&[draft]).as_deref(),
+        Some("no conversation files")
+    );
+    assert_eq!(
+        unloaded_status(&[empty]).as_deref(),
+        Some("empty conversation directory")
+    );
+}
+
+// The title is whatever the stored metadata says, as for any conversation: a
+// conversation whose metadata is missing or does not parse has none.
+#[test]
+fn the_title_comes_from_the_stored_metadata() {
+    let tmp = camino_tempfile::tempdir().unwrap();
+    let fs = FsStorageBackend::new(tmp.path()).unwrap();
+    let conversations = tmp.path().join("conversations");
+    write_dir(&conversations, "17941219991-fix-the-loader", &[(
+        "metadata.json",
+        r#"{"title":"Fix the loader","last_activated_at":"2026-01-01T00:00:00Z"}"#,
+    )]);
+    write_dir(&conversations, "17941219992", &[("events.json", "[]")]);
+
+    assert_eq!(
+        stored_title(&fs, &id("17941219991")).as_deref(),
+        Some("Fix the loader")
+    );
+    assert_eq!(stored_title(&fs, &id("17941219992")), None);
 }
 
 // The status is read under the conversation's lock, so a conversation another

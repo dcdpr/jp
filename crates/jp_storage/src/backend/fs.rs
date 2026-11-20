@@ -355,9 +355,7 @@ impl LoadBackend for FsStorageBackend {
             .filter(|entry| {
                 // A conversation another process holds may be between the
                 // writes of its managed files, so its state says nothing yet.
-                let locked = entry
-                    .id()
-                    .is_some_and(|id| self.storage.is_conversation_locked(&id.to_string()));
+                let locked = self.storage.is_conversation_locked(&entry.id.to_string());
                 if locked {
                     debug!(%entry, "Ignoring locked conversation.");
                 }

@@ -56,7 +56,8 @@ fn test_invalid_conversations_are_reported_and_left_in_place() {
     let valid_id = ConversationId::try_from(datetime!(2024-01-01 00:00:00 Z)).unwrap();
     fs.write_test_conversation(&valid_id, &Conversation::default());
 
-    // Two different kinds of invalid: bad dirname + corrupt metadata.
+    // A directory whose name is not a conversation ID is not a conversation, so
+    // only the corrupt conversation is reported, and neither moves.
     let bad_id = ConversationId::try_from(datetime!(2024-01-02 00:00:00 Z)).unwrap();
     fs.create_corrupt_test_conversation_dir(&bad_id.to_dirname(None))
         .unwrap();
@@ -65,10 +66,10 @@ fn test_invalid_conversations_are_reported_and_left_in_place() {
 
     let report = ws.sanitize().unwrap();
 
-    assert_eq!(reported_paths(&report), [
-        conversation_dir(&fs, "17041536000"),
-        conversation_dir(&fs, "not-a-valid-id"),
-    ]);
+    assert_eq!(reported_paths(&report), [conversation_dir(
+        &fs,
+        "17041536000"
+    )]);
     assert!(
         conversation_dir(&fs, "17041536000")
             .join("metadata.json")

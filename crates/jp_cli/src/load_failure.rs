@@ -19,35 +19,23 @@ use tracing::warn;
 
 use crate::deferred_report::DeferredReport;
 
-/// The most failures the text report lists one by one; above it, it gives a
-/// count.
-const LISTED_FAILURES: usize = 3;
-
 /// A conversation directory that failed to load, as the report shows it.
 #[derive(Debug)]
 pub(crate) struct LoadFailure<'a> {
-    /// `None` when the directory name is not a conversation ID.
-    pub id: Option<ConversationId>,
+    pub id: ConversationId,
     pub dirname: &'a str,
     pub path: Utf8PathBuf,
     pub error: &'a ValidationError,
 }
 
 impl LoadFailure<'_> {
-    /// The conversation ID, or the directory name when it is not one.
-    fn name(&self) -> String {
-        self.id
-            .map_or_else(|| self.dirname.to_owned(), |id| id.to_string())
-    }
-
     /// Log the failure as one warning, shown with `-v`.
     fn log(&self) {
-        let file = self.error.file().map(|file| self.path.join(file.name()));
         warn!(
             code = "conversation_load_failed",
-            conversation = %self.name(),
+            conversation = %self.id,
             path = %self.path,
-            file = file.as_deref().map(Utf8Path::as_str),
+            file = %self.path.join(self.error.file().name()),
             error = %self.error,
             "Conversation failed to load."
         );
@@ -64,17 +52,20 @@ pub(crate) fn notice(printer: Printer, invalid: &[InvalidConversation]) -> LoadF
 
     LoadFailureNotice {
         printer,
-        dirs: invalid.iter().map(InvalidConversation::path).collect(),
+        dirs: invalid
+            .iter()
+            .map(|invalid| (invalid.id, invalid.path()))
+            .collect(),
     }
 }
 
 /// The load-failure report, printed on stderr when dropped.
 ///
-/// Holds the directories that failed startup validation, and reports those that
-/// still exist and still fail when it drops.
+/// Holds the conversation directories that failed startup validation, and
+/// reports those that still exist and still fail when it drops.
 pub(crate) struct LoadFailureNotice {
     printer: Printer,
-    dirs: Vec<Utf8PathBuf>,
+    dirs: Vec<(ConversationId, Utf8PathBuf)>,
 }
 
 impl Drop for LoadFailureNotice {
@@ -82,24 +73,21 @@ impl Drop for LoadFailureNotice {
         let still_failing: Vec<_> = self
             .dirs
             .drain(..)
-            .filter(|dir| dir.is_dir())
-            .filter_map(|dir| {
+            .filter(|(_, dir)| dir.is_dir())
+            .filter_map(|(id, dir)| {
                 validate_conversation_dir(&dir)
                     .err()
-                    .map(|error| (dir, error))
+                    .map(|error| (id, dir, error))
             })
             .collect();
 
         let failures: Vec<_> = still_failing
             .iter()
-            .map(|(dir, error)| {
-                let dirname = dir.file_name().unwrap_or_default();
-                LoadFailure {
-                    id: ConversationId::try_from_dirname(dirname).ok(),
-                    dirname,
-                    path: dir.clone(),
-                    error,
-                }
+            .map(|(id, dir, error)| LoadFailure {
+                id: *id,
+                dirname: dir.file_name().unwrap_or_default(),
+                path: dir.clone(),
+                error,
             })
             .collect();
 
@@ -114,7 +102,7 @@ impl Drop for LoadFailureNotice {
 impl<'a> From<&'a InvalidConversation> for LoadFailure<'a> {
     fn from(invalid: &'a InvalidConversation) -> Self {
         Self {
-            id: invalid.id(),
+            id: invalid.id,
             dirname: &invalid.dirname,
             path: invalid.path(),
             error: &invalid.error,
@@ -124,60 +112,48 @@ impl<'a> From<&'a InvalidConversation> for LoadFailure<'a> {
 
 /// Render the text report, or `None` when nothing failed to load.
 ///
-/// Up to three failures are listed with their name and error, followed by the
-/// `jp conversation rm` command that removes them; more are summarized as a
-/// count.
+/// Every failure is listed with its ID and error, followed by the `jp
+/// conversation rm` command that removes them.
 pub(crate) fn render_text(failures: &[LoadFailure<'_>]) -> Option<String> {
     let count = failures.len();
-    let noun = if count == 1 {
-        "conversation"
-    } else {
-        "conversations"
-    };
-
-    match count {
-        0 => None,
-        1..=LISTED_FAILURES => {
-            let entries = failures
-                .iter()
-                .map(|failure| format!("  {}: {}", failure.name().bold().yellow(), failure.error))
-                .collect::<Vec<_>>()
-                .join("\n");
-            let subject = format!("{count} {noun}");
-            let mut report = format!("{} failed to load:\n{entries}", subject.bold().yellow());
-            if let Some(hint) = rm_hint(failures) {
-                report.push('\n');
-                report.push_str(&hint);
-            }
-            Some(report)
-        }
-        _ => Some(format!(
-            "{} {noun} failed to load. Run with `-v` to list them.",
-            count.to_string().bold().yellow()
-        )),
-    }
-}
-
-/// The command that removes every listed failure with a conversation ID.
-///
-/// `None` when no failure has one: `jp conversation rm` only removes
-/// directories named for a conversation ID.
-fn rm_hint(failures: &[LoadFailure<'_>]) -> Option<String> {
-    let ids: Vec<_> = failures
-        .iter()
-        .filter_map(|failure| failure.id)
-        .map(|id| id.to_string())
-        .collect();
-    let pronoun = match ids.len() {
+    let noun = match count {
         0 => return None,
-        1 => "it",
-        _ => "them",
+        1 => "conversation",
+        _ => "conversations",
     };
+
+    let entries = failures
+        .iter()
+        .map(|failure| {
+            format!(
+                "- {}: {}",
+                failure.id.to_string().bold().yellow(),
+                failure.error
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let subject = format!("{count} {noun}");
 
     Some(format!(
+        "{} failed to load:\n\n{entries}\n\n{}",
+        subject.bold().yellow(),
+        rm_hint(failures)
+    ))
+}
+
+/// The command that removes every listed failure.
+fn rm_hint(failures: &[LoadFailure<'_>]) -> String {
+    let ids: Vec<_> = failures
+        .iter()
+        .map(|failure| failure.id.to_string())
+        .collect();
+    let pronoun = if ids.len() == 1 { "it" } else { "them" };
+
+    format!(
         "Run `jp conversation rm {}` to remove {pronoun}.",
         ids.join(" ")
-    ))
+    )
 }
 
 /// Render one JSON record per failure.
@@ -220,8 +196,7 @@ struct Context<'a> {
 
 #[derive(Serialize)]
 struct ConversationContext<'a> {
-    /// `null` when the directory name is not a conversation ID.
-    id: Option<String>,
+    id: String,
     dirname: &'a str,
     path: &'a Utf8Path,
 }
@@ -262,7 +237,7 @@ impl<'a> From<&'a LoadFailure<'a>> for Record<'a> {
             message: "conversation failed to load",
             context: Context {
                 conversation: ConversationContext {
-                    id: failure.id.map(|id| id.to_string()),
+                    id: failure.id.to_string(),
                     dirname: failure.dirname,
                     path: &failure.path,
                 },
@@ -275,9 +250,6 @@ impl<'a> From<&'a LoadFailure<'a>> for Record<'a> {
 /// The error chain of the conversation directory at `dir`, outermost first.
 pub(crate) fn causes(dir: &Utf8Path, error: &ValidationError) -> Vec<Cause> {
     match error {
-        ValidationError::InvalidDirname => {
-            vec![Cause::new("invalid_dirname", "invalid directory name")]
-        }
         ValidationError::MissingFile { file } => vec![Cause {
             path: Some(dir.join(file.name())),
             ..Cause::new("file_missing", "missing file")
