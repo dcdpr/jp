@@ -19,7 +19,7 @@ use tracing::debug;
 
 use super::{
     ConversationFilter, ConversationIndexEntry, ConversationLockGuard, LoadBackend, LockBackend,
-    PersistBackend, Projection, SanitizeReport, SessionBackend, UnlistedConversation,
+    PersistBackend, Projection, RecoveryBackend, Removal, SessionBackend, StoredConversation,
 };
 use crate::{
     CONVERSATIONS_DIR, LoadError, Storage, conversation_dirs_for_id, dir_entries,
@@ -338,8 +338,10 @@ impl LoadBackend for FsStorageBackend {
         expired.dedup();
         expired
     }
+}
 
-    fn sanitize(&self) -> Result<SanitizeReport> {
+impl RecoveryBackend for FsStorageBackend {
+    fn scan(&self) -> Result<Vec<InvalidConversation>> {
         let validation = self.storage.validate_conversations();
 
         // A conversation another process holds may be between the writes of
@@ -359,10 +361,10 @@ impl LoadBackend for FsStorageBackend {
             .collect();
         invalid.sort_by_key(InvalidConversation::path);
 
-        Ok(SanitizeReport { invalid })
+        Ok(invalid)
     }
 
-    fn unlisted_conversation(&self, id: &ConversationId) -> Option<UnlistedConversation> {
+    fn inspect(&self, id: &ConversationId) -> Option<StoredConversation> {
         let dirs = self.live_conversation_dirs(id);
         if dirs.is_empty() {
             return None;
@@ -381,12 +383,35 @@ impl LoadBackend for FsStorageBackend {
             .ok()
             .and_then(|metadata| metadata.title);
 
-        Some(UnlistedConversation {
+        Some(StoredConversation {
             id: *id,
             locations,
             state,
             title,
         })
+    }
+
+    fn remove(
+        &self,
+        id: &ConversationId,
+        decide: &mut dyn FnMut(&StoredConversation) -> bool,
+    ) -> Result<Removal> {
+        // Held until the directories are gone: a process creating this
+        // conversation is between the writes of its files, and its partial
+        // state would otherwise be deleted.
+        let Some(_guard) = self.storage.try_lock_conversation(&id.to_string(), None)? else {
+            return Ok(Removal::Locked);
+        };
+
+        let Some(stored) = self.inspect(id) else {
+            return Ok(Removal::NotFound);
+        };
+        if !decide(&stored) {
+            return Ok(Removal::Declined);
+        }
+
+        self.storage.remove_conversation(id)?;
+        Ok(Removal::Removed)
     }
 }
 

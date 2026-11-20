@@ -14,12 +14,10 @@ mod error;
 mod handle;
 mod id;
 pub mod roots;
-mod sanitize;
 pub mod session;
 pub(crate) mod session_mapping;
 pub mod session_store;
 mod state;
-mod unlisted;
 
 use std::{
     collections::HashMap,
@@ -48,11 +46,9 @@ use jp_storage::{
     lock::LockInfo,
 };
 use parking_lot::{ArcRwLockReadGuard, RawRwLock, RwLock, RwLockReadGuard};
-pub use sanitize::SanitizeReport;
 pub use session_mapping::SessionOverview;
 use state::State;
 use tracing::{debug, trace, warn};
-pub use unlisted::UnlistedLock;
 
 use crate::session::Session;
 
@@ -179,8 +175,6 @@ impl Workspace {
     ///
     /// The conversation index is not populated, so [`conversations`] is empty
     /// until [`load_conversation_index`] is called.
-    /// Call [`sanitize`] before that: it repairs the backing store, and
-    /// indexing an unrepaired store carries the damage into the index.
     ///
     /// Opening writes to disk: the user-local silo is created if missing, its
     /// `storage` symlink is repointed at this workspace root, and the workspace
@@ -193,7 +187,6 @@ impl Workspace {
     ///
     /// [`conversations`]: Self::conversations
     /// [`load_conversation_index`]: Self::load_conversation_index
-    /// [`sanitize`]: Self::sanitize
     pub fn open(dir: &Utf8Path) -> Result<Self> {
         Self::open_inner(dir, DEFAULT_STORAGE_DIR, Access::ReadWrite)
     }
@@ -362,14 +355,11 @@ impl Workspace {
     /// index.
     ///
     /// All entries are lazily initialized — metadata and events are loaded on
-    /// first access via [`metadata`], [`events`], etc.
-    ///
-    /// Call [`sanitize`] before this method to ensure the backing store is in a
-    /// consistent state.
+    /// first access via [`metadata`], [`events`], etc. A stored conversation
+    /// that fails validation is left out.
     ///
     /// [`events`]: Self::events
     /// [`metadata`]: Self::metadata
-    /// [`sanitize`]: Self::sanitize
     pub fn load_conversation_index(&mut self) {
         trace!("Loading conversation index.");
 

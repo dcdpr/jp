@@ -1,18 +1,20 @@
 //! The report of conversations that failed to load.
 //!
-//! Startup validation finds conversation directories JP cannot load and leaves
+//! The scan at startup finds the stored conversations JP cannot load and leaves
 //! them where they are.
 //! [`notice`] prints the report on stderr after the command's own output:
 //! [`render_text`] for the text formats, [`render_json`] for the JSON formats.
-//! Each directory is checked again when the report prints, so one the command
-//! removed or fixed is left out.
+//! Each conversation is checked again when the report prints, so one the
+//! command removed or fixed is left out.
 
-use camino::Utf8PathBuf;
+use std::sync::Arc;
+
 use crossterm::style::Stylize as _;
 use jp_conversation::ConversationId;
 use jp_printer::Printer;
-use jp_storage::validate::{
-    InvalidConversation, ReadError, StorageLocation, ValidationError, validate_conversation_dir,
+use jp_storage::{
+    backend::RecoveryBackend,
+    validate::{InvalidConversation, ReadError, StorageLocation, ValidationError},
 };
 use serde::Serialize;
 use tracing::warn;
@@ -43,48 +45,53 @@ impl LoadFailure<'_> {
 
 /// Log each failure, and return the report printed on stderr when it drops.
 ///
+/// `recovery` checks each conversation again when the report prints.
 /// Under the JSON output formats the report is one record per failure.
-pub(crate) fn notice(printer: Printer, invalid: &[InvalidConversation]) -> LoadFailureNotice {
+pub(crate) fn notice(
+    printer: Printer,
+    recovery: Arc<dyn RecoveryBackend>,
+    invalid: &[InvalidConversation],
+) -> LoadFailureNotice {
     for failure in invalid.iter().map(LoadFailure::from) {
         failure.log();
     }
 
     LoadFailureNotice {
         printer,
-        dirs: invalid
+        recovery,
+        failed: invalid
             .iter()
-            .map(|invalid| (invalid.id, invalid.path()))
+            .map(|invalid| (invalid.id, invalid.location()))
             .collect(),
     }
 }
 
 /// The load-failure report, printed on stderr when dropped.
 ///
-/// Holds the conversation directories that failed startup validation, and
-/// reports those that still exist and still fail when it drops.
+/// Holds the conversations that failed the scan at startup, and reports those
+/// the store still holds and that still fail when it drops.
 pub(crate) struct LoadFailureNotice {
     printer: Printer,
-    dirs: Vec<(ConversationId, Utf8PathBuf)>,
+    recovery: Arc<dyn RecoveryBackend>,
+    failed: Vec<(ConversationId, StorageLocation)>,
 }
 
 impl Drop for LoadFailureNotice {
     fn drop(&mut self) {
         let still_failing: Vec<_> = self
-            .dirs
+            .failed
             .drain(..)
-            .filter(|(_, dir)| dir.is_dir())
-            .filter_map(|(id, dir)| {
-                validate_conversation_dir(&dir)
-                    .err()
-                    .map(|error| (id, dir, error))
+            .filter_map(|(id, location)| {
+                let error = self.recovery.inspect(&id)?.state.err()?;
+                Some((id, location, error))
             })
             .collect();
 
         let failures: Vec<_> = still_failing
             .iter()
-            .map(|(id, dir, error)| LoadFailure {
+            .map(|(id, location, error)| LoadFailure {
                 id: *id,
-                location: StorageLocation::new(dir.as_str()),
+                location: location.clone(),
                 error,
             })
             .collect();

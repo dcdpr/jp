@@ -13,7 +13,7 @@ use jp_inquire::{release_terminal, terminal_held};
 use jp_llm::Provider;
 use jp_mcp::{StartupSet, id::McpServerId};
 use jp_printer::Printer;
-use jp_storage::backend::FsStorageBackend;
+use jp_storage::backend::{DryRunRecovery, FsStorageBackend, NullRecoveryBackend, RecoveryBackend};
 use jp_task::TaskHandler;
 use jp_workspace::{Workspace, session::Session};
 use tokio::runtime::{Handle, Runtime};
@@ -37,6 +37,10 @@ pub(crate) struct Ctx {
     /// file-level cleanup.
     /// `None` when running with an in-memory backend.
     pub(crate) fs_backend: Option<Arc<FsStorageBackend>>,
+
+    /// The stored conversations that do not load, which the workspace leaves
+    /// out; see [`recovery_backend`].
+    pub(crate) recovery: Arc<dyn RecoveryBackend>,
 
     /// Merged file/CLI configuration.
     config: Arc<AppConfig>,
@@ -154,10 +158,13 @@ impl Ctx {
 
         let interactive = crate::interactive(args.no_interactive, is_tty);
 
+        let recovery = recovery_backend(fs_backend.as_ref(), args.persist);
+
         Self {
             exec,
             workspace,
             fs_backend,
+            recovery,
             config,
             term: Term {
                 args,
@@ -330,6 +337,21 @@ impl Drop for Ctx {
         }
 
         self.printer.shutdown();
+    }
+}
+
+/// The recovery backend for a run over `fs`.
+///
+/// Under `--no-persist` (`persist` false) it reads the store and removes
+/// nothing; without storage on disk there is nothing to recover.
+pub(crate) fn recovery_backend(
+    fs: Option<&Arc<FsStorageBackend>>,
+    persist: bool,
+) -> Arc<dyn RecoveryBackend> {
+    match fs {
+        None => Arc::new(NullRecoveryBackend),
+        Some(fs) if persist => Arc::clone(fs) as Arc<dyn RecoveryBackend>,
+        Some(fs) => Arc::new(DryRunRecovery::new(Arc::clone(fs) as _)),
     }
 }
 

@@ -6,7 +6,7 @@
 - **Parent**: W-00dxybb
 - **Label**: domain=conversation
 - **Summary**: The glossary's Conversation cluster: Turn, Event ID, Label, and
-  what makes a conversation active, live, or archived.
+  what makes a conversation active, live, archived, or invalid.
 
 The Conversation cluster covers JP's central abstraction: the persistent record
 of "talking to the assistant" and the event log that backs it.
@@ -87,9 +87,9 @@ A conversation moved out of the default partition into the archive, to keep it
 out of listings and whole-corpus operations without deleting it.
 
 Archived conversations are deliberately **not** indexed at startup.
-That is what keeps `jp c ls`, sanitization, and the picker fast in a workspace
-where most conversations have been archived, and it is why reaching one costs an
-explicit target (`a`, `?a`, `+a`) or `--archived`.
+That is what keeps `jp c ls`, the scan for invalid conversations, and the picker
+fast in a workspace where most conversations have been archived, and it is why
+reaching one costs an explicit target (`a`, `?a`, `+a`) or `--archived`.
 
 **Implementation.** The `conversations/.archive/` partition, reached via
 `ConversationFilter { archived: true }`.
@@ -98,6 +98,19 @@ is the source of truth.
 
 **Not the same as.** A removed conversation (archiving is reversible with `jp c
 unarchive`; removal is not).
+
+### Invalid Conversation
+
+A conversation the store holds whose stored parts (metadata, base config,
+events) fail validation, so it cannot be loaded.
+It stays where it is: it is left out of the conversation index, reported after
+every command, and reached only by its ID.
+
+**Implementation.** `InvalidConversation` in `jp_storage::validate`, listed by
+`RecoveryBackend::scan`.
+
+**Not the same as.** An **Archived Conversation**: archived is a location and
+the conversation loads; invalid is a state, and the conversation does not.
 
 ### Label
 

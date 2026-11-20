@@ -243,13 +243,9 @@ everything it writes to the sequences JP's own output uses, whatever filtered it
 before.
 Text with no class, such as a conversation title, relies on the floor alone.
 
-**Not the same as** the other two operations JP calls sanitize, which act on
-stored data rather than how it is shown.
-Storage sanitization (`Workspace::sanitize`, [RFD-052]) checks the conversations
-on disk at startup and reports the ones that cannot be loaded, leaving their
-files in place.
-Stream repair (`ConversationStream::sanitize`) fixes structural problems in an
-event stream, such as a tool call with no response.
+**Not the same as** stream repair (`ConversationStream::sanitize`), the other
+operation JP calls sanitize, which fixes structural problems in a stored event
+stream, such as a tool call with no response, rather than how text is shown.
 
 ### Drain Timeout
 
@@ -640,7 +636,6 @@ See [RFD-031].
 
 [RFD-001]: ../rfd/001-jp-rfd-process.md
 [RFD-031]: ../rfd/031-durable-conversation-storage-with-workspace-projection.md
-[RFD-052]: ../rfd/052-workspace-data-store-sanitization.md
 [RFD-064]: ../rfd/064-non-destructive-conversation-compaction.md
 [RFD-087]: ../rfd/087-session-scoped-active-workspace.md
 [RFD-096]: ../rfd/096-terminal-output-sanitization-for-untrusted-content.md

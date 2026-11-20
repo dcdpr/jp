@@ -39,7 +39,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::NamedUtf8TempFile;
 use cmd::Commands;
 use crossterm::{style::Stylize as _, terminal};
-use ctx::{Ctx, IntoPartialAppConfig};
+use ctx::{Ctx, IntoPartialAppConfig, recovery_backend};
 use error::{Error, Result};
 use jp_config::{
     AppConfig, PartialAppConfig,
@@ -53,7 +53,7 @@ use jp_config::{
 use jp_inquire::prompt::TerminalPromptBackend;
 use jp_printer::{Chrome, OutputFormat, OutputWidth, Printer, RegionStyle};
 use jp_storage::backend::{
-    FsStorageBackend, NullLockBackend, NullPersistBackend, ReadOnlySessionBackend,
+    FsStorageBackend, NullLockBackend, NullPersistBackend, ReadOnlySessionBackend, RecoveryBackend,
 };
 use jp_term::table::{DetailRow, Details, details, details_markdown};
 use jp_workspace::{
@@ -520,8 +520,8 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
     // Held until the run ends, whichever way it ends, so the report follows the
     // command's own output.
     let _load_failures = prepare_conversation_store(
-        &mut workspace,
         fs_backend.as_deref().filter(|_| cli.globals.persist),
+        recovery_backend(fs_backend.as_ref(), cli.globals.persist),
         &printer,
     )?;
 
@@ -1122,20 +1122,20 @@ pub(crate) enum LoadIntent {
 /// back, so they are listed or reported like any other.
 /// Without it (no storage on disk, or `--no-persist`) nothing on disk changes.
 fn prepare_conversation_store(
-    workspace: &mut Workspace,
     fs: Option<&FsStorageBackend>,
+    recovery: Arc<dyn RecoveryBackend>,
     printer: &Printer,
 ) -> Result<load_failure::LoadFailureNotice> {
-    // Before validation, so a restored conversation that still fails to load
-    // is reported below.
+    // Before the scan, so a restored conversation that still fails to load is
+    // reported below.
     if let Some(fs) = fs {
         trash_restore::restore_trash(fs);
     }
 
-    trace!("Sanitizing workspace.");
-    let report = workspace.sanitize()?;
+    trace!("Scanning for conversations that do not load.");
+    let invalid = recovery.scan().map_err(cmd::Error::from)?;
 
-    Ok(load_failure::notice(printer.clone(), &report.invalid))
+    Ok(load_failure::notice(printer.clone(), recovery, &invalid))
 }
 
 /// Construct the workspace at the given, bootstrap-selected checkout root.

@@ -14,7 +14,8 @@ use test_log::test;
 use super::*;
 use crate::{
     backend::{
-        ConversationFilter, FsStorageBackend, LoadBackend as _, Projection, StoragePresence,
+        ConversationFilter, FsStorageBackend, LoadBackend as _, Projection, RecoveryBackend as _,
+        StoragePresence,
     },
     validate::{ConversationPart, StorageLocation, ValidationError},
 };
@@ -307,7 +308,7 @@ fn live_conversation_dirs_match_the_id_exactly() {
 // What the store holds for a conversation the index leaves out, as typed
 // state: callers render it, storage only reports it.
 #[test]
-fn an_unlisted_conversation_reports_its_files_title_and_directories() {
+fn inspecting_a_conversation_reports_its_state_title_and_directories() {
     let tmp = tempdir().unwrap();
     let backend = FsStorageBackend::new(&tmp.path().join("ws"))
         .unwrap()
@@ -324,7 +325,7 @@ fn an_unlisted_conversation_reports_its_files_title_and_directories() {
         r#"{"title":"Fix the loader","last_activated_at":"2026-01-01T00:00:00Z"}"#,
     )
     .unwrap();
-    let found = backend.unlisted_conversation(&id("17941219991")).unwrap();
+    let found = backend.inspect(&id("17941219991")).unwrap();
     assert_eq!(found.locations, [StorageLocation::new(broken.as_str())]);
     assert_eq!(found.title.as_deref(), Some("Fix the loader"));
     assert_eq!(
@@ -338,7 +339,7 @@ fn an_unlisted_conversation_reports_its_files_title_and_directories() {
     let draft = user.join("17941219992");
     fs::create_dir_all(&draft).unwrap();
     fs::write(draft.join("QUERY_MESSAGE.md"), "typed").unwrap();
-    let found = backend.unlisted_conversation(&id("17941219992")).unwrap();
+    let found = backend.inspect(&id("17941219992")).unwrap();
     assert_eq!(found.locations, [StorageLocation::new(draft.as_str())]);
     assert_eq!(found.title, None);
     assert_eq!(
@@ -349,7 +350,7 @@ fn an_unlisted_conversation_reports_its_files_title_and_directories() {
         })
     );
 
-    assert!(backend.unlisted_conversation(&id("17941219994")).is_none());
+    assert!(backend.inspect(&id("17941219994")).is_none());
 }
 
 #[test]

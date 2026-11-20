@@ -507,6 +507,44 @@ fn test_load_index_fresh_workspace() {
     assert_eq!(workspace.conversations().count(), 0);
 }
 
+// The index keeps a broken conversation out on its own, so a reader that never
+// scans for broken conversations, such as the macOS app, does not hand one on
+// to be loaded either.
+#[test]
+fn test_load_index_leaves_out_invalid_conversations() {
+    let tmp = tempdir().unwrap();
+    let fs = FsStorageBackend::new(&tmp.path().join("storage")).unwrap();
+    let mut workspace = workspace_with_fs(tmp.path(), &fs);
+    workspace.disable_persistence();
+
+    let valid = ConversationId::try_from(datetime!(2024-01-01 00:00:00 Z)).unwrap();
+    let invalid = ConversationId::try_from(datetime!(2024-01-02 00:00:00 Z)).unwrap();
+    fs.write_test_conversation(&valid, &Conversation::default());
+    fs.create_corrupt_test_conversation_dir(&invalid.to_dirname(None))
+        .unwrap();
+
+    workspace.load_conversation_index();
+
+    assert!(workspace.acquire_conversation(&valid).is_ok());
+    assert!(workspace.acquire_conversation(&invalid).is_err());
+}
+
+#[test]
+fn test_load_index_of_only_invalid_conversations_is_empty() {
+    let tmp = tempdir().unwrap();
+    let fs = FsStorageBackend::new(&tmp.path().join("storage")).unwrap();
+    let mut workspace = workspace_with_fs(tmp.path(), &fs);
+    workspace.disable_persistence();
+
+    let id = ConversationId::try_from(datetime!(2024-01-01 00:00:00 Z)).unwrap();
+    fs.create_corrupt_test_conversation_dir(&id.to_dirname(None))
+        .unwrap();
+
+    workspace.load_conversation_index();
+
+    assert_eq!(workspace.conversations().count(), 0);
+}
+
 #[test]
 fn test_load_index_fresh_workspace_then_create_conversation() {
     let tmp = tempdir().unwrap();

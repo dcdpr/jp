@@ -5,7 +5,7 @@ use chrono::{DateTime, TimeZone as _, Utc};
 use jp_config::AppConfig;
 use jp_conversation::{Conversation, ConversationEvent, ConversationId, event::ChatRequest};
 use jp_printer::{OutputFormat, Printer};
-use jp_storage::backend::{FsStorageBackend, InMemoryStorageBackend, LoadBackend as _};
+use jp_storage::backend::{FsStorageBackend, InMemoryStorageBackend, RecoveryBackend as _};
 use jp_workspace::{
     LockResult, Workspace,
     session::{Session, SessionId, SessionSource},
@@ -337,7 +337,7 @@ fn filter_grep_drops_a_match_whose_stream_does_not_load() {
 
     // Startup validation checks structure only, so it does not report the
     // conversation before `c use` runs.
-    assert!(backend.sanitize().unwrap().invalid.is_empty());
+    assert!(backend.scan().unwrap().is_empty());
 
     // `FsStorageBackend` stores session mappings in user storage, which is not
     // configured in this fixture, so keep sessions in memory.

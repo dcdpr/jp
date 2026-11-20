@@ -21,8 +21,7 @@
 //! forgot to filter its content still cannot take over the terminal.
 //!
 //! Only what is displayed is filtered, never what is stored.
-//! This is unrelated to `Workspace::sanitize` (storage) and
-//! `ConversationStream::sanitize` (stream repair).
+//! This is unrelated to `ConversationStream::sanitize` (stream repair).
 
 use std::{
     borrow::Cow,

@@ -1,12 +1,13 @@
 //! Storage backend trait abstractions.
 //!
-//! Four focused traits decouple conversation persistence, loading, locking, and
-//! session management from the filesystem:
+//! Focused traits decouple conversation persistence, loading, locking, session
+//! management, and recovery from the filesystem:
 //!
 //! - [`PersistBackend`] — writes and removes conversation data.
 //! - [`LoadBackend`] — reads conversation data and indexes.
 //! - [`LockBackend`] — conversation-level exclusive locking.
 //! - [`SessionBackend`] — session-to-conversation mapping storage.
+//! - [`RecoveryBackend`] — finds and removes conversations that do not load.
 //!
 //! See also: `docs/rfd/073-layered-storage-backend-for-workspaces.md`
 
@@ -16,15 +17,16 @@ mod lock;
 mod memory;
 mod null;
 mod persist;
+mod recovery;
 mod session;
 
 pub use fs::FsStorageBackend;
-pub use load::{
-    ConversationFilter, ConversationIndexEntry, LoadBackend, SanitizeReport, StoragePresence,
-    UnlistedConversation,
-};
+pub use load::{ConversationFilter, ConversationIndexEntry, LoadBackend, StoragePresence};
 pub use lock::{ConversationLockGuard, LockBackend};
 pub use memory::InMemoryStorageBackend;
 pub use null::{NoopLockGuard, NullLockBackend, NullPersistBackend, ReadOnlySessionBackend};
 pub use persist::{PersistBackend, Projection};
+pub use recovery::{
+    DryRunRecovery, NullRecoveryBackend, RecoveryBackend, Removal, StoredConversation,
+};
 pub use session::SessionBackend;

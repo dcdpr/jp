@@ -5,7 +5,7 @@ use crossterm::style::Stylize as _;
 use jp_conversation::ConversationId;
 use jp_printer::{Chrome, OutputFormat};
 use jp_storage::{
-    backend::FsStorageBackend,
+    backend::{FsStorageBackend, NullRecoveryBackend},
     validate::{ConversationPart, Position, ReadError, StorageLocation, ValidationError},
 };
 
@@ -164,14 +164,15 @@ fn an_unavailable_part_lists_the_read_error_as_a_cause() {
     )]);
 }
 
-/// Every conversation in a store holding one conversation whose `metadata.json`
-/// is not JSON, as startup validation reports them.
-fn validated_store(root: &Utf8Path) -> Vec<InvalidConversation> {
-    let backend = FsStorageBackend::new(root).unwrap();
+/// A store holding one conversation whose `metadata.json` is not JSON, and the
+/// conversations its scan reports.
+fn scanned_store(root: &Utf8Path) -> (Arc<dyn RecoveryBackend>, Vec<InvalidConversation>) {
+    let backend = Arc::new(FsStorageBackend::new(root).unwrap());
     backend
         .create_corrupt_test_conversation_dir("17941219994")
         .unwrap();
-    backend.validate_conversations().invalid
+    let invalid = backend.scan().unwrap();
+    (backend, invalid)
 }
 
 // `--quiet` silences chrome, and a conversation JP cannot load is not chrome:
@@ -179,11 +180,11 @@ fn validated_store(root: &Utf8Path) -> Vec<InvalidConversation> {
 #[test]
 fn the_text_report_prints_when_the_notice_drops_even_under_quiet() {
     let tmp = camino_tempfile::tempdir().unwrap();
-    let invalid = validated_store(tmp.path());
+    let (recovery, invalid) = scanned_store(tmp.path());
     let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
     let printer = printer.with_chrome(Chrome::Silenced);
 
-    let report = notice(printer.clone(), &invalid);
+    let report = notice(printer.clone(), recovery, &invalid);
     printer.flush();
     assert_eq!(
         err.lock().as_str(),
@@ -206,10 +207,10 @@ fn the_text_report_prints_when_the_notice_drops_even_under_quiet() {
 #[test]
 fn a_conversation_the_command_dealt_with_is_not_reported() {
     let tmp = camino_tempfile::tempdir().unwrap();
-    let invalid = validated_store(tmp.path());
+    let (recovery, invalid) = scanned_store(tmp.path());
     let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
 
-    let report = notice(printer.clone(), &invalid);
+    let report = notice(printer.clone(), recovery, &invalid);
     fs::remove_dir_all(tmp.path().join("conversations/17941219994")).unwrap();
     drop(report);
     printer.flush();
@@ -220,11 +221,11 @@ fn a_conversation_the_command_dealt_with_is_not_reported() {
 #[test]
 fn the_json_report_prints_raw_records_even_under_quiet() {
     let tmp = camino_tempfile::tempdir().unwrap();
-    let invalid = validated_store(tmp.path());
+    let (recovery, invalid) = scanned_store(tmp.path());
     let (printer, out, err) = Printer::memory(OutputFormat::Json);
     let printer = printer.with_chrome(Chrome::Silenced);
 
-    drop(notice(printer, &invalid));
+    drop(notice(printer, recovery, &invalid));
 
     assert_eq!(out.lock().as_str(), "");
     assert_eq!(
@@ -247,7 +248,7 @@ fn the_json_report_prints_raw_records_even_under_quiet() {
 fn nothing_prints_when_every_conversation_loads() {
     let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
 
-    drop(notice(printer.clone(), &[]));
+    drop(notice(printer.clone(), Arc::new(NullRecoveryBackend), &[]));
     printer.flush();
 
     assert_eq!(out.lock().as_str(), "");

@@ -1,7 +1,7 @@
 use clap::{ArgMatches, Command};
 use crossterm::style::Stylize as _;
 use jp_conversation::ConversationId;
-use jp_storage::validate::ValidationError;
+use jp_storage::{backend::Removal as StorageRemoval, validate::ValidationError};
 use jp_workspace::{ConversationHandle, Workspace};
 
 use crate::{
@@ -161,7 +161,7 @@ enum Removal {
 }
 
 /// Resolve typed IDs: through the index when the conversation loads, otherwise
-/// as an unlisted conversation the store holds.
+/// as a stored conversation the index leaves out.
 ///
 /// Every ID is resolved before anything is removed, so one unknown ID fails the
 /// run without touching the others.
@@ -169,9 +169,7 @@ fn resolve_literal(ctx: &Ctx, ids: &[ConversationId]) -> Result<Vec<Removal>, cm
     ids.iter()
         .map(|id| match ctx.workspace.acquire_conversation(id) {
             Ok(handle) => Ok(Removal::Loaded(handle)),
-            Err(_) if ctx.workspace.unlisted_conversation(id).is_some() => {
-                Ok(Removal::Unloaded(*id))
-            }
+            Err(_) if ctx.recovery.inspect(id).is_some() => Ok(Removal::Unloaded(*id)),
             Err(not_found) => Err(crate::error::Error::from(not_found).into()),
         })
         .collect()
@@ -183,31 +181,44 @@ fn resolve_literal(ctx: &Ctx, ids: &[ConversationId]) -> Result<Vec<Removal>, cm
 /// describes exactly what the removal deletes.
 /// Returns whether the conversation was removed.
 fn remove_unloaded(ctx: &Ctx, id: ConversationId, force: bool) -> Result<bool, cmd::Error> {
-    let lock = ctx
-        .workspace
-        .lock_unlisted_conversation(&id)
-        .map_err(crate::error::Error::from)?
-        .ok_or_else(|| format!("Conversation {id} is in use by another process."))?;
+    // `decide` can only answer yes or no, so a failed prompt answers no and its
+    // error is returned once the lock is released.
+    let mut prompt_error = None;
+    let removal = ctx.recovery.remove(&id, &mut |stored| {
+        if force {
+            return true;
+        }
 
-    if !force {
-        let conversation = lock.conversation();
-        let status = unloaded_status(&conversation.state);
-        let confirmed = confirm_unloaded_removal(
+        let status = unloaded_status(&stored.state);
+        confirm_unloaded_removal(
             ctx,
             id,
-            conversation.title.as_deref(),
+            stored.title.as_deref(),
             status.as_deref(),
-            &conversation.locations,
-        )?;
-        if !confirmed {
-            return Ok(false);
-        }
+            &stored.locations,
+        )
+        .unwrap_or_else(|error| {
+            prompt_error = Some(error);
+            false
+        })
+    })?;
+
+    if let Some(error) = prompt_error {
+        return Err(error.into());
     }
 
-    ctx.workspace
-        .remove_unlisted_conversation(lock)
-        .map_err(crate::error::Error::from)?;
-    Ok(true)
+    match removal {
+        StorageRemoval::Removed => Ok(true),
+        StorageRemoval::Declined => Ok(false),
+        StorageRemoval::Locked => {
+            Err(format!("Conversation {id} is in use by another process.").into())
+        }
+        StorageRemoval::NotFound => Err(crate::error::Error::from(jp_workspace::Error::not_found(
+            "Conversation",
+            &id,
+        ))
+        .into()),
+    }
 }
 
 /// Why a conversation does not load, for the removal prompt, or `None` when it

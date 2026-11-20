@@ -6,10 +6,7 @@ use chrono::{DateTime, Utc};
 use jp_config::PartialAppConfig;
 use jp_conversation::{Conversation, ConversationEvent, ConversationId, ConversationStream};
 
-use crate::{
-    LoadError,
-    validate::{InvalidConversation, StorageLocation, ValidationError},
-};
+use crate::LoadError;
 
 /// Controls which storage partition to scan.
 ///
@@ -118,50 +115,4 @@ pub trait LoadBackend: Send + Sync + Debug {
     /// `expires_at` field without deserializing the full `Conversation`.
     /// In-memory backends check the structs directly.
     fn load_expired_conversation_ids(&self, now: DateTime<Utc>) -> Vec<ConversationId>;
-
-    /// Check the backing store and report the conversations that cannot be
-    /// loaded.
-    ///
-    /// Filesystem backends check every conversation directory and remove
-    /// leftovers of their own interrupted writes, but never move or delete a
-    /// conversation.
-    /// A conversation another process holds the lock on is left out of the
-    /// report, because it may be partway through a write.
-    /// In-memory backends hold only valid data and return an empty report.
-    fn sanitize(&self) -> crate::error::Result<SanitizeReport>;
-
-    /// What the store holds for conversation `id`, read without loading the
-    /// conversation, so it describes one that fails to load.
-    ///
-    /// `None` when the store holds nothing for `id`.
-    /// In-memory backends hold only conversations that load, and return `None`.
-    fn unlisted_conversation(&self, _id: &ConversationId) -> Option<UnlistedConversation> {
-        None
-    }
-}
-
-/// A conversation's stored files, as [`LoadBackend::unlisted_conversation`]
-/// found them.
-#[derive(Debug)]
-pub struct UnlistedConversation {
-    pub id: ConversationId,
-
-    /// Where the store holds the conversation; for the filesystem backend, its
-    /// directories, workspace first.
-    pub locations: Vec<StorageLocation>,
-
-    /// The conversation's files as startup validation checks them: the first
-    /// failure when any location fails.
-    pub state: Result<(), ValidationError>,
-
-    /// The title stored in the conversation's metadata, when the metadata loads
-    /// and has one.
-    pub title: Option<String>,
-}
-
-/// The conversation directories [`LoadBackend::sanitize`] found it cannot load.
-#[derive(Debug, Default)]
-pub struct SanitizeReport {
-    /// Conversation directories that failed validation, sorted by path.
-    pub invalid: Vec<InvalidConversation>,
 }
