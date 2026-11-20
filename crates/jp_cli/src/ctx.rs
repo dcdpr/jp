@@ -158,7 +158,7 @@ impl Ctx {
 
         let interactive = crate::interactive(args.no_interactive, is_tty);
 
-        let recovery = recovery_backend(fs_backend.as_ref(), args.persist);
+        let recovery = recovery_backend(fs_backend.as_ref(), workspace.persists());
 
         Self {
             exec,

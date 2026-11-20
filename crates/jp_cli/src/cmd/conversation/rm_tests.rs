@@ -8,7 +8,7 @@ use jp_config::AppConfig;
 use jp_conversation::{Conversation, ConversationId};
 use jp_printer::{OutputFormat, Printer, SharedBuffer};
 use jp_storage::{
-    backend::{FsStorageBackend, LockBackend as _, NullLockBackend, NullPersistBackend},
+    backend::{FsStorageBackend, LockBackend as _},
     validate::{ConversationPart, Position, ReadError, StorageLocation, ValidationError},
 };
 use jp_workspace::Workspace;
@@ -212,8 +212,8 @@ struct Store {
 /// A `Ctx` over a workspace on disk with user-local storage, and nobody
 /// available to answer a prompt.
 ///
-/// Without `persist`, the workspace writes and locks through the null backends,
-/// as `load_workspace` sets it up for `--no-persist`.
+/// Without `persist`, the workspace is set up as `load_workspace` sets it up
+/// for `--no-persist`.
 fn store(persist: bool) -> Store {
     let tmp = camino_tempfile::tempdir().unwrap();
     let root = tmp.path().to_owned();
@@ -229,19 +229,14 @@ fn store(persist: bool) -> Store {
     let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
     let mut ws = Workspace::in_memory(&root).with_backend(Arc::clone(&fs));
     if !persist {
-        ws = ws
-            .with_persist(Arc::new(NullPersistBackend))
-            .with_locker(Arc::new(NullLockBackend));
+        ws = ws.without_persistence();
     }
     let mut ctx = Ctx::new(
         ExecutionContext::for_workspace(&ws),
         ws,
         Some(Arc::clone(&fs)),
         Runtime::new().unwrap(),
-        Globals {
-            persist,
-            ..Globals::default()
-        },
+        Globals::default(),
         AppConfig::new_test(),
         None,
         printer,

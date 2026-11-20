@@ -507,6 +507,40 @@ fn test_load_index_fresh_workspace() {
     assert_eq!(workspace.conversations().count(), 0);
 }
 
+#[test]
+fn test_a_workspace_persists_unless_told_otherwise() {
+    let workspace = Workspace::in_memory("/ws");
+    assert!(workspace.persists());
+    assert!(!workspace.without_persistence().persists());
+}
+
+// Writes, locks, and session records are all switched off together, so nothing
+// a run does without persistence reaches the store.
+#[test]
+fn test_a_workspace_without_persistence_writes_nothing() {
+    let tmp = tempdir().unwrap();
+    let fs = FsStorageBackend::new(&tmp.path().join("storage")).unwrap();
+    let mut workspace = workspace_with_fs(tmp.path(), &fs).without_persistence();
+
+    let id =
+        workspace.create_conversation(Conversation::default(), Arc::new(AppConfig::new_test()));
+    let handle = workspace.acquire_conversation(&id).unwrap();
+    let LockResult::Acquired(lock) = workspace.lock_conversation(handle, None).unwrap() else {
+        panic!("a workspace without persistence takes no lock to be refused");
+    };
+
+    let held = fs.try_lock(&id.to_string(), None).unwrap();
+    assert!(held.is_some(), "the workspace holds no lock in the store");
+
+    lock.into_mut()
+        .update_metadata_and_flush(|metadata| metadata.title = Some("Changed".to_owned()))
+        .unwrap();
+    assert!(
+        fs.load_conversation_ids(ConversationFilter::default())
+            .is_empty()
+    );
+}
+
 // The index keeps a broken conversation out on its own, so a reader that never
 // scans for broken conversations, such as the macOS app, does not hand one on
 // to be loaded either.

@@ -94,7 +94,7 @@ impl Rm {
         } else {
             ctx.printer.println("Conversation(s) removed.");
         }
-        if !ctx.term.args.persist {
+        if !ctx.workspace.persists() {
             ctx.printer.println("");
             ctx.printer.println(format!(
                 "This command ran under `--no-persist`, {}.",

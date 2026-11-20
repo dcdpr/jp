@@ -33,10 +33,7 @@ use jp_llm::{
 use jp_mcp::{Startup, StartupSet, id::McpServerId, server::tool_definitions};
 use jp_printer::{OutputFormat, Printer, SharedBuffer};
 use jp_storage::{
-    backend::{
-        ConversationFilter, FsStorageBackend, LoadBackend, NullLockBackend, NullPersistBackend,
-        ReadOnlySessionBackend,
-    },
+    backend::{ConversationFilter, FsStorageBackend, LoadBackend},
     load::projected_conversation_ids,
 };
 use jp_workspace::{
@@ -3988,17 +3985,12 @@ fn editor_ctx(
     // it five times with backoff is time these tests would only spend waiting.
     config.assistant.request.max_retries = 0;
 
-    // A run that stores what it does, as `jp query` without `--no-persist` is:
-    // the derived default of `Globals` reads as `--no-persist`.
     let mut ctx = Ctx::new(
         crate::bootstrap::ExecutionContext::for_workspace(&workspace),
         workspace,
         Some(fs),
         Runtime::new().unwrap(),
-        Globals {
-            persist: true,
-            ..Globals::default()
-        },
+        Globals::default(),
         config,
         Some(session.clone()),
         printer,
@@ -4257,14 +4249,10 @@ fn run_failing_no_persist_query_leaves_no_conversation_directory() {
     let fs = Arc::new(test_backend(root));
     let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
 
-    // Use the same no-op persistence, lock, and read-only session backends that
-    // `load_workspace` configures for `--no-persist`.
-    let workspace = Workspace::in_memory(root).with_backend(Arc::clone(&fs));
-    let sessions = Arc::new(ReadOnlySessionBackend::new(workspace.sessions().clone()));
-    let workspace = workspace
-        .with_persist(Arc::new(NullPersistBackend))
-        .with_locker(Arc::new(NullLockBackend))
-        .with_sessions(sessions);
+    // The workspace as `load_workspace` opens it for `--no-persist`.
+    let workspace = Workspace::in_memory(root)
+        .with_backend(Arc::clone(&fs))
+        .without_persistence();
 
     let mut config = config_with_model(ProviderId::Test, "mock");
     config.assistant.request.max_retries = 0;
@@ -4274,10 +4262,7 @@ fn run_failing_no_persist_query_leaves_no_conversation_directory() {
         workspace,
         Some(fs),
         Runtime::new().unwrap(),
-        Globals {
-            persist: false,
-            ..Globals::default()
-        },
+        Globals::default(),
         config,
         Some(session),
         printer,
@@ -4416,14 +4401,10 @@ fn run_no_persist_editor_query_writes_no_draft() {
     assert_eq!(stored_conversation_ids(tmp.path()), []);
 }
 
-/// `ctx` as `load_workspace` sets it up for `--no-persist`: writes and locks go
-/// to the null backends.
+/// `ctx` with its workspace as `load_workspace` opens it for `--no-persist`.
 fn no_persist(mut ctx: Ctx) -> Ctx {
     let workspace = std::mem::replace(&mut ctx.workspace, Workspace::in_memory("/unused"));
-    ctx.workspace = workspace
-        .with_persist(Arc::new(NullPersistBackend))
-        .with_locker(Arc::new(NullLockBackend));
-    ctx.term.args.persist = false;
+    ctx.workspace = workspace.without_persistence();
     ctx
 }
 

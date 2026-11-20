@@ -52,9 +52,7 @@ use jp_config::{
 };
 use jp_inquire::prompt::TerminalPromptBackend;
 use jp_printer::{Chrome, OutputFormat, OutputWidth, Printer, RegionStyle};
-use jp_storage::backend::{
-    FsStorageBackend, NullLockBackend, NullPersistBackend, ReadOnlySessionBackend, RecoveryBackend,
-};
+use jp_storage::backend::{FsStorageBackend, RecoveryBackend};
 use jp_term::table::{DetailRow, Details, details, details_markdown};
 use jp_workspace::{
     DEFAULT_STORAGE_DIR, Workspace, roots, session_store::WorkspaceSessionStore, user_data_dir,
@@ -520,8 +518,8 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
     // Held until the run ends, whichever way it ends, so the report follows the
     // command's own output.
     let _load_failures = prepare_conversation_store(
-        fs_backend.as_deref().filter(|_| cli.globals.persist),
-        recovery_backend(fs_backend.as_ref(), cli.globals.persist),
+        fs_backend.as_deref().filter(|_| workspace.persists()),
+        recovery_backend(fs_backend.as_ref(), workspace.persists()),
         &printer,
     )?;
 
@@ -1144,13 +1142,12 @@ fn prepare_conversation_store(
 /// backend and [`Workspace`] on top of it.
 /// `intent` decides what the load may write — see [`LoadIntent`].
 ///
-/// When `persist` is `false` (`--no-persist`), the persist backend is swapped
-/// to [`NullPersistBackend`] and the lock backend to [`NullLockBackend`] so
-/// that ephemeral queries never write to disk and never block on lock
-/// contention.
-/// The session backend is wrapped in [`ReadOnlySessionBackend`] for the same
-/// reason: the run still needs to read which conversation the session is on,
-/// but must not record one that it never persisted.
+/// When `persist` is `false` (`--no-persist`), the workspace is opened [without
+/// persistence]: ephemeral queries never write to disk and never block on lock
+/// contention, and the run still reads which conversation the session is on
+/// without recording one it never persisted.
+///
+/// [without persistence]: Workspace::without_persistence
 fn load_workspace(
     root: &Utf8Path,
     persist: bool,
@@ -1181,11 +1178,7 @@ fn load_workspace(
     }
 
     if !persist {
-        let sessions = Arc::new(ReadOnlySessionBackend::new(workspace.sessions().clone()));
-        workspace = workspace
-            .with_persist(Arc::new(NullPersistBackend))
-            .with_locker(Arc::new(NullLockBackend))
-            .with_sessions(sessions);
+        workspace = workspace.without_persistence();
     }
     info!(workspace = %workspace.root(), "Using existing workspace.");
 

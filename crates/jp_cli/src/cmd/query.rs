@@ -414,7 +414,7 @@ impl Query {
         // Held until the run ends: under `--no-persist` it is the directory the
         // editor composes in.
         let (conversation_path, _scratch) = draft_dir(
-            ctx.term.args.persist,
+            ctx.workspace.persists(),
             ctx.fs_backend.as_deref(),
             ctx.workspace.root(),
             &cid,
@@ -504,7 +504,7 @@ impl Query {
         // disk, and a failed turn would leave `QUERY_MESSAGE.md` in a directory
         // with no persisted conversation.
         if query_source != QuerySource::Editor
-            && ctx.term.args.persist
+            && ctx.workspace.persists()
             && ctx
                 .fs_backend
                 .as_deref()
@@ -613,7 +613,7 @@ impl Query {
         // title, short-circuiting the LLM round-trip. Otherwise, fall back to
         // background title generation when enabled.
         if (self.is_new() || self.fork.is_some() || stream.is_empty())
-            && ctx.term.args.persist
+            && ctx.workspace.persists()
             && self.title.is_none()
             && !self.no_title
         {
@@ -651,7 +651,7 @@ impl Query {
         // Spawn background summarization for earlier completed turns that do
         // not yet have a summary. A misconfigured summary model logs a warning
         // rather than failing the query.
-        if cfg.conversation.turn_summary.generate.auto && ctx.term.args.persist {
+        if cfg.conversation.turn_summary.generate.auto && ctx.workspace.persists() {
             match TurnSummaryTask::new(cid, &stream, &cfg, notice_sink(&ctx.printer)) {
                 Ok(Some(task)) => ctx.task_handler.spawn(task),
                 Ok(None) => {}

@@ -40,8 +40,8 @@ use jp_conversation::{Conversation, ConversationEvent, ConversationId, Conversat
 use jp_storage::{
     backend::{
         ConversationFilter, ConversationIndexEntry, FsStorageBackend, InMemoryStorageBackend,
-        LoadBackend, LockBackend, NullPersistBackend, PersistBackend, Projection, SessionBackend,
-        StoragePresence,
+        LoadBackend, LockBackend, NullLockBackend, NullPersistBackend, PersistBackend, Projection,
+        ReadOnlySessionBackend, SessionBackend, StoragePresence,
     },
     lock::LockInfo,
 };
@@ -95,6 +95,10 @@ pub struct Workspace {
 
     /// The filesystem backend, for workspaces opened from disk.
     fs: Option<Arc<FsStorageBackend>>,
+
+    /// Whether what the run changes is written to the store; see
+    /// [`Self::without_persistence`].
+    persists: bool,
 
     /// The in-memory state of the workspace.
     state: State,
@@ -159,6 +163,7 @@ impl Workspace {
             locker: backend.clone(),
             sessions: backend,
             fs: None,
+            persists: true,
             state: State::default(),
             persist_failures: PersistFailures::default(),
         }
@@ -341,7 +346,21 @@ impl Workspace {
             .with_sessions(backend)
     }
 
-    /// Disable persistence for the workspace.
+    /// The workspace, writing nothing to the store.
+    ///
+    /// Writes are discarded, locks are never taken, so a conversation another
+    /// process holds can still be read, and session records are read but not
+    /// written.
+    /// [`Self::persists`] reports `false` from then on.
+    #[must_use]
+    pub fn without_persistence(mut self) -> Self {
+        self.disable_persistence();
+        self.locker = Arc::new(NullLockBackend);
+        self.sessions = Arc::new(ReadOnlySessionBackend::new(Arc::clone(&self.sessions)));
+        self
+    }
+
+    /// Stop writing conversations to the store, for the rest of the run.
     ///
     /// Swaps the persist backend to [`NullPersistBackend`], which silently
     /// discards all writes.
@@ -349,6 +368,16 @@ impl Workspace {
     /// of the original backend and continue to persist.
     pub fn disable_persistence(&mut self) {
         self.persist = Arc::new(NullPersistBackend);
+        self.persists = false;
+    }
+
+    /// Whether what changes is written to the store.
+    ///
+    /// `false` for a workspace built with [`Self::without_persistence`], or
+    /// once [`Self::disable_persistence`] is called.
+    #[must_use]
+    pub const fn persists(&self) -> bool {
+        self.persists
     }
 
     /// Scan conversation IDs from the backing store and populate the workspace

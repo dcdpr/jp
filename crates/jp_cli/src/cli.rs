@@ -236,7 +236,9 @@ impl RootOpts {
 }
 
 /// The options every `jp` command accepts, before or after its name.
-#[derive(Debug, Default)]
+///
+/// [`Default`] gives the options of a command run with no global flags.
+#[derive(Debug)]
 pub(crate) struct Globals {
     /// `--cfg` values, in the order given.
     pub(crate) config: Vec<KeyValueOrPath>,
@@ -273,6 +275,25 @@ pub(crate) struct Globals {
 
     /// `--log`.
     pub(crate) log: Option<String>,
+}
+
+impl Default for Globals {
+    fn default() -> Self {
+        Self {
+            config: vec![],
+            no_config: false,
+            verbose: 0,
+            quiet: false,
+            no_interactive: false,
+            format: CliFormat::default(),
+            persist: true,
+            workspace: None,
+            width: None,
+            log_format: LogFormat::default(),
+            log_file: None,
+            log: None,
+        }
+    }
 }
 
 impl Globals {
