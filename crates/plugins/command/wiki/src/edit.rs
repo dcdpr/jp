@@ -26,20 +26,23 @@ use doc::{
     metadata,
     references::{self, Rule, names_stem},
 };
-use jp_plugin::message::{
-    ComposeMode, ComposeOption, ComposeRequest, EditFilesRequest, HostToPlugin, PluginToHost,
+use jp_plugin::{
+    message::{
+        ComposeMode, ComposeOption, ComposeRequest, EditFilesRequest, HostToPlugin, PluginToHost,
+    },
+    stdio::{self, send},
 };
 use jp_tool::Capability;
 
 use crate::{
-    Context, Output,
+    BINARY, Context, Output,
     check::{self, Finding, check_page},
     cmd::{self, active_parent, refuse_active_children, superseded_target, unique},
     library::Library,
     order::ORDER_FILE,
     page::{Page, PageId, Status, body_start},
     pin::{self, Pinned},
-    read_message, section, send, store,
+    section, store,
     store::Wiki,
 };
 
@@ -591,7 +594,7 @@ impl<R: BufRead, W: Write> Editing for Host<'_, R, W> {
             }),
         )?;
 
-        match read_message(self.stdin)? {
+        match stdio::read(self.stdin, BINARY)? {
             HostToPlugin::Edited(response) => Ok(response.saved),
             HostToPlugin::Error(error) => Err(format!(
                 "Couldn't open an editor: {}. {USE_THE_FLAGS}",
@@ -626,7 +629,7 @@ impl<R: BufRead, W: Write> Editing for Host<'_, R, W> {
         // No answer, from a cancelled prompt or a missing terminal, discards.
         asked.is_ok()
             && matches!(
-                read_message(self.stdin),
+                stdio::read(self.stdin, BINARY),
                 Ok(HostToPlugin::Composed(response)) if response.text.as_deref() == Some("edit")
             )
     }

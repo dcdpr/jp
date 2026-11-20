@@ -7,7 +7,8 @@ use std::{
 
 use jp_plugin::message::{
     CompactedResponse, ConfigResponse, CreatedResponse, DoneResponse, ErrorResponse,
-    EventsResponse, InterruptAction, QueryCompleteResponse, QueryOutcome, ReasoningCompaction,
+    EventsResponse, InterruptAction, LogMessage, QueryCompleteResponse, QueryOutcome,
+    ReasoningCompaction,
 };
 use pretty_assertions::assert_eq;
 use serde_json::json;

@@ -4,7 +4,8 @@ use camino_tempfile::Utf8TempDir;
 use clap::CommandFactory;
 use comfort::format::FormatOptions;
 use jp_plugin::message::{
-    EditFilesRequest, EditedResponse, ErrorResponse, OutputFormat, ToolAction, WorkspaceInfo,
+    EditFilesRequest, EditedResponse, ErrorResponse, ExitMessage, OutputFormat, PrintMessage,
+    ToolAction, WorkspaceInfo,
 };
 use serde_json::{Map, json};
 use ticket::epoch::EPOCH_FILE;

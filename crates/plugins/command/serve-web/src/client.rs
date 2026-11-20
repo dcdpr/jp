@@ -1,31 +1,20 @@
 //! Protocol client for communicating with the JP host.
 //!
-//! Manages the stdin reader loop and provides async methods for sending
-//! requests and awaiting responses.
-//! Thread-safe and shareable across axum handlers via `Arc`.
+//! Wraps the shared [`Client`] with the requests the web UI makes, each
+//! answering with what the host sent or a [`ClientError`].
+//! Thread-safe and shareable across axum handlers.
 
-use std::{
-    collections::{HashMap, VecDeque},
-    io::{BufRead, Write},
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicU64, Ordering},
+use std::{io::BufRead, time::Duration};
+
+use jp_plugin::{
+    client::{self, Answer, Client, Writer},
+    message::{
+        ConfigEntry, ConversationRequest, ConversationSummary, DraftResponse, EventsResponse,
+        ExitMessage, HostToPlugin, InterruptRequest, OptionalId, PluginToHost, QueryRequest,
+        ReadEventsRequest, SetTitleRequest, WriteDraftRequest,
     },
-    thread,
-    time::Duration,
 };
-
-use jp_plugin::message::{
-    ConfigEntry, ConversationRequest, ConversationSummary, DraftResponse, EventsResponse,
-    ExitMessage, HostToPlugin, InterruptRequest, OptionalId, PluginToHost, QueryRequest,
-    ReadEventsRequest, SetTitleRequest, WriteDraftRequest,
-};
-use tokio::sync::{oneshot, watch};
-use tracing::{debug, error, trace, warn};
-
-/// Shared writer for stdout, used by both the protocol client and the tracing
-/// log layer.
-pub type SharedWriter = Arc<Mutex<Box<dyn Write + Send>>>;
+use tokio::sync::watch;
 
 /// How long a request waits for a matching host response before giving up.
 ///
@@ -35,10 +24,10 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// A protocol client that talks to the JP host over stdin/stdout.
 ///
-/// Cloneable via `Arc` internally — pass it into axum state directly.
+/// Cheap to clone: pass it into axum state directly.
 #[derive(Clone)]
 pub struct PluginClient {
-    inner: Arc<Inner>,
+    client: Client,
 }
 
 /// The still-running turn a newly created conversation was started with.
@@ -47,7 +36,7 @@ pub struct PluginClient {
 /// request that created the conversation, since it returned as soon as there
 /// was somewhere to send the reader.
 pub struct TurnOutcome {
-    rx: oneshot::Receiver<HostToPlugin>,
+    finished: Answer,
 }
 
 impl TurnOutcome {
@@ -62,27 +51,12 @@ impl TurnOutcome {
     /// report a failure for a turn that is still running, and the host would go
     /// on holding the conversation after this said it had stopped.
     pub async fn finished(self) -> Result<(), ClientError> {
-        match self.rx.await {
-            Ok(HostToPlugin::QueryComplete(_)) => Ok(()),
-            Ok(HostToPlugin::Error(e)) => Err(ClientError::Host(e.message)),
-            Ok(other) => Err(ClientError::Unexpected(format!("{other:?}"))),
-            Err(_) => Err(ClientError::ChannelClosed),
+        match self.finished.wait(None).await? {
+            HostToPlugin::QueryComplete(_) => Ok(()),
+            HostToPlugin::Error(e) => Err(ClientError::Host(e.message)),
+            other => Err(ClientError::Unexpected(format!("{other:?}"))),
         }
     }
-}
-
-struct Inner {
-    writer: SharedWriter,
-
-    /// Waiters per request, in the order their replies are expected.
-    ///
-    /// A queue rather than one waiter, because a request can be answered more
-    /// than once: starting a conversation is told the id as soon as it exists
-    /// and told again when its first turn ends.
-    /// Both waiters are registered before the request goes out, so a turn that
-    /// finishes quickly cannot arrive before anything is listening for it.
-    pending: Mutex<HashMap<String, VecDeque<oneshot::Sender<HostToPlugin>>>>,
-    next_id: AtomicU64,
 }
 
 impl PluginClient {
@@ -94,33 +68,21 @@ impl PluginClient {
     /// message is received from the host.
     pub fn start(
         stdin: impl BufRead + Send + 'static,
-        writer: SharedWriter,
-    ) -> (Self, watch::Receiver<bool>) {
-        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        writer: Writer,
+    ) -> Result<(Self, watch::Receiver<bool>), ClientError> {
+        let client = Client::new(writer);
+        let shutdown = client.listen(stdin)?;
 
-        let inner = Arc::new(Inner {
-            writer,
-            pending: Mutex::new(HashMap::new()),
-            next_id: AtomicU64::new(1),
-        });
-
-        let reader_inner = inner.clone();
-        thread::Builder::new()
-            .name("stdin-reader".into())
-            .spawn(move || reader_loop(stdin, &reader_inner, &shutdown_tx))
-            .expect("failed to spawn stdin reader thread");
-
-        (Self { inner }, shutdown_rx)
+        Ok((Self { client }, shutdown))
     }
 
     /// Request the list of conversations from the host.
     pub async fn list_conversations(&self) -> Result<Vec<ConversationSummary>, ClientError> {
-        let id = self.next_id();
         let msg = PluginToHost::ListConversations(OptionalId {
-            id: Some(id.clone()),
+            id: Some(self.client.next_id()),
         });
 
-        match self.request(&id, &msg).await? {
+        match self.request(&msg).await? {
             HostToPlugin::Conversations(resp) => Ok(resp.data),
             HostToPlugin::Error(e) => Err(ClientError::Host(e.message)),
             other => Err(ClientError::Unexpected(format!("{other:?}"))),
@@ -129,13 +91,12 @@ impl PluginClient {
 
     /// Request events for a specific conversation.
     pub async fn read_events(&self, conversation: &str) -> Result<EventsResponse, ClientError> {
-        let id = self.next_id();
         let msg = PluginToHost::ReadEvents(ReadEventsRequest {
-            id: Some(id.clone()),
+            id: Some(self.client.next_id()),
             conversation: conversation.to_owned(),
         });
 
-        match self.request(&id, &msg).await? {
+        match self.request(&msg).await? {
             HostToPlugin::Events(resp) => Ok(resp),
             HostToPlugin::Error(e) => Err(ClientError::Host(e.message)),
             other => Err(ClientError::Unexpected(format!("{other:?}"))),
@@ -157,19 +118,18 @@ impl PluginClient {
         content: &str,
         cfg: Vec<String>,
     ) -> Result<(), ClientError> {
-        let id = self.next_id();
         let msg = PluginToHost::Query(QueryRequest {
             new: false,
             title: None,
             cfg,
-            id: Some(id.clone()),
+            id: Some(self.client.next_id()),
             conversation: conversation.to_owned(),
             content: content.to_owned(),
             schema: None,
             expires_in: None,
         });
 
-        match self.request_within(&id, &msg, None).await? {
+        match self.client.request(&msg, None).await? {
             HostToPlugin::QueryComplete(_) => Ok(()),
             HostToPlugin::Error(e) => Err(ClientError::Host(e.message)),
             other => Err(ClientError::Unexpected(format!("{other:?}"))),
@@ -178,12 +138,11 @@ impl PluginClient {
 
     /// List the configurations a new conversation can be started with.
     pub async fn list_configs(&self) -> Result<Vec<ConfigEntry>, ClientError> {
-        let id = self.next_id();
         let msg = PluginToHost::ListConfigs(OptionalId {
-            id: Some(id.clone()),
+            id: Some(self.client.next_id()),
         });
 
-        match self.request(&id, &msg).await? {
+        match self.request(&msg).await? {
             HostToPlugin::Configs(resp) => Ok(resp.data),
             HostToPlugin::Error(e) => Err(ClientError::Host(e.message)),
             other => Err(ClientError::Unexpected(format!("{other:?}"))),
@@ -204,7 +163,7 @@ impl PluginClient {
         title: Option<String>,
         cfg: Vec<String>,
     ) -> Result<(String, TurnOutcome), ClientError> {
-        let id = self.next_id();
+        let id = self.client.next_id();
         let msg = PluginToHost::Query(QueryRequest {
             id: Some(id.clone()),
             conversation: String::new(),
@@ -216,69 +175,54 @@ impl PluginClient {
             expires_in: None,
         });
 
-        // Both waiters before the request goes out. Registering the second one
-        // after the first reply arrives would race a turn that finished in between,
-        // and a lost completion leaves the conversation marked busy forever.
-        let created = self.register(&id);
-        let finished = self.register(&id);
-
-        if let Err(error) = self.send(&msg) {
-            self.forget(&id);
-            return Err(error);
-        }
+        // Both answers are waited for before the request goes out. Waiting for
+        // the second only after the first arrives would race a turn that
+        // finished in between, and a lost completion leaves the conversation
+        // marked busy forever.
+        let [created, finished] = self.client.send_expecting(&msg)?;
 
         // The default timeout, not the turn's: the host answers as soon as the
         // conversation exists, without waiting for its first turn.
-        let conversation = match tokio::time::timeout(REQUEST_TIMEOUT, created).await {
-            Ok(Ok(HostToPlugin::Created(resp))) => resp.conversation,
-            Ok(Ok(HostToPlugin::Error(e))) => {
-                self.forget(&id);
-                return Err(ClientError::Host(e.message));
-            }
-            Ok(Ok(other)) => {
-                self.forget(&id);
-                return Err(ClientError::Unexpected(format!("{other:?}")));
-            }
-            Ok(Err(_)) => {
-                self.forget(&id);
-                return Err(ClientError::ChannelClosed);
-            }
-            Err(_) => {
-                self.forget(&id);
-                return Err(ClientError::Timeout);
+        let conversation = match created.wait(Some(REQUEST_TIMEOUT)).await {
+            Ok(HostToPlugin::Created(resp)) => resp.conversation,
+            answer => {
+                self.client.forget(&id);
+                return Err(match answer {
+                    Ok(HostToPlugin::Error(e)) => ClientError::Host(e.message),
+                    Ok(other) => ClientError::Unexpected(format!("{other:?}")),
+                    Err(error) => error.into(),
+                });
             }
         };
 
-        Ok((conversation, TurnOutcome { rx: finished }))
+        Ok((conversation, TurnOutcome { finished }))
     }
 
     /// Move a conversation to the archive.
     pub async fn archive(&self, conversation: &str) -> Result<(), ClientError> {
-        let id = self.next_id();
         let msg = PluginToHost::ArchiveConversation(ConversationRequest {
-            id: Some(id.clone()),
+            id: Some(self.client.next_id()),
             conversation: conversation.to_owned(),
         });
 
-        self.done(&id, &msg).await
+        self.done(&msg).await
     }
 
     /// Rename a conversation.
     /// An empty title clears it.
     pub async fn set_title(&self, conversation: &str, title: &str) -> Result<(), ClientError> {
-        let id = self.next_id();
         let msg = PluginToHost::SetTitle(SetTitleRequest {
-            id: Some(id.clone()),
+            id: Some(self.client.next_id()),
             conversation: conversation.to_owned(),
             title: Some(title.to_owned()),
         });
 
-        self.done(&id, &msg).await
+        self.done(&msg).await
     }
 
     /// Send a request whose only answer is whether it worked.
-    async fn done(&self, id: &str, msg: &PluginToHost) -> Result<(), ClientError> {
-        match self.request(id, msg).await? {
+    async fn done(&self, msg: &PluginToHost) -> Result<(), ClientError> {
+        match self.request(msg).await? {
             HostToPlugin::Done(_) => Ok(()),
             HostToPlugin::Error(e) => Err(ClientError::Host(e.message)),
             other => Err(ClientError::Unexpected(format!("{other:?}"))),
@@ -287,13 +231,12 @@ impl PluginClient {
 
     /// Read a conversation's query draft.
     pub async fn read_draft(&self, conversation: &str) -> Result<DraftResponse, ClientError> {
-        let id = self.next_id();
         let msg = PluginToHost::ReadDraft(ConversationRequest {
-            id: Some(id.clone()),
+            id: Some(self.client.next_id()),
             conversation: conversation.to_owned(),
         });
 
-        match self.request(&id, &msg).await? {
+        match self.request(&msg).await? {
             HostToPlugin::Draft(resp) => Ok(resp),
             HostToPlugin::Error(e) => Err(ClientError::Host(e.message)),
             other => Err(ClientError::Unexpected(format!("{other:?}"))),
@@ -311,15 +254,14 @@ impl PluginClient {
         content: &str,
         revision: Option<String>,
     ) -> Result<DraftResponse, ClientError> {
-        let id = self.next_id();
         let msg = PluginToHost::WriteDraft(WriteDraftRequest {
-            id: Some(id.clone()),
+            id: Some(self.client.next_id()),
             conversation: conversation.to_owned(),
             content: content.to_owned(),
             revision,
         });
 
-        match self.request(&id, &msg).await? {
+        match self.request(&msg).await? {
             HostToPlugin::Draft(resp) => Ok(resp),
             HostToPlugin::Error(e) => Err(ClientError::Host(e.message)),
             other => Err(ClientError::Unexpected(format!("{other:?}"))),
@@ -333,9 +275,11 @@ impl PluginClient {
     /// and the turn's own outcome still arrives as the answer to the `query`
     /// that started it.
     pub fn interrupt(&self, conversation: &str) -> Result<(), ClientError> {
-        self.send(&PluginToHost::Interrupt(InterruptRequest::stop(
-            conversation.to_owned(),
-        )))
+        Ok(self
+            .client
+            .send(&PluginToHost::Interrupt(InterruptRequest::stop(
+                conversation.to_owned(),
+            )))?)
     }
 
     /// Interrupt the turn the host is running and answer it with `content`.
@@ -355,99 +299,30 @@ impl PluginClient {
     /// given up on here would still land there.
     /// The host always answers, because every turn ends.
     pub async fn reply(&self, conversation: &str, content: &str) -> Result<(), ClientError> {
-        let id = self.next_id();
         let msg = PluginToHost::Interrupt(
             InterruptRequest::reply(conversation.to_owned(), content.to_owned())
-                .with_id(id.clone()),
+                .with_id(self.client.next_id()),
         );
 
-        match self.request_within(&id, &msg, None).await? {
+        match self.client.request(&msg, None).await? {
             HostToPlugin::Done(_) => Ok(()),
             HostToPlugin::Error(e) => Err(ClientError::Host(e.message)),
             other => Err(ClientError::Unexpected(format!("{other:?}"))),
         }
     }
 
-    /// Register a request, send it, and await the matching response.
-    ///
-    /// Removes the pending entry on a transport failure (send error or timeout)
-    /// so a stalled or failed request can't leak a dead sender.
-    /// A delivered response is removed by `dispatch`, and a closed channel
-    /// leaves nothing to remove, so the cleanup here targets only the
-    /// transport-error paths.
-    async fn request(&self, id: &str, msg: &PluginToHost) -> Result<HostToPlugin, ClientError> {
-        self.request_within(id, msg, Some(REQUEST_TIMEOUT)).await
-    }
-
-    /// [`Self::request`], with a deadline of the caller's choosing, or none.
-    async fn request_within(
-        &self,
-        id: &str,
-        msg: &PluginToHost,
-        timeout: Option<Duration>,
-    ) -> Result<HostToPlugin, ClientError> {
-        let rx = self.register(id);
-
-        let result = match self.send(msg) {
-            Ok(()) => await_response(rx, timeout).await,
-            Err(e) => Err(e),
-        };
-
-        if result.is_err() {
-            self.inner
-                .pending
-                .lock()
-                .expect("pending lock poisoned")
-                .remove(id);
-        }
-
-        result
+    /// Send a request and await its answer, for up to [`REQUEST_TIMEOUT`].
+    async fn request(&self, msg: &PluginToHost) -> Result<HostToPlugin, ClientError> {
+        Ok(self.client.request(msg, Some(REQUEST_TIMEOUT)).await?)
     }
 
     /// Send an exit message to the host.
     pub fn send_exit(&self, code: u8) {
-        drop(self.send(&PluginToHost::Exit(ExitMessage {
+        drop(self.client.send(&PluginToHost::Exit(ExitMessage {
             code,
             reason: None,
             expected: false,
         })));
-    }
-
-    fn next_id(&self) -> String {
-        self.inner
-            .next_id
-            .fetch_add(1, Ordering::Relaxed)
-            .to_string()
-    }
-
-    fn register(&self, id: &str) -> oneshot::Receiver<HostToPlugin> {
-        let (tx, rx) = oneshot::channel();
-        self.inner
-            .pending
-            .lock()
-            .expect("pending lock poisoned")
-            .entry(id.to_owned())
-            .or_default()
-            .push_back(tx);
-        rx
-    }
-
-    /// Drop every waiter for a request that will never be answered again.
-    fn forget(&self, id: &str) {
-        self.inner
-            .pending
-            .lock()
-            .expect("pending lock poisoned")
-            .remove(id);
-    }
-
-    fn send(&self, msg: &PluginToHost) -> Result<(), ClientError> {
-        let json = serde_json::to_string(msg).map_err(|e| ClientError::Protocol(e.to_string()))?;
-        let mut writer = self.inner.writer.lock().expect("writer lock poisoned");
-        writeln!(writer, "{json}").map_err(|e| ClientError::Protocol(e.to_string()))?;
-        writer
-            .flush()
-            .map_err(|e| ClientError::Protocol(e.to_string()))
     }
 }
 
@@ -466,24 +341,17 @@ pub enum ClientError {
     Timeout,
 }
 
-/// Await a pending response, failing with [`ClientError`] on a closed channel
-/// or timeout instead of blocking forever.
-///
-/// Without a timeout the wait ends only with the answer or with the host: the
-/// reader drops every waiter when stdout closes, which resolves this as
-/// [`ClientError::ChannelClosed`].
-async fn await_response(
-    rx: oneshot::Receiver<HostToPlugin>,
-    timeout: Option<Duration>,
-) -> Result<HostToPlugin, ClientError> {
-    let Some(timeout) = timeout else {
-        return rx.await.map_err(|_| ClientError::ChannelClosed);
-    };
-
-    tokio::time::timeout(timeout, rx)
-        .await
-        .map_err(|_| ClientError::Timeout)?
-        .map_err(|_| ClientError::ChannelClosed)
+impl From<client::Error> for ClientError {
+    fn from(error: client::Error) -> Self {
+        match error {
+            client::Error::Closed => Self::ChannelClosed,
+            client::Error::TimedOut => Self::Timeout,
+            client::Error::Write(error) => Self::Protocol(error.to_string()),
+            error @ (client::Error::Listen(_) | client::Error::NoId) => {
+                Self::Protocol(error.to_string())
+            }
+        }
+    }
 }
 
 impl std::fmt::Display for ClientError {
@@ -494,117 +362,6 @@ impl std::fmt::Display for ClientError {
             Self::ChannelClosed => write!(f, "protocol channel closed"),
             Self::Protocol(msg) => write!(f, "protocol error: {msg}"),
             Self::Timeout => write!(f, "timed out waiting for host response"),
-        }
-    }
-}
-
-/// Background loop that reads stdin and dispatches messages.
-fn reader_loop(reader: impl BufRead, inner: &Inner, shutdown_tx: &watch::Sender<bool>) {
-    for line in reader.lines() {
-        let line = match line {
-            Ok(l) => l,
-            Err(e) => {
-                error!("stdin read error: {e}");
-                break;
-            }
-        };
-
-        if line.trim().is_empty() {
-            continue;
-        }
-
-        let msg: HostToPlugin = match serde_json::from_str(&line) {
-            Ok(m) => m,
-            Err(e) => {
-                warn!("invalid host message: {e}: {line}");
-                continue;
-            }
-        };
-
-        trace!(?msg, "Received host message");
-
-        // Extract the request ID (if any) before moving `msg` into dispatch.
-        let req_id = match &msg {
-            HostToPlugin::Conversations(r) => r.id.clone(),
-            HostToPlugin::Events(r) => r.id.clone(),
-            HostToPlugin::Config(r) => r.id.clone(),
-            HostToPlugin::QueryComplete(r) => r.id.clone(),
-            HostToPlugin::Configs(r) => r.id.clone(),
-            HostToPlugin::Created(r) => r.id.clone(),
-            HostToPlugin::Done(r) => r.id.clone(),
-            HostToPlugin::Draft(r) => r.id.clone(),
-            HostToPlugin::Error(r) => r.id.clone(),
-            _ => None,
-        };
-
-        match msg {
-            HostToPlugin::Shutdown => {
-                debug!("Received shutdown from host");
-                let _ = shutdown_tx.send(true);
-            }
-
-            // `Composed`, `Edited`, and `Compacted` answer `compose`,
-            // `edit_files`, and `compact`, which this plugin never sends.
-            HostToPlugin::Init(_)
-            | HostToPlugin::Describe
-            | HostToPlugin::Composed(_)
-            | HostToPlugin::Edited(_)
-            | HostToPlugin::Compacted(_) => {
-                warn!("Unexpected message after startup");
-            }
-
-            // Response messages — dispatch to the pending request.
-            msg @ (HostToPlugin::Conversations(_)
-            | HostToPlugin::Events(_)
-            | HostToPlugin::Config(_)
-            | HostToPlugin::QueryComplete(_)
-            | HostToPlugin::Configs(_)
-            | HostToPlugin::Created(_)
-            | HostToPlugin::Done(_)
-            | HostToPlugin::Draft(_)
-            | HostToPlugin::Error(_)) => {
-                dispatch(&inner.pending, req_id.as_deref(), msg);
-            }
-        }
-    }
-
-    // stdin closed — host process is gone. Drop every pending sender so any
-    // in-flight request resolves with `ChannelClosed` instead of hanging and
-    // stalling graceful shutdown.
-    inner.pending.lock().expect("pending lock poisoned").clear();
-
-    debug!("stdin reader loop exited");
-    let _ = shutdown_tx.send(true);
-}
-
-/// Dispatch a response to the pending request with the given ID.
-fn dispatch(
-    pending: &Mutex<HashMap<String, VecDeque<oneshot::Sender<HostToPlugin>>>>,
-    id: Option<&str>,
-    msg: HostToPlugin,
-) {
-    let Some(id) = id else {
-        warn!("Response without ID, cannot dispatch: {msg:?}");
-        return;
-    };
-
-    // Taken in order, and the entry removed once its last waiter is served, so an
-    // id that expects one reply behaves exactly as it did before.
-    let tx = {
-        let mut pending = pending.lock().expect("pending lock poisoned");
-        let tx = pending.get_mut(id).and_then(VecDeque::pop_front);
-        if pending.get(id).is_some_and(VecDeque::is_empty) {
-            pending.remove(id);
-        }
-        tx
-    };
-
-    match tx {
-        Some(tx) => {
-            drop(tx.send(msg));
-        }
-        None => {
-            warn!("No pending request for ID {id}");
         }
     }
 }

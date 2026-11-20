@@ -26,6 +26,9 @@
 //! destinations with a `javascript:`, `vbscript:`, `file:`, or non-image
 //! `data:` scheme are stripped.
 //!
+//! [`render_text`] renders plain text as preformatted HTML (`<pre>`), wrapping
+//! each line in a `<span>` with its source byte range.
+//!
 //! [`Lines`] converts between byte offsets and 1-based line and column
 //! positions.
 //!
@@ -35,14 +38,18 @@ mod formatter;
 mod position;
 mod range;
 mod span;
+mod text;
 
 use comrak::{
     Arena, Options, html::format_document_with_formatter, options::Plugins, parse_document,
 };
 
-pub use crate::position::{LineColumn, Lines};
+pub use crate::{
+    position::{LineColumn, Lines},
+    text::render_text,
+};
 
-/// Markdown rendered to HTML by [`render`].
+/// Text rendered to HTML by [`render`] or [`render_text`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Rendered {
     pub html: String,

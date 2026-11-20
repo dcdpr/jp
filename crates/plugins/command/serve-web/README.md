@@ -69,14 +69,14 @@ response and no re-render.
 
 That second half is what a tool call needs.
 A call is drawn when it is requested and gains its result later, so the entry on
-the page is not final when it first appears — and by the time the result lands,
+the page is not final when it first appears, and by the time the result lands,
 the server's own boundary has moved on to the next call still waiting.
 Only the page knows how far back to ask from, so it is the page that says.
 
 A boundary is not enough for the newest entry, though, so while a turn is
 running that one is re-sent on every tick if it is one that can still change.
 A run of assistant text is rendered as one block that the next flush adds to,
-and it sits at the end — nothing after it is provisional and the count does not
+and it sits at the end: nothing after it is provisional and the count does not
 move, so neither the boundary nor the page's own floor reaches back for it.
 An entry that is finished the moment it appears, such as the request itself, is
 not re-sent; waiting for the first token is the longest stretch of a turn, and
@@ -140,13 +140,26 @@ is checked from `Sec-Fetch-Site` and `Origin`.
 Loopback is no defence on its own here: a form post is not subject to a
 preflight, so any site a browser visits can submit one to `127.0.0.1` and start
 a turn, and the same-origin policy only stops it reading the answer.
-A request that carries neither header — `curl`, a script, another tool — is
+A request that carries neither header (`curl`, a script, another tool) is
 allowed, since no browser can be made to omit both.
+
+When listening on loopback, the server also rejects requests whose `Host` header
+is not an IP address, `localhost`, or a subdomain of `.localhost`.
+A page on a domain re-pointed at `127.0.0.1` (DNS rebinding) passes the origin
+check as the server's own origin, but its requests still carry that domain in
+`Host`.
+To allow additional hostnames (for example, from a local reverse proxy), add
+them to `allowed_hosts` or pass `--allowed-host`:
+
+```toml
+[plugins.command.serve-web.options]
+allowed_hosts = ["my-machine.local"]
+```
 
 ## Development
 
 A file watcher that restarts on save can't be used here: a turn started from the
 browser runs inside the host process the plugin is attached to, so restarting on
-save aborts whatever the assistant was in the middle of — including the
-assistant editing these files.
+save aborts whatever the assistant was in the middle of, including the assistant
+editing these files.
 Poll `/status` and restart only once `busy` is false.

@@ -523,7 +523,9 @@ fn move_to_waits_for_the_board_lock() {
     let dir = Utf8TempDir::new().unwrap();
     write_ticket(&dir, "02wt0k1", Status::Todo);
     write_ticket(&dir, "02wt0k2", Status::Todo);
-    let held = lock(dir.path()).unwrap().unwrap();
+    let held = lock::exclusive(&dir.path().join(LOCK_FILE))
+        .unwrap()
+        .unwrap();
 
     let path = dir.path().to_owned();
     let mover = thread::spawn(move || {

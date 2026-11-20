@@ -1,15 +1,15 @@
-//! Documents kept one to a file, `<id>-<slug>.md`, in a directory whose [epoch
-//! file] says when their ids start counting.
+//! Document storage as `<id>-<slug>.md` files or `<id>` directories, backed by
+//! a directory [epoch file].
 //!
-//! Ids carry a time bucket and a random tail rather than a counter, so two
-//! checkouts that cannot see each other still hand out different ids.
-//! Nothing coordinates allocation; see
-//! `docs/rfd/102-collision-resistant-ticket-identifiers.md`.
+//! IDs combine a time bucket and a random tail rather than a sequential
+//! counter, so independent checkouts allocate distinct IDs without
+//! coordination; see `docs/rfd/102-collision-resistant-ticket-identifiers.md`.
 //!
-//! The time component counts from the directory's own [`Epoch`], which the
-//! first document in an empty directory writes.
-//! [`create`] claims an id by creating its file exclusively, and draws again
-//! when another process got there first.
+//! The time bucket is measured from the directory's [`Epoch`], which is written
+//! when the first document or directory is created.
+//! [`create`] claims an ID by creating its file with `create_new`, and
+//! [`create_dir`] claims an ID by creating its directory; both retry if another
+//! process claims the ID first.
 //!
 //! [epoch file]: crate::epoch
 
@@ -29,7 +29,7 @@ use crate::{
     id::{Id, Kind, MAX_BUCKET, TAIL_SPACE},
 };
 
-/// Longest slug a file name carries; a title beyond this is cut.
+/// Maximum slug length in bytes; longer titles are truncated.
 ///
 /// Slugs are ASCII, so this is both a byte count and a character count.
 pub const MAX_SLUG_SIZE: usize = 60;
@@ -143,19 +143,8 @@ impl<K> From<io::Error> for Error<K> {
 ///
 /// Returns the I/O error of a directory that can't be read.
 pub fn list<K: Kind>(dir: &Utf8Path) -> io::Result<Vec<(Id<K>, Utf8PathBuf)>> {
-    let entries = match fs::read_dir(dir) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(vec![]),
-        Err(error) => return Err(error),
-    };
-
     let mut files = vec![];
-    for entry in entries {
-        // A path that isn't UTF-8 can't be a document file: ids and slugs are
-        // ASCII.
-        let Ok(path) = Utf8PathBuf::try_from(entry?.path()) else {
-            continue;
-        };
+    for path in entries(dir)? {
         if path.extension() != Some("md") {
             continue;
         }
@@ -171,6 +160,53 @@ pub fn list<K: Kind>(dir: &Utf8Path) -> io::Result<Vec<(Id<K>, Utf8PathBuf)>> {
     files.sort_unstable();
 
     Ok(files)
+}
+
+/// Return every subdirectory in `dir` whose name is the canonical body of an
+/// [`Id<K>`] (such as `02wt0kx`), sorted by ID.
+///
+/// Non-canonical names such as `T-02wt0kx` or `02WT0KX` are ignored.
+/// Returns an empty list if `dir` does not exist.
+///
+/// # Errors
+///
+/// Returns an error if `dir` exists but cannot be read.
+pub fn list_dirs<K: Kind>(dir: &Utf8Path) -> io::Result<Vec<(Id<K>, Utf8PathBuf)>> {
+    let mut dirs = vec![];
+    for path in entries(dir)? {
+        let Some(id) = path
+            .file_name()
+            .and_then(|name| name.parse::<Id<K>>().ok().filter(|id| id.as_str() == name))
+        else {
+            continue;
+        };
+        if path.is_dir() {
+            dirs.push((id, path));
+        }
+    }
+    dirs.sort_unstable();
+
+    Ok(dirs)
+}
+
+/// Return the entries in `dir`, or an empty list if `dir` does not exist.
+///
+/// Non-UTF-8 paths are skipped because IDs and slugs are ASCII.
+fn entries(dir: &Utf8Path) -> io::Result<Vec<Utf8PathBuf>> {
+    let read = match fs::read_dir(dir) {
+        Ok(read) => read,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(vec![]),
+        Err(error) => return Err(error),
+    };
+
+    let mut paths = vec![];
+    for entry in read {
+        if let Ok(path) = Utf8PathBuf::try_from(entry?.path()) {
+            paths.push(path);
+        }
+    }
+
+    Ok(paths)
 }
 
 /// The one file in `dir` that `id` names.
@@ -242,22 +278,34 @@ pub fn load_epoch<K>(dir: &Utf8Path) -> Result<Epoch, Error<K>> {
     read_epoch(dir)?.ok_or_else(|| Error::MissingEpoch(dir.join(EPOCH_FILE)))
 }
 
-/// The epoch `dir`'s ids count time from, written as the start of today when
-/// the directory holds no documents of kind `K` yet.
+/// Return `dir`'s [`Epoch`], writing today's UTC date if `dir` contains no
+/// documents of kind `K`.
 ///
-/// Creates `dir` if it doesn't exist.
-/// A directory holding documents but no epoch file is an error rather than a
-/// fresh start: a new epoch would sort every new id against the existing ones
-/// by an unrelated clock.
+/// Creates `dir` if it does not exist.
+/// If `dir` already contains documents but has no epoch file, returns
+/// [`Error::MissingEpoch`] rather than writing a new epoch that would sort new
+/// IDs against an unrelated start date.
 ///
 /// # Errors
 ///
-/// Returns an error when the epoch file is missing beside existing documents or
-/// doesn't hold an epoch, or when the filesystem refuses.
+/// Returns [`Error::MissingEpoch`] if the epoch file is missing alongside
+/// existing documents, [`Error::MalformedEpoch`] if the epoch file cannot be
+/// parsed, or an I/O error.
 pub fn establish_epoch<K: Kind>(dir: &Utf8Path) -> Result<Epoch, Error<K>> {
+    establish(dir, || Ok(!list::<K>(dir)?.is_empty()))
+}
+
+/// Return `dir`'s [`Epoch`], writing today's UTC date if `has_documents`
+/// returns `false`.
+///
+/// `has_documents` is called only when the epoch file does not exist.
+fn establish<K: Kind>(
+    dir: &Utf8Path,
+    has_documents: impl FnOnce() -> io::Result<bool>,
+) -> Result<Epoch, Error<K>> {
     match read_epoch(dir)? {
         Some(epoch) => return Ok(epoch),
-        None if !list::<K>(dir)?.is_empty() => {
+        None if has_documents()? => {
             return Err(Error::MissingEpoch(dir.join(EPOCH_FILE)));
         }
         None => {}
@@ -327,11 +375,17 @@ pub fn current_bucket<K>(epoch: Epoch) -> Result<u32, Error<K>> {
 ///
 /// Returns [`Error::Exhausted`] when no bucket the format can express has room,
 /// or the I/O error of a directory that can't be read.
-pub fn allocate_in<K: Kind>(dir: &Utf8Path, mut bucket: u32) -> Result<Id<K>, Error<K>> {
+pub fn allocate_in<K: Kind>(dir: &Utf8Path, bucket: u32) -> Result<Id<K>, Error<K>> {
     fs::create_dir_all(dir)?;
 
     let existing: Vec<Id<K>> = list(dir)?.into_iter().map(|(id, _)| id).collect();
 
+    allocate_among(&existing, bucket)
+}
+
+/// Allocate an ID in `bucket` (or the next bucket with capacity) given
+/// `existing` IDs in ascending order.
+fn allocate_among<K>(existing: &[Id<K>], mut bucket: u32) -> Result<Id<K>, Error<K>> {
     loop {
         let highest = existing.iter().rev().find(|id| id.bucket() == bucket);
         let tail = match highest {
@@ -403,12 +457,44 @@ pub fn create<K: Kind>(
     Err(Error::Contended)
 }
 
-/// The slug a document's file name carries after its id, from its title.
+/// Create a new directory in `dir` named after the body of a freshly allocated
+/// [`Id<K>`], returning the ID and directory path.
 ///
-/// ASCII letters and digits are kept, lowercased, and so is `_`; every other
-/// run of characters becomes one `-`.
-/// The slug is cut to [`MAX_SLUG_SIZE`], and a title with nothing to keep
-/// produces `untitled`.
+/// Allocates IDs against the existing directories returned by [`list_dirs`],
+/// writing the epoch file when creating the first directory in an empty `dir`.
+/// `fs::create_dir` claims the ID atomically; if another process creates the
+/// directory first, allocation retries with the next tail.
+///
+/// # Errors
+///
+/// Returns [`Error::Contended`] if all retry attempts collide,
+/// [`Error::MissingEpoch`] if `dir` contains ID directories but no epoch file,
+/// or any epoch or I/O error.
+pub fn create_dir<K: Kind>(dir: &Utf8Path) -> Result<(Id<K>, Utf8PathBuf), Error<K>> {
+    let epoch = establish(dir, || Ok(!list_dirs::<K>(dir)?.is_empty()))?;
+
+    for _ in 0..CLAIM_ATTEMPTS {
+        let existing: Vec<Id<K>> = list_dirs(dir)?.into_iter().map(|(id, _)| id).collect();
+        let id = allocate_among(&existing, current_bucket(epoch)?)?;
+        let path = dir.join(id.as_str());
+
+        match fs::create_dir(&path) {
+            Ok(()) => return Ok((id, path)),
+            // Another process claimed this id first. The next attempt sees its
+            // directory and draws a higher tail.
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+
+    Err(Error::Contended)
+}
+
+/// Derive a filename slug from `title`.
+///
+/// Keeps ASCII alphanumerics (lowercased) and `_`, collapses any other run of
+/// characters to a single `-`, and truncates the result to [`MAX_SLUG_SIZE`].
+/// Returns `"untitled"` if no valid characters remain.
 #[must_use]
 pub fn slug(title: &str) -> String {
     let mut slug = String::new();

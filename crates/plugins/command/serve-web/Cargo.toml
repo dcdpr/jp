@@ -13,7 +13,7 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
-jp_plugin = { workspace = true }
+jp_plugin = { workspace = true, features = ["client"] }
 
 axum = { workspace = true, features = ["form", "http1", "json", "query", "tokio"] }
 chrono = { workspace = true }
@@ -25,11 +25,9 @@ serde_json = { workspace = true, features = ["std"] }
 sha2 = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
-tracing-subscriber = { workspace = true, features = ["ansi", "env-filter", "fmt", "std"] }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true, features = ["std"] }
-tracing = { workspace = true, features = ["std"] }
 
 [lints]
 workspace = true

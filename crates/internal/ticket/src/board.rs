@@ -25,12 +25,11 @@
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
-    fs::{self, File, OpenOptions},
-    io,
+    fs, io,
 };
 
 use camino::{Utf8Path, Utf8PathBuf};
-use doc::format::Formatting;
+use doc::{format::Formatting, lock};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -248,7 +247,7 @@ pub fn rank(dir: &Utf8Path, id: TicketId, place: Place, other: TicketId) -> Resu
         return Err(Error::SameTicket(id));
     }
 
-    let _lock = lock(dir)?;
+    let _lock = lock::exclusive(&dir.join(LOCK_FILE))?;
     let entries = store::list(dir)?;
     let status = status_of(&entries, id)?;
     let other_status = status_of(&entries, other)?;
@@ -311,7 +310,7 @@ pub fn move_to(
         return Err(Error::SameTicket(id));
     }
 
-    let _lock = lock(dir)?;
+    let _lock = lock::exclusive(&dir.join(LOCK_FILE))?;
     let entries = store::list(dir)?;
     let from = status_of(&entries, id)?;
     if let Some(Placement::Next(_, other)) = at {
@@ -365,27 +364,6 @@ pub fn move_to(
     }
 
     Ok(Moved { path, previous })
-}
-
-/// Acquire an exclusive lock on [`LOCK_FILE`] in `dir`, held until the returned
-/// [`File`] is dropped.
-///
-/// Blocks if another writer holds the lock.
-/// Returns `Ok(None)` if `dir` does not exist yet.
-fn lock(dir: &Utf8Path) -> Result<Option<File>, Error> {
-    let file = match OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(false)
-        .open(dir.join(LOCK_FILE))
-    {
-        Ok(file) => file,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(error.into()),
-    };
-    file.lock()?;
-
-    Ok(Some(file))
 }
 
 /// The status of the ticket `wanted` among `entries`.

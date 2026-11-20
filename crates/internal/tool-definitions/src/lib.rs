@@ -21,15 +21,11 @@
 
 mod labels;
 
-use std::{
-    fs::{self, OpenOptions},
-    io::{self, Write as _},
-};
+use std::{fs, io};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use jp_label::Vocabulary;
 pub use labels::Role;
-use overwrite::{Existing, Unrecorded};
 use serde_json::Value;
 
 /// Filename written by `tools sync` inside the definitions directory.
@@ -46,8 +42,9 @@ pub struct Definitions {
     pub files: &'static [(&'static str, &'static str)],
 
     /// Plural noun for the synced values in status output (e.g. `"categories"`,
-    /// `"labels"`).
-    pub offers: &'static str,
+    /// `"labels"`), or `None` for a plugin whose tools mirror nothing from
+    /// configuration.
+    pub offers: Option<&'static str>,
 }
 
 /// A tool parameter whose schema values are derived from workspace
@@ -152,56 +149,29 @@ impl Definitions {
     /// them or `force` is true; otherwise `init` returns an error before
     /// writing any files.
     pub fn init(&self, dir: &Utf8Path, force: bool) -> Result<String, String> {
-        let mut planned = vec![];
-        for (name, content) in self.files {
-            let path = dir.join(name);
-            let existing = overwrite::existing(&path, content.as_bytes())?;
-            planned.push((*name, path, *content, existing));
-        }
-
-        if !force {
-            let differing: Vec<Utf8PathBuf> = planned
-                .iter()
-                .filter(|(.., existing)| *existing == Existing::Differs)
-                .map(|(name, ..)| Utf8PathBuf::from(*name))
-                .collect();
-            refuse_unrecorded(
-                dir,
-                &differing,
-                &format!("jp {} tools init {dir}", self.plugin),
-            )?;
-        }
-
-        fs::create_dir_all(dir).map_err(|error| format!("failed to create {dir}: {error}"))?;
+        let command = format!("jp {} tools init {dir}", self.plugin);
+        let written = overwrite::write(dir, self.files, &command, force)?;
 
         let mut text = String::new();
-        for (_, path, content, existing) in planned {
-            let written = match existing {
-                Existing::Same => {
-                    text.push_str(&format!("Unchanged {path}\n"));
-                    continue;
-                }
-                Existing::Differs => fs::write(&path, content).map(|()| "Overwrote"),
-                // Use `create_new` so a file created after `overwrite::existing`
-                // ran is not overwritten.
-                Existing::Missing => OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .open(&path)
-                    .and_then(|mut file| file.write_all(content.as_bytes()))
-                    .map(|()| "Wrote"),
-            };
-            let verb = written.map_err(|error| format!("failed to write {path}: {error}"))?;
-            text.push_str(&format!("{verb} {path}\n"));
+        for (path, written) in &written {
+            text.push_str(&format!("{written} {path}\n"));
         }
-
-        text.push_str(&format!(
-            "Load the directory from the workspace configuration, then run `jp {} tools sync \
-             {dir}` to offer the {}.\n",
-            self.plugin, self.offers
-        ));
+        text.push_str(&match self.offers {
+            Some(offers) => format!(
+                "Load the directory from the workspace configuration, then run `jp {} tools sync \
+                 {dir}` to offer the {offers}.\n",
+                self.plugin
+            ),
+            None => "Load the directory from the workspace configuration to offer the tools.\n"
+                .to_owned(),
+        });
 
         Ok(text)
+    }
+
+    /// The plural noun `tools sync` reports its values under.
+    fn offered(&self) -> &'static str {
+        self.offers.unwrap_or("values")
     }
 
     /// Return the configured tools served by this plugin as `(config_key,
@@ -272,7 +242,7 @@ impl Definitions {
             .is_some_and(|text| overwrite::same_text(text.as_bytes(), synced.text.as_bytes()));
         if !unchanged {
             if !force && existing.is_some() {
-                refuse_unrecorded(dir, &[Utf8PathBuf::from(SYNCED_FILE)], &command)?;
+                overwrite::refuse_unrecorded(dir, &[Utf8PathBuf::from(SYNCED_FILE)], &command)?;
             }
             fs::write(&path, &synced.text)
                 .map_err(|error| format!("failed to write {path}: {error}"))?;
@@ -345,12 +315,13 @@ impl Definitions {
         let mut text = if synced.covered.is_empty() {
             format!(
                 "{verb} {path}; no configured tool takes {} from `jp {}`.\n",
-                self.offers, self.plugin
+                self.offered(),
+                self.plugin
             )
         } else {
             format!(
                 "{verb} {path}, with {} for {}\n",
-                self.offers,
+                self.offered(),
                 synced.covered.join(", ")
             )
         };
@@ -375,22 +346,6 @@ struct Synced {
 
     /// Skipped tools and the undeclared parameter name for each.
     undeclared: Vec<String>,
-}
-
-/// Return a refusal error if any file in `names` (relative to `dir`) cannot be
-/// restored by git.
-fn refuse_unrecorded(dir: &Utf8Path, names: &[Utf8PathBuf], command: &str) -> Result<(), String> {
-    let unrecorded = overwrite::unrecorded(dir, names)?;
-    if unrecorded.is_empty() {
-        return Ok(());
-    }
-
-    let shown: Vec<(Utf8PathBuf, Unrecorded)> = unrecorded
-        .into_iter()
-        .map(|(name, why)| (dir.join(name), why))
-        .collect();
-
-    Err(overwrite::refusal(command, &shown))
 }
 
 /// Return whether the configured tool `key` declares parameter `name` with a

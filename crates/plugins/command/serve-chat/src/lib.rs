@@ -41,20 +41,26 @@ use std::{
 };
 
 use camino::Utf8PathBuf;
-use jp_plugin::message::{DescribeResponse, HostToPlugin, InitMessage, PluginToHost};
+use jp_plugin::{
+    log::{Level, Log as _, fields},
+    message::{HostToPlugin, InitMessage, PluginToHost},
+    stdio,
+};
 use tokio::sync::{mpsc, watch};
 
 use crate::{
     bridge::Bridge,
     checkout::{GitCheckout, Unguarded},
     decide::{Decide, PackQuestion, SystemOne},
-    host::{Host as _, HostClient, Level, fields},
+    host::{Host as _, HostClient},
     inject::{Injector, Process},
     options::Options,
     signal::{Logger, Signal},
     state::State,
     transport::Outbox,
 };
+
+const BINARY: &str = "jp-serve-chat";
 
 /// Minimum host protocol version required by this plugin.
 ///
@@ -124,8 +130,16 @@ pub fn run(
 ) -> Result<(), String> {
     let client = HostClient::new(stdout);
 
-    let init = match first_message(&mut stdin)? {
-        HostToPlugin::Describe => return client.send(&PluginToHost::Describe(describe()?)),
+    let init = match stdio::read(&mut stdin, BINARY)? {
+        HostToPlugin::Describe => {
+            let describe = stdio::describe_response(
+                MANIFEST,
+                "serve-chat",
+                env!("CARGO_PKG_VERSION"),
+                HELP_TEXT,
+            )?;
+            return client.send(&PluginToHost::Describe(describe));
+        }
         HostToPlugin::Init(init) => init,
         other => return Err(format!("expected init or describe, got: {other:?}")),
     };
@@ -158,17 +172,6 @@ pub fn run(
         Ok(()) => client.exit(0, None),
         Err(reason) => client.exit(1, Some(reason)),
     }
-}
-
-/// Read the host's first message: `describe`, or `init` to start a run.
-fn first_message(stdin: &mut impl BufRead) -> Result<HostToPlugin, String> {
-    let line = stdin
-        .lines()
-        .next()
-        .ok_or("The host stopped responding before sending init.")?
-        .map_err(|error| format!("failed to read from the host: {error}"))?;
-
-    serde_json::from_str(line.trim()).map_err(|error| format!("invalid host message: {error}"))
 }
 
 fn serve(
@@ -277,21 +280,6 @@ fn state_dir(init: &InitMessage) -> Result<Utf8PathBuf, String> {
     }
 
     Err("JP reported no user data directory to keep the bridge's state in.".to_owned())
-}
-
-fn describe() -> Result<DescribeResponse, String> {
-    let mut describe = DescribeResponse::from_manifest(
-        MANIFEST,
-        "serve-chat",
-        env!("CARGO_PKG_VERSION"),
-        HELP_TEXT,
-    )
-    .map_err(|error| format!("invalid embedded manifest: {error}"))?;
-
-    describe.author = Some("Jean Mertz <git@jeanmertz.com>".to_owned());
-    describe.repository = Some("https://github.com/dcdpr/jp".to_owned());
-
-    Ok(describe)
 }
 
 /// Acquire `mutex`, recovering the guard if a previous holder panicked.

@@ -33,9 +33,12 @@ use chrono::{Local, SecondsFormat, Utc};
 use clap::{ArgGroup, CommandFactory, Parser, Subcommand};
 use doc::format::Formatting;
 use jp_github::models::issues::{Comment as IssueComment, Issue};
-use jp_plugin::message::{
-    ComposeMode, ComposeOption, ComposeRequest, DescribeResponse, ExitMessage, HostToPlugin,
-    InitMessage, OutputFormat, PluginToHost, PrintMessage, ToolCall, ToolOutcomeMessage,
+use jp_plugin::{
+    message::{
+        ComposeMode, ComposeOption, ComposeRequest, HostToPlugin, InitMessage, OutputFormat,
+        PluginToHost, ToolCall, ToolOutcomeMessage,
+    },
+    stdio::{self, print_json, print_to, read, send, send_exit, send_result},
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -57,6 +60,8 @@ use crate::{
 
 /// The name the plugin is configured under, `plugins.command.ticket`.
 pub(crate) const PLUGIN: &str = "ticket";
+
+pub(crate) const BINARY: &str = "jp-ticket";
 
 /// What `jp ticket --version` prints after the command's name: the plugin's
 /// version, and the revision of the site files it was built alongside.
@@ -625,8 +630,14 @@ struct Context<'a> {
 /// An `init` carrying a tool call is answered with the call's outcome; any
 /// other `init` runs the command its arguments name.
 pub fn run(mut stdin: impl BufRead, mut stdout: impl Write) -> Result<(), String> {
-    match read_message(&mut stdin)? {
-        HostToPlugin::Describe => send_describe(&mut stdout),
+    match read(&mut stdin, BINARY)? {
+        HostToPlugin::Describe => stdio::describe(
+            &mut stdout,
+            MANIFEST,
+            PLUGIN,
+            env!("CARGO_PKG_VERSION"),
+            help_text(),
+        ),
         HostToPlugin::Init(init) => {
             match jp_plugin::ready(REQUIRED_PROTOCOL, init.version) {
                 Ok(ready) => send(&mut stdout, &PluginToHost::Ready(ready))?,
@@ -1142,7 +1153,7 @@ fn compose_many(
 ) -> Result<Vec<String>, String> {
     send(stdout, &PluginToHost::Compose(request))?;
 
-    match read_message(stdin)? {
+    match read(stdin, BINARY)? {
         HostToPlugin::Composed(response) if response.values.is_empty() => {
             Err("Nothing selected.".to_owned())
         }
@@ -1196,7 +1207,7 @@ fn compose(
 ) -> Result<String, String> {
     send(stdout, &PluginToHost::Compose(request))?;
 
-    match read_message(stdin)? {
+    match read(stdin, BINARY)? {
         HostToPlugin::Composed(response) => response
             .text
             .ok_or_else(|| "Nothing composed; run it again with the text as arguments.".to_owned()),
@@ -2701,95 +2712,8 @@ pub fn help_text() -> String {
     Args::command().render_help().to_string()
 }
 
-fn send_describe(stdout: &mut impl Write) -> Result<(), String> {
-    let mut describe =
-        DescribeResponse::from_manifest(MANIFEST, "ticket", env!("CARGO_PKG_VERSION"), help_text())
-            .map_err(|e| format!("invalid embedded manifest: {e}"))?;
-
-    describe.author = Some("Jean Mertz <git@jeanmertz.com>".to_owned());
-    describe.repository = Some("https://github.com/dcdpr/jp".to_owned());
-
-    send(stdout, &PluginToHost::Describe(describe))
-}
-
 fn print(stdout: &mut impl Write, text: &str) -> Result<(), String> {
     print_to(stdout, text, "content")
-}
-
-/// Print `text`, one JSON value, for the host to emit as a record of its own.
-fn print_json(stdout: &mut impl Write, text: &str) -> Result<(), String> {
-    send(
-        stdout,
-        &PluginToHost::Print(PrintMessage {
-            text: text.to_owned(),
-            channel: "content".to_owned(),
-            format: "json".into(),
-            language: None,
-        }),
-    )
-}
-
-/// Print `text` on the host's output channel `channel`.
-fn print_to(stdout: &mut impl Write, text: &str, channel: &str) -> Result<(), String> {
-    send(
-        stdout,
-        &PluginToHost::Print(PrintMessage {
-            text: text.to_owned(),
-            channel: channel.to_owned(),
-            format: "plain".into(),
-            language: None,
-        }),
-    )
-}
-
-/// End the session with a failure, or with success when `code` is 0.
-fn send_exit(stdout: &mut impl Write, code: u8, reason: Option<&str>) -> Result<(), String> {
-    send(
-        stdout,
-        &PluginToHost::Exit(ExitMessage {
-            code,
-            reason: reason.map(String::from),
-            expected: false,
-        }),
-    )
-}
-
-/// End the session with the code a command chose to report its result by, which
-/// `jp` doesn't treat as a failure.
-fn send_result(stdout: &mut impl Write, code: u8) -> Result<(), String> {
-    send(
-        stdout,
-        &PluginToHost::Exit(ExitMessage {
-            code,
-            reason: None,
-            expected: code != 0,
-        }),
-    )
-}
-
-fn read_message(stdin: &mut impl BufRead) -> Result<HostToPlugin, String> {
-    let mut line = String::new();
-    let read = stdin
-        .read_line(&mut line)
-        .map_err(|error| format!("failed to read from host: {error}"))?;
-
-    // EOF: the host closed the pipe without answering, which is what an older
-    // `jp` does when it gives up on a message it couldn't read.
-    if read == 0 {
-        return Err(
-            "The host stopped responding. Are `jp` and `jp-ticket` the same build?".to_owned(),
-        );
-    }
-
-    serde_json::from_str(line.trim()).map_err(|error| format!("invalid host message: {error}"))
-}
-
-fn send(stdout: &mut impl Write, msg: &PluginToHost) -> Result<(), String> {
-    let json = serde_json::to_string(msg).map_err(|error| format!("serialize error: {error}"))?;
-    writeln!(stdout, "{json}").map_err(|error| format!("write error: {error}"))?;
-    stdout
-        .flush()
-        .map_err(|error| format!("flush error: {error}"))
 }
 
 #[cfg(test)]
