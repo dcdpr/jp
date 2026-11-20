@@ -137,8 +137,12 @@ pub enum ReadError {
     Unavailable(String),
 
     /// The part was read, and does not have the shape the part has.
-    #[error("malformed{}", at(*position))]
+    #[error("{}{}", malformed(*format), at(*position))]
     Malformed {
+        /// The format the backend stores the part in, such as `JSON`, as a
+        /// message names it.
+        format: Option<&'static str>,
+
         message: String,
 
         /// Where in the part's text the problem is, when it is text.
@@ -151,6 +155,14 @@ pub enum ReadError {
 pub struct Position {
     pub line: usize,
     pub column: usize,
+}
+
+/// `invalid JSON` for a part stored as JSON, `malformed` without a format.
+fn malformed(format: Option<&str>) -> String {
+    format.map_or_else(
+        || "malformed".to_owned(),
+        |format| format!("invalid {format}"),
+    )
 }
 
 /// ` at line 1, column 2`, or nothing without a position.
@@ -169,6 +181,7 @@ impl From<io::Error> for ReadError {
 impl From<serde_json::Error> for ReadError {
     fn from(error: serde_json::Error) -> Self {
         Self::Malformed {
+            format: Some("JSON"),
             message: error.to_string(),
             position: Some(Position {
                 line: error.line(),

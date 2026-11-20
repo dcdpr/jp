@@ -227,14 +227,23 @@ fn test_corrupt_metadata_is_detected() {
         part: ConversationPart::Metadata,
         location: StorageLocation::new(dir.join(METADATA_FILE).as_str()),
         error: ReadError::Malformed {
+            format: Some("JSON"),
             message: "expected ident at line 1 column 2".to_owned(),
             position: Some(Position { line: 1, column: 2 }),
         },
     });
     assert_eq!(
         result.invalid[0].error.to_string(),
-        "metadata.json: malformed at line 1, column 2"
+        "metadata.json: invalid JSON at line 1, column 2"
     );
+}
+
+// A backend names the format its parts are in; one whose parts have no named
+// format still says what is wrong.
+#[test]
+fn a_malformed_part_is_named_by_its_format() {
+    assert_eq!(malformed(Some("JSON")), "invalid JSON");
+    assert_eq!(malformed(None), "malformed");
 }
 
 #[test]
@@ -282,7 +291,7 @@ fn test_corrupt_events_is_detected() {
     ));
     assert_eq!(
         result.invalid[0].error.to_string(),
-        "events.json: malformed at line 1, column 2"
+        "events.json: invalid JSON at line 1, column 2"
     );
 }
 

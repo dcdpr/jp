@@ -253,6 +253,7 @@ fn unloaded_details_show_the_title_status_and_every_location() {
                 "metadata.json",
             ),
             error: ReadError::Malformed {
+                format: Some("JSON"),
                 message: "expected ident at line 1 column 2".to_owned(),
                 position: Some(Position { line: 1, column: 2 }),
             },
@@ -267,7 +268,7 @@ fn unloaded_details_show_the_title_status_and_every_location() {
         "",
         "        ID  jp-c10000",
         "     Title  Fix the loader",
-        "    Status  unable to load: metadata.json: malformed at line 1, column 2",
+        "    Status  unable to load: metadata.json: invalid JSON at line 1, column 2",
         " Locations",
         "            1. /ws/.jp/conversations/10000",
         "            2. /user/conversations/10000-a-title",

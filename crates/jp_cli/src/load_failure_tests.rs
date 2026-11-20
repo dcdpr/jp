@@ -36,6 +36,7 @@ fn corrupt_metadata() -> ValidationError {
         part: ConversationPart::Metadata,
         location: file_location("metadata.json"),
         error: ReadError::Malformed {
+            format: Some("JSON"),
             message: "expected ident at line 1 column 2".to_owned(),
             position: Some(Position { line: 1, column: 2 }),
         },
@@ -85,7 +86,7 @@ fn every_failure_is_listed() {
         "6 conversations failed to load:",
         "",
         "- jp-c17636257521: missing metadata.json",
-        "- jp-c17636257522: metadata.json: malformed at line 1, column 2",
+        "- jp-c17636257522: metadata.json: invalid JSON at line 1, column 2",
         "- jp-c17636257523: missing metadata.json",
         "- jp-c17636257524: missing metadata.json",
         "- jp-c17636257525: missing metadata.json",
@@ -202,8 +203,8 @@ fn the_text_report_prints_when_the_notice_drops_even_under_quiet() {
     assert_eq!(out.lock().as_str(), "");
     assert_eq!(
         strip_ansi_escapes::strip_str(err.lock().as_str()),
-        "1 conversation failed to load:\n\n- jp-c17941219994: metadata.json: malformed at line 1, \
-         column 2\n\nRun `jp conversation rm jp-c17941219994` to remove it.\n"
+        "1 conversation failed to load:\n\n- jp-c17941219994: metadata.json: invalid JSON at line \
+         1, column 2\n\nRun `jp conversation rm jp-c17941219994` to remove it.\n"
     );
 }
 

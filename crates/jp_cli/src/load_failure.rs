@@ -302,7 +302,9 @@ fn read_cause(error: &ReadError) -> Cause<'_> {
             error: Some(message),
             ..Cause::new("unavailable", "unable to read")
         },
-        ReadError::Malformed { message, position } => Cause {
+        ReadError::Malformed {
+            message, position, ..
+        } => Cause {
             error: Some(message),
             line: position.map(|p| p.line),
             column: position.map(|p| p.column),
