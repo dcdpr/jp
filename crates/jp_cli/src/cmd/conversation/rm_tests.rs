@@ -7,10 +7,7 @@ use crossterm::style::Stylize as _;
 use jp_config::AppConfig;
 use jp_conversation::{Conversation, ConversationId};
 use jp_printer::{OutputFormat, Printer, SharedBuffer};
-use jp_storage::{
-    backend::{FsStorageBackend, LockBackend as _},
-    validate::{ConversationPart, Position, ReadError, StorageLocation, ValidationError},
-};
+use jp_storage::backend::{FsStorageBackend, LockBackend as _};
 use jp_workspace::Workspace;
 use tokio::runtime::Runtime;
 
@@ -438,30 +435,6 @@ fn no_persist_removes_nothing_and_says_so() {
         )
     );
     assert!(dir.is_dir());
-}
-
-#[test]
-fn the_status_says_why_a_conversation_does_not_load() {
-    let corrupt = Err(ValidationError::Unreadable {
-        part: ConversationPart::Metadata,
-        location: StorageLocation::new("/ws/.jp/conversations/17941219991/metadata.json"),
-        error: ReadError::Malformed {
-            message: "expected ident at line 1 column 2".to_owned(),
-            position: Some(Position { line: 1, column: 2 }),
-        },
-    });
-
-    assert_eq!(
-        unloaded_status(&corrupt).as_deref(),
-        Some("unable to load: metadata: malformed at line 1, column 2")
-    );
-}
-
-// The state is read under the conversation's lock, so a conversation another
-// process finished writing after this run's scan has no status to report.
-#[test]
-fn a_conversation_that_loads_has_no_status() {
-    assert_eq!(unloaded_status(&Ok(())), None);
 }
 
 #[test]

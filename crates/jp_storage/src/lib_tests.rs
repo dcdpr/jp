@@ -305,6 +305,38 @@ fn live_conversation_dirs_match_the_id_exactly() {
     ]);
 }
 
+// Where a conversation is stored, live or archived, named the way the backend
+// names them.
+#[test]
+fn conversation_locations_name_the_live_or_archived_directories() {
+    let tmp = tempdir().unwrap();
+    let backend = FsStorageBackend::new(&tmp.path().join("ws"))
+        .unwrap()
+        .with_user_storage(&tmp.path().join("user"), None, "abc")
+        .unwrap();
+    let workspace = tmp.path().join("ws").join(CONVERSATIONS_DIR);
+    let user = tmp.path().join("user").join("abc").join(CONVERSATIONS_DIR);
+    let id = |s| ConversationId::try_from_deciseconds_str(s).unwrap();
+
+    write_valid_conv_dir(&workspace, &id("17941219991"));
+    write_valid_conv_dir(&user, &id("17941219991"));
+    assert_eq!(backend.conversation_locations(&id("17941219991")), [
+        StorageLocation::new(workspace.join("17941219991").as_str()),
+        StorageLocation::new(user.join("17941219991").as_str()),
+    ]);
+
+    write_valid_conv_dir(&user.join(ARCHIVE_DIR), &id("17941219992"));
+    assert_eq!(backend.conversation_locations(&id("17941219992")), [
+        StorageLocation::new(user.join(ARCHIVE_DIR).join("17941219992").as_str()),
+    ]);
+
+    assert!(
+        backend
+            .conversation_locations(&id("17941219993"))
+            .is_empty()
+    );
+}
+
 // What the store holds for a conversation the index leaves out, as typed
 // state: callers render it, storage only reports it.
 #[test]

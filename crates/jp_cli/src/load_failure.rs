@@ -239,8 +239,8 @@ impl<'a> From<&'a LoadFailure<'a>> for Record<'a> {
     fn from(failure: &'a LoadFailure<'a>) -> Self {
         Self {
             level: "warning",
-            code: "conversation_load_failed",
-            message: "conversation failed to load",
+            code: FAILURE_CODE,
+            message: FAILURE_MESSAGE,
             context: Context {
                 conversation: ConversationContext {
                     id: failure.id.to_string(),
@@ -251,6 +251,27 @@ impl<'a> From<&'a LoadFailure<'a>> for Record<'a> {
         }
     }
 }
+
+/// Why a conversation does not load, as the typed record the load-failure
+/// report emits, without the report's context.
+pub(crate) fn failure_json(error: &ValidationError) -> serde_json::Value {
+    #[derive(Serialize)]
+    struct Failure<'a> {
+        code: &'static str,
+        message: &'static str,
+        causes: Vec<Cause<'a>>,
+    }
+
+    serde_json::to_value(Failure {
+        code: FAILURE_CODE,
+        message: FAILURE_MESSAGE,
+        causes: causes(error),
+    })
+    .unwrap_or_default()
+}
+
+const FAILURE_CODE: &str = "conversation_load_failed";
+const FAILURE_MESSAGE: &str = "conversation failed to load";
 
 /// The error chain of a validation failure, outermost first.
 fn causes(error: &ValidationError) -> Vec<Cause<'_>> {

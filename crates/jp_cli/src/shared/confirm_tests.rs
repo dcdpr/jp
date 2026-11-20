@@ -4,7 +4,10 @@ use chrono::{DateTime, TimeZone as _, Utc};
 use jp_config::AppConfig;
 use jp_conversation::{Conversation, Labels};
 use jp_printer::{OutputFormat, Printer};
-use jp_storage::validate::StorageLocation;
+use jp_storage::{
+    backend::StoredConversation,
+    validate::{ConversationPart, Position, ReadError, StorageLocation, ValidationError},
+};
 use jp_workspace::{ConversationLock, LockResult, Workspace};
 use tokio::runtime::Runtime;
 
@@ -223,71 +226,87 @@ fn details_report_an_unpinned_conversation_as_unpinned() {
     );
 }
 
+/// A conversation stored at `/ws/.jp/conversations/10000`.
+fn stored(
+    title: Option<&str>,
+    state: std::result::Result<(), ValidationError>,
+) -> StoredConversation {
+    StoredConversation {
+        id: make_id(1000),
+        locations: vec![StorageLocation::new("/ws/.jp/conversations/10000")],
+        state,
+        title: title.map(str::to_owned),
+    }
+}
+
 // A conversation that does not load has no events to show, so the prompt says
 // what it can: its title when one is recorded, why it does not load, and which
-// directories go.
+// locations go.
 #[test]
-fn unloaded_details_show_the_title_status_and_every_directory() {
-    let details = unloaded_details(
-        make_id(1000),
+fn unloaded_details_show_the_title_status_and_every_location() {
+    let mut conversation = stored(
         Some("Fix the loader"),
-        Some("unable to load: missing events.json"),
-        &[
-            StorageLocation::new("/ws/.jp/conversations/10000"),
-            StorageLocation::new("/user/conversations/10000-a-title"),
-        ],
-        false,
+        Err(ValidationError::Unreadable {
+            part: ConversationPart::Metadata,
+            location: StorageLocation::new("/ws/.jp/conversations/10000/metadata.json"),
+            error: ReadError::Malformed {
+                message: "expected ident at line 1 column 2".to_owned(),
+                position: Some(Position { line: 1, column: 2 }),
+            },
+        }),
     );
-    let details = details.to_string();
+    conversation
+        .locations
+        .push(StorageLocation::new("/user/conversations/10000-a-title"));
 
+    let expected = [
+        "Removing conversation jp-c10000",
+        "",
+        "        ID  jp-c10000",
+        "     Title  Fix the loader",
+        "    Status  unable to load: metadata: malformed at line 1, column 2",
+        " Locations",
+        "            1. /ws/.jp/conversations/10000",
+        "            2. /user/conversations/10000-a-title",
+    ];
     assert_eq!(
-        details,
-        "Removing conversation jp-c10000\n\n     ID  jp-c10000\n  Title  Fix the loader\n Status  \
-         unable to load: missing events.json\n  Paths\n         1. /ws/.jp/conversations/10000\n         \
-         2. /user/conversations/10000-a-title"
+        unloaded_details(&conversation, false).to_string(),
+        expected.join("\n")
     );
 }
 
-// A conversation that loads by the time it is removed has nothing to report.
+// The state is read under the conversation's lock, so a conversation another
+// process finished writing after this run's scan has no status to report.
 #[test]
 fn unloaded_details_leave_out_what_is_not_known() {
-    let details = unloaded_details(
-        make_id(1000),
-        None,
-        None,
-        &[StorageLocation::new("/ws/.jp/conversations/10000")],
-        false,
-    );
-    let details = details.to_string();
-
+    let expected = [
+        "Removing conversation jp-c10000",
+        "",
+        "        ID  jp-c10000",
+        " Locations",
+        "            1. /ws/.jp/conversations/10000",
+    ];
     assert_eq!(
-        details,
-        "Removing conversation jp-c10000\n\n    ID  jp-c10000\n Paths\n        1. \
-         /ws/.jp/conversations/10000"
+        unloaded_details(&stored(None, Ok(())), false).to_string(),
+        expected.join("\n")
     );
 }
 
 // The prompt widget draws without the printer's filter.
 #[test]
 fn unloaded_details_show_a_title_as_plain_text() {
-    let details = unloaded_details(
-        make_id(1000),
-        Some("Fix\x1b[2J the\r loader"),
-        None,
-        &[StorageLocation::new("/ws/.jp/conversations/10000")],
-        false,
-    );
-    let details = details.to_string();
-
     let expected = [
         "Removing conversation jp-c10000",
         "",
-        "    ID  jp-c10000",
-        " Title  Fix[2J the loader",
-        " Paths",
-        "        1. /ws/.jp/conversations/10000",
+        "        ID  jp-c10000",
+        "     Title  Fix[2J the loader",
+        " Locations",
+        "            1. /ws/.jp/conversations/10000",
     ];
-    assert_eq!(details, expected.join("\n"));
+    assert_eq!(
+        unloaded_details(&stored(Some("Fix\x1b[2J the\r loader"), Ok(())), false).to_string(),
+        expected.join("\n")
+    );
 }
 
 #[test]
@@ -296,7 +315,7 @@ fn an_unloaded_removal_nobody_can_confirm_fails() {
     let mut ctx = test_ctx(id, Conversation::default());
     ctx.term.interactive = false;
 
-    let error = confirm_unloaded_removal(&ctx, id, None, None, &[])
+    let error = confirm_unloaded_removal(&ctx, &stored(None, Ok(())))
         .expect_err("a removal nobody can confirm must not be assumed");
     let crate::error::Error::Command(error) = error else {
         panic!("expected a command error, got: {error}");

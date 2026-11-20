@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use jp_config::PartialAppConfig;
 use jp_conversation::{Conversation, ConversationEvent, ConversationId, ConversationStream};
 
-use crate::LoadError;
+use crate::{LoadError, validate::StorageLocation};
 
 /// Controls which storage partition to scan.
 ///
@@ -115,4 +115,12 @@ pub trait LoadBackend: Send + Sync + Debug {
     /// `expires_at` field without deserializing the full `Conversation`.
     /// In-memory backends check the structs directly.
     fn load_expired_conversation_ids(&self, now: DateTime<Utc>) -> Vec<ConversationId>;
+
+    /// Where the store holds conversation `id`, live or archived.
+    ///
+    /// Empty when the store holds nothing for `id`, and for a store that keeps
+    /// conversations nowhere a user can reach them, such as an in-memory one.
+    fn conversation_locations(&self, _id: &ConversationId) -> Vec<StorageLocation> {
+        vec![]
+    }
 }

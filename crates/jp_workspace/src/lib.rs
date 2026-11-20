@@ -44,6 +44,7 @@ use jp_storage::{
         ReadOnlySessionBackend, SessionBackend, StoragePresence,
     },
     lock::LockInfo,
+    validate::StorageLocation,
 };
 use parking_lot::{ArcRwLockReadGuard, RawRwLock, RwLock, RwLockReadGuard};
 pub use session_mapping::SessionOverview;
@@ -822,6 +823,15 @@ impl Workspace {
     #[must_use]
     pub fn conversation_presence(&self, id: &ConversationId) -> Option<StoragePresence> {
         self.state.presence.get(id).copied()
+    }
+
+    /// Where the store holds the conversation, live or archived.
+    ///
+    /// Empty for a conversation not yet written, and for a store that keeps
+    /// conversations nowhere a user can reach them, such as an in-memory one.
+    #[must_use]
+    pub fn conversation_locations(&self, h: &ConversationHandle) -> Vec<StorageLocation> {
+        self.loader.conversation_locations(&h.id())
     }
 
     /// Get conversation metadata via a handle.

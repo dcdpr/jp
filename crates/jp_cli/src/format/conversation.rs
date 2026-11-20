@@ -3,11 +3,12 @@ use std::fmt;
 use chrono::{DateTime, Utc};
 use crossterm::style::Stylize as _;
 use jp_conversation::ConversationId;
-use jp_storage::validate::StorageLocation;
+use jp_storage::validate::{StorageLocation, ValidationError};
 use jp_term::table::{DetailItem, DetailRow, Details, details};
 use serde_json::json;
 
 use super::datetime::DateTimeFmt;
+use crate::load_failure::failure_json;
 
 pub struct DetailsFmt {
     /// The ID of the conversation.
@@ -65,15 +66,10 @@ pub struct DetailsFmt {
     pub compactions: Vec<DetailItem>,
 
     /// Why the conversation does not load, for one that does not.
-    ///
-    /// Not in the [`Self::json`] payload, which is `jp c show`'s contract and
-    /// only describes conversations that load.
-    pub status: Option<String>,
+    pub status: Option<ValidationError>,
 
-    /// The conversation's directories on disk.
-    ///
-    /// Not in the [`Self::json`] payload.
-    pub paths: Vec<StorageLocation>,
+    /// Where the store holds the conversation.
+    pub locations: Vec<StorageLocation>,
 
     /// Pretty-print the output.
     pub pretty: bool,
@@ -100,7 +96,7 @@ impl DetailsFmt {
             attachments: vec![],
             compactions: vec![],
             status: None,
-            paths: vec![],
+            locations: vec![],
             pretty: true,
         }
     }
@@ -154,14 +150,14 @@ impl DetailsFmt {
     }
 
     #[must_use]
-    pub fn with_status(mut self, status: Option<impl Into<String>>) -> Self {
-        self.status = status.map(Into::into);
+    pub fn with_status(mut self, status: Option<ValidationError>) -> Self {
+        self.status = status;
         self
     }
 
     #[must_use]
-    pub fn with_paths(mut self, paths: Vec<StorageLocation>) -> Self {
-        self.paths = paths;
+    pub fn with_locations(mut self, locations: Vec<StorageLocation>) -> Self {
+        self.locations = locations;
         self
     }
 
@@ -261,6 +257,11 @@ impl DetailsFmt {
                 .iter()
                 .map(|item| item.json.clone())
                 .collect::<Vec<_>>(),
+            "status": match &self.status {
+                Some(error) => failure_json(error),
+                None => serde_json::Value::Null,
+            },
+            "locations": self.locations,
         })
     }
 
@@ -282,8 +283,8 @@ impl DetailsFmt {
             rows.push(self.scalar("Title", title));
         }
 
-        if let Some(status) = self.status.clone() {
-            rows.push(self.scalar("Status", status));
+        if let Some(error) = &self.status {
+            rows.push(self.scalar("Status", format!("unable to load: {error}")));
         }
 
         if let Some(name) = self.assistant_name.clone() {
@@ -374,13 +375,13 @@ impl DetailsFmt {
             ));
         }
 
-        if !self.paths.is_empty() {
+        if !self.locations.is_empty() {
             let items = self
-                .paths
+                .locations
                 .iter()
-                .map(|path| DetailItem::new(path.as_str(), path.as_str().into()))
+                .map(|location| DetailItem::new(location.as_str(), location.as_str().into()))
                 .collect();
-            rows.push(DetailRow::list(self.styled_label("Paths"), items));
+            rows.push(DetailRow::list(self.styled_label("Locations"), items));
         }
 
         rows

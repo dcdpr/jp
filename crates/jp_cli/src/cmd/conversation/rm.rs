@@ -1,7 +1,7 @@
 use clap::{ArgMatches, Command};
 use crossterm::style::Stylize as _;
 use jp_conversation::ConversationId;
-use jp_storage::{backend::Removal as StorageRemoval, validate::ValidationError};
+use jp_storage::backend::Removal as StorageRemoval;
 use jp_workspace::{ConversationHandle, Workspace};
 
 use crate::{
@@ -189,15 +189,7 @@ fn remove_unloaded(ctx: &Ctx, id: ConversationId, force: bool) -> Result<bool, c
             return true;
         }
 
-        let status = unloaded_status(&stored.state);
-        confirm_unloaded_removal(
-            ctx,
-            id,
-            stored.title.as_deref(),
-            status.as_deref(),
-            &stored.locations,
-        )
-        .unwrap_or_else(|error| {
+        confirm_unloaded_removal(ctx, stored).unwrap_or_else(|error| {
             prompt_error = Some(error);
             false
         })
@@ -219,18 +211,6 @@ fn remove_unloaded(ctx: &Ctx, id: ConversationId, force: bool) -> Result<bool, c
         ))
         .into()),
     }
-}
-
-/// Why a conversation does not load, for the removal prompt, or `None` when it
-/// does.
-///
-/// A conversation the index leaves out can load by the time it is removed, when
-/// another process finished writing it after this run's scan.
-fn unloaded_status(state: &Result<(), ValidationError>) -> Option<String> {
-    state
-        .as_ref()
-        .err()
-        .map(|error| format!("unable to load: {error}"))
 }
 
 /// Remove one conversation, asking first unless `force` says the caller already

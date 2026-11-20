@@ -22,7 +22,7 @@ use super::{
     PersistBackend, Projection, RecoveryBackend, Removal, SessionBackend, StoredConversation,
 };
 use crate::{
-    CONVERSATIONS_DIR, LoadError, Storage, conversation_dirs_for_id, dir_entries,
+    ARCHIVE_DIR, CONVERSATIONS_DIR, LoadError, Storage, conversation_dirs_for_id, dir_entries,
     error::Result,
     get_expiring_timestamp,
     load::load_json,
@@ -270,6 +270,22 @@ impl PersistBackend for FsStorageBackend {
 impl LoadBackend for FsStorageBackend {
     fn load_conversation_index(&self, filter: ConversationFilter) -> Vec<ConversationIndexEntry> {
         self.storage.load_conversation_index(filter)
+    }
+
+    fn conversation_locations(&self, id: &ConversationId) -> Vec<StorageLocation> {
+        let mut dirs = self.live_conversation_dirs(id);
+        if dirs.is_empty() {
+            let prefix = id.to_dirname(None);
+            dirs = self
+                .conversations_dirs()
+                .iter()
+                .flat_map(|dir| conversation_dirs_for_id(&dir.join(ARCHIVE_DIR), &prefix))
+                .collect();
+        }
+
+        dirs.iter()
+            .map(|dir| StorageLocation::of_path(dir))
+            .collect()
     }
 
     fn load_conversation_metadata(

@@ -15,7 +15,7 @@ use crossterm::style::Stylize as _;
 use inquire::InquireError;
 use jp_conversation::ConversationId;
 use jp_inquire::{InlineOption, InlineSelect};
-use jp_storage::{backend::Projection, validate::StorageLocation};
+use jp_storage::backend::{Projection, StoredConversation};
 use jp_term::sanitize::strip_controls;
 use jp_workspace::ConversationLock;
 
@@ -192,22 +192,15 @@ pub(crate) fn confirm_conversation_action(
 /// Ask the user to confirm removing a conversation that is not in the
 /// conversation list.
 ///
-/// The prompt names the conversation, its `title` when one is recorded,
-/// `status` (why it does not load) when it does not, and every directory the
-/// removal deletes.
+/// The prompt names the conversation, its title when one is recorded, why it
+/// does not load when it does not, and every location the removal deletes.
 /// Errors in the same cases as [`confirm_conversation_action`].
-pub(crate) fn confirm_unloaded_removal(
-    ctx: &Ctx,
-    id: ConversationId,
-    title: Option<&str>,
-    status: Option<&str>,
-    dirs: &[StorageLocation],
-) -> Result<bool> {
+pub(crate) fn confirm_unloaded_removal(ctx: &Ctx, stored: &StoredConversation) -> Result<bool> {
     let action = ConversationAction::Remove;
-    ensure_answerable(ctx, action, id)?;
+    ensure_answerable(ctx, action, stored.id)?;
 
     let pretty = ctx.printer.pretty_printing_enabled();
-    let details = unloaded_details(id, title, status, dirs, pretty);
+    let details = unloaded_details(stored, pretty);
     ask(ctx, action, &details.to_string())
 }
 
@@ -280,19 +273,18 @@ fn decide(answer: std::result::Result<char, InquireError>) -> Result<bool> {
 ///
 /// The block is the prompt's preamble, which the prompt widget writes itself,
 /// so a title keeps no control character there.
-fn unloaded_details(
-    id: ConversationId,
-    title: Option<&str>,
-    status: Option<&str>,
-    dirs: &[StorageLocation],
-    pretty: bool,
-) -> DetailsFmt {
-    DetailsFmt::new(id)
-        .with_title(title.map(|title| strip_controls(title, &[])))
-        .with_status(status)
-        .with_paths(dirs.to_vec())
+fn unloaded_details(stored: &StoredConversation, pretty: bool) -> DetailsFmt {
+    DetailsFmt::new(stored.id)
+        .with_title(
+            stored
+                .title
+                .as_deref()
+                .map(|title| strip_controls(title, &[])),
+        )
+        .with_status(stored.state.clone().err())
+        .with_locations(stored.locations.clone())
         .with_pretty_printing(pretty)
-        .with_heading(heading(ConversationAction::Remove, id, pretty))
+        .with_heading(heading(ConversationAction::Remove, stored.id, pretty))
 }
 
 /// Build the details block shown above a confirmation prompt.
