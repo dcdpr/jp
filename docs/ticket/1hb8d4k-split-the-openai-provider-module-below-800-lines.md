@@ -29,3 +29,21 @@ the new file didn't define it at the base commit.
 Move a function whole.
 A function left behind under its old name, or moved into a file that already had
 an item of that name, has its findings reported as new.
+
+## Comments
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-17T21:55:19Z
+
+First step done: `MODEL_OVERRIDES`, `map_model`, `is_api_only`,
+`subscription_models`, and `model_overrides` moved unchanged to
+`provider/openai/models.rs`.
+The pin on `openai.rs` is lowered to `file_length=1900`.
+
+`models.rs` is 1,022 production lines, nearly all of it the static table, so it
+trips `SRP-002` on its own.
+A split along the table's own grain would be current versus retired models (the
+entries carrying `ModelDeprecation::deprecated`), but that is a judgement call;
+see the conversation that moved it.

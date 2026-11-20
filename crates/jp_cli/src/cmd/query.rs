@@ -492,9 +492,14 @@ impl Query {
         // `conversation_path` has fallen back to the workspace conversation
         // directory, where `cleanup_query_message_file` (which resolves
         // exclusively through the user-local store) could never remove the
-        // file again — the scratch file must never land in the committed
+        // file again. The scratch file must never land in the committed
         // workspace tree.
+        //
+        // Skip under `--no-persist`: the conversation itself is not written to
+        // disk, and a failed turn would leave `QUERY_MESSAGE.md` in a directory
+        // with no persisted conversation.
         if query_source != QuerySource::Editor
+            && ctx.term.args.persist
             && ctx
                 .fs_backend
                 .as_deref()

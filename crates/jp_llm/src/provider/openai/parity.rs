@@ -39,8 +39,9 @@ pub(crate) fn assert_rewrite_preserves_meaning(model: &ModelDetails, query: Chat
 ///
 /// - `max_output_tokens`, sampling controls, truncation, metadata, user and
 ///   previous-response state are unsupported by the subscription endpoint.
-/// - explicit cache options and content breakpoints are unsupported there;
-///   `prompt_cache_key` is preserved and compared.
+/// - content breakpoints are unsupported there, and explicit cache mode is
+///   dropped with them; `prompt_cache_key` is preserved and compared.
+///   `prompt_cache_options.ttl` is preserved but not compared.
 /// - `stream` is a transport choice made by the client method.
 fn project(request: &openai_responses::types::Request) -> Value {
     let request = serde_json::to_value(request).expect("a serializable OpenAI request");
