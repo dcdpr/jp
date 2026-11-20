@@ -19,17 +19,22 @@ fn failure<'a>(dirname: &str, error: &'a ValidationError) -> LoadFailure<'a> {
     }
 }
 
+/// Where the filesystem backend keeps a conversation's `file`.
+fn file_location(file: &str) -> StorageLocation {
+    StorageLocation::labelled(format!("/ws/.jp/conversations/17941219994/{file}"), file)
+}
+
 fn missing_metadata() -> ValidationError {
     ValidationError::Missing {
         part: ConversationPart::Metadata,
-        location: StorageLocation::new("/ws/.jp/conversations/17941219994/metadata.json"),
+        location: file_location("metadata.json"),
     }
 }
 
 fn corrupt_metadata() -> ValidationError {
     ValidationError::Unreadable {
         part: ConversationPart::Metadata,
-        location: StorageLocation::new("/ws/.jp/conversations/17941219994/metadata.json"),
+        location: file_location("metadata.json"),
         error: ReadError::Malformed {
             message: "expected ident at line 1 column 2".to_owned(),
             position: Some(Position { line: 1, column: 2 }),
@@ -56,8 +61,8 @@ fn one_failure_is_listed_in_the_singular() {
     assert_eq!(
         report.as_deref(),
         Some(
-            "1 conversation failed to load:\n\n- jp-c17636257526: missing metadata\n\nRun `jp \
-             conversation rm jp-c17636257526` to remove it."
+            "1 conversation failed to load:\n\n- jp-c17636257526: missing metadata.json\n\nRun \
+             `jp conversation rm jp-c17636257526` to remove it."
         )
     );
 }
@@ -79,12 +84,12 @@ fn every_failure_is_listed() {
     let expected = [
         "6 conversations failed to load:",
         "",
-        "- jp-c17636257521: missing metadata",
-        "- jp-c17636257522: metadata: malformed at line 1, column 2",
-        "- jp-c17636257523: missing metadata",
-        "- jp-c17636257524: missing metadata",
-        "- jp-c17636257525: missing metadata",
-        "- jp-c17636257526: missing metadata",
+        "- jp-c17636257521: missing metadata.json",
+        "- jp-c17636257522: metadata.json: malformed at line 1, column 2",
+        "- jp-c17636257523: missing metadata.json",
+        "- jp-c17636257524: missing metadata.json",
+        "- jp-c17636257525: missing metadata.json",
+        "- jp-c17636257526: missing metadata.json",
         "",
         "Run `jp conversation rm jp-c17636257521 jp-c17636257522 jp-c17636257523 jp-c17636257524 \
          jp-c17636257525 jp-c17636257526` to remove them.",
@@ -101,7 +106,7 @@ fn the_count_and_conversations_are_highlighted() {
     assert_eq!(
         listed,
         format!(
-            "{} failed to load:\n\n- {}: missing metadata\n\nRun `jp conversation rm \
+            "{} failed to load:\n\n- {}: missing metadata.json\n\nRun `jp conversation rm \
              jp-c17636257526` to remove it.",
             "1 conversation".bold().yellow(),
             "jp-c17636257526".bold().yellow(),
@@ -148,7 +153,7 @@ fn a_malformed_part_lists_the_part_and_the_parse_error_as_causes() {
 fn an_unavailable_part_lists_the_read_error_as_a_cause() {
     let error = ValidationError::Unreadable {
         part: ConversationPart::Events,
-        location: StorageLocation::new("/ws/.jp/conversations/17941219994/events.json"),
+        location: file_location("events.json"),
         error: ReadError::Unavailable("permission denied".to_owned()),
     };
     let records = render_json(&[failure("17941219994", &error)], false).unwrap();
@@ -197,7 +202,7 @@ fn the_text_report_prints_when_the_notice_drops_even_under_quiet() {
     assert_eq!(out.lock().as_str(), "");
     assert_eq!(
         strip_ansi_escapes::strip_str(err.lock().as_str()),
-        "1 conversation failed to load:\n\n- jp-c17941219994: metadata: malformed at line 1, \
+        "1 conversation failed to load:\n\n- jp-c17941219994: metadata.json: malformed at line 1, \
          column 2\n\nRun `jp conversation rm jp-c17941219994` to remove it.\n"
     );
 }

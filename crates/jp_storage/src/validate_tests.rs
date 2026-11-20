@@ -204,7 +204,7 @@ fn test_missing_metadata_is_detected() {
         part: ConversationPart::Metadata,
         location: StorageLocation::new(dir.join(METADATA_FILE).as_str()),
     });
-    assert_eq!(result.invalid[0].error.to_string(), "missing metadata");
+    assert_eq!(result.invalid[0].error.to_string(), "missing metadata.json");
 }
 
 #[test]
@@ -233,7 +233,7 @@ fn test_corrupt_metadata_is_detected() {
     });
     assert_eq!(
         result.invalid[0].error.to_string(),
-        "metadata: malformed at line 1, column 2"
+        "metadata.json: malformed at line 1, column 2"
     );
 }
 
@@ -253,7 +253,7 @@ fn test_missing_events_is_detected() {
         part: ConversationPart::Events,
         location: StorageLocation::new(dir.join(EVENTS_FILE).as_str()),
     });
-    assert_eq!(result.invalid[0].error.to_string(), "missing events");
+    assert_eq!(result.invalid[0].error.to_string(), "missing events.json");
 }
 
 #[test]
@@ -282,7 +282,7 @@ fn test_corrupt_events_is_detected() {
     ));
     assert_eq!(
         result.invalid[0].error.to_string(),
-        "events: malformed at line 1, column 2"
+        "events.json: malformed at line 1, column 2"
     );
 }
 
@@ -312,8 +312,8 @@ fn a_directory_without_conversation_files_is_invalid() {
         .collect();
     invalid.sort();
     assert_eq!(invalid, [
-        (drafted, "missing metadata".to_owned()),
-        (empty, "missing metadata".to_owned()),
+        (drafted, "missing metadata.json".to_owned()),
+        (empty, "missing metadata.json".to_owned()),
     ]);
 }
 

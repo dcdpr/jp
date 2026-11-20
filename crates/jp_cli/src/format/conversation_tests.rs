@@ -31,7 +31,10 @@ fn details_show_the_model_beneath_the_title() {
 fn missing_events() -> ValidationError {
     ValidationError::Missing {
         part: ConversationPart::Events,
-        location: StorageLocation::new("/ws/.jp/conversations/10000/events.json"),
+        location: StorageLocation::labelled(
+            "/ws/.jp/conversations/10000/events.json",
+            "events.json",
+        ),
     }
 }
 
@@ -49,7 +52,7 @@ fn details_show_the_status_beneath_the_title_and_the_locations_last() {
     let expected = [
         "        ID  jp-c10000",
         "     Title  Fix the loader",
-        "    Status  unable to load: missing events",
+        "    Status  unable to load: missing events.json",
         " Locations",
         "            1. /ws/.jp/conversations/10000",
         "            2. /user/conversations/10000-fix-the-loader",

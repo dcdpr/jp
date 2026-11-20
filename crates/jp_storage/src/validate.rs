@@ -55,13 +55,16 @@ pub struct InvalidConversation {
 }
 
 /// The reason a stored conversation failed validation.
+///
+/// The message names the part by its location's label: for the filesystem
+/// backend, its file name.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ValidationError {
     /// A required part of the conversation is missing.
     ///
     /// The metadata and the events are required; the base config is optional,
     /// because older conversations store it with the events.
-    #[error("missing {part}")]
+    #[error("missing {}", .location.label())]
     Missing {
         part: ConversationPart,
 
@@ -70,7 +73,7 @@ pub enum ValidationError {
     },
 
     /// A part of the conversation exists but could not be read.
-    #[error("{part}: {error}")]
+    #[error("{}: {error}", .location.label())]
     Unreadable {
         part: ConversationPart,
         location: StorageLocation,
@@ -106,16 +109,6 @@ pub enum ConversationPart {
 }
 
 impl ConversationPart {
-    /// The part's name, as text shows it.
-    #[must_use]
-    pub const fn name(self) -> &'static str {
-        match self {
-            Self::Metadata => "metadata",
-            Self::BaseConfig => "base config",
-            Self::Events => "events",
-        }
-    }
-
     /// A stable identifier for the part, for machine-readable output.
     #[must_use]
     pub const fn code(self) -> &'static str {
@@ -133,12 +126,6 @@ impl ConversationPart {
             Self::BaseConfig => BASE_CONFIG_FILE,
             Self::Events => EVENTS_FILE,
         }
-    }
-}
-
-impl fmt::Display for ConversationPart {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.name())
     }
 }
 
