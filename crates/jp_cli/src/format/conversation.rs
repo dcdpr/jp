@@ -1,5 +1,6 @@
 use std::fmt;
 
+use camino::Utf8PathBuf;
 use chrono::{DateTime, Utc};
 use crossterm::style::Stylize as _;
 use jp_conversation::ConversationId;
@@ -63,6 +64,17 @@ pub struct DetailsFmt {
     /// Compactions applied to the conversation.
     pub compactions: Vec<DetailItem>,
 
+    /// Why the conversation does not load, for one that does not.
+    ///
+    /// Not in the [`Self::json`] payload, which is `jp c show`'s contract and
+    /// only describes conversations that load.
+    pub status: Option<String>,
+
+    /// The conversation's directories on disk.
+    ///
+    /// Not in the [`Self::json`] payload.
+    pub paths: Vec<Utf8PathBuf>,
+
     /// Pretty-print the output.
     pub pretty: bool,
 }
@@ -87,6 +99,8 @@ impl DetailsFmt {
             labels: vec![],
             attachments: vec![],
             compactions: vec![],
+            status: None,
+            paths: vec![],
             pretty: true,
         }
     }
@@ -136,6 +150,18 @@ impl DetailsFmt {
     #[must_use]
     pub fn with_compactions(mut self, compactions: Vec<DetailItem>) -> Self {
         self.compactions = compactions;
+        self
+    }
+
+    #[must_use]
+    pub fn with_status(mut self, status: Option<impl Into<String>>) -> Self {
+        self.status = status.map(Into::into);
+        self
+    }
+
+    #[must_use]
+    pub fn with_paths(mut self, paths: Vec<Utf8PathBuf>) -> Self {
+        self.paths = paths;
         self
     }
 
@@ -256,6 +282,10 @@ impl DetailsFmt {
             rows.push(self.scalar("Title", title));
         }
 
+        if let Some(status) = self.status.clone() {
+            rows.push(self.scalar("Status", status));
+        }
+
         if let Some(name) = self.assistant_name.clone() {
             rows.push(self.scalar("Assistant", name));
         }
@@ -342,6 +372,15 @@ impl DetailsFmt {
                 self.styled_label("Compactions"),
                 self.compactions.clone(),
             ));
+        }
+
+        if !self.paths.is_empty() {
+            let items = self
+                .paths
+                .iter()
+                .map(|path| DetailItem::new(path.as_str(), path.as_str().into()))
+                .collect();
+            rows.push(DetailRow::list(self.styled_label("Paths"), items));
         }
 
         rows

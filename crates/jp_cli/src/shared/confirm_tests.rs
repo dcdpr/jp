@@ -238,6 +238,7 @@ fn unloaded_details_show_the_title_status_and_every_directory() {
         ],
         false,
     );
+    let details = details.to_string();
 
     assert_eq!(
         details,
@@ -257,6 +258,7 @@ fn unloaded_details_leave_out_what_is_not_known() {
         &[Utf8PathBuf::from("/ws/.jp/conversations/10000")],
         false,
     );
+    let details = details.to_string();
 
     assert_eq!(
         details,
@@ -275,6 +277,7 @@ fn unloaded_details_show_a_title_as_plain_text() {
         &[Utf8PathBuf::from("/ws/.jp/conversations/10000")],
         false,
     );
+    let details = details.to_string();
 
     let expected = [
         "Removing conversation jp-c10000",

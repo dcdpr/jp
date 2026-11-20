@@ -17,10 +17,7 @@ use inquire::InquireError;
 use jp_conversation::ConversationId;
 use jp_inquire::{InlineOption, InlineSelect};
 use jp_storage::backend::Projection;
-use jp_term::{
-    sanitize::strip_controls,
-    table::{DetailItem, DetailRow, Details, details},
-};
+use jp_term::sanitize::strip_controls;
 use jp_workspace::ConversationLock;
 
 use crate::{
@@ -212,7 +209,7 @@ pub(crate) fn confirm_unloaded_removal(
 
     let pretty = ctx.printer.pretty_printing_enabled();
     let details = unloaded_details(id, title, status, dirs, pretty);
-    ask(ctx, action, &details)
+    ask(ctx, action, &details.to_string())
 }
 
 /// Fail when nobody is available to answer the question for `action` on `id`.
@@ -290,25 +287,13 @@ fn unloaded_details(
     status: Option<&str>,
     dirs: &[Utf8PathBuf],
     pretty: bool,
-) -> String {
-    let mut rows = vec![DetailRow::scalar("ID", id.to_string())];
-    if let Some(title) = title {
-        rows.push(DetailRow::scalar("Title", strip_controls(title, &[])));
-    }
-    if let Some(status) = status {
-        rows.push(DetailRow::scalar("Status", status));
-    }
-    rows.push(DetailRow::list(
-        "Paths",
-        dirs.iter()
-            .map(|dir| DetailItem::new(dir.as_str(), dir.as_str().into()))
-            .collect(),
-    ));
-
-    details(
-        Some(&heading(ConversationAction::Remove, id, pretty)),
-        Details::Fields(rows),
-    )
+) -> DetailsFmt {
+    DetailsFmt::new(id)
+        .with_title(title.map(|title| strip_controls(title, &[])))
+        .with_status(status)
+        .with_paths(dirs.to_vec())
+        .with_pretty_printing(pretty)
+        .with_heading(heading(ConversationAction::Remove, id, pretty))
 }
 
 /// Build the details block shown above a confirmation prompt.

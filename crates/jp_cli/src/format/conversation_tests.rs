@@ -27,6 +27,28 @@ fn details_show_the_model_beneath_the_title() {
     );
 }
 
+#[test]
+fn details_show_the_status_beneath_the_title_and_the_paths_last() {
+    let details = DetailsFmt::new(make_id(1000))
+        .with_title(Some("Fix the loader"))
+        .with_status(Some("unable to load: missing events.json"))
+        .with_paths(vec![
+            "/ws/.jp/conversations/10000".into(),
+            "/user/conversations/10000-fix-the-loader".into(),
+        ])
+        .with_pretty_printing(false);
+
+    let expected = [
+        "     ID  jp-c10000",
+        "  Title  Fix the loader",
+        " Status  unable to load: missing events.json",
+        "  Paths",
+        "         1. /ws/.jp/conversations/10000",
+        "         2. /user/conversations/10000-fix-the-loader",
+    ];
+    assert_eq!(details.to_string(), expected.join("\n"));
+}
+
 /// The payload keeps every key present, so a consumer reads `model: null`
 /// rather than a missing key when no model was set.
 #[test]
