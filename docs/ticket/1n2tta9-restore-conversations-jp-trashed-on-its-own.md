@@ -77,3 +77,29 @@ conversation two directories).
 The `TRASHED.md` filter, the validation checks, the restore report and its JSON
 records are gone.
 `jp doctor` (T-1n2ttac) lists what is left in an old `.trash/`.
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-20T14:51:33Z
+
+Reworked on `trash-rework2`.
+The restore now fixes each entry inside `.trash/` before moving it out, and
+takes no conversation lock (nothing reads or writes `.trash/`):
+
+- `TRASHED.md` is removed; an entry left empty is deleted rather than moved
+  back.
+- A draft-only entry gets the files of a conversation with no turns, written
+  with `jp_storage::write_conversation_files` into exactly that directory (the
+  normal save path would rename and delete other directories for the same ID).
+  It is dated by its ID and uses the workspace config as its base config.
+- An entry whose ID is already live or archived comes back under the next free
+  tenth of a second, checked against every live, archived and trashed directory
+  in both roots.
+  This also covers the `<id>-1` names older versions gave a second entry for one
+  ID.
+- Anything that still cannot be moved (a non-ID name that is taken, an I/O
+  failure) stays in the trash and is listed in an end-of-run report on every
+  run, in text and as `trash_entry_not_restored` JSON records.
+
+`jp_cli::draft_migration` is gone; the restore covers its case.

@@ -515,11 +515,12 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
     let (mut workspace, fs_backend) =
         load_workspace(&exec.root, cli.globals.persist, LoadIntent::Run)?;
 
-    // Held until the run ends, whichever way it ends, so the report follows the
+    // Held until the run ends, whichever way it ends, so the reports follow the
     // command's own output.
-    let _load_failures = prepare_conversation_store(
+    let _store_reports = prepare_conversation_store(
         fs_backend.as_deref().filter(|_| workspace.persists()),
         recovery_backend(fs_backend.as_ref(), workspace.persists()),
+        exec.config_cwd(),
         &printer,
     )?;
 
@@ -1112,28 +1113,46 @@ pub(crate) enum LoadIntent {
     Inspect,
 }
 
+/// The reports about the conversation store, printed on stderr in field order
+/// when dropped.
+struct StoreReports {
+    _trash: Option<deferred_report::DeferredReport>,
+    _load_failures: load_failure::LoadFailureNotice,
+}
+
 /// Bring the stored conversations into the state the conversation index loads
-/// from, and return the report of those that fail to load, printed when it
-/// drops.
+/// from, and return the reports about them, printed when they drop.
 ///
 /// With `fs`, the conversations older versions moved to the trash are moved
-/// back, so they are listed or reported like any other.
+/// back, so they are listed or reported like any other; a draft among them is
+/// given the workspace config found from `config_cwd`.
 /// Without it (no storage on disk, or `--no-persist`) nothing on disk changes.
 fn prepare_conversation_store(
     fs: Option<&FsStorageBackend>,
     recovery: Arc<dyn RecoveryBackend>,
+    config_cwd: &Utf8Path,
     printer: &Printer,
-) -> Result<load_failure::LoadFailureNotice> {
+) -> Result<StoreReports> {
     // Before the scan, so a restored conversation that still fails to load is
     // reported below.
-    if let Some(fs) = fs {
-        trash_restore::restore_trash(fs);
-    }
+    let trash = fs.map(|fs| {
+        let leftovers = trash_restore::restore_trash(fs, || {
+            load_base_partial(Some(fs), config_cwd.to_owned())
+                .and_then(|partial| Ok(build(partial)?))
+                .map(Arc::new)
+                .inspect_err(|error| warn!(%error, "Not restoring drafts from the trash."))
+                .ok()
+        });
+        trash_restore::notice(printer.clone(), &leftovers)
+    });
 
     trace!("Scanning for conversations that do not load.");
     let invalid = recovery.scan().map_err(cmd::Error::from)?;
 
-    Ok(load_failure::notice(printer.clone(), recovery, &invalid))
+    Ok(StoreReports {
+        _trash: trash,
+        _load_failures: load_failure::notice(printer.clone(), recovery, &invalid),
+    })
 }
 
 /// Construct the workspace at the given, bootstrap-selected checkout root.
