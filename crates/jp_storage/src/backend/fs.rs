@@ -342,24 +342,33 @@ impl LoadBackend for FsStorageBackend {
     }
 
     fn sanitize(&self) -> Result<SanitizeReport> {
-        let mut invalid: Vec<_> = self
-            .storage
-            .validate_conversations()
+        let validation = self.storage.validate_conversations();
+
+        // A conversation another process holds may be between the writes of
+        // its managed files, so its state says nothing yet.
+        let unlocked = |id: &ConversationId| {
+            let locked = self.storage.is_conversation_locked(&id.to_string());
+            if locked {
+                debug!(%id, "Ignoring locked conversation.");
+            }
+            !locked
+        };
+
+        let mut invalid: Vec<_> = validation
             .invalid
             .into_iter()
-            .filter(|entry| {
-                // A conversation another process holds may be between the
-                // writes of its managed files, so its state says nothing yet.
-                let locked = self.storage.is_conversation_locked(&entry.id.to_string());
-                if locked {
-                    debug!(%entry, "Ignoring locked conversation.");
-                }
-                !locked
-            })
+            .filter(|entry| unlocked(&entry.id))
             .collect();
         invalid.sort_by_key(InvalidConversation::path);
 
-        Ok(SanitizeReport { invalid })
+        let mut unstored: Vec<_> = validation
+            .unstored
+            .into_iter()
+            .filter(|entry| unlocked(&entry.id))
+            .collect();
+        unstored.sort_by(|a, b| a.path.cmp(&b.path));
+
+        Ok(SanitizeReport { invalid, unstored })
     }
 
     fn unlisted_conversation(&self, id: &ConversationId) -> Option<UnlistedConversation> {

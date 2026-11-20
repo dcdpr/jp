@@ -5,6 +5,7 @@ mod cmd;
 mod config_pipeline;
 mod ctx;
 mod deferred_report;
+mod draft_migration;
 mod editor;
 #[cfg(test)]
 mod env_testing;
@@ -517,21 +518,14 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
     let (mut workspace, fs_backend) =
         load_workspace(&exec.root, cli.globals.persist, LoadIntent::Run)?;
 
-    // Moves conversations older versions trashed back into place, before
-    // validation, so one that still fails to load is reported below.
-    // `--no-persist` writes nothing to disk, this included.
-    if let Some(fs) = fs_backend.as_deref()
-        && cli.globals.persist
-    {
-        trash_restore::restore_trash(fs);
-    }
-
-    trace!("Sanitizing workspace.");
-    let report = workspace.sanitize()?;
-
     // Held until the run ends, whichever way it ends, so the report follows the
     // command's own output.
-    let _load_failures = load_failure::notice(printer.clone(), &report.invalid);
+    let _load_failures = prepare_conversation_store(
+        &mut workspace,
+        fs_backend.as_deref().filter(|_| cli.globals.persist),
+        exec.config_cwd(),
+        &printer,
+    )?;
 
     // Populate the conversation index. This does NOT load the contents of
     // individual conversations, this is done lazily as needed.
@@ -1120,6 +1114,42 @@ pub(crate) enum LoadIntent {
     /// resolves to, nor mint user-local state for a workspace the user never
     /// ran a command in.
     Inspect,
+}
+
+/// Bring the stored conversations into the state the conversation index loads
+/// from, and return the report of those that fail to load, printed when it
+/// drops.
+///
+/// With `fs`, the conversations older versions moved to the trash are moved
+/// back, and the drafts they left without a conversation are given one, so both
+/// are listed or reported like any other.
+/// Without it (no storage on disk, or `--no-persist`) nothing on disk changes.
+fn prepare_conversation_store(
+    workspace: &mut Workspace,
+    fs: Option<&FsStorageBackend>,
+    config_cwd: &Utf8Path,
+    printer: &Printer,
+) -> Result<load_failure::LoadFailureNotice> {
+    // Before validation, so a restored conversation that still fails to load
+    // is reported below.
+    if let Some(fs) = fs {
+        trash_restore::restore_trash(fs);
+    }
+
+    trace!("Sanitizing workspace.");
+    let report = workspace.sanitize()?;
+
+    if let Some(fs) = fs {
+        draft_migration::store_draft_only_conversations(fs, &report.unstored, || {
+            load_base_partial(Some(fs), config_cwd.to_owned())
+                .and_then(|partial| Ok(jp_config::util::build(partial)?))
+                .map(Arc::new)
+                .inspect_err(|error| warn!(%error, "Not storing draft-only conversations."))
+                .ok()
+        });
+    }
+
+    Ok(load_failure::notice(printer.clone(), &report.invalid))
 }
 
 /// Construct the workspace at the given, bootstrap-selected checkout root.

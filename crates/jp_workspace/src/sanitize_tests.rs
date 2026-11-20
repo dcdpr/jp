@@ -5,7 +5,7 @@ use camino_tempfile::{Utf8TempDir, tempdir};
 use datetime_literal::datetime;
 use jp_conversation::{Conversation, ConversationId};
 use jp_storage::{
-    backend::{FsStorageBackend, LockBackend, SanitizeReport},
+    backend::{FsStorageBackend, LockBackend as _, SanitizeReport},
     validate::InvalidConversation,
 };
 use test_log::test;
@@ -193,12 +193,34 @@ fn test_unstored_conversation_is_left_in_place_and_not_indexed() {
     let report = ws.sanitize().unwrap();
     assert!(report.invalid.is_empty());
     assert_eq!(
+        report
+            .unstored
+            .iter()
+            .map(|unstored| (unstored.id, unstored.path.clone()))
+            .collect::<Vec<_>>(),
+        [(id, dir.clone())]
+    );
+    assert_eq!(
         fs::read_to_string(dir.join("QUERY_MESSAGE.md")).unwrap(),
         "typed request"
     );
 
     ws.load_conversation_index();
     assert_eq!(ws.conversations().count(), 0);
+}
+
+// Another process may be about to store the conversation it is composing in.
+#[test]
+fn test_a_locked_unstored_conversation_is_not_reported() {
+    let (_tmp, backend, mut ws) = setup();
+
+    let id = ConversationId::try_from(datetime!(2024-01-01 00:00:00 Z)).unwrap();
+    let dir = backend.build_conversation_dir(&id, None, true);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("QUERY_MESSAGE.md"), "typed request").unwrap();
+    let _held = backend.try_lock(&id.to_string(), None).unwrap().unwrap();
+
+    assert!(ws.sanitize().unwrap().unstored.is_empty());
 }
 
 #[test]

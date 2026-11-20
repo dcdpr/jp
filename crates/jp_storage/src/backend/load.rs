@@ -9,7 +9,7 @@ use jp_conversation::{Conversation, ConversationEvent, ConversationId, Conversat
 
 use crate::{
     LoadError,
-    validate::{DirContents, InvalidConversation, ValidationError},
+    validate::{DirContents, InvalidConversation, UnstoredConversation, ValidationError},
 };
 
 /// Controls which storage partition to scan.
@@ -165,9 +165,13 @@ pub struct UnlistedConversation {
     pub title: Option<String>,
 }
 
-/// The conversations [`LoadBackend::sanitize`] found it cannot load.
+/// The conversation directories [`LoadBackend::sanitize`] found it cannot load.
 #[derive(Debug, Default)]
 pub struct SanitizeReport {
     /// Conversation directories that failed validation, sorted by path.
     pub invalid: Vec<InvalidConversation>,
+
+    /// Conversation directories holding none of the conversation files, sorted
+    /// by path.
+    pub unstored: Vec<UnstoredConversation>,
 }
