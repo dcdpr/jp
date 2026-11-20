@@ -48,3 +48,28 @@ than driving a real interrupt.
 
 The `jp doctor` item moved to T-1n2ttac, which needs
 `FsStorageBackend::validate_conversations` (added here).
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-20T15:44:58Z
+
+Superseded on `trash-rework2`: the "unstored" outcome described above is gone.
+
+A draft-only or empty conversation directory is now an ordinary invalid
+conversation (`missing metadata.json`): it is reported by the load-failure
+report and removable with `jp conversation rm`.
+`ValidationResult::unstored`, `UnstoredConversation` and `DirContents` no longer
+exist.
+The test named above was removed with `Workspace::sanitize`;
+`a_directory_without_conversation_files_is_invalid` in `jp_storage`'s
+`validate_tests.rs` covers the case now.
+
+The problem this ticket solved is handled at its source instead: `jp query`
+stores a new conversation before writing its draft beside it, so a failed or
+interrupted first query no longer leaves a draft-only directory.
+Such directories now come only from older versions (the one-time trash restore
+turns trashed ones into conversations with no turns), a crash between creating
+the directory and the first write, or a directory made by hand.
+A conversation another process holds the lock on is still left out of the
+report, which covers one being created at that moment.
