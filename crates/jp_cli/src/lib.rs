@@ -520,10 +520,11 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
     // Moves conversations older versions trashed back into place, before
     // validation, so one that still fails to load is reported below.
     // `--no-persist` writes nothing to disk, this included.
-    let restored = match fs_backend.as_deref() {
-        Some(fs) if cli.globals.persist => trash_restore::restore_auto_trashed(fs),
-        _ => vec![],
-    };
+    if let Some(fs) = fs_backend.as_deref()
+        && cli.globals.persist
+    {
+        trash_restore::restore_trash(fs);
+    }
 
     trace!("Sanitizing workspace.");
     let report = workspace.sanitize()?;
@@ -531,10 +532,6 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
     // Held until the run ends, whichever way it ends, so the report follows the
     // command's own output.
     let _load_failures = load_failure::notice(printer.clone(), &report.invalid);
-
-    // Declared after `_load_failures` so it drops, and prints, first: the
-    // restore explains where the conversations reported after it came from.
-    let _restored = trash_restore::notice(printer.clone(), &restored);
 
     // Populate the conversation index. This does NOT load the contents of
     // individual conversations, this is done lazily as needed.

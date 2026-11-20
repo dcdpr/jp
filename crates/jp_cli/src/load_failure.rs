@@ -203,7 +203,7 @@ struct ConversationContext<'a> {
 
 /// One step of the error chain, outermost first.
 #[derive(Serialize)]
-pub(crate) struct Cause {
+struct Cause {
     code: &'static str,
     message: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -248,7 +248,7 @@ impl<'a> From<&'a LoadFailure<'a>> for Record<'a> {
 }
 
 /// The error chain of the conversation directory at `dir`, outermost first.
-pub(crate) fn causes(dir: &Utf8Path, error: &ValidationError) -> Vec<Cause> {
+fn causes(dir: &Utf8Path, error: &ValidationError) -> Vec<Cause> {
     match error {
         ValidationError::MissingFile { file } => vec![Cause {
             path: Some(dir.join(file.name())),

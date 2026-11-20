@@ -56,3 +56,24 @@ The module and its call in `run_inner` are all that needs deleting later.
   Its report prints just before the load-failure report, past `--quiet`, and as
   one typed record per trash under `--format=json`.
 - `TRASHED.md` is deleted from every entry moved back.
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-20T11:44:13Z
+
+Simplified.
+With the trash gone as a concept, the restore moves every entry of each root's
+`.trash/` back into `conversations/` and prints nothing: what still fails to
+load shows up in the load-failure report, and what is not a conversation in `jp
+doctor`.
+`TRASHED.md` is removed from each moved entry, and `.trash/` itself once it is
+empty, so no done-marker is needed.
+
+Two cases stay in `.trash/`, logged with `warn!` and retried on every run: an
+entry whose conversation another process holds, and an entry whose conversation
+already has a live directory in either root (moving it would give one
+conversation two directories).
+The `TRASHED.md` filter, the validation checks, the restore report and its JSON
+records are gone.
+`jp doctor` (T-1n2ttac) lists what is left in an old `.trash/`.
