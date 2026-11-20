@@ -47,3 +47,13 @@ That makes this deletion more visible: when a conversation persists,
 a broken copy the user was just told about.
 The fix here should leave such a copy in place, or at least never remove a
 directory that holds managed files JP could not load.
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-20T14:52:20Z
+
+This is one of the conflicting-copy cases now collected in T-1p3pk56, which
+decides how such conflicts are resolved in general.
+Fixing the deletion here should follow that decision rather than pick one on its
+own.
