@@ -1126,6 +1126,16 @@ impl From<jp_storage::Error> for Error {
                 ("id", id.to_string().into()),
             ]
             .into(),
+            Error::ConversationExists { id, from, existing } => [
+                (
+                    "message",
+                    "Another copy of this conversation is in the way; nothing was moved.".into(),
+                ),
+                ("id", id.to_string().into()),
+                ("from", from.to_string().into()),
+                ("existing", existing.to_string().into()),
+            ]
+            .into(),
         };
 
         Self::from(metadata)

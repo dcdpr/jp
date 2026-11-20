@@ -1000,7 +1000,14 @@ impl Workspace {
     /// Moves the conversation back to the live partition and inserts it into
     /// the in-memory index.
     /// Returns a handle for the restored conversation.
+    ///
+    /// The conversation's lock is held across the move and the metadata write;
+    /// [`Error::LockFailed`] when another process holds it, with nothing moved.
     pub fn unarchive_conversation(&mut self, id: &ConversationId) -> Result<ConversationHandle> {
+        let Some(_guard) = self.locker.try_lock(&id.to_string(), None)? else {
+            return Err(Error::LockFailed(id.to_string()));
+        };
+
         // Capture where the archived copy lives before moving it, so a private
         // `--local` conversation isn't projected into the workspace on restore.
         let presence = self

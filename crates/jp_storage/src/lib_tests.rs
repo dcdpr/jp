@@ -1508,6 +1508,121 @@ fn archive_and_unarchive_act_on_every_root() {
     assert!(!archived(&workspace).exists() && !archived(&user_dir).exists());
 }
 
+/// Write a directory holding `content` in `events.json`, and return it.
+fn conv_dir_with(dir: &Utf8Path, content: &str) -> Utf8PathBuf {
+    fs::create_dir_all(dir).unwrap();
+    fs::write(dir.join(EVENTS_FILE), content).unwrap();
+    dir.to_path_buf()
+}
+
+// A copy already in the archive, under any title, is the user's data: archiving
+// refuses rather than replacing it, and names both directories.
+#[test]
+fn archive_refuses_when_the_archive_holds_the_conversation() {
+    let tmp = tempdir().unwrap();
+    let storage = Storage::new(tmp.path()).unwrap();
+    let conversations = tmp.path().join(CONVERSATIONS_DIR);
+    let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
+    let live = conv_dir_with(&conversations.join("17636257526-new"), "live");
+    let archived = conv_dir_with(
+        &conversations.join(ARCHIVE_DIR).join("17636257526-old"),
+        "archived",
+    );
+
+    let error = storage.archive_conversation(&id).unwrap_err();
+
+    assert_eq!(error, Error::ConversationExists {
+        id,
+        from: live.clone(),
+        existing: archived.clone(),
+    });
+    assert_eq!(fs::read_to_string(live.join(EVENTS_FILE)).unwrap(), "live");
+    assert_eq!(
+        fs::read_to_string(archived.join(EVENTS_FILE)).unwrap(),
+        "archived"
+    );
+}
+
+#[test]
+fn unarchive_refuses_when_the_conversation_is_live() {
+    let tmp = tempdir().unwrap();
+    let storage = Storage::new(tmp.path()).unwrap();
+    let conversations = tmp.path().join(CONVERSATIONS_DIR);
+    let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
+    let live = conv_dir_with(&conversations.join("17636257526"), "live");
+    let archived = conv_dir_with(
+        &conversations.join(ARCHIVE_DIR).join("17636257526"),
+        "archived",
+    );
+
+    let error = storage.unarchive_conversation(&id).unwrap_err();
+
+    assert_eq!(error, Error::ConversationExists {
+        id,
+        from: archived.clone(),
+        existing: live.clone(),
+    });
+    assert_eq!(fs::read_to_string(live.join(EVENTS_FILE)).unwrap(), "live");
+    assert_eq!(
+        fs::read_to_string(archived.join(EVENTS_FILE)).unwrap(),
+        "archived"
+    );
+}
+
+// Every root is checked before anything moves, so a projected conversation is
+// never left archived in one root and live in the other.
+#[test]
+fn a_collision_in_one_root_moves_nothing_in_the_other() {
+    let tmp = tempdir().unwrap();
+    let (storage, workspace, user_dir) = dual_root_storage(tmp.path());
+    let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
+    let workspace_live =
+        conv_dir_with(&workspace.join(CONVERSATIONS_DIR).join("17636257526"), "[]");
+    let user_live = conv_dir_with(&user_dir.join(CONVERSATIONS_DIR).join("17636257526"), "[]");
+    conv_dir_with(
+        &user_dir
+            .join(CONVERSATIONS_DIR)
+            .join(ARCHIVE_DIR)
+            .join("17636257526"),
+        "archived",
+    );
+
+    assert!(storage.archive_conversation(&id).is_err());
+
+    assert!(workspace_live.is_dir());
+    assert!(user_live.is_dir());
+    assert!(
+        !workspace
+            .join(CONVERSATIONS_DIR)
+            .join(ARCHIVE_DIR)
+            .join("17636257526")
+            .exists()
+    );
+}
+
+// A directory whose name only starts with the same digits is another
+// conversation, not this one.
+#[test]
+fn archive_and_unarchive_match_the_conversation_exactly() {
+    let tmp = tempdir().unwrap();
+    let storage = Storage::new(tmp.path()).unwrap();
+    let conversations = tmp.path().join(CONVERSATIONS_DIR);
+    let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
+    let other_live = conv_dir_with(&conversations.join("176362575260"), "[]");
+    let other_archived = conv_dir_with(&conversations.join(ARCHIVE_DIR).join("176362575261"), "[]");
+
+    assert_eq!(
+        storage.archive_conversation(&id).unwrap_err(),
+        Error::ConversationNotFound(id)
+    );
+    assert_eq!(
+        storage.unarchive_conversation(&id).unwrap_err(),
+        Error::ConversationNotFound(id)
+    );
+    assert!(other_live.is_dir());
+    assert!(other_archived.is_dir());
+}
+
 #[test]
 fn projected_write_imports_external_non_managed_files() {
     let tmp = tempdir().unwrap();

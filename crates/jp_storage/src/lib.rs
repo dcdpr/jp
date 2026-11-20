@@ -290,78 +290,72 @@ impl Storage {
     /// A projected conversation lives in both roots, so each copy is archived;
     /// archiving only the first found would leave the other copy live.
     /// Creates each archive directory if needed.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::ConversationExists`] when an archive already holds a directory
+    /// for the conversation, under any title; nothing is moved in any root.
     pub fn archive_conversation(&self, id: &ConversationId) -> Result<()> {
-        let mut archived = false;
-        for root in [Some(&self.root), self.user.as_ref()] {
-            let Some(root) = root else {
-                continue;
-            };
-
-            let Some(conv_dir) = find_conversation_dir_path(root, id) else {
-                continue;
-            };
-
-            let dirname = conv_dir
-                .file_name()
-                .expect("conversation dir has a name")
-                .to_owned();
-
-            let archive_dir = root.join(CONVERSATIONS_DIR).join(ARCHIVE_DIR);
-            fs::create_dir_all(&archive_dir)?;
-
-            let target = archive_dir.join(&dirname);
-            if target.exists() {
-                fs::remove_dir_all(&target)?;
-            }
-            fs::rename(&conv_dir, &target)?;
-            archived = true;
-        }
-
-        if archived {
-            Ok(())
-        } else {
-            Err(Error::ConversationNotFound(*id))
-        }
+        self.move_conversation(id, Partition::Live, Partition::Archive)
     }
 
     /// Move a conversation directory out of `.archive/` back to the live
     /// conversations directory in every root that holds the archived copy.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::ConversationExists`] when a root already holds a live directory
+    /// for the conversation, under any title; nothing is moved in any root.
     pub fn unarchive_conversation(&self, id: &ConversationId) -> Result<()> {
+        self.move_conversation(id, Partition::Archive, Partition::Live)
+    }
+
+    /// Move conversation `id` from partition `from` to partition `to` in every
+    /// root that holds it in `from`.
+    ///
+    /// Every root is checked before any directory moves, so a conversation is
+    /// never left in `from` in one root and in `to` in the other.
+    fn move_conversation(&self, id: &ConversationId, from: Partition, to: Partition) -> Result<()> {
         let prefix = id.to_dirname(None);
-        let mut unarchived = false;
+        let mut moves = vec![];
 
-        for root in [Some(&self.root), self.user.as_ref()] {
-            let Some(root) = root else {
+        for root in [Some(&self.root), self.user.as_ref()].into_iter().flatten() {
+            let conversations = root.join(CONVERSATIONS_DIR);
+            let from_dir = from.dir(&conversations);
+            let to_dir = to.dir(&conversations);
+
+            let Some(source) = conversation_dirs_for_id(&from_dir, &prefix)
+                .into_iter()
+                .next()
+            else {
                 continue;
             };
-
-            let archive_dir = root.join(CONVERSATIONS_DIR).join(ARCHIVE_DIR);
-            if !archive_dir.is_dir() {
-                continue;
+            if let Some(existing) = conversation_dirs_for_id(&to_dir, &prefix)
+                .into_iter()
+                .next()
+            {
+                return Err(Error::ConversationExists {
+                    id: *id,
+                    from: source,
+                    existing,
+                });
             }
 
-            let entry = dir_entries(&archive_dir).find(|e| e.file_name().starts_with(&prefix));
-
-            let Some(entry) = entry else {
-                continue;
-            };
-
-            let dirname = entry.file_name().to_owned();
-            let source = entry.into_path();
-            let target = root.join(CONVERSATIONS_DIR).join(&dirname);
-
-            if target.exists() {
-                fs::remove_dir_all(&target)?;
-            }
-            fs::rename(&source, &target)?;
-            unarchived = true;
+            let target = to_dir.join(source.file_name().unwrap_or(&prefix));
+            moves.push((source, to_dir, target));
         }
 
-        if unarchived {
-            Ok(())
-        } else {
-            Err(Error::ConversationNotFound(*id))
+        if moves.is_empty() {
+            return Err(Error::ConversationNotFound(*id));
         }
+
+        for (source, to_dir, target) in moves {
+            fs::create_dir_all(&to_dir).map_err(|error| Error::write_failed(&to_dir, error))?;
+            fs::rename(&source, &target)
+                .map_err(|error| Error::rename_failed(&source, &target, error))?;
+        }
+
+        Ok(())
     }
 
     /// Load metadata for a conversation in the archive partition.
@@ -1116,6 +1110,22 @@ fn find_normal_conversation_dir_path(
 /// the actual conversation directory will be `{root}/conversations/x-foo`.
 fn build_conversation_dir_prefix(root: &Utf8Path, id: &ConversationId) -> Utf8PathBuf {
     root.join(CONVERSATIONS_DIR).join(id.to_dirname(None))
+}
+
+/// The part of a `conversations/` directory a conversation is kept in.
+#[derive(Debug, Clone, Copy)]
+enum Partition {
+    Live,
+    Archive,
+}
+
+impl Partition {
+    fn dir(self, conversations: &Utf8Path) -> Utf8PathBuf {
+        match self {
+            Self::Live => conversations.to_path_buf(),
+            Self::Archive => conversations.join(ARCHIVE_DIR),
+        }
+    }
 }
 
 /// Write a conversation's files into exactly `conv_dir`, creating it if needed.

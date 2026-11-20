@@ -1401,6 +1401,41 @@ fn test_archived_keyword_resolves_most_recently_archived() {
     assert_eq!(most_recent, id2);
 }
 
+// Another process holding the conversation may be writing it, so it is not
+// moved under that process.
+#[test]
+fn test_unarchive_refuses_a_conversation_another_process_holds() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path().join("root");
+    let storage = root.join("storage");
+
+    let fs = FsStorageBackend::new(&storage).unwrap();
+    let mut ws = workspace_with_fs(&root, &fs);
+    let config = Arc::new(AppConfig::new_test());
+
+    let id = ConversationId::try_from(datetime!(2024-06-01 00:00:00 Z)).unwrap();
+    ws.create_conversation_with_id(id, Conversation::default(), config);
+    let h = ws.acquire_conversation(&id).unwrap();
+    let mut conv = ws.test_lock(h).into_mut();
+    conv.update_metadata(|_| {});
+    conv.flush().unwrap();
+    drop(conv);
+    let h = ws.acquire_conversation(&id).unwrap();
+    ws.archive_conversation(ws.test_lock(h).into_mut()).unwrap();
+
+    let held = fs.try_lock(&id.to_string(), None).unwrap().unwrap();
+    assert_eq!(
+        ws.unarchive_conversation(&id).unwrap_err(),
+        Error::LockFailed(id.to_string())
+    );
+    assert!(ws.acquire_conversation(&id).is_err());
+    assert_eq!(ws.archived_conversations().count(), 1);
+
+    drop(held);
+    ws.unarchive_conversation(&id).unwrap();
+    assert!(ws.acquire_conversation(&id).is_ok());
+}
+
 #[test]
 fn test_unarchive_nonexistent_returns_error() {
     let tmp = tempdir().unwrap();
