@@ -281,26 +281,7 @@ impl Storage {
         // Bring any existing copy to the current directory name (e.g. after a
         // title change) and drop other stale copies for this id.
         reconcile_conversation_dir(id, conversations_dir, &conv_dir)?;
-        fs::create_dir_all(&conv_dir).map_err(|error| Error::write_failed(&conv_dir, error))?;
-
-        let (base_config, events_json) = events
-            .to_parts()
-            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-
-        write_json(&conv_dir.join(METADATA_FILE), metadata)?;
-
-        // Write `base_config.json` before `events.json`. The loader picks the
-        // current vs legacy format by the presence of `base_config.json`, so
-        // for a legacy conversation's first upgrade this ordering ensures an
-        // interrupted write never leaves the unreadable "current marker, no
-        // base config" state. The worst interrupted state is a fresh
-        // `base_config.json` beside a still-legacy `events.json`, which the
-        // loader reads back without data loss.
-        write_json(&conv_dir.join(BASE_CONFIG_FILE), &base_config)?;
-
-        write_json(&conv_dir.join(EVENTS_FILE), &events_json)?;
-
-        Ok(())
+        write_conversation_files(&conv_dir, metadata, events)
     }
 
     /// Move a conversation directory into the `.archive/` subdirectory of every
@@ -1135,6 +1116,41 @@ fn find_normal_conversation_dir_path(
 /// the actual conversation directory will be `{root}/conversations/x-foo`.
 fn build_conversation_dir_prefix(root: &Utf8Path, id: &ConversationId) -> Utf8PathBuf {
     root.join(CONVERSATIONS_DIR).join(id.to_dirname(None))
+}
+
+/// Write a conversation's files into exactly `conv_dir`, creating it if needed.
+///
+/// Nothing is renamed or removed: other directories for the same conversation,
+/// and the other files `conv_dir` holds, are left as they are.
+///
+/// # Errors
+///
+/// Fails when a file cannot be written.
+pub fn write_conversation_files(
+    conv_dir: &Utf8Path,
+    metadata: &Conversation,
+    events: &ConversationStream,
+) -> Result<()> {
+    fs::create_dir_all(conv_dir).map_err(|error| Error::write_failed(conv_dir, error))?;
+
+    let (base_config, events_json) = events
+        .to_parts()
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+
+    write_json(&conv_dir.join(METADATA_FILE), metadata)?;
+
+    // Write `base_config.json` before `events.json`. The loader picks the
+    // current vs legacy format by the presence of `base_config.json`, so for a
+    // legacy conversation's first upgrade this ordering ensures an interrupted
+    // write never leaves the unreadable "current marker, no base config" state.
+    // The worst interrupted state is a fresh `base_config.json` beside a
+    // still-legacy `events.json`, which the loader reads back without data
+    // loss.
+    write_json(&conv_dir.join(BASE_CONFIG_FILE), &base_config)?;
+
+    write_json(&conv_dir.join(EVENTS_FILE), &events_json)?;
+
+    Ok(())
 }
 
 /// Whether a conversation directory holds any of the managed files.

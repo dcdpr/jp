@@ -17,7 +17,7 @@ use crate::{
         ConversationFilter, FsStorageBackend, LoadBackend as _, Projection, RecoveryBackend as _,
         StoragePresence,
     },
-    validate::{ConversationPart, StorageLocation, ValidationError},
+    validate::{ConversationPart, StorageLocation, ValidationError, validate_conversation_dir},
 };
 
 #[test]
@@ -303,6 +303,38 @@ fn live_conversation_dirs_match_the_id_exactly() {
         workspace.join("17941219994"),
         user.join("17941219994-a-title"),
     ]);
+}
+
+// Writing into one exact directory touches nothing else: not a live directory
+// for the same conversation, and not the other files the directory holds.
+#[test]
+fn conversation_files_are_written_into_exactly_the_given_directory() {
+    let tmp = tempdir().unwrap();
+    let conversations = tmp.path().join("ws").join(CONVERSATIONS_DIR);
+    let id = ConversationId::try_from_deciseconds_str("17941219994").unwrap();
+
+    let live = write_valid_conv_dir(&conversations, &id);
+    let live_metadata = fs::read_to_string(live.join(METADATA_FILE)).unwrap();
+    let elsewhere = conversations.join(".trash").join("17941219994");
+    fs::create_dir_all(&elsewhere).unwrap();
+    fs::write(elsewhere.join("QUERY_MESSAGE.md"), "typed").unwrap();
+
+    write_conversation_files(
+        &elsewhere,
+        &Conversation::default(),
+        &ConversationStream::new_test(),
+    )
+    .unwrap();
+
+    assert_eq!(validate_conversation_dir(&elsewhere), Ok(()));
+    assert_eq!(
+        fs::read_to_string(elsewhere.join("QUERY_MESSAGE.md")).unwrap(),
+        "typed"
+    );
+    assert_eq!(
+        fs::read_to_string(live.join(METADATA_FILE)).unwrap(),
+        live_metadata
+    );
 }
 
 // Where a conversation is stored, live or archived, named the way the backend
