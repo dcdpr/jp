@@ -3,6 +3,7 @@ use std::{fs, sync::Arc};
 use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::Utf8TempDir;
 use chrono::{DateTime, Utc};
+use crossterm::style::Stylize as _;
 use jp_config::AppConfig;
 use jp_conversation::{Conversation, ConversationId};
 use jp_printer::{OutputFormat, Printer, SharedBuffer};
@@ -425,10 +426,39 @@ fn no_persist_removes_nothing_and_says_so() {
 
     assert_eq!(
         s.out.lock().as_str(),
-        "Conversation(s) removed.\n\nThis command ran under `--no-persist`, no files on disk were \
-         modified.\n"
+        format!(
+            "Conversation(s) removed.\n\nThis command ran under `--no-persist`, {}.\n",
+            "no files on disk were modified or removed".bold()
+        )
     );
     assert!(dir.is_dir());
+}
+
+#[test]
+fn the_status_says_why_a_conversation_does_not_load() {
+    let tmp = camino_tempfile::tempdir().unwrap();
+    let broken = write_dir(tmp.path(), "17941219991", &[("metadata.json", "not json")]);
+    let draft = write_dir(tmp.path(), "17941219992", &[("QUERY_MESSAGE.md", "typed")]);
+
+    assert_eq!(
+        unloaded_status(&[broken]).as_deref(),
+        Some("unable to load: metadata.json: invalid JSON at line 1, column 2")
+    );
+    assert_eq!(unloaded_status(&[draft]).as_deref(), Some("never stored"));
+}
+
+// The status is read under the conversation's lock, so a conversation another
+// process finished writing after this run's scan has no status to report.
+#[test]
+fn a_conversation_that_loads_has_no_status() {
+    let tmp = camino_tempfile::tempdir().unwrap();
+    let fs = FsStorageBackend::new(tmp.path()).unwrap();
+    fs.write_test_conversation(&id("17941219993"), &Conversation::default());
+
+    assert_eq!(
+        unloaded_status(&fs.live_conversation_dirs(&id("17941219993"))),
+        None
+    );
 }
 
 #[test]

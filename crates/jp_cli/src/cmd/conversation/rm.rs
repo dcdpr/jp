@@ -2,12 +2,13 @@ use std::sync::Arc;
 
 use camino::Utf8PathBuf;
 use clap::{ArgMatches, Command};
+use crossterm::style::Stylize as _;
 use jp_conversation::ConversationId;
 use jp_storage::{
     backend::{FsStorageBackend, LockBackend as _, PersistBackend as _},
-    validate::{DirContents, validate_conversation_dir},
+    validate::{DirContents, stored_title, validate_conversation_dir},
 };
-use jp_workspace::{ConversationHandle, Workspace};
+use jp_workspace::{ConversationHandle, Error as WorkspaceError, Workspace};
 
 use crate::{
     cli::CommandArgs,
@@ -87,7 +88,7 @@ impl Rm {
         for removal in removals {
             let done = match removal {
                 Removal::Loaded(handle) => remove(ctx, handle, active_id, force).await?,
-                Removal::Unloaded { fs, id, dirs } => remove_unloaded(ctx, &fs, id, &dirs, force)?,
+                Removal::Unloaded { fs, id } => remove_unloaded(ctx, &fs, id, force)?,
             };
             if done {
                 removed += 1;
@@ -101,8 +102,10 @@ impl Rm {
         }
         if !ctx.term.args.persist {
             ctx.printer.println("");
-            ctx.printer
-                .println("This command ran under `--no-persist`, no files on disk were modified.");
+            ctx.printer.println(format!(
+                "This command ran under `--no-persist`, {}.",
+                "no files on disk were modified or removed".bold()
+            ));
         }
         Ok(())
     }
@@ -159,11 +162,10 @@ enum Removal {
     Loaded(ConversationHandle),
 
     /// A conversation the index leaves out, because it fails to load or was
-    /// never stored, with its live directories.
+    /// never stored, that had live directories when it was resolved.
     Unloaded {
         fs: Arc<FsStorageBackend>,
         id: ConversationId,
-        dirs: Vec<Utf8PathBuf>,
     },
 }
 
@@ -180,22 +182,23 @@ fn resolve_literal(ctx: &Ctx, ids: &[ConversationId]) -> Result<Vec<Removal>, cm
                 Err(error) => error,
             };
 
-            let unloaded = ctx.fs_backend.as_ref().and_then(|fs| {
-                let dirs = fs.live_conversation_dirs(id);
-                (!dirs.is_empty()).then(|| Removal::Unloaded {
+            let unloaded = ctx
+                .fs_backend
+                .as_ref()
+                .filter(|fs| !fs.live_conversation_dirs(id).is_empty())
+                .map(|fs| Removal::Unloaded {
                     fs: Arc::clone(fs),
                     id: *id,
-                    dirs,
-                })
-            });
+                });
             unloaded.ok_or_else(|| crate::error::Error::from(not_found).into())
         })
         .collect()
 }
 
-/// Remove a conversation that does not load, asking first unless `force`.
+/// Remove a conversation the index leaves out, asking first unless `force`.
 ///
-/// Deletes `dirs`, the conversation's live directories, while holding its lock.
+/// Its live directories, title, and status are read while its lock is held, so
+/// the prompt describes exactly what the removal deletes.
 /// Under `--no-persist` it checks the lock without taking it and deletes
 /// nothing.
 /// Returns whether the conversation was (or, in a dry run, would be) removed.
@@ -203,7 +206,6 @@ fn remove_unloaded(
     ctx: &Ctx,
     fs: &FsStorageBackend,
     id: ConversationId,
-    dirs: &[Utf8PathBuf],
     force: bool,
 ) -> Result<bool, cmd::Error> {
     let dry_run = !ctx.term.args.persist;
@@ -218,8 +220,20 @@ fn remove_unloaded(
         Some(fs.try_lock(&id.to_string(), None)?.ok_or_else(locked)?)
     };
 
-    if !force && !confirm_unloaded_removal(ctx, id, &unloaded_status(dirs), dirs)? {
-        return Ok(false);
+    let dirs = fs.live_conversation_dirs(&id);
+    if dirs.is_empty() {
+        // Removed by another process since it was resolved.
+        return Err(
+            crate::error::Error::from(WorkspaceError::not_found("Conversation", &id)).into(),
+        );
+    }
+
+    if !force {
+        let title = dirs.iter().find_map(|dir| stored_title(dir));
+        let status = unloaded_status(&dirs);
+        if !confirm_unloaded_removal(ctx, id, title.as_deref(), status.as_deref(), &dirs)? {
+            return Ok(false);
+        }
     }
 
     if !dry_run {
@@ -228,21 +242,22 @@ fn remove_unloaded(
     Ok(true)
 }
 
-/// Why a conversation is not in the index, for the removal prompt.
-fn unloaded_status(dirs: &[Utf8PathBuf]) -> String {
-    let mut contents = vec![];
+/// Why a conversation does not load, for the removal prompt, or `None` when it
+/// does.
+///
+/// A conversation the index leaves out can load by the time it is removed, when
+/// another process finished writing it after this run's scan.
+fn unloaded_status(dirs: &[Utf8PathBuf]) -> Option<String> {
+    let mut stored = false;
     for dir in dirs {
         match validate_conversation_dir(dir) {
-            Ok(found) => contents.push(found),
-            Err(error) => return format!("fails to load: {error}"),
+            Ok(DirContents::Stored) => stored = true,
+            Ok(DirContents::Unstored) => {}
+            Err(error) => return Some(format!("unable to load: {error}")),
         }
     }
 
-    if contents.iter().all(|found| *found == DirContents::Unstored) {
-        "never stored".to_owned()
-    } else {
-        "not in the conversation list".to_owned()
-    }
+    (!stored).then(|| "never stored".to_owned())
 }
 
 /// Remove one conversation, asking first unless `force` says the caller already

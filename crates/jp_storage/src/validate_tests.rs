@@ -22,6 +22,30 @@ const ONE_EVENT: &str =
 /// [`TWO_EVENTS`] with a later last timestamp and the same size in bytes.
 const TWO_EVENTS_LATER: &str = r#"[{"timestamp":"2026-01-01T10:00:00Z","type":"chat_request","content":"a"},{"timestamp":"2026-01-09T11:30:00Z","type":"chat_response","content":"b"}]"#;
 
+// A conversation whose events are broken can still name itself, and that name
+// is what lets a user recognize it before removing it.
+#[test]
+fn stored_title_reads_metadata_whatever_else_fails() {
+    let tmp = tempdir().unwrap();
+    let dir = tmp.path().join("17941219994");
+    fs::create_dir_all(&dir).unwrap();
+
+    assert_eq!(stored_title(&dir), None, "no metadata.json");
+
+    fs::write(dir.join(METADATA_FILE), "not json").unwrap();
+    assert_eq!(stored_title(&dir), None, "unparseable metadata.json");
+
+    fs::write(dir.join(METADATA_FILE), r#"{"title":7}"#).unwrap();
+    assert_eq!(stored_title(&dir), None, "a title that is not a string");
+
+    fs::write(
+        dir.join(METADATA_FILE),
+        r#"{"title":"Fix the loader","last_activated_at":"not a date"}"#,
+    )
+    .unwrap();
+    assert_eq!(stored_title(&dir).as_deref(), Some("Fix the loader"));
+}
+
 /// Write a conversation with the given `events.json` body and no
 /// `base_config.json`, returning its directory.
 fn write_with_events(storage: &camino::Utf8Path, id: &ConversationId, events: &str) -> Utf8PathBuf {

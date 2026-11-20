@@ -423,6 +423,26 @@ pub fn validate_conversation_dir(dir: &Utf8Path) -> Result<DirContents, Validati
     }
 }
 
+/// The title recorded in the `metadata.json` of conversation directory `dir`.
+///
+/// Reads only the `title` field, so a title is found even when the rest of the
+/// file, or the conversation, fails validation.
+/// `None` when the file is missing, is not a JSON object, or holds no string
+/// `title`.
+#[must_use]
+pub fn stored_title(dir: &Utf8Path) -> Option<String> {
+    #[derive(serde::Deserialize)]
+    struct Titled {
+        title: Option<serde_json::Value>,
+    }
+
+    let buf = fs::read(dir.join(METADATA_FILE)).ok()?;
+    match serde_json::from_slice::<Titled>(&buf).ok()?.title? {
+        serde_json::Value::String(title) => Some(title),
+        _ => None,
+    }
+}
+
 /// Validate a single conversation directory entry.
 ///
 /// Returns [`ScannedDir`] alongside a stored conversation when `metadata.json`

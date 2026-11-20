@@ -223,13 +223,15 @@ fn details_report_an_unpinned_conversation_as_unpinned() {
     );
 }
 
-// A conversation that does not load has no title or events to show, so the
-// prompt says why it does not load and which directories go.
+// A conversation that does not load has no events to show, so the prompt says
+// what it can: its title when one is recorded, why it does not load, and which
+// directories go.
 #[test]
-fn unloaded_details_show_the_status_and_every_directory() {
+fn unloaded_details_show_the_title_status_and_every_directory() {
     let details = unloaded_details(
         make_id(1000),
-        "fails to load: missing metadata.json",
+        Some("Fix the loader"),
+        Some("unable to load: missing events.json"),
         &[
             Utf8PathBuf::from("/ws/.jp/conversations/10000"),
             Utf8PathBuf::from("/user/conversations/10000-a-title"),
@@ -239,10 +241,50 @@ fn unloaded_details_show_the_status_and_every_directory() {
 
     assert_eq!(
         details,
-        "Removing conversation jp-c10000\n\n     ID  jp-c10000\n Status  fails to load: missing \
-         metadata.json\n  Paths\n         1. /ws/.jp/conversations/10000\n         2. \
-         /user/conversations/10000-a-title"
+        "Removing conversation jp-c10000\n\n     ID  jp-c10000\n  Title  Fix the loader\n Status  \
+         unable to load: missing events.json\n  Paths\n         1. /ws/.jp/conversations/10000\n         \
+         2. /user/conversations/10000-a-title"
     );
+}
+
+// A conversation that loads by the time it is removed has nothing to report.
+#[test]
+fn unloaded_details_leave_out_what_is_not_known() {
+    let details = unloaded_details(
+        make_id(1000),
+        None,
+        None,
+        &[Utf8PathBuf::from("/ws/.jp/conversations/10000")],
+        false,
+    );
+
+    assert_eq!(
+        details,
+        "Removing conversation jp-c10000\n\n    ID  jp-c10000\n Paths\n        1. \
+         /ws/.jp/conversations/10000"
+    );
+}
+
+// The prompt widget draws without the printer's filter.
+#[test]
+fn unloaded_details_show_a_title_as_plain_text() {
+    let details = unloaded_details(
+        make_id(1000),
+        Some("Fix\x1b[2J the\r loader"),
+        None,
+        &[Utf8PathBuf::from("/ws/.jp/conversations/10000")],
+        false,
+    );
+
+    let expected = [
+        "Removing conversation jp-c10000",
+        "",
+        "    ID  jp-c10000",
+        " Title  Fix[2J the loader",
+        " Paths",
+        "        1. /ws/.jp/conversations/10000",
+    ];
+    assert_eq!(details, expected.join("\n"));
 }
 
 #[test]
@@ -251,7 +293,7 @@ fn an_unloaded_removal_nobody_can_confirm_fails() {
     let mut ctx = test_ctx(id, Conversation::default());
     ctx.term.interactive = false;
 
-    let error = confirm_unloaded_removal(&ctx, id, "fails to load", &[])
+    let error = confirm_unloaded_removal(&ctx, id, None, None, &[])
         .expect_err("a removal nobody can confirm must not be assumed");
     let crate::error::Error::Command(error) = error else {
         panic!("expected a command error, got: {error}");

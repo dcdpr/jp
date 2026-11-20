@@ -193,21 +193,25 @@ pub(crate) fn confirm_conversation_action(
     ask(ctx, action, &details.to_string())
 }
 
-/// Ask the user to confirm removing a conversation that does not load.
+/// Ask the user to confirm removing a conversation that is not in the
+/// conversation list.
 ///
-/// The prompt names the conversation, `status` (why it does not load), and
-/// every directory the removal deletes.
+/// The prompt names the conversation, its `title` when one is recorded,
+/// `status` (why it does not load) when it does not, and every directory the
+/// removal deletes.
 /// Errors in the same cases as [`confirm_conversation_action`].
 pub(crate) fn confirm_unloaded_removal(
     ctx: &Ctx,
     id: ConversationId,
-    status: &str,
+    title: Option<&str>,
+    status: Option<&str>,
     dirs: &[Utf8PathBuf],
 ) -> Result<bool> {
     let action = ConversationAction::Remove;
     ensure_answerable(ctx, action, id)?;
 
-    let details = unloaded_details(id, status, dirs, ctx.printer.pretty_printing_enabled());
+    let pretty = ctx.printer.pretty_printing_enabled();
+    let details = unloaded_details(id, title, status, dirs, pretty);
     ask(ctx, action, &details)
 }
 
@@ -276,23 +280,30 @@ fn decide(answer: std::result::Result<char, InquireError>) -> Result<bool> {
 }
 
 /// Build the details block shown above the prompt for removing a conversation
-/// that does not load.
+/// that is not in the conversation list.
+///
+/// The block is the prompt's preamble, which the prompt widget writes itself,
+/// so a title keeps no control character there.
 fn unloaded_details(
     id: ConversationId,
-    status: &str,
+    title: Option<&str>,
+    status: Option<&str>,
     dirs: &[Utf8PathBuf],
     pretty: bool,
 ) -> String {
-    let rows = vec![
-        DetailRow::scalar("ID", id.to_string()),
-        DetailRow::scalar("Status", status),
-        DetailRow::list(
-            "Paths",
-            dirs.iter()
-                .map(|dir| DetailItem::new(dir.as_str(), dir.as_str().into()))
-                .collect(),
-        ),
-    ];
+    let mut rows = vec![DetailRow::scalar("ID", id.to_string())];
+    if let Some(title) = title {
+        rows.push(DetailRow::scalar("Title", strip_controls(title, &[])));
+    }
+    if let Some(status) = status {
+        rows.push(DetailRow::scalar("Status", status));
+    }
+    rows.push(DetailRow::list(
+        "Paths",
+        dirs.iter()
+            .map(|dir| DetailItem::new(dir.as_str(), dir.as_str().into()))
+            .collect(),
+    ));
 
     details(
         Some(&heading(ConversationAction::Remove, id, pretty)),
