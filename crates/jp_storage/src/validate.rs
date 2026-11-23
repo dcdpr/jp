@@ -1,7 +1,7 @@
 use std::{fmt, fs, io, time::SystemTime};
 
 use camino::{Utf8Path, Utf8PathBuf};
-use jp_conversation::ConversationId;
+use jp_conversation::{Conversation, ConversationId};
 use rayon::prelude::*;
 use serde::de::IgnoredAny;
 use tracing::{debug, trace};
@@ -11,7 +11,7 @@ use crate::{
     BASE_CONFIG_FILE, CONVERSATIONS_DIR, EVENTS_FILE, IMPORT_STAGING_PREFIX, METADATA_FILE,
     Storage, dir_entries,
     scan::{DirStamps, EventsSummary, SCAN_CACHE_FILE, ScanCache, ScannedDir},
-    value::{cleanup_tmp_files, has_tmp_files},
+    value::{cleanup_tmp_files, has_tmp_files, tmp_files, write_json},
 };
 
 /// Result of validating all conversation directories across storage roots.
@@ -27,6 +27,21 @@ pub struct ValidationResult {
     ///
     /// They are not conversations, so their contents are not checked.
     pub unrecognized: Vec<Utf8PathBuf>,
+}
+
+/// What [`Storage::diagnose_conversations`] finds.
+#[derive(Debug, Default)]
+pub(crate) struct ConversationsDiagnosis {
+    /// Conversation directories that fail validation, sorted by path.
+    pub(crate) invalid: Vec<InvalidConversation>,
+
+    /// Directories under `conversations/` whose name is not a conversation ID,
+    /// sorted.
+    pub(crate) unrecognized: Vec<Utf8PathBuf>,
+
+    /// `.tmp` files and import staging directories that interrupted writes left
+    /// behind, sorted.
+    pub(crate) leftovers: Vec<Utf8PathBuf>,
 }
 
 /// A conversation directory that passed validation.
@@ -285,6 +300,43 @@ impl Storage {
         result
     }
 
+    /// Check every conversation directory as [`Self::validate_conversations`]
+    /// does, and find the leftovers of interrupted writes, changing nothing on
+    /// disk.
+    ///
+    /// The leftovers are the ones [`Self::validate_conversations`] removes, and
+    /// are listed instead.
+    /// The scan cache is read, so a directory that passed with the same file
+    /// stamps is not read again, and never written.
+    pub(crate) fn diagnose_conversations(&self) -> ConversationsDiagnosis {
+        trace!("Diagnosing conversations.");
+        self.load_scan_cache();
+
+        let mut validation = ValidationResult::default();
+        let mut leftovers = vec![];
+        for root in [Some(&self.root), self.user.as_ref()].into_iter().flatten() {
+            let conversations_dir = root.join(CONVERSATIONS_DIR);
+            if !conversations_dir.is_dir() {
+                continue;
+            }
+
+            leftovers.extend(leftovers_in(&conversations_dir));
+            validate_root(&conversations_dir, &self.scan, &mut validation, &mut vec![]);
+        }
+
+        let mut invalid = validation.invalid;
+        invalid.sort_by_key(InvalidConversation::path);
+        let mut unrecognized = validation.unrecognized;
+        unrecognized.sort();
+        leftovers.sort();
+
+        ConversationsDiagnosis {
+            invalid,
+            unrecognized,
+            leftovers,
+        }
+    }
+
     /// IDs of the conversations under `conversations_dir` that pass
     /// [`Self::validate_conversations`]'s checks.
     ///
@@ -397,6 +449,30 @@ impl Storage {
     }
 }
 
+/// The import staging directories, and the `.tmp` files in conversation
+/// directories, under `conversations_dir`: what the startup scan removes.
+///
+/// Entries whose name holds no conversation ID are not JP's, and are left out.
+fn leftovers_in(conversations_dir: &Utf8Path) -> Vec<Utf8PathBuf> {
+    let mut leftovers = vec![];
+    for entry in dir_entries(conversations_dir) {
+        if !entry.file_type().is_ok_and(|ft| ft.is_dir()) {
+            continue;
+        }
+
+        let name = entry.file_name();
+        if let Some(dirname) = name.strip_prefix(IMPORT_STAGING_PREFIX) {
+            if ConversationId::try_from_dirname(dirname).is_ok() {
+                leftovers.push(entry.into_path());
+            }
+        } else if ConversationId::try_from_dirname(name).is_ok() {
+            leftovers.extend(tmp_files(entry.path()));
+        }
+    }
+
+    leftovers
+}
+
 /// Validate every conversation directory under `conversations_dir`.
 ///
 /// Directories that pass validation and have complete file stamps are appended
@@ -463,6 +539,53 @@ pub fn validate_conversation_dir(dir: &Utf8Path) -> Result<(), ValidationError> 
     check_files(dir, &ScanCache::default()).map(|_| ())
 }
 
+/// Whether the conversation in `dir` is missing nothing but its metadata: the
+/// metadata file is absent, and the rest passes validation.
+pub(crate) fn missing_only_metadata(dir: &Utf8Path) -> bool {
+    !dir.join(METADATA_FILE).exists() && check_contents(dir).is_ok()
+}
+
+/// Write the metadata of conversation `id`, stored in `dir`, from what the rest
+/// of the directory holds.
+///
+/// The title is the one the directory name carries, with each dash read as a
+/// space, since the name replaced the title's spaces and punctuation with
+/// dashes.
+/// The last activity is the time of the last event, or the conversation's
+/// creation when it has none.
+/// Every other field takes its default.
+/// Meant for a directory [`missing_only_metadata`] accepts: an existing
+/// `metadata.json` is overwritten.
+///
+/// # Errors
+///
+/// Fails when the metadata cannot be written.
+pub(crate) fn rebuild_metadata(dir: &Utf8Path, id: &ConversationId) -> crate::error::Result<()> {
+    let last_event_at = validate_events(&dir.join(EVENTS_FILE))
+        .ok()
+        .and_then(|summary| summary.last_event_at);
+
+    let metadata = Conversation {
+        title: title_from_dirname(dir, id),
+        last_activated_at: last_event_at.unwrap_or_else(|| id.timestamp()),
+        ..Conversation::default()
+    };
+
+    write_json(&dir.join(METADATA_FILE), &metadata)
+}
+
+/// The title the name of `dir` carries after conversation `id`'s timestamp,
+/// with dashes read as spaces.
+fn title_from_dirname(dir: &Utf8Path, id: &ConversationId) -> Option<String> {
+    let slug = dir
+        .file_name()?
+        .strip_prefix(&id.to_dirname(None))?
+        .strip_prefix('-')?;
+
+    let title = slug.replace('-', " ");
+    (!title.trim().is_empty()).then_some(title)
+}
+
 /// Validate a single conversation directory entry named for `id`.
 fn validate_entry(
     conversations_dir: &Utf8Path,
@@ -500,41 +623,49 @@ fn check_files(dir: &Utf8Path, cache: &ScanCache) -> Result<Option<ScannedDir>, 
         return Ok(Some(scan));
     }
 
-    let path = |part: ConversationPart| dir.join(part.file_name());
-    let missing = |part| ValidationError::Missing {
-        part,
-        location: StorageLocation::of_path(&path(part)),
-    };
-    let unreadable = |part, error| ValidationError::Unreadable {
-        part,
-        location: StorageLocation::of_path(&path(part)),
-        error,
-    };
-
-    let metadata_path = path(ConversationPart::Metadata);
+    let metadata_path = dir.join(METADATA_FILE);
     if !metadata_path.is_file() {
-        return Err(missing(ConversationPart::Metadata));
+        return Err(missing(dir, ConversationPart::Metadata));
     }
     validate_metadata(&metadata_path)
-        .map_err(|error| unreadable(ConversationPart::Metadata, error))?;
+        .map_err(|error| unreadable(dir, ConversationPart::Metadata, error))?;
 
+    let summary = check_contents(dir)?;
+    Ok(stamps.scanned(summary))
+}
+
+/// Check the conversation files in `dir` other than the metadata, and summarize
+/// the events.
+fn check_contents(dir: &Utf8Path) -> Result<EventsSummary, ValidationError> {
     // base_config.json is optional for backward compat (old conversations have
     // the base config packed into events.json), but if it exists it must be
     // valid JSON.
-    let base_config_path = path(ConversationPart::BaseConfig);
+    let base_config_path = dir.join(BASE_CONFIG_FILE);
     if base_config_path.is_file() {
         validate_json_file(&base_config_path)
-            .map_err(|error| unreadable(ConversationPart::BaseConfig, error))?;
+            .map_err(|error| unreadable(dir, ConversationPart::BaseConfig, error))?;
     }
 
-    let events_path = path(ConversationPart::Events);
+    let events_path = dir.join(EVENTS_FILE);
     if !events_path.is_file() {
-        return Err(missing(ConversationPart::Events));
+        return Err(missing(dir, ConversationPart::Events));
     }
-    let summary = validate_events(&events_path)
-        .map_err(|error| unreadable(ConversationPart::Events, error))?;
+    validate_events(&events_path).map_err(|error| unreadable(dir, ConversationPart::Events, error))
+}
 
-    Ok(stamps.scanned(summary))
+fn missing(dir: &Utf8Path, part: ConversationPart) -> ValidationError {
+    ValidationError::Missing {
+        part,
+        location: StorageLocation::of_path(&dir.join(part.file_name())),
+    }
+}
+
+fn unreadable(dir: &Utf8Path, part: ConversationPart, error: ReadError) -> ValidationError {
+    ValidationError::Unreadable {
+        part,
+        location: StorageLocation::of_path(&dir.join(part.file_name())),
+        error,
+    }
 }
 
 /// Confirm `metadata.json` is a valid JSON object.

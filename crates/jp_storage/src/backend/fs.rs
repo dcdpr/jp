@@ -18,8 +18,9 @@ use serde_json::Value;
 use tracing::debug;
 
 use super::{
-    ConversationFilter, ConversationIndexEntry, ConversationLockGuard, LoadBackend, LockBackend,
-    PersistBackend, Projection, RecoveryBackend, Removal, SessionBackend, StoredConversation,
+    ConversationFilter, ConversationIndexEntry, ConversationLockGuard, DiagnosedConversation,
+    Diagnosis, LoadBackend, LockBackend, PersistBackend, Projection, RecoveryBackend, Removal,
+    Repair, RepairOutcome, SessionBackend, StoredConversation,
 };
 use crate::{
     ARCHIVE_DIR, CONVERSATIONS_DIR, LoadError, Storage, conversation_dirs_for_id, dir_entries,
@@ -29,7 +30,10 @@ use crate::{
     load_conversation_id_from_entry,
     location::StorageLocation,
     lock::LockInfo,
-    validate::{InvalidConversation, ValidationResult, validate_conversation_dir},
+    validate::{
+        InvalidConversation, ValidationResult, missing_only_metadata, rebuild_metadata,
+        validate_conversation_dir,
+    },
 };
 
 /// Filesystem-backed storage that delegates to `Storage`.
@@ -428,6 +432,84 @@ impl RecoveryBackend for FsStorageBackend {
 
         self.storage.remove_conversation(id)?;
         Ok(Removal::Removed)
+    }
+
+    fn diagnose(&self) -> Result<Diagnosis> {
+        let found = self.storage.diagnose_conversations();
+
+        let invalid = found
+            .invalid
+            .into_iter()
+            .filter(|entry| !self.storage.is_conversation_locked(&entry.id.to_string()))
+            .map(|conversation| {
+                let repair = self
+                    .repair_applies(&conversation.id, Repair::RebuildMetadata)
+                    .then_some(Repair::RebuildMetadata);
+                DiagnosedConversation {
+                    conversation,
+                    repair,
+                }
+            })
+            .collect();
+        let locations = |paths: Vec<Utf8PathBuf>| {
+            paths
+                .iter()
+                .map(|path| StorageLocation::of_path(path))
+                .collect()
+        };
+
+        Ok(Diagnosis {
+            invalid,
+            unrecognized: locations(found.unrecognized),
+            leftovers: locations(found.leftovers),
+        })
+    }
+
+    fn repair(
+        &self,
+        id: &ConversationId,
+        repair: Repair,
+        decide: &mut dyn FnMut(&StoredConversation) -> bool,
+    ) -> Result<RepairOutcome> {
+        let Some(_guard) = self.storage.try_lock_conversation(&id.to_string(), None)? else {
+            return Ok(RepairOutcome::Locked);
+        };
+
+        let Some(stored) = self.inspect(id) else {
+            return Ok(RepairOutcome::NotFound);
+        };
+        if !self.repair_applies(id, repair) {
+            return Ok(RepairOutcome::NotApplicable);
+        }
+        if !decide(&stored) {
+            return Ok(RepairOutcome::Declined);
+        }
+
+        match repair {
+            Repair::RebuildMetadata => {
+                for dir in self.live_conversation_dirs(id) {
+                    rebuild_metadata(&dir, id)?;
+                }
+            }
+        }
+
+        Ok(RepairOutcome::Repaired)
+    }
+}
+
+impl FsStorageBackend {
+    /// Whether `repair` makes conversation `id` load: every live directory the
+    /// conversation has needs it.
+    ///
+    /// A conversation with one directory that loads and one that does not has
+    /// two copies that disagree, which no repair settles.
+    fn repair_applies(&self, id: &ConversationId, repair: Repair) -> bool {
+        let dirs = self.live_conversation_dirs(id);
+        match repair {
+            Repair::RebuildMetadata => {
+                !dirs.is_empty() && dirs.iter().all(|dir| missing_only_metadata(dir))
+            }
+        }
     }
 }
 

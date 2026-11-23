@@ -481,6 +481,34 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
             return output;
         }
 
+        // A root, and the workspace opened read-only: none of the steps below
+        // run, so the report describes the store as it is and only a fix the
+        // user names writes to it.
+        WorkspaceRequirement::Diagnose => {
+            let Commands::Doctor(args) = cli.command else {
+                unreachable!("`Diagnose` is declared by `jp doctor` alone");
+            };
+
+            let session = session::resolve();
+            let exec = bootstrap::resolve(
+                cli.globals.workspace.as_ref(),
+                session.as_ref(),
+                cli.globals.no_interactive,
+            )?;
+            let (workspace, fs_backend) =
+                load_workspace(&exec.root, cli.globals.persist, LoadIntent::Inspect)?;
+            let recovery = recovery_backend(fs_backend.as_ref(), workspace.persists());
+
+            return args
+                .run(
+                    &printer,
+                    recovery.as_ref(),
+                    stdin_interactive(cli.globals.no_interactive),
+                    workspace.persists(),
+                )
+                .map_err(Into::into);
+        }
+
         // Resolves a root below, then constructs the workspace and loads the
         // conversation index.
         WorkspaceRequirement::Load => {}

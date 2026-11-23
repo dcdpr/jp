@@ -3,7 +3,8 @@
 //! A conversation that fails validation never enters the conversation index, so
 //! nothing working with loaded conversations can reach it.
 //! [`RecoveryBackend`] is how a client finds and acts on one instead: it lists
-//! them, describes one by ID, and removes one once the caller has decided to.
+//! them, describes one by ID, and removes or repairs one once the caller has
+//! decided to.
 
 use std::{fmt::Debug, sync::Arc};
 
@@ -45,6 +46,104 @@ pub trait RecoveryBackend: Debug + Send + Sync {
         id: &ConversationId,
         decide: &mut dyn FnMut(&StoredConversation) -> bool,
     ) -> Result<Removal>;
+
+    /// What the store holds that needs the user's attention, read without
+    /// changing anything.
+    ///
+    /// A conversation another process holds the lock on is left out, as in
+    /// [`Self::scan`].
+    ///
+    /// # Errors
+    ///
+    /// Fails when the store cannot be read.
+    fn diagnose(&self) -> Result<Diagnosis>;
+
+    /// Apply `repair` to conversation `id` if it makes the conversation load
+    /// and `decide` approves of what the store holds for it.
+    ///
+    /// The conversation's lock is held from reading its state until the repair
+    /// is done.
+    /// `decide` is not called when another process holds the lock, the store
+    /// holds nothing for `id`, or the repair would not make it load.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the lock cannot be taken or the repair cannot be written.
+    fn repair(
+        &self,
+        id: &ConversationId,
+        repair: Repair,
+        decide: &mut dyn FnMut(&StoredConversation) -> bool,
+    ) -> Result<RepairOutcome>;
+}
+
+/// A change the store can make to a conversation that does not load, so that it
+/// does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Repair {
+    /// Write the metadata of a conversation missing nothing else, from what the
+    /// rest of the conversation holds.
+    RebuildMetadata,
+}
+
+impl Repair {
+    pub const ALL: [Self; 1] = [Self::RebuildMetadata];
+
+    /// A stable name for the repair, by which a user asks for it.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::RebuildMetadata => "rebuild-metadata",
+        }
+    }
+
+    /// The repair called `name`.
+    #[must_use]
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|repair| repair.name() == name)
+    }
+}
+
+/// What a store holds that needs the user's attention.
+#[derive(Debug, Default)]
+pub struct Diagnosis {
+    /// Stored conversations that fail validation, sorted by location.
+    pub invalid: Vec<DiagnosedConversation>,
+
+    /// What the store holds alongside its conversations that is not a
+    /// conversation, sorted.
+    pub unrecognized: Vec<StorageLocation>,
+
+    /// Leftovers of the store's own interrupted writes, which hold no user data
+    /// and which the next [`RecoveryBackend::scan`] removes, sorted.
+    pub leftovers: Vec<StorageLocation>,
+}
+
+/// A stored conversation that fails validation, and how it can be made to load.
+#[derive(Debug)]
+pub struct DiagnosedConversation {
+    pub conversation: InvalidConversation,
+
+    /// The repair that makes the conversation load, when one does.
+    pub repair: Option<Repair>,
+}
+
+/// The outcome of [`RecoveryBackend::repair`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RepairOutcome {
+    Repaired,
+
+    /// `decide` did not approve; the conversation is unchanged.
+    Declined,
+
+    /// Another process holds the conversation's lock.
+    Locked,
+
+    /// The store holds nothing for the ID.
+    NotFound,
+
+    /// The repair would not make the conversation load; it is unchanged.
+    NotApplicable,
 }
 
 /// A conversation's stored parts, as [`RecoveryBackend::inspect`] found them.
@@ -100,12 +199,27 @@ impl RecoveryBackend for NullRecoveryBackend {
     ) -> Result<Removal> {
         Ok(Removal::NotFound)
     }
+
+    fn diagnose(&self) -> Result<Diagnosis> {
+        Ok(Diagnosis::default())
+    }
+
+    fn repair(
+        &self,
+        _id: &ConversationId,
+        _repair: Repair,
+        _decide: &mut dyn FnMut(&StoredConversation) -> bool,
+    ) -> Result<RepairOutcome> {
+        Ok(RepairOutcome::NotFound)
+    }
 }
 
-/// Reads through to another backend, and removes nothing.
+/// Reads through to another backend, and changes nothing.
 ///
-/// [`RecoveryBackend::remove`] asks `decide` as the backend would and reports
-/// its answer, without taking a lock or changing the store.
+/// [`RecoveryBackend::remove`] and [`RecoveryBackend::repair`] ask `decide` as
+/// the backend would and report its answer, without taking a lock or changing
+/// the store.
+/// A repair is taken to apply: the caller picks it from a [`Diagnosis`].
 #[derive(Debug, Clone)]
 pub struct DryRunRecovery {
     inner: Arc<dyn RecoveryBackend>,
@@ -136,6 +250,23 @@ impl RecoveryBackend for DryRunRecovery {
             None => Removal::NotFound,
             Some(stored) if decide(&stored) => Removal::Removed,
             Some(_) => Removal::Declined,
+        })
+    }
+
+    fn diagnose(&self) -> Result<Diagnosis> {
+        self.inner.diagnose()
+    }
+
+    fn repair(
+        &self,
+        id: &ConversationId,
+        _repair: Repair,
+        decide: &mut dyn FnMut(&StoredConversation) -> bool,
+    ) -> Result<RepairOutcome> {
+        Ok(match self.inner.inspect(id) {
+            None => RepairOutcome::NotFound,
+            Some(stored) if decide(&stored) => RepairOutcome::Repaired,
+            Some(_) => RepairOutcome::Declined,
         })
     }
 }

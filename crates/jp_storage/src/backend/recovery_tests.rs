@@ -206,4 +206,198 @@ fn the_null_backend_holds_nothing() {
             .unwrap(),
         Removal::NotFound
     );
+    assert!(null.diagnose().unwrap().invalid.is_empty());
+    assert_eq!(
+        null.repair(&id("17941219991"), Repair::RebuildMetadata, &mut |_| {
+            panic!("not asked")
+        })
+        .unwrap(),
+        RepairOutcome::NotFound
+    );
+}
+
+/// A conversation directory holding valid events and nothing else.
+fn events_only(conversations: &Utf8PathBuf, dirname: &str) -> Utf8PathBuf {
+    let dir = conversations.join(dirname);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("events.json"),
+        r#"[{"timestamp":"2026-01-01T10:00:00Z","type":"chat_request","content":"a"}]"#,
+    )
+    .unwrap();
+    dir
+}
+
+// The diagnosis names the repair that makes a conversation load, and only where
+// one does.
+#[test]
+fn the_diagnosis_offers_rebuilding_metadata_where_the_events_survive() {
+    let (_tmp, fs, conversations) = setup();
+    let rebuildable = events_only(&conversations, "17941219991-fix-the-loader");
+    let corrupt = broken(&conversations, "17941219992");
+
+    let diagnosis = fs.diagnose().unwrap();
+
+    let found: Vec<_> = diagnosis
+        .invalid
+        .iter()
+        .map(|diagnosed| (diagnosed.conversation.path(), diagnosed.repair))
+        .collect();
+    assert_eq!(found, vec![
+        (rebuildable, Some(Repair::RebuildMetadata)),
+        (corrupt, None),
+    ]);
+}
+
+#[test]
+fn the_diagnosis_lists_what_is_not_a_conversation_and_leftover_writes() {
+    let (_tmp, fs, conversations) = setup();
+    fs.write_test_conversation(&id("17941219991"), &Conversation::default());
+    let leftover = conversations.join("17941219991").join("events.json.tmp");
+    fs::write(&leftover, "partial").unwrap();
+    let notes = conversations.join("notes");
+    fs::create_dir_all(&notes).unwrap();
+
+    let diagnosis = fs.diagnose().unwrap();
+
+    assert!(diagnosis.invalid.is_empty());
+    assert_eq!(diagnosis.unrecognized, [StorageLocation::new(
+        notes.as_str()
+    )]);
+    assert_eq!(diagnosis.leftovers, [StorageLocation::new(
+        leftover.as_str()
+    )]);
+    assert!(leftover.is_file());
+}
+
+#[test]
+fn rebuilding_metadata_makes_the_conversation_load() {
+    let (_tmp, fs, conversations) = setup();
+    events_only(&conversations, "17941219991-fix-the-loader");
+
+    let outcome = fs
+        .repair(&id("17941219991"), Repair::RebuildMetadata, &mut |_| true)
+        .unwrap();
+
+    assert_eq!(outcome, RepairOutcome::Repaired);
+    assert!(fs.scan().unwrap().is_empty());
+    assert_eq!(
+        fs.inspect(&id("17941219991")).unwrap().title.as_deref(),
+        Some("fix the loader")
+    );
+}
+
+// A conversation with one copy that loads and one that does not has two copies
+// that disagree: rebuilding the broken copy's metadata would make it load with
+// metadata the other copy contradicts.
+#[test]
+fn metadata_is_not_rebuilt_beside_a_copy_that_loads() {
+    let tmp = tempdir().unwrap();
+    let fs = FsStorageBackend::new(&tmp.path().join("storage"))
+        .unwrap()
+        .with_user_storage(&tmp.path().join("user"), None, "abc")
+        .unwrap();
+    let workspace_copy = events_only(
+        &tmp.path().join("storage").join("conversations"),
+        "17941219991",
+    );
+    fs::write(workspace_copy.join("metadata.json"), "{}").unwrap();
+    let user_copy = events_only(
+        &tmp.path().join("user").join("abc").join("conversations"),
+        "17941219991",
+    );
+
+    let diagnosis = fs.diagnose().unwrap();
+    let outcome = fs
+        .repair(&id("17941219991"), Repair::RebuildMetadata, &mut |_| {
+            panic!("not asked")
+        })
+        .unwrap();
+
+    let found: Vec<_> = diagnosis
+        .invalid
+        .iter()
+        .map(|diagnosed| (diagnosed.conversation.path(), diagnosed.repair))
+        .collect();
+    assert_eq!(found, vec![(user_copy.clone(), None)]);
+    assert_eq!(outcome, RepairOutcome::NotApplicable);
+    assert!(!user_copy.join("metadata.json").exists());
+}
+
+// A repair that would not make the conversation load is refused before anyone
+// is asked, and writes nothing.
+#[test]
+fn a_repair_that_does_not_apply_changes_nothing() {
+    let (_tmp, fs, conversations) = setup();
+    let dir = broken(&conversations, "17941219991");
+
+    let outcome = fs
+        .repair(&id("17941219991"), Repair::RebuildMetadata, &mut |_| {
+            panic!("not asked")
+        })
+        .unwrap();
+
+    assert_eq!(outcome, RepairOutcome::NotApplicable);
+    assert_eq!(
+        fs::read_to_string(dir.join("metadata.json")).unwrap(),
+        "not json"
+    );
+}
+
+#[test]
+fn a_declined_repair_changes_nothing() {
+    let (_tmp, fs, conversations) = setup();
+    let dir = events_only(&conversations, "17941219991");
+
+    let outcome = fs
+        .repair(&id("17941219991"), Repair::RebuildMetadata, &mut |_| false)
+        .unwrap();
+
+    assert_eq!(outcome, RepairOutcome::Declined);
+    assert!(!dir.join("metadata.json").exists());
+}
+
+#[test]
+fn a_conversation_another_process_holds_is_not_repaired() {
+    let (_tmp, fs, conversations) = setup();
+    let dir = events_only(&conversations, "17941219991");
+    let _held = fs.try_lock("jp-c17941219991", None).unwrap().unwrap();
+
+    let outcome = fs
+        .repair(&id("17941219991"), Repair::RebuildMetadata, &mut |_| {
+            panic!("not asked")
+        })
+        .unwrap();
+
+    assert_eq!(outcome, RepairOutcome::Locked);
+    assert!(!dir.join("metadata.json").exists());
+}
+
+#[test]
+fn a_dry_run_asks_and_repairs_nothing() {
+    let (_tmp, fs, conversations) = setup();
+    let dir = events_only(&conversations, "17941219991");
+    let dry = DryRunRecovery::new(fs);
+
+    let mut asked = false;
+    let outcome = dry
+        .repair(&id("17941219991"), Repair::RebuildMetadata, &mut |_| {
+            asked = true;
+            true
+        })
+        .unwrap();
+
+    assert!(asked);
+    assert_eq!(outcome, RepairOutcome::Repaired);
+    assert!(!dir.join("metadata.json").exists());
+}
+
+#[test]
+fn a_repair_is_named_by_its_stable_name() {
+    assert_eq!(Repair::RebuildMetadata.name(), "rebuild-metadata");
+    assert_eq!(
+        Repair::from_name("rebuild-metadata"),
+        Some(Repair::RebuildMetadata)
+    );
+    assert_eq!(Repair::from_name("rebuild"), None);
 }

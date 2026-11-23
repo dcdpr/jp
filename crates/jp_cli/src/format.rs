@@ -2,6 +2,7 @@ pub(crate) mod conversation;
 pub(crate) mod datetime;
 pub(crate) mod workspace;
 
+use crossterm::style::Stylize as _;
 use indexmap::IndexSet;
 use jp_config::{
     style::{Sanitization, markdown::MarkdownConfig},
@@ -221,6 +222,14 @@ pub(crate) fn color_to_bg_param(color: Color) -> String {
         Color::Ansi256(n) => format!("48;5;{n}"),
         Color::Rgb { r, g, b } => format!("48;2;{r};{g};{b}"),
     }
+}
+
+/// The note that ends the output of a command that ran under `--no-persist`.
+pub(crate) fn no_persist_note() -> String {
+    format!(
+        "This command ran under `--no-persist`, {}.",
+        "no files on disk were modified or removed".bold()
+    )
 }
 
 /// The sanitizer mode the `style.sanitize` setting names.

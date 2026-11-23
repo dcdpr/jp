@@ -56,6 +56,14 @@ pub(crate) enum WorkspaceRequirement {
     /// have not asked.
     Subject,
 
+    /// Resolve a root and open its [`Workspace`] without writing to it, running
+    /// none of the steps around a command that change the store.
+    ///
+    /// `jp doctor` reports the store as it is, so the trash restore, the
+    /// startup scan and its cleanup, and the end-of-run cleanup never run for
+    /// it.
+    Diagnose,
+
     /// Resolve a root, construct the [`Workspace`], and load the conversation
     /// index.
     Load,

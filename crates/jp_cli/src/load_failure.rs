@@ -169,15 +169,29 @@ pub(crate) fn render_json(
 ) -> serde_json::Result<Vec<String>> {
     failures
         .iter()
-        .map(Record::from)
-        .map(|record| {
-            if pretty {
-                serde_json::to_string_pretty(&record)
-            } else {
-                serde_json::to_string(&record)
-            }
-        })
+        .map(|failure| render_record(failure, None, pretty))
         .collect()
+}
+
+/// Render one failure as a JSON record, naming `fix` when a `jp doctor` fix
+/// makes the conversation load.
+///
+/// With `pretty`, the record is indented across several lines.
+pub(crate) fn render_record(
+    failure: &LoadFailure<'_>,
+    fix: Option<&'static str>,
+    pretty: bool,
+) -> serde_json::Result<String> {
+    let record = Record {
+        fix,
+        ..Record::from(failure)
+    };
+
+    if pretty {
+        serde_json::to_string_pretty(&record)
+    } else {
+        serde_json::to_string(&record)
+    }
 }
 
 /// One failure as a JSON record.
@@ -191,6 +205,10 @@ struct Record<'a> {
     message: &'static str,
     context: Context<'a>,
     causes: Vec<Cause<'a>>,
+
+    /// The name of the `jp doctor --fix` fix that makes the conversation load.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fix: Option<&'static str>,
 }
 
 #[derive(Serialize)]
@@ -248,6 +266,7 @@ impl<'a> From<&'a LoadFailure<'a>> for Record<'a> {
                 },
             },
             causes: causes(failure.error),
+            fix: None,
         }
     }
 }

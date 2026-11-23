@@ -257,7 +257,7 @@ fn ask(ctx: &Ctx, action: ConversationAction, details: &str) -> Result<bool> {
 /// nothing else would stop a run part-way through a list.
 /// Every other error keeps its cause, so a broken terminal is reported as a
 /// failure rather than as a choice.
-fn decide(answer: std::result::Result<char, InquireError>) -> Result<bool> {
+pub(crate) fn decide(answer: std::result::Result<char, InquireError>) -> Result<bool> {
     match answer {
         Ok('y') => Ok(true),
         Ok(_) | Err(InquireError::OperationCanceled) => Ok(false),

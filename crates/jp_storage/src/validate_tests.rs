@@ -81,6 +81,119 @@ fn write_valid(storage: &camino::Utf8Path, id: &ConversationId) {
     write_json(&dir.join(EVENTS_FILE), &events).unwrap();
 }
 
+// `jp doctor` reports the store as it is, so diagnosing it lists what the
+// startup scan would clean up, and changes nothing on disk.
+#[test]
+fn diagnosing_the_store_changes_nothing_on_disk() {
+    let tmp = tempdir().unwrap();
+    let workspace = tmp.path().join("workspace");
+    let user_root = tmp.path().join("user");
+    let storage = Storage::new(workspace.clone())
+        .unwrap()
+        .with_user_storage(&user_root, None, "abc")
+        .unwrap();
+    let cache = user_root
+        .join("abc")
+        .join(CONVERSATIONS_DIR)
+        .join(SCAN_CACHE_FILE);
+    fs::create_dir_all(cache.parent().unwrap()).unwrap();
+    let conversations = workspace.join(CONVERSATIONS_DIR);
+
+    let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
+    write_valid(&workspace, &id);
+    let tmp_file = conversations.join("17636257526").join("events.json.tmp");
+    fs::write(&tmp_file, "partial").unwrap();
+    let staging = conversations.join(crate::import_staging_dirname("17636257527"));
+    fs::create_dir_all(&staging).unwrap();
+    let broken = conversations.join("17636257528");
+    fs::create_dir_all(&broken).unwrap();
+    let notes = conversations.join("notes");
+    fs::create_dir_all(&notes).unwrap();
+
+    let diagnosis = storage.diagnose_conversations();
+
+    let invalid: Vec<_> = diagnosis
+        .invalid
+        .iter()
+        .map(InvalidConversation::path)
+        .collect();
+    assert_eq!(invalid, vec![broken]);
+    assert_eq!(diagnosis.unrecognized, vec![notes]);
+    assert_eq!(diagnosis.leftovers, vec![staging.clone(), tmp_file.clone()]);
+    assert!(tmp_file.is_file());
+    assert!(staging.is_dir());
+    assert!(!cache.exists());
+}
+
+// A conversation whose events survive gets its metadata back: the title its
+// directory name still carries, and the time of its last event.
+#[test]
+fn rebuilding_metadata_recovers_the_title_and_the_last_activity() {
+    let tmp = tempdir().unwrap();
+    let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
+    let dir = tmp.path().join("17636257526-fix-the-loader");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join(EVENTS_FILE), TWO_EVENTS).unwrap();
+
+    assert!(missing_only_metadata(&dir));
+    rebuild_metadata(&dir, &id).unwrap();
+
+    let metadata: Conversation =
+        serde_json::from_str(&fs::read_to_string(dir.join(METADATA_FILE)).unwrap()).unwrap();
+    assert_eq!(metadata.title.as_deref(), Some("fix the loader"));
+    assert_eq!(
+        metadata.last_activated_at,
+        Utc.with_ymd_and_hms(2026, 1, 2, 11, 30, 0).unwrap()
+    );
+    assert_eq!(validate_conversation_dir(&dir), Ok(()));
+}
+
+// Without a title in the directory name or an event to date it by, the
+// conversation keeps no title and is dated by its ID.
+#[test]
+fn rebuilding_metadata_without_a_title_or_events_dates_it_by_its_id() {
+    let tmp = tempdir().unwrap();
+    let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
+    let dir = tmp.path().join("17636257526");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join(EVENTS_FILE), "[]").unwrap();
+
+    rebuild_metadata(&dir, &id).unwrap();
+
+    let metadata: Conversation =
+        serde_json::from_str(&fs::read_to_string(dir.join(METADATA_FILE)).unwrap()).unwrap();
+    assert_eq!(metadata.title, None);
+    assert_eq!(metadata.last_activated_at, id.timestamp());
+}
+
+// Rebuilding the metadata only makes a conversation load when the metadata is
+// all it is missing.
+#[test]
+fn only_a_conversation_missing_nothing_but_its_metadata_can_have_it_rebuilt() {
+    let tmp = tempdir().unwrap();
+
+    let no_events = tmp.path().join("17636257526");
+    fs::create_dir_all(&no_events).unwrap();
+    assert!(!missing_only_metadata(&no_events));
+
+    let broken_events = tmp.path().join("17636257527");
+    fs::create_dir_all(&broken_events).unwrap();
+    fs::write(broken_events.join(EVENTS_FILE), "not json").unwrap();
+    assert!(!missing_only_metadata(&broken_events));
+
+    let broken_base_config = tmp.path().join("17636257528");
+    fs::create_dir_all(&broken_base_config).unwrap();
+    fs::write(broken_base_config.join(EVENTS_FILE), TWO_EVENTS).unwrap();
+    fs::write(broken_base_config.join(BASE_CONFIG_FILE), "not json").unwrap();
+    assert!(!missing_only_metadata(&broken_base_config));
+
+    let has_metadata = tmp.path().join("17636257529");
+    fs::create_dir_all(&has_metadata).unwrap();
+    fs::write(has_metadata.join(METADATA_FILE), "not json").unwrap();
+    fs::write(has_metadata.join(EVENTS_FILE), TWO_EVENTS).unwrap();
+    assert!(!missing_only_metadata(&has_metadata));
+}
+
 #[test]
 fn staging_dirs_are_swept_only_when_the_conversation_is_unlocked() {
     // The sweep runs at startup in every process, while another process may be

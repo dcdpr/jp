@@ -1,6 +1,6 @@
 # Add jp doctor
 
-- **Status**: Todo
+- **Status**: In Progress
 - **Authors**: jp
 - **Date**: 2026-11-18
 - **Label**: client=cli
@@ -27,17 +27,18 @@ Each check returns typed findings; a finding with a fix carries the fix's name.
 `jp doctor` runs the checks, groups the findings, and applies the fixes it is
 told to, with no fixing logic of its own.
 
-- [ ] `jp doctor` runs without the pre-run step: no trash restore, no startup
+- [x] `jp doctor` runs without the pre-run step: no trash restore, no startup
       scan, no load-failure report, and nothing written to disk
-- [ ] Findings are typed and grouped by section; each section prints the exact
+- [x] Findings are typed and grouped by section; each section prints the exact
       `jp doctor --fix <name>` command for the findings it can fix, and a
       suggestion (a command or an edit) for those it cannot
-- [ ] `jp doctor --fix <name>` applies that fix to every finding it covers: asks
-      before writing, takes each conversation's lock (waiting as other commands
-      do), and only reports what it would do under `--no-persist`
-- [ ] Fix `rebuild-metadata`: rebuilds a missing `metadata.json` from the events
+- [x] `jp doctor --fix <name>` applies that fix to every finding it covers: asks
+      once before writing, takes each conversation's lock, skips one another
+      process holds and names it in the error the run ends with, and only
+      reports what it would do under `--no-persist`
+- [x] Fix `rebuild-metadata`: rebuilds a missing `metadata.json` from the events
       and the directory name
-- [ ] Reports leftover `.tmp` files and import staging directories, which the
+- [x] Reports leftover `.tmp` files and import staging directories, which the
       startup scan of any other command removes
 - [ ] Lists conversations with no turns and a query draft as unsent drafts, as a
       notice: what a run interrupted before its turn leaves, and what the
@@ -49,7 +50,7 @@ told to, with no fixing logic of its own.
 - [ ] Validates the archive partition (`conversations/.archive/`), which startup
       validation never reads, and reports archived conversations that fail to
       load
-- [ ] Lists directories under `conversations/` whose name is not a conversation
+- [x] Lists directories under `conversations/` whose name is not a conversation
       ID (`ValidationResult::unrecognized`), which the load-failure report
       leaves out, suggesting `rm -r <path>` for each
 - [ ] The load-failure report printed after every command

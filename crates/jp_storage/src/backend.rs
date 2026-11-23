@@ -27,6 +27,7 @@ pub use memory::InMemoryStorageBackend;
 pub use null::{NoopLockGuard, NullLockBackend, NullPersistBackend, ReadOnlySessionBackend};
 pub use persist::{PersistBackend, Projection};
 pub use recovery::{
-    DryRunRecovery, NullRecoveryBackend, RecoveryBackend, Removal, StoredConversation,
+    DiagnosedConversation, Diagnosis, DryRunRecovery, NullRecoveryBackend, RecoveryBackend,
+    Removal, Repair, RepairOutcome, StoredConversation,
 };
 pub use session::SessionBackend;

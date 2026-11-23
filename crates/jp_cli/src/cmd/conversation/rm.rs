@@ -1,5 +1,4 @@
 use clap::{ArgMatches, Command};
-use crossterm::style::Stylize as _;
 use jp_conversation::ConversationId;
 use jp_storage::backend::Removal as StorageRemoval;
 use jp_workspace::{ConversationHandle, Workspace};
@@ -14,6 +13,7 @@ use crate::{
         time::CreationRange,
     },
     ctx::Ctx,
+    format::no_persist_note,
     shared::confirm::{
         ConfirmFlag, ConversationAction, confirm_conversation_action, confirm_unloaded_removal,
     },
@@ -96,10 +96,7 @@ impl Rm {
         }
         if !ctx.workspace.persists() {
             ctx.printer.println("");
-            ctx.printer.println(format!(
-                "This command ran under `--no-persist`, {}.",
-                "no files on disk were modified or removed".bold()
-            ));
+            ctx.printer.println(no_persist_note());
         }
         Ok(())
     }
