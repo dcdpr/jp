@@ -3,6 +3,7 @@
 use std::{
     collections::HashMap,
     future::Future,
+    net::IpAddr,
     sync::{Arc, Mutex},
 };
 
@@ -13,7 +14,7 @@ use axum::{
     middleware::{self, Next},
     response::{IntoResponse, Redirect, Response},
 };
-use jp_plugin::message::LockState;
+use jp_plugin::{message::LockState, origin};
 use maud::Markup;
 use serde::{Deserialize, Serialize};
 use tokio::{net::TcpListener, sync::watch};
@@ -42,6 +43,14 @@ struct AppState {
     /// are out of date.
     /// Data recovers on its own; the page itself does not.
     boot: String,
+
+    /// Bound IP address, used to decide whether `Host` header validation
+    /// applies.
+    listening: IpAddr,
+
+    /// Additional hostnames accepted by [`origin::answers`] when bound to
+    /// loopback.
+    allowed_hosts: Arc<[String]>,
 }
 
 /// The turns this server has started, by conversation.
@@ -122,22 +131,42 @@ enum StopMode {
     Unreachable,
 }
 
-/// Start the HTTP server on an already-bound listener and block until
-/// `shutdown` resolves.
+/// Serve the web UI on `listener` until `shutdown` resolves.
+///
+/// When bound to loopback, rejects requests whose `Host` header is not an IP
+/// address, `localhost`, `.localhost`, or an entry in `allowed_hosts`.
 pub(crate) async fn serve(
     client: PluginClient,
     listener: std::net::TcpListener,
+    allowed_hosts: Vec<String>,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> Result<(), String> {
+    let address = listener
+        .local_addr()
+        .map_err(|e| format!("failed to read the address listened on: {e}"))?;
     let state = AppState {
         client,
         turns: Arc::new(Mutex::new(HashMap::new())),
         boot: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or_else(|_| "unknown".to_owned(), |d| d.as_millis().to_string()),
+        listening: address.ip(),
+        allowed_hosts: allowed_hosts.into(),
     };
 
-    let app = Router::new()
+    let listener =
+        TcpListener::from_std(listener).map_err(|e| format!("failed to adopt listener: {e}"))?;
+    info!(addr = %address, "Web server listening");
+
+    axum::serve(listener, router(state))
+        .with_graceful_shutdown(shutdown)
+        .await
+        .map_err(|e| format!("server error: {e}"))
+}
+
+/// Build the axum router with host and origin validation middleware.
+fn router(state: AppState) -> Router {
+    Router::new()
         .route("/", axum::routing::get(index))
         .route("/conversations", axum::routing::get(conversation_list))
         .route(
@@ -173,20 +202,11 @@ pub(crate) async fn serve(
         .route("/assets/icon.svg", axum::routing::get(serve_icon))
         .route("/manifest.webmanifest", axum::routing::get(serve_manifest))
         .layer(middleware::from_fn(same_origin_only))
-        .with_state(state);
-
-    let local_addr = listener.local_addr().ok();
-    let listener =
-        TcpListener::from_std(listener).map_err(|e| format!("failed to adopt listener: {e}"))?;
-
-    if let Some(addr) = local_addr {
-        info!(%addr, "Web server listening");
-    }
-
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown)
-        .await
-        .map_err(|e| format!("server error: {e}"))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            known_host_only,
+        ))
+        .with_state(state)
 }
 
 /// Refuse a write that a page on some other origin asked for.
@@ -221,40 +241,46 @@ async fn same_origin_only(request: Request, next: Next) -> Response {
     next.run(request).await
 }
 
-/// Whether a request came from one of this server's own pages.
-///
-/// `Sec-Fetch-Site` is the browser's own answer and is taken where it is given.
-/// `Origin` against `Host` is the fallback for a browser too old to send it: a
-/// cross-site form post carries the submitting page's origin, which is not this
-/// server's.
-///
-/// A request carrying neither is allowed.
-/// `curl`, a script, or another tool sends no such header, and no browser can
-/// be made to omit both — so refusing here would lock out every non-browser
-/// caller to stop nothing.
+/// Return whether `headers` pass [`origin::same_origin`].
 fn same_origin(headers: &HeaderMap) -> bool {
-    if let Some(site) = headers
-        .get("sec-fetch-site")
-        .and_then(|value| value.to_str().ok())
-    {
-        return site == "same-origin" || site == "none";
-    }
+    let header = |name: &str| headers.get(name).and_then(|value| value.to_str().ok());
 
-    let Some(origin) = headers.get(header::ORIGIN).and_then(|v| v.to_str().ok()) else {
-        return true;
+    origin::same_origin(header("sec-fetch-site"), header("origin"), header("host"))
+}
+
+/// Reject requests whose `Host` header is not allowed on `state.listening`
+/// (defending against DNS rebinding on loopback).
+async fn known_host_only(State(state): State<AppState>, request: Request, next: Next) -> Response {
+    let Some(refusal) = host_refusal(state.listening, &state.allowed_hosts, request.headers())
+    else {
+        return next.run(request).await;
     };
 
-    // Whatever the browser was told to connect to, which is the authority half
-    // of the origin its own pages carry. Its absence with an `Origin` present
-    // leaves nothing to compare against, and guessing is not worth it.
+    warn!(
+        host = header_text(request.headers(), header::HOST.as_str()).unwrap_or_default(),
+        path = %request.uri().path(),
+        "Refused a request for a name this server doesn't answer to",
+    );
+    (StatusCode::FORBIDDEN, format!("{refusal}\n")).into_response()
+}
+
+/// Return the 403 refusal message if `headers` fail [`origin::answers`], or
+/// `None` if the `Host` header is allowed.
+///
+/// Non-UTF-8 `Host` header values are treated as `""` and rejected.
+fn host_refusal(listening: IpAddr, allowed: &[String], headers: &HeaderMap) -> Option<String> {
+    let host = header_text(headers, header::HOST.as_str());
+
+    (!origin::answers(listening, host, allowed))
+        .then(|| origin::unknown_host(host.unwrap_or_default(), "serve-web"))
+}
+
+/// Extract header `name` as a `&str`, returning `Some("")` if the value is not
+/// valid ASCII/UTF-8 or `None` if the header is absent.
+fn header_text<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
     headers
-        .get(header::HOST)
-        .and_then(|value| value.to_str().ok())
-        .is_some_and(|host| {
-            origin
-                .split_once("://")
-                .is_some_and(|(_, authority)| authority == host)
-        })
+        .get(name)
+        .map(|value| value.to_str().unwrap_or_default())
 }
 
 async fn index() -> Redirect {

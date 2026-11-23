@@ -64,5 +64,5 @@ Until then, document the convention where contributors and assistants read it.
 
 - [ ] Convert the sites the grep found
 - [ ] Convert the multi-line invocations
-- [ ] Forward event fields in `ProtocolLogLayer`
+- [x] Forward event fields in `ProtocolLogLayer`
 - [ ] Write the convention down for contributors and assistants

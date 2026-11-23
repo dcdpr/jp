@@ -915,6 +915,38 @@ fn a_shorter_title_answer_that_still_does_not_fit_ends_the_call() {
 }
 
 #[test]
+fn a_shorter_title_answer_that_is_no_title_is_quoted_in_part() {
+    let dir = Utf8TempDir::new().unwrap();
+
+    let out = error_message(run_tool_with_answers(
+        &dir,
+        "create",
+        json!({ "title": "A title that does not fit" }),
+        json!({
+            "shorter_title": "Reused draft slots inherit stale references\n\nPromoting a draft \
+                               rewrites references to another document."
+        }),
+    ));
+
+    assert_eq!(
+        out,
+        "The shorter title is 103 characters, and a ticket takes at most 60: Reused draft slots \
+         inherit stale references…"
+    );
+    assert!(ids(&dir).is_empty(), "a refused title filed a ticket");
+}
+
+#[test]
+fn an_excerpt_is_the_first_line_cut_to_length() {
+    assert_eq!(excerpt("Bump the deny list", 60), "Bump the deny list");
+    assert_eq!(excerpt("Bump the deny list", 8), "Bump the…");
+    assert_eq!(
+        excerpt("Bump the deny list\n\nIt is stale.", 60),
+        "Bump the deny list…"
+    );
+}
+
+#[test]
 fn an_empty_shorter_title_answer_ends_the_call() {
     let dir = Utf8TempDir::new().unwrap();
 

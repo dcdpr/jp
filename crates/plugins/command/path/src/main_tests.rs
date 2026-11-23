@@ -1,11 +1,11 @@
-use jp_plugin::Manifest;
+use jp_plugin::{Manifest, message::DescribeResponse};
 
 use super::*;
 
 #[test]
 fn describe_answers_from_the_embedded_manifest() {
     let mut out = Vec::new();
-    send_describe(&mut out).unwrap();
+    run("{\"type\":\"describe\"}\n".as_bytes(), &mut out).unwrap();
 
     let msg: PluginToHost = serde_json::from_slice(&out).unwrap();
     assert_eq!(

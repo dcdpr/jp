@@ -368,6 +368,103 @@ fn existing_reports_a_path_it_cannot_read() {
 }
 
 #[test]
+fn write_writes_missing_files_and_leaves_matching_ones() {
+    let dir = Utf8TempDir::new().unwrap();
+    let target = dir.path().join("config");
+    fs::create_dir(&target).unwrap();
+    fs::write(target.join("same.toml"), "same\r\n").unwrap();
+
+    let written = write(
+        &target,
+        &[("same.toml", "same\n"), ("new.toml", "new\n")],
+        "jp test init",
+        false,
+    )
+    .unwrap();
+
+    assert_eq!(written, [
+        (target.join("same.toml"), Written::Unchanged),
+        (target.join("new.toml"), Written::Wrote),
+    ]);
+    assert_eq!(
+        fs::read_to_string(target.join("new.toml")).unwrap(),
+        "new\n"
+    );
+    assert_eq!(
+        written
+            .iter()
+            .map(|(_, written)| written.to_string())
+            .collect::<Vec<_>>(),
+        ["Unchanged", "Wrote"]
+    );
+}
+
+#[test]
+fn write_refuses_before_writing_anything_git_cannot_restore() {
+    let dir = Utf8TempDir::new().unwrap();
+    fs::write(dir.path().join("mine.toml"), "mine\n").unwrap();
+
+    let error = write(
+        dir.path(),
+        &[("new.toml", "new\n"), ("mine.toml", "shipped\n")],
+        "jp test init",
+        false,
+    )
+    .unwrap_err();
+
+    assert_eq!(
+        error,
+        format!(
+            "Git couldn't restore these files, so `jp test init` leaves them:\n  {} (not in a git \
+             work tree)\nRun `jp test init --force` to overwrite them anyway.",
+            dir.path().join("mine.toml")
+        )
+    );
+    assert!(!dir.path().join("new.toml").exists());
+    assert_eq!(
+        fs::read_to_string(dir.path().join("mine.toml")).unwrap(),
+        "mine\n"
+    );
+}
+
+#[test]
+fn write_with_force_overwrites_what_git_cannot_restore() {
+    let dir = Utf8TempDir::new().unwrap();
+    fs::write(dir.path().join("mine.toml"), "mine\n").unwrap();
+
+    let written = write(
+        dir.path(),
+        &[("mine.toml", "shipped\n")],
+        "jp test init",
+        true,
+    )
+    .unwrap();
+
+    assert_eq!(written, [(
+        dir.path().join("mine.toml"),
+        Written::Overwrote
+    )]);
+    assert_eq!(
+        fs::read_to_string(dir.path().join("mine.toml")).unwrap(),
+        "shipped\n"
+    );
+}
+
+#[test]
+fn refusing_nothing_unrecorded_is_no_refusal() {
+    let top = repository();
+
+    assert_eq!(
+        refuse_unrecorded(
+            &top.path().join("sub"),
+            &[Utf8PathBuf::from("docs/rfd/index.md")],
+            "jp test init"
+        ),
+        Ok(())
+    );
+}
+
+#[test]
 fn only_a_carriage_return_ending_a_line_is_ignored() {
     assert!(same_text(b"a\r\nb\r\n", b"a\nb\n"));
     assert!(same_text(b"a\nb", b"a\r\nb"));

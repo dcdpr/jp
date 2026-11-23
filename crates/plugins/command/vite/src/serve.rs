@@ -35,13 +35,15 @@ use std::{
 };
 
 use camino::Utf8Path;
-use jp_plugin::message::{HostToPlugin, PluginToHost, ReadConfigRequest};
+use jp_plugin::{
+    message::{HostToPlugin, PluginToHost, ReadConfigRequest},
+    stdio::{self, print_to, send},
+};
 use serde_json::Value;
 
 use crate::{
-    git, init,
+    BINARY, git, init,
     options::Options,
-    print_to, read_message, send,
     settings::{Settings, below, snapshot, source_dir},
     shown, site,
     sync::{self, Change},
@@ -296,7 +298,7 @@ fn forward(
 fn listen(mut stdin: impl BufRead + Send + 'static, events: Sender<Event>) {
     thread::spawn(move || {
         loop {
-            let message = read_message(&mut stdin);
+            let message = stdio::read(&mut stdin, BINARY);
             let over = message.is_err();
             if events.send(Event::Host(message)).is_err() || over {
                 break;

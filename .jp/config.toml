@@ -214,6 +214,19 @@ base_url = "http://model.api:8001"
 id = "haiku"
 parameters.reasoning.effort = "auto"
 
+# Explicit inquiry instructions replace the active persona's `instructions`
+# during tool inquiries instead of appending to them. Without this override,
+# end-of-turn reporting instructions from a persona also apply to tool
+# inquiries.
+[[conversation.inquiry.assistant.instructions]]
+title = "Answering a tool's question"
+items = [
+    """\
+    You are answering one question a tool asked, and your reply becomes the tool's input. Reply \
+    with that answer alone: not a summary, report, or plan of the work in the conversation.\
+    """,
+]
+
 [conversation.title.generate.model]
 id = "haiku"
 parameters.reasoning.effort = "low"

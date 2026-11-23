@@ -4,6 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-11-16
+- **Extended by**: [RFD 136]
 - **Summary**: Adds an internal Markdown-to-HTML renderer that annotates every
   rendered text span with its source byte range.
 
@@ -272,5 +273,6 @@ This phase is self-contained and mergeable before any consumer is wired up.
 - [markdown-it issue 821][mdit-821], on column positions
 - [comrak's `render.sourcepos`][comrak-sourcepos]
 
+[RFD 136]: 136-review-engine-for-workspace-files.md
 [comrak-sourcepos]: https://docs.rs/comrak/0.52.0/comrak/options/struct.Render.html#structfield.sourcepos
 [mdit-821]: https://github.com/markdown-it/markdown-it/issues/821

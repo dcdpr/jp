@@ -1,0 +1,61 @@
+# Off outside a pass: the configuration a pass runs under, `review.toml`, turns
+# it on.
+[conversation.tools.review_comment]
+source = "plugin.command.review.comment"
+enable = false
+summary = "Open a comment in a review, on something the reviewer missed."
+description = """
+Open a comment of your own in a review: on the review as a whole, on one of its
+files, or on lines of one. The reviewer answers it, and resolves it.
+
+Name the review the way the pass message does, `R-1h4k2m9`, and the file by
+the path the message gives it. `lines` count in the file as it is now, after
+any edits you made, which can move them from where the pass message put them;
+quote the text you mean in `quote` to anchor the comment to exactly it.
+"""
+
+examples = """
+A comment on a phrase in one line:
+```json
+{"review": "R-1h4k2m9", "path": "docs/a.md", "lines": "12", "quote": "every interface", "body": "This contradicts the Security section."}
+```
+
+A comment on the review as a whole:
+```json
+{"review": "R-1h4k2m9", "body": "The examples use two different review ids."}
+```
+"""
+
+# Comments opened in one call are stored one at a time, in the order written,
+# so they are numbered in that order.
+fan_out = { concurrency = 1 }
+
+[conversation.tools.review_comment.style]
+parameters = "function_call"
+inline_results = "full"
+results_file_link = "off"
+
+[conversation.tools.review_comment.parameters.review]
+type = "string"
+required = true
+summary = "The review: `R-1h4k2m9`."
+
+[conversation.tools.review_comment.parameters.path]
+type = "string"
+required = false
+summary = "The file the comment is on; leave it out for a comment on the review as a whole."
+
+[conversation.tools.review_comment.parameters.lines]
+type = "string"
+required = false
+summary = "The line, `42`, or lines, `42-45`, the comment is on, in the file as it is now."
+
+[conversation.tools.review_comment.parameters.quote]
+type = "string"
+required = false
+summary = "Text that occurs exactly once in `lines`, to anchor the comment to it alone."
+
+[conversation.tools.review_comment.parameters.body]
+type = "string"
+required = true
+summary = "The comment, as markdown."

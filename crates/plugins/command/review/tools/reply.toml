@@ -1,0 +1,58 @@
+# Off outside a pass: the configuration a pass runs under, `review.toml`, turns
+# it on.
+[conversation.tools.review_reply]
+source = "plugin.command.review.reply"
+enable = false
+summary = "Reply to a comment in a review, with your verdict on it."
+description = """
+Answer one comment of a review pass. Name the comment the way the pass message
+does, `R-1h4k2m9#2`. A reply is stored as soon as the call returns, so the
+reviewer reads it while you work through the rest.
+
+A reply to the reviewer's comment carries your verdict on it:
+
+- `accept`: you agree, and made the change it asks for.
+- `amend`: you agree there is a problem, and made a different change; say which.
+- `decline`: you made no change; say why.
+- `defer`: the point stands but is out of scope; say where it is tracked.
+- `ask`: you need an answer before changing anything; ask it.
+
+A reply to a comment you opened yourself carries no verdict.
+"""
+
+examples = """
+Accept a comment, after making the change:
+```json
+{"comment": "R-1h4k2m9#1", "verdict": "accept", "body": "Fixed: it binds to loopback."}
+```
+
+Answer the reviewer's reply to a comment you opened:
+```json
+{"comment": "R-1h4k2m9#4", "body": "Then the heading stays as it is."}
+```
+"""
+
+# Replies to several comments in one call are stored one at a time, in the
+# order written.
+fan_out = { concurrency = 1 }
+
+[conversation.tools.review_reply.style]
+parameters = "function_call"
+inline_results = "full"
+results_file_link = "off"
+
+[conversation.tools.review_reply.parameters.comment]
+type = "string"
+required = true
+summary = "The comment to answer, as the pass message names it: `R-1h4k2m9#2`."
+
+[conversation.tools.review_reply.parameters.verdict]
+type = "string"
+required = false
+enum = ["accept", "amend", "decline", "defer", "ask"]
+summary = "Your verdict on the reviewer's comment; leave it out on a comment you opened."
+
+[conversation.tools.review_reply.parameters.body]
+type = "string"
+required = true
+summary = "The reply, as markdown: what you changed, or why not."

@@ -2178,6 +2178,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "jp-review"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "camino",
+ "camino-tempfile",
+ "chrono",
+ "clap",
+ "doc",
+ "jp_id",
+ "jp_plugin",
+ "jp_tool",
+ "md-html",
+ "overwrite",
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "sha2",
+ "shlex",
+ "similar",
+ "tokio",
+ "toml",
+ "tool-definitions",
+]
+
+[[package]]
 name = "jp-rfd"
 version = "0.1.0"
 dependencies = [
@@ -2236,7 +2262,6 @@ dependencies = [
  "sha2",
  "tokio",
  "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -2826,7 +2851,9 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.20",
+ "tokio",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

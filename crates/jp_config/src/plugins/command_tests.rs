@@ -410,6 +410,28 @@ fn layer(base: &str, next: &str) -> CommandPluginConfig {
     CommandPluginConfig::from_partial(partial.finalize(&()).unwrap(), vec![]).unwrap()
 }
 
+/// A plain `KEY=VALUE` option is a string whatever it holds, while `KEY:=VALUE`
+/// keeps its JSON type, which a plugin reading a number from its options needs.
+#[test]
+fn an_option_assigned_as_json_keeps_its_type() {
+    let mut layer = PartialCommandPluginsConfig::default();
+
+    layer
+        .assign("review.options.max_chars:=600".parse().unwrap())
+        .unwrap();
+    layer
+        .assign(r#"review.options.assistant:="jp""#.parse().unwrap())
+        .unwrap();
+    layer
+        .assign("review.options.port=3001".parse().unwrap())
+        .unwrap();
+
+    assert_eq!(
+        serde_json::to_value(&layer.plugins.get("review").unwrap().options).unwrap(),
+        json!({ "max_chars": 600, "assistant": "jp", "port": "3001" })
+    );
+}
+
 #[test]
 fn a_later_layer_keeps_the_options_it_does_not_name() {
     let config = layer(

@@ -17,7 +17,7 @@ version.workspace = true
 # published registry. `jp` finds it on `$PATH`.
 
 [dependencies]
-jp_plugin = { workspace = true }
+jp_plugin = { workspace = true, features = ["client"] }
 
 camino = { workspace = true, features = ["serde1"] }
 chrono = { workspace = true }

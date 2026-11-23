@@ -412,13 +412,28 @@ fn fitting_title(
 
     let count = retitled.chars().count();
     if count > limit {
+        // Quote only a bounded first-line excerpt so a multi-paragraph response
+        // does not obscure the error.
         return Err(refuse(format!(
-            "The shorter title is {count} characters, and a ticket takes at most {limit}: \
-             {retitled}"
+            "The shorter title is {count} characters, and a ticket takes at most {limit}: {}",
+            excerpt(retitled, limit.saturating_mul(2))
         )));
     }
 
     Ok(retitled.to_owned())
+}
+
+/// Return the first line of `text` truncated to `max` characters, appending
+/// `…` if any part of `text` was omitted.
+fn excerpt(text: &str, max: usize) -> String {
+    let line = text.lines().next().unwrap_or_default();
+    let kept: String = line.chars().take(max).collect();
+
+    if kept.len() == text.len() {
+        kept
+    } else {
+        format!("{kept}…")
+    }
 }
 
 /// Render the ticket file `create` is about to write.

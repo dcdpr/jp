@@ -5,7 +5,7 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-09-30
 - **Extends**: [RFD 001], [RFD 100]
-- **Extended by**: [RFD 127], [RFD 128]
+- **Extended by**: [RFD 127], [RFD 128], [RFD 136]
 - **Summary**: Moves ticket, RFD, and documentation-site workflows into reusable
   `jp-ticket`, `jp-rfd`, and `jp-vite` command plugins.
 
@@ -928,3 +928,4 @@ Depends on Phases 1 through 5.
 [RFD 102]: 102-collision-resistant-ticket-identifiers.md
 [RFD 127]: 127-in-repo-project-wiki.md
 [RFD 128]: 128-workspace-source-explorer-in-jp-vite.md
+[RFD 136]: 136-review-engine-for-workspace-files.md
