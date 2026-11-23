@@ -444,7 +444,12 @@ impl RecoveryBackend for FsStorageBackend {
             .into_iter()
             .filter(|entry| !self.storage.is_conversation_locked(&entry.id.to_string()))
             .map(|conversation| DiagnosedConversation {
-                repair: applicable_repair(&self.live_conversation_dirs(&conversation.id)),
+                // A repair works on live conversations only.
+                repair: if conversation.archived {
+                    None
+                } else {
+                    applicable_repair(&self.live_conversation_dirs(&conversation.id))
+                },
                 conversation,
             })
             .collect();

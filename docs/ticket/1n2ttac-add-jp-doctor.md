@@ -40,7 +40,7 @@ told to, with no fixing logic of its own.
       and the directory name
 - [x] Reports leftover `.tmp` files and import staging directories, which the
       startup scan of any other command removes
-- [ ] Validates the archive partition (`conversations/.archive/`), which startup
+- [x] Validates the archive partition (`conversations/.archive/`), which startup
       validation never reads, and reports archived conversations that fail to
       load
 - [x] Lists directories under `conversations/` whose name is not a conversation

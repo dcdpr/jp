@@ -283,6 +283,59 @@ fn the_diagnosis_lists_what_the_store_holds_beside_its_conversations() {
     assert!(leftover.is_file());
 }
 
+// The startup scan never reads the archive, so the diagnosis is the only place
+// an archived conversation that stopped loading shows up. A repair applies to
+// live conversations only.
+#[test]
+fn the_diagnosis_covers_the_archive() {
+    let (_tmp, fs, conversations) = setup();
+    let archive = conversations.join(".archive");
+    let live = broken(&conversations, "17941219991");
+    let archived = events_only(&archive, "17941219992-old-work");
+    let loads = events_only(&archive, "17941219993");
+    fs::write(loads.join("metadata.json"), "{}").unwrap();
+
+    let diagnosis = fs.diagnose().unwrap();
+
+    let found: Vec<_> = diagnosis
+        .invalid
+        .iter()
+        .map(|diagnosed| {
+            (
+                diagnosed.conversation.path(),
+                diagnosed.conversation.archived,
+                diagnosed.repair,
+            )
+        })
+        .collect();
+    assert_eq!(found, vec![
+        (archived, true, None),
+        (live.clone(), false, None)
+    ]);
+    assert_eq!(scanned_paths(&fs), [live]);
+}
+
+// A repair rebuilds live copies, so it is never offered for an archived copy,
+// even of a conversation whose live copy it does fix.
+#[test]
+fn an_archived_copy_is_never_offered_the_live_copy_s_repair() {
+    let (_tmp, fs, conversations) = setup();
+    let live = events_only(&conversations, "17941219991");
+    let archived = events_only(&conversations.join(".archive"), "17941219991");
+
+    let diagnosis = fs.diagnose().unwrap();
+
+    let found: Vec<_> = diagnosis
+        .invalid
+        .iter()
+        .map(|diagnosed| (diagnosed.conversation.path(), diagnosed.repair))
+        .collect();
+    assert_eq!(found, vec![
+        (archived, None),
+        (live, Some(Repair::RebuildMetadata))
+    ]);
+}
+
 #[test]
 fn inspect_names_the_repair_that_makes_a_conversation_load() {
     let (_tmp, fs, conversations) = setup();

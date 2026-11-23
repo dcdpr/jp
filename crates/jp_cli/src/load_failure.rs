@@ -181,23 +181,31 @@ pub(crate) fn render_json(
 ) -> serde_json::Result<Vec<String>> {
     failures
         .iter()
-        .map(|failure| render_record(failure, None, pretty))
+        .map(|failure| render_record(failure, RecordExtras::default(), pretty))
         .collect()
 }
 
-/// Render one failure as a JSON record, naming `fix` when a `jp doctor` fix
-/// makes the conversation load.
+/// What a record says beyond the failure itself.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct RecordExtras {
+    /// The name of the `jp doctor` fix that makes the conversation load.
+    pub fix: Option<&'static str>,
+
+    /// Whether the conversation is in the archive.
+    pub archived: bool,
+}
+
+/// Render one failure as a JSON record, with what `extras` adds.
 ///
 /// With `pretty`, the record is indented across several lines.
 pub(crate) fn render_record(
     failure: &LoadFailure<'_>,
-    fix: Option<&'static str>,
+    extras: RecordExtras,
     pretty: bool,
 ) -> serde_json::Result<String> {
-    let record = Record {
-        fix,
-        ..Record::from(failure)
-    };
+    let mut record = Record::from(failure);
+    record.fix = extras.fix;
+    record.context.conversation.archived = extras.archived;
 
     if pretty {
         serde_json::to_string_pretty(&record)
@@ -232,6 +240,9 @@ struct Context<'a> {
 struct ConversationContext<'a> {
     id: String,
     location: &'a StorageLocation,
+
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    archived: bool,
 }
 
 /// One step of the error chain, outermost first.
@@ -275,6 +286,7 @@ impl<'a> From<&'a LoadFailure<'a>> for Record<'a> {
                 conversation: ConversationContext {
                     id: failure.id.to_string(),
                     location: &failure.location,
+                    archived: false,
                 },
             },
             causes: causes(failure.error),

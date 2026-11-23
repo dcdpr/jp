@@ -28,7 +28,7 @@ use crate::{
     cli::CommandArgs,
     cmd::{self, Output},
     format::no_persist_note,
-    load_failure::{self, LoadFailure},
+    load_failure::{self, LoadFailure, RecordExtras},
     shared::confirm::{ConfirmFlag, decide},
 };
 
@@ -145,6 +145,9 @@ pub(crate) struct Report<'a> {
 pub(crate) struct Finding<'a> {
     pub failure: LoadFailure<'a>,
     pub fix: Option<Repair>,
+
+    /// Whether the conversation is in the archive.
+    pub archived: bool,
 }
 
 impl Report<'_> {
@@ -162,6 +165,7 @@ impl<'a> From<&'a Diagnosis> for Report<'a> {
                 .map(|diagnosed| Finding {
                     failure: LoadFailure::from(&diagnosed.conversation),
                     fix: diagnosed.repair,
+                    archived: diagnosed.conversation.archived,
                 })
                 .collect(),
             strays: &diagnosis.strays,
@@ -215,16 +219,26 @@ struct Row {
 }
 
 /// Render the text report: a table of problems under the section they belong
-/// to.
+/// to, then the commands that apply a fix to many conversations at once.
 pub(crate) fn render_text(report: &Report<'_>) -> String {
-    let rows: Vec<_> = conversation_rows(&report.failures)
+    let live: Vec<_> = conversation_rows(&report.failures, false)
         .chain(report.strays.iter().map(stray_row))
         .collect();
-    if rows.is_empty() {
+    let archived: Vec<_> = conversation_rows(&report.failures, true).collect();
+
+    let sections: Vec<_> = [
+        ("Conversations", live),
+        ("Archived conversations", archived),
+    ]
+    .into_iter()
+    .filter(|(_, rows)| !rows.is_empty())
+    .map(|(title, rows)| format!("## {title}\n{}", table(&rows)))
+    .collect();
+    if sections.is_empty() {
         return "No problems found.".to_owned();
     }
 
-    let mut text = format!("# Report\n## Conversations\n{}", table(&rows));
+    let mut text = format!("# Report\n{}", sections.join("\n"));
     let hints = fix_all_hints(&report.failures);
     if !hints.is_empty() {
         text.push_str("\n\n");
@@ -283,15 +297,24 @@ fn table(rows: &[Row]) -> String {
         .join("\n")
 }
 
-/// A row per conversation that does not load, by its first copy's failure.
-fn conversation_rows<'a>(findings: &'a [Finding<'_>]) -> impl Iterator<Item = Row> + 'a {
+/// A row per conversation that does not load, live or `archived`, by its first
+/// copy's failure.
+///
+/// An archived conversation is out of reach of the fixes and of `jp c rm`, so
+/// its row suggests unarchiving it.
+fn conversation_rows<'a>(
+    findings: &'a [Finding<'_>],
+    archived: bool,
+) -> impl Iterator<Item = Row> + 'a {
     let mut seen = HashSet::new();
     findings
         .iter()
+        .filter(move |finding| finding.archived == archived)
         .filter(move |finding| seen.insert(finding.failure.id))
         .map(|finding| {
             let id = finding.failure.id;
             let fix = match finding.fix {
+                _ if finding.archived => format!("jp c unarchive {id}"),
                 Some(repair) => format!("jp doctor --id={id} --fix {}", repair.name()),
                 None => format!("jp c rm {id}"),
             };
@@ -350,9 +373,13 @@ const fn stray_kind(kind: StrayKind) -> StrayProblem {
 pub(crate) fn render_json(report: &Report<'_>, pretty: bool) -> serde_json::Result<Vec<String>> {
     let mut records = vec![];
     for finding in &report.failures {
+        let extras = RecordExtras {
+            fix: finding.fix.map(Repair::name),
+            archived: finding.archived,
+        };
         records.push(load_failure::render_record(
             &finding.failure,
-            finding.fix.map(Repair::name),
+            extras,
             pretty,
         )?);
     }

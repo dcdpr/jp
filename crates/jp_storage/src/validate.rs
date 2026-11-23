@@ -8,8 +8,8 @@ use tracing::{debug, trace};
 
 pub use crate::location::StorageLocation;
 use crate::{
-    BASE_CONFIG_FILE, CONVERSATIONS_DIR, EVENTS_FILE, IMPORT_STAGING_PREFIX, METADATA_FILE,
-    Storage, dir_entries,
+    ARCHIVE_DIR, BASE_CONFIG_FILE, CONVERSATIONS_DIR, EVENTS_FILE, IMPORT_STAGING_PREFIX,
+    METADATA_FILE, Storage, dir_entries,
     scan::{DirStamps, EventsSummary, SCAN_CACHE_FILE, ScanCache, ScannedDir},
     value::{cleanup_tmp_files, has_tmp_files, tmp_files, write_json},
 };
@@ -61,6 +61,9 @@ pub struct InvalidConversation {
     pub(crate) conversations_dir: Utf8PathBuf,
 
     pub id: ConversationId,
+
+    /// Whether the conversation is in the archive.
+    pub archived: bool,
 
     /// What went wrong.
     pub error: ValidationError,
@@ -306,6 +309,8 @@ impl Storage {
     ///
     /// The leftovers are the ones [`Self::validate_conversations`] removes, and
     /// are listed instead.
+    /// Archived conversations are checked too, which
+    /// [`Self::validate_conversations`] never does.
     /// The scan cache is read, so a directory that passed with the same file
     /// stamps is not read again, and never written.
     pub(crate) fn diagnose_conversations(&self) -> ConversationsDiagnosis {
@@ -313,6 +318,7 @@ impl Storage {
         self.load_scan_cache();
 
         let mut validation = ValidationResult::default();
+        let mut archive = ValidationResult::default();
         let mut leftovers = vec![];
         for root in [Some(&self.root), self.user.as_ref()].into_iter().flatten() {
             let conversations_dir = root.join(CONVERSATIONS_DIR);
@@ -322,9 +328,15 @@ impl Storage {
 
             leftovers.extend(leftovers_in(&conversations_dir));
             validate_root(&conversations_dir, &self.scan, &mut validation, &mut vec![]);
+
+            let archive_dir = conversations_dir.join(ARCHIVE_DIR);
+            if archive_dir.is_dir() {
+                validate_root(&archive_dir, &self.scan, &mut archive, &mut vec![]);
+            }
         }
 
         let mut invalid = validation.invalid;
+        invalid.extend(archive.invalid);
         invalid.sort_by_key(InvalidConversation::path);
         let mut unrecognized = validation.unrecognized;
         unrecognized.sort();
@@ -605,6 +617,7 @@ fn validate_entry(
         Err(error) => Err(InvalidConversation {
             conversations_dir: conversations_dir.to_path_buf(),
             id,
+            archived: conversations_dir.file_name() == Some(ARCHIVE_DIR),
             error,
             dirname: dirname.to_owned(),
         }),
