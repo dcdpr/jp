@@ -224,7 +224,37 @@ pub(crate) fn render_text(report: &Report<'_>) -> String {
         return "No problems found.".to_owned();
     }
 
-    format!("# Report\n## Conversations\n{}", table(&rows))
+    let mut text = format!("# Report\n## Conversations\n{}", table(&rows));
+    let hints = fix_all_hints(&report.failures);
+    if !hints.is_empty() {
+        text.push_str("\n\n");
+        text.push_str(&hints.join("\n"));
+    }
+    text
+}
+
+/// A line for each fix that covers more than one conversation, with the command
+/// that applies it to all of them at once.
+fn fix_all_hints(findings: &[Finding<'_>]) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let fixes: Vec<_> = findings
+        .iter()
+        .filter(|finding| seen.insert(finding.failure.id))
+        .filter_map(|finding| finding.fix)
+        .collect();
+
+    Repair::ALL
+        .into_iter()
+        .filter_map(|repair| {
+            let count = fixes.iter().filter(|fix| **fix == repair).count();
+            (count > 1).then(|| {
+                format!(
+                    "Run `jp doctor --fix {}` to fix all {count} conversations it covers.",
+                    repair.name()
+                )
+            })
+        })
+        .collect()
 }
 
 /// Lay `rows` out in aligned columns, one bullet per row.

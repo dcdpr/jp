@@ -124,6 +124,55 @@ fn the_report_lists_each_problem_with_the_command_that_deals_with_it() {
     );
 }
 
+// Each row's command fixes one conversation; a fix that covers more than one
+// also gets the command that applies it to all of them.
+#[test]
+fn a_fix_covering_several_conversations_gets_one_command_for_all() {
+    let first = missing_metadata("17941219991");
+    let second = missing_metadata("17941219992");
+    let report = Report {
+        failures: vec![
+            failure("17941219991", &first, Some(Repair::RebuildMetadata)),
+            failure("17941219992", &second, Some(Repair::RebuildMetadata)),
+        ],
+        strays: &[],
+    };
+
+    assert_eq!(
+        plain(&report),
+        "\
+# Report
+## Conversations
+- jp-c17941219991  missing metadata.json    jp doctor --id=jp-c17941219991 --fix rebuild-metadata
+- jp-c17941219992  missing metadata.json    jp doctor --id=jp-c17941219992 --fix rebuild-metadata
+
+Run `jp doctor --fix rebuild-metadata` to fix all 2 conversations it covers."
+    );
+}
+
+// Two copies of one conversation are one conversation to fix.
+#[test]
+fn copies_of_one_conversation_count_once_toward_the_command_for_all() {
+    let missing = missing_metadata("17941219991");
+    let mut user_copy = failure("17941219991", &missing, Some(Repair::RebuildMetadata));
+    user_copy.failure.location = StorageLocation::new("/user/conversations/17941219991");
+    let report = Report {
+        failures: vec![
+            failure("17941219991", &missing, Some(Repair::RebuildMetadata)),
+            user_copy,
+        ],
+        strays: &[],
+    };
+
+    assert_eq!(
+        plain(&report),
+        "\
+# Report
+## Conversations
+- jp-c17941219991  missing metadata.json    jp doctor --id=jp-c17941219991 --fix rebuild-metadata"
+    );
+}
+
 #[test]
 fn an_unfinished_import_is_its_own_kind_of_problem() {
     let strays = [stray(
