@@ -249,25 +249,51 @@ fn the_diagnosis_offers_rebuilding_metadata_where_the_events_survive() {
     ]);
 }
 
+// Each stray entry is named for the directory in the store a user finds it
+// under: a leftover file by the conversation directory it is in.
 #[test]
-fn the_diagnosis_lists_what_is_not_a_conversation_and_leftover_writes() {
+fn the_diagnosis_lists_what_the_store_holds_beside_its_conversations() {
     let (_tmp, fs, conversations) = setup();
     fs.write_test_conversation(&id("17941219991"), &Conversation::default());
     let leftover = conversations.join("17941219991").join("events.json.tmp");
     fs::write(&leftover, "partial").unwrap();
     let notes = conversations.join("notes");
     fs::create_dir_all(&notes).unwrap();
+    let staging_name = crate::import_staging_dirname("17941219992");
+    let staging = conversations.join(&staging_name);
+    fs::create_dir_all(&staging).unwrap();
 
     let diagnosis = fs.diagnose().unwrap();
 
+    let strays: Vec<_> = diagnosis
+        .strays
+        .iter()
+        .map(|stray| (stray.name.as_str(), stray.kind, stray.location.as_str()))
+        .collect();
     assert!(diagnosis.invalid.is_empty());
-    assert_eq!(diagnosis.unrecognized, [StorageLocation::new(
-        notes.as_str()
-    )]);
-    assert_eq!(diagnosis.leftovers, [StorageLocation::new(
-        leftover.as_str()
-    )]);
+    assert_eq!(strays, vec![
+        (
+            staging_name.as_str(),
+            StrayKind::ImportStaging,
+            staging.as_str()
+        ),
+        ("17941219991", StrayKind::TempFile, leftover.as_str()),
+        ("notes", StrayKind::NotAConversation, notes.as_str()),
+    ]);
     assert!(leftover.is_file());
+}
+
+#[test]
+fn inspect_names_the_repair_that_makes_a_conversation_load() {
+    let (_tmp, fs, conversations) = setup();
+    events_only(&conversations, "17941219991");
+    broken(&conversations, "17941219992");
+
+    assert_eq!(
+        fs.inspect(&id("17941219991")).unwrap().repair,
+        Some(Repair::RebuildMetadata)
+    );
+    assert_eq!(fs.inspect(&id("17941219992")).unwrap().repair, None);
 }
 
 #[test]
@@ -390,6 +416,23 @@ fn a_dry_run_asks_and_repairs_nothing() {
     assert!(asked);
     assert_eq!(outcome, RepairOutcome::Repaired);
     assert!(!dir.join("metadata.json").exists());
+}
+
+// A conversation named for a repair that does not apply to it is reported as
+// such, the same as the backend would, without anyone being asked.
+#[test]
+fn a_dry_run_reports_a_repair_that_does_not_apply() {
+    let (_tmp, fs, conversations) = setup();
+    broken(&conversations, "17941219991");
+    let dry = DryRunRecovery::new(fs);
+
+    let outcome = dry
+        .repair(&id("17941219991"), Repair::RebuildMetadata, &mut |_| {
+            panic!("not asked")
+        })
+        .unwrap();
+
+    assert_eq!(outcome, RepairOutcome::NotApplicable);
 }
 
 #[test]

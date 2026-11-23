@@ -28,6 +28,6 @@ pub use null::{NoopLockGuard, NullLockBackend, NullPersistBackend, ReadOnlySessi
 pub use persist::{PersistBackend, Projection};
 pub use recovery::{
     DiagnosedConversation, Diagnosis, DryRunRecovery, NullRecoveryBackend, RecoveryBackend,
-    Removal, Repair, RepairOutcome, StoredConversation,
+    Removal, Repair, RepairOutcome, StoredConversation, StrayEntry, StrayKind,
 };
 pub use session::SessionBackend;

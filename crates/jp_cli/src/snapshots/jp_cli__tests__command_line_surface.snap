@@ -5242,7 +5242,7 @@ long_help: Some("Print help (see a summary with '-h')")
 about: Some("Report problems in the JP setup, and apply named fixes")
 long_about: None
 after_help: None
-after_long_help: None
+after_long_help: Some("Exits with status 3 when the report lists a problem.")
 visible_aliases: []
 hidden_aliases: []
 hidden: false
@@ -5268,6 +5268,26 @@ help_heading: None
 conflicts: []
 set: []
 help: Some("Apply the named fix to every problem it covers")
+long_help: None
+
+### id
+short: None
+long: Some("id")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_conversation::conversation::ConversationId
+possible_values: []
+value_names: Some(["ID"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Apply the fix only to this conversation; repeat for more")
 long_help: None
 
 ### confirm

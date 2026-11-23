@@ -5,13 +5,15 @@ use std::{
 
 use camino::Utf8PathBuf;
 use camino_tempfile::Utf8TempDir;
+use clap::error::ErrorKind;
+use crossterm::style::{Color, Stylize as _};
 use jp_conversation::ConversationId;
 use jp_printer::{OutputFormat, Printer, SharedBuffer};
 use jp_storage::{
     Error as StorageError,
     backend::{
         ConversationLockGuard, DryRunRecovery, FsStorageBackend, LockBackend as _, RecoveryBackend,
-        Removal, StoredConversation,
+        Removal, StoredConversation, StrayEntry, StrayKind,
     },
     validate::{
         ConversationPart, InvalidConversation, Position, ReadError, StorageLocation,
@@ -57,6 +59,14 @@ fn failure<'a>(dirname: &str, error: &'a ValidationError, fix: Option<Repair>) -
     }
 }
 
+fn stray(name: &str, kind: StrayKind, location: &str) -> StrayEntry {
+    StrayEntry {
+        name: name.to_owned(),
+        kind,
+        location: StorageLocation::new(location),
+    }
+}
+
 /// A report as the user reads it, with the styling stripped.
 fn plain(report: &Report<'_>) -> String {
     strip_ansi_escapes::strip_str(render_text(report))
@@ -66,120 +76,105 @@ fn plain(report: &Report<'_>) -> String {
 fn a_store_without_problems_reports_none() {
     let report = Report {
         failures: vec![],
-        unrecognized: &[],
-        leftovers: &[],
+        strays: &[],
     };
 
     assert_eq!(plain(&report), "No problems found.");
     assert_eq!(render_json(&report, false).unwrap(), Vec::<String>::new());
 }
 
-// Each problem comes with what deals with it: the fix that makes a conversation
-// load, the command that removes the rest, and `rm -r` for what is not a
-// conversation.
+// One row per problem: what it is about, what is wrong, and the command that
+// deals with it.
 #[test]
-fn the_report_lists_each_problem_with_what_deals_with_it() {
+fn the_report_lists_each_problem_with_the_command_that_deals_with_it() {
     let missing = missing_metadata("17941219991");
     let corrupt = corrupt_events("17941219992");
-    let unrecognized = [StorageLocation::new(
-        "/Users/me/Library/Application Support/jp/conversations/notes",
-    )];
-    let leftovers = [
-        StorageLocation::new("/ws/.jp/conversations/17941219993/events.json.tmp"),
-        StorageLocation::new("/ws/.jp/conversations/17941219994/metadata.json.tmp"),
+    let strays = [
+        stray(
+            "notes",
+            StrayKind::NotAConversation,
+            "/Users/me/Library/Application Support/jp/conversations/notes",
+        ),
+        stray(
+            "17941219993",
+            StrayKind::TempFile,
+            "/ws/.jp/conversations/17941219993/events.json.tmp",
+        ),
     ];
     let report = Report {
         failures: vec![
             failure("17941219991", &missing, Some(Repair::RebuildMetadata)),
             failure("17941219992", &corrupt, None),
         ],
-        unrecognized: &unrecognized,
-        leftovers: &leftovers,
+        strays: &strays,
     };
 
     assert_eq!(
         plain(&report),
         "\
-Conversations
-
-2 conversations fail to load:
-
-- jp-c17941219991: missing metadata.json
-- jp-c17941219992: events.json: invalid JSON at line 1, column 2
-
-Run `jp doctor --fix rebuild-metadata` to make 1 of them load.
-Run `jp conversation rm jp-c17941219992` to remove the rest.
-
-1 directory in the conversation store is not a conversation:
-
-- /Users/me/Library/Application Support/jp/conversations/notes
-
-Run `rm -r '/Users/me/Library/Application Support/jp/conversations/notes'` to remove it.
-
-2 leftovers of interrupted writes, which the next `jp` command removes:
-
-- /ws/.jp/conversations/17941219993/events.json.tmp
-- /ws/.jp/conversations/17941219994/metadata.json.tmp"
+# Report
+## Conversations
+- jp-c17941219991  missing metadata.json                            jp doctor --id=jp-c17941219991 \
+         --fix rebuild-metadata
+- jp-c17941219992  events.json: invalid JSON at line 1, column 2    jp c rm jp-c17941219992
+- notes            directory is not a conversation                  rm -r \
+         '/Users/me/Library/Application Support/jp/conversations/notes'
+- 17941219993      unused temporary file                            rm -r \
+         /ws/.jp/conversations/17941219993/events.json.tmp"
     );
 }
 
 #[test]
-fn a_fix_that_covers_every_failure_is_the_only_suggestion() {
-    let first = missing_metadata("17941219991");
-    let second = missing_metadata("17941219992");
+fn an_unfinished_import_is_its_own_kind_of_problem() {
+    let strays = [stray(
+        ".import-17941219994-1",
+        StrayKind::ImportStaging,
+        "/ws/.jp/conversations/.import-17941219994-1",
+    )];
     let report = Report {
-        failures: vec![
-            failure("17941219991", &first, Some(Repair::RebuildMetadata)),
-            failure("17941219992", &second, Some(Repair::RebuildMetadata)),
-        ],
-        unrecognized: &[],
-        leftovers: &[],
+        failures: vec![],
+        strays: &strays,
     };
 
     assert_eq!(
         plain(&report),
         "\
-Conversations
-
-2 conversations fail to load:
-
-- jp-c17941219991: missing metadata.json
-- jp-c17941219992: missing metadata.json
-
-Run `jp doctor --fix rebuild-metadata` to make them load."
+# Report
+## Conversations
+- .import-17941219994-1  unused import directory    rm -r \
+         /ws/.jp/conversations/.import-17941219994-1"
     );
 }
 
+// A conversation that does not load is red; what the store holds beside its
+// conversations is orange.
 #[test]
-fn without_a_fix_removal_is_the_only_suggestion() {
+fn the_target_is_coloured_by_how_serious_the_problem_is() {
     let corrupt = corrupt_events("17941219992");
+    let strays = [stray(
+        "notes",
+        StrayKind::NotAConversation,
+        "/ws/.jp/conversations/notes",
+    )];
     let report = Report {
         failures: vec![failure("17941219992", &corrupt, None)],
-        unrecognized: &[],
-        leftovers: &[StorageLocation::new(
-            "/ws/.jp/conversations/17941219993/events.json.tmp",
-        )],
+        strays: &strays,
     };
 
     assert_eq!(
-        plain(&report),
-        "\
-Conversations
-
-1 conversation fails to load:
-
-- jp-c17941219992: events.json: invalid JSON at line 1, column 2
-
-Run `jp conversation rm jp-c17941219992` to remove it.
-
-1 leftover of an interrupted write, which the next `jp` command removes:
-
-- /ws/.jp/conversations/17941219993/events.json.tmp"
+        render_text(&report),
+        format!(
+            "# Report\n## Conversations\n- {}  events.json: invalid JSON at line 1, column 2    \
+             jp c rm jp-c17941219992\n- {}            directory is not a conversation                  \
+             rm -r /ws/.jp/conversations/notes",
+            "jp-c17941219992".bold().red(),
+            "notes".bold().with(Color::AnsiValue(208)),
+        )
     );
 }
 
 // A conversation stored in both roots is one conversation: listed once, by the
-// first copy's failure, and named once in the command that removes it.
+// first copy's failure.
 #[test]
 fn a_conversation_with_two_broken_copies_is_listed_once() {
     let corrupt = corrupt_events("17941219992");
@@ -188,44 +183,46 @@ fn a_conversation_with_two_broken_copies_is_listed_once() {
     user_copy.failure.location = StorageLocation::new("/user/conversations/17941219992");
     let report = Report {
         failures: vec![failure("17941219992", &corrupt, None), user_copy],
-        unrecognized: &[],
-        leftovers: &[],
+        strays: &[],
     };
 
     assert_eq!(
         plain(&report),
         "\
-Conversations
-
-1 conversation fails to load:
-
-- jp-c17941219992: events.json: invalid JSON at line 1, column 2
-
-Run `jp conversation rm jp-c17941219992` to remove it."
+# Report
+## Conversations
+- jp-c17941219992  events.json: invalid JSON at line 1, column 2    jp c rm jp-c17941219992"
     );
 }
 
 #[test]
 fn the_json_report_is_one_typed_record_per_problem() {
     let missing = missing_metadata("17941219991");
-    let unrecognized = [StorageLocation::new("/ws/.jp/conversations/notes")];
-    let leftovers = [StorageLocation::new(
-        "/ws/.jp/conversations/17941219993/events.json.tmp",
-    )];
+    let strays = [
+        stray(
+            "notes",
+            StrayKind::NotAConversation,
+            "/ws/.jp/conversations/notes",
+        ),
+        stray(
+            "17941219993",
+            StrayKind::TempFile,
+            "/ws/.jp/conversations/17941219993/events.json.tmp",
+        ),
+    ];
     let report = Report {
         failures: vec![failure(
             "17941219991",
             &missing,
             Some(Repair::RebuildMetadata),
         )],
-        unrecognized: &unrecognized,
-        leftovers: &leftovers,
+        strays: &strays,
     };
 
     assert_eq!(render_json(&report, false).unwrap(), vec![
         r#"{"level":"warning","code":"conversation_load_failed","message":"conversation failed to load","context":{"conversation":{"id":"jp-c17941219991","location":"/ws/.jp/conversations/17941219991"}},"causes":[{"code":"part_missing","message":"missing conversation part","part":"metadata","location":"/ws/.jp/conversations/17941219991/metadata.json"}],"fix":"rebuild-metadata"}"#,
-        r#"{"level":"warning","code":"not_a_conversation","message":"not a conversation","context":{"location":"/ws/.jp/conversations/notes"}}"#,
-        r#"{"level":"info","code":"interrupted_write_leftover","message":"leftover of an interrupted write","context":{"location":"/ws/.jp/conversations/17941219993/events.json.tmp"}}"#,
+        r#"{"level":"warning","code":"not_a_conversation","message":"directory is not a conversation","context":{"name":"notes","location":"/ws/.jp/conversations/notes"}}"#,
+        r#"{"level":"warning","code":"unused_temporary_file","message":"unused temporary file","context":{"name":"17941219993","location":"/ws/.jp/conversations/17941219993/events.json.tmp"}}"#,
     ]);
 }
 
@@ -275,6 +272,31 @@ fn run(store: &Store, recovery: &dyn RecoveryBackend, args: &[&str], persists: b
     result
 }
 
+#[test]
+fn a_clean_store_exits_successfully() {
+    let s = store();
+
+    run(&s, s.fs.as_ref(), &[], true).unwrap();
+
+    assert_eq!(s.out.lock().as_str(), "No problems found.\n");
+}
+
+// Status 1 is a run that failed and 2 a mistyped command, so a script tells a
+// report with problems from both. The report is the output; the status adds no
+// message to it.
+#[test]
+fn a_report_with_problems_exits_with_status_3() {
+    let s = store();
+    events_only(&s, "17941219991");
+
+    let error = run(&s, s.fs.as_ref(), &[], true).unwrap_err();
+
+    assert_eq!(error.code.get(), 3);
+    assert_eq!(error.message, None);
+    assert!(error.expected);
+    assert!(s.out.lock().starts_with("# Report\n"));
+}
+
 // The report reads the store as it is: what the startup scan of any other
 // command would remove stays where it is.
 #[test]
@@ -284,7 +306,7 @@ fn reporting_changes_nothing_on_disk() {
     let leftover = dir.join("events.json.tmp");
     fs::write(&leftover, "partial").unwrap();
 
-    run(&s, s.fs.as_ref(), &[], true).unwrap();
+    run(&s, s.fs.as_ref(), &[], true).unwrap_err();
 
     assert!(leftover.is_file());
     assert!(!dir.join("metadata.json").exists());
@@ -299,7 +321,7 @@ fn the_named_fix_makes_the_conversations_it_covers_load() {
     run(
         &s,
         s.fs.as_ref(),
-        &["--fix", "rebuild-metadata", "--no-confirm"],
+        &["--fix", "rebuild-metadata", "--yes"],
         true,
     )
     .unwrap();
@@ -313,6 +335,71 @@ fn the_named_fix_makes_the_conversations_it_covers_load() {
     assert!(s.fs.scan().unwrap().is_empty());
 }
 
+#[test]
+fn the_fix_applies_only_to_the_conversations_named() {
+    let s = store();
+    let named = events_only(&s, "17941219991");
+    let other = events_only(&s, "17941219992");
+
+    run(
+        &s,
+        s.fs.as_ref(),
+        &["--fix", "rebuild-metadata", "--id=jp-c17941219991", "--yes"],
+        true,
+    )
+    .unwrap();
+
+    assert_eq!(
+        s.out.lock().as_str(),
+        "Applied `rebuild-metadata` to 1 conversation.\n"
+    );
+    assert!(named.join("metadata.json").is_file());
+    assert!(!other.join("metadata.json").exists());
+}
+
+// A named conversation the fix cannot help is reported, not skipped silently.
+#[test]
+fn a_named_conversation_the_fix_cannot_help_is_reported() {
+    let s = store();
+    let broken = s.conversations.join("17941219991");
+    fs::create_dir_all(&broken).unwrap();
+    fs::write(broken.join("metadata.json"), "not json").unwrap();
+
+    let error = run(
+        &s,
+        s.fs.as_ref(),
+        &[
+            "--fix",
+            "rebuild-metadata",
+            "--id=jp-c17941219991",
+            "--id=jp-c17941219992",
+            "--yes",
+        ],
+        true,
+    )
+    .unwrap_err();
+
+    assert_eq!(s.out.lock().as_str(), "");
+    assert_eq!(
+        error.message.as_deref(),
+        Some(
+            "Failed to apply `rebuild-metadata` to 2 of 2 conversations:\n\njp-c17941219991:  the \
+             fix does not apply\njp-c17941219992:  no conversation with this ID"
+        )
+    );
+    assert_eq!(
+        fs::read_to_string(broken.join("metadata.json")).unwrap(),
+        "not json"
+    );
+}
+
+#[test]
+fn naming_a_conversation_needs_a_fix() {
+    let error = parse_args::<Doctor>(&["--id=jp-c17941219991"]).unwrap_err();
+
+    assert_eq!(error.kind(), ErrorKind::MissingRequiredArgument);
+}
+
 // Writing to the user's conversations is never assumed when nobody can be asked.
 #[test]
 fn the_fix_needs_a_confirmation_when_nobody_can_answer() {
@@ -323,10 +410,7 @@ fn the_fix_needs_a_confirmation_when_nobody_can_answer() {
 
     assert_eq!(
         error.message.as_deref(),
-        Some(
-            "applying `rebuild-metadata` to 1 conversation needs a confirmation and nobody is \
-             available to give one; pass --no-confirm to apply it without asking"
-        )
+        Some("Cannot run `--fix` in a non-interactive environment.")
     );
     assert!(!dir.join("metadata.json").exists());
 }
@@ -337,13 +421,7 @@ fn the_fix_under_no_persist_writes_nothing() {
     let dir = events_only(&s, "17941219991");
     let dry = DryRunRecovery::new(Arc::clone(&s.fs) as _);
 
-    run(
-        &s,
-        &dry,
-        &["--fix", "rebuild-metadata", "--no-confirm"],
-        false,
-    )
-    .unwrap();
+    run(&s, &dry, &["--fix", "rebuild-metadata", "--yes"], false).unwrap();
 
     assert_eq!(
         s.out.lock().as_str(),
@@ -360,7 +438,7 @@ fn a_fix_with_nothing_to_cover_changes_nothing() {
     run(
         &s,
         s.fs.as_ref(),
-        &["--fix", "rebuild-metadata", "--no-confirm"],
+        &["--fix", "rebuild-metadata", "--yes"],
         true,
     )
     .unwrap();
@@ -430,13 +508,7 @@ fn the_fix_skips_and_reports_a_conversation_another_process_holds() {
         guard: Mutex::new(None),
     };
 
-    let error = run(
-        &s,
-        &recovery,
-        &["--fix", "rebuild-metadata", "--no-confirm"],
-        true,
-    )
-    .unwrap_err();
+    let error = run(&s, &recovery, &["--fix", "rebuild-metadata", "--yes"], true).unwrap_err();
 
     assert_eq!(
         s.out.lock().as_str(),

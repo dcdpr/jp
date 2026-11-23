@@ -20,10 +20,11 @@ use tracing::debug;
 use super::{
     ConversationFilter, ConversationIndexEntry, ConversationLockGuard, DiagnosedConversation,
     Diagnosis, LoadBackend, LockBackend, PersistBackend, Projection, RecoveryBackend, Removal,
-    Repair, RepairOutcome, SessionBackend, StoredConversation,
+    Repair, RepairOutcome, SessionBackend, StoredConversation, StrayEntry, StrayKind,
 };
 use crate::{
-    ARCHIVE_DIR, CONVERSATIONS_DIR, LoadError, Storage, conversation_dirs_for_id, dir_entries,
+    ARCHIVE_DIR, CONVERSATIONS_DIR, IMPORT_STAGING_PREFIX, LoadError, Storage,
+    conversation_dirs_for_id, dir_entries,
     error::Result,
     get_expiring_timestamp,
     load::load_json,
@@ -408,6 +409,7 @@ impl RecoveryBackend for FsStorageBackend {
             locations,
             state,
             title,
+            repair: applicable_repair(&dirs),
         })
     }
 
@@ -441,28 +443,31 @@ impl RecoveryBackend for FsStorageBackend {
             .invalid
             .into_iter()
             .filter(|entry| !self.storage.is_conversation_locked(&entry.id.to_string()))
-            .map(|conversation| {
-                let repair = self
-                    .repair_applies(&conversation.id, Repair::RebuildMetadata)
-                    .then_some(Repair::RebuildMetadata);
-                DiagnosedConversation {
-                    conversation,
-                    repair,
-                }
+            .map(|conversation| DiagnosedConversation {
+                repair: applicable_repair(&self.live_conversation_dirs(&conversation.id)),
+                conversation,
             })
             .collect();
-        let locations = |paths: Vec<Utf8PathBuf>| {
-            paths
-                .iter()
-                .map(|path| StorageLocation::of_path(path))
-                .collect()
-        };
 
-        Ok(Diagnosis {
-            invalid,
-            unrecognized: locations(found.unrecognized),
-            leftovers: locations(found.leftovers),
-        })
+        let mut strays: Vec<_> = found
+            .unrecognized
+            .iter()
+            .map(|path| stray_entry(path, StrayKind::NotAConversation))
+            .chain(found.leftovers.iter().map(|path| {
+                let staging = path
+                    .file_name()
+                    .is_some_and(|name| name.starts_with(IMPORT_STAGING_PREFIX));
+                let kind = if staging {
+                    StrayKind::ImportStaging
+                } else {
+                    StrayKind::TempFile
+                };
+                stray_entry(path, kind)
+            }))
+            .collect();
+        strays.sort_by(|a, b| a.location.as_str().cmp(b.location.as_str()));
+
+        Ok(Diagnosis { invalid, strays })
     }
 
     fn repair(
@@ -478,7 +483,7 @@ impl RecoveryBackend for FsStorageBackend {
         let Some(stored) = self.inspect(id) else {
             return Ok(RepairOutcome::NotFound);
         };
-        if !self.repair_applies(id, repair) {
+        if stored.repair != Some(repair) {
             return Ok(RepairOutcome::NotApplicable);
         }
         if !decide(&stored) {
@@ -497,19 +502,32 @@ impl RecoveryBackend for FsStorageBackend {
     }
 }
 
-impl FsStorageBackend {
-    /// Whether `repair` makes conversation `id` load: every live directory the
-    /// conversation has needs it.
-    ///
-    /// A conversation with one directory that loads and one that does not has
-    /// two copies that disagree, which no repair settles.
-    fn repair_applies(&self, id: &ConversationId, repair: Repair) -> bool {
-        let dirs = self.live_conversation_dirs(id);
-        match repair {
-            Repair::RebuildMetadata => {
-                !dirs.is_empty() && dirs.iter().all(|dir| missing_only_metadata(dir))
-            }
-        }
+/// The repair that makes the conversation in `dirs`, its live directories,
+/// load: one every directory needs.
+///
+/// A conversation with one directory that loads and one that does not has two
+/// copies that disagree, which no repair settles.
+fn applicable_repair(dirs: &[Utf8PathBuf]) -> Option<Repair> {
+    let rebuildable = !dirs.is_empty() && dirs.iter().all(|dir| missing_only_metadata(dir));
+    rebuildable.then_some(Repair::RebuildMetadata)
+}
+
+/// The stray entry at `path`, named for the directory in `conversations/` that
+/// it is or, for a file, that holds it.
+fn stray_entry(path: &Utf8Path, kind: StrayKind) -> StrayEntry {
+    let named = match kind {
+        StrayKind::TempFile => path.parent(),
+        StrayKind::NotAConversation | StrayKind::ImportStaging => Some(path),
+    };
+    let name = named
+        .and_then(Utf8Path::file_name)
+        .unwrap_or(path.as_str())
+        .to_owned();
+
+    StrayEntry {
+        name,
+        kind,
+        location: StorageLocation::of_path(path),
     }
 }
 

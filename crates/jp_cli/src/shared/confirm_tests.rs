@@ -236,6 +236,7 @@ fn stored(
         locations: vec![StorageLocation::new("/ws/.jp/conversations/10000")],
         state,
         title: title.map(str::to_owned),
+        repair: None,
     }
 }
 

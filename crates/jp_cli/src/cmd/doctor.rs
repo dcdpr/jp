@@ -9,17 +9,18 @@
 //! The checks live with the data they cover; this module renders their findings
 //! and applies the named fix through them.
 
-use std::{borrow::Cow, collections::HashSet};
+use std::{borrow::Cow, collections::HashSet, str::FromStr as _};
 
-use clap::{Arg, ArgMatches, Command, builder::PossibleValuesParser};
-use crossterm::style::Stylize as _;
+use clap::{Arg, ArgAction, ArgMatches, Command, builder::PossibleValuesParser};
+use crossterm::style::{Color, Stylize as _};
 use jp_conversation::ConversationId;
 use jp_inquire::{InlineOption, InlineSelect};
 use jp_printer::Printer;
 use jp_storage::{
-    backend::{Diagnosis, RecoveryBackend, Repair, RepairOutcome},
+    backend::{Diagnosis, RecoveryBackend, Repair, RepairOutcome, StrayEntry, StrayKind},
     validate::StorageLocation,
 };
+use jp_term::width::display_width;
 use serde::Serialize;
 use tracing::warn;
 
@@ -31,11 +32,21 @@ use crate::{
     shared::confirm::{ConfirmFlag, decide},
 };
 
+/// The exit status of a report that lists a problem.
+///
+/// Distinct from a run that failed (1) and from a mistyped command (2, which
+/// clap uses).
+const PROBLEMS_FOUND_EXIT_STATUS: u8 = 3;
+
 /// `jp doctor`.
 #[derive(Debug)]
 pub(crate) struct Doctor {
-    /// The fix `--fix` names, applied to every problem it covers.
+    /// The fix `--fix` names.
     fix: Option<Repair>,
+
+    /// The conversations `--id` names, to apply the fix to; every conversation
+    /// the fix covers when empty.
+    ids: Vec<ConversationId>,
 
     confirm: ConfirmFlag,
 }
@@ -43,13 +54,25 @@ pub(crate) struct Doctor {
 impl CommandArgs for Doctor {
     fn augment(cmd: Command) -> Command {
         ConfirmFlag::augment(
-            cmd.arg(
-                Arg::new("fix")
-                    .long("fix")
-                    .value_name("NAME")
-                    .value_parser(PossibleValuesParser::new(Repair::ALL.map(Repair::name)))
-                    .help("Apply the named fix to every problem it covers"),
-            ),
+            cmd.after_long_help("Exits with status 3 when the report lists a problem.")
+                .arg(
+                    Arg::new("fix")
+                        .long("fix")
+                        .value_name("NAME")
+                        .value_parser(PossibleValuesParser::new(Repair::ALL.map(Repair::name)))
+                        .help("Apply the named fix to every problem it covers"),
+                )
+                .arg(
+                    Arg::new("id")
+                        .long("id")
+                        .value_name("ID")
+                        .action(ArgAction::Append)
+                        .requires("fix")
+                        .value_parser(|id: &str| {
+                            ConversationId::from_str(id).map_err(|error| error.to_string())
+                        })
+                        .help("Apply the fix only to this conversation; repeat for more"),
+                ),
         )
     }
 
@@ -58,6 +81,12 @@ impl CommandArgs for Doctor {
             fix: matches
                 .get_one::<String>("fix")
                 .and_then(|name| Repair::from_name(name)),
+            ids: matches
+                .get_many::<ConversationId>("id")
+                .into_iter()
+                .flatten()
+                .copied()
+                .collect(),
             confirm: ConfirmFlag::from_matches(matches)?,
         })
     }
@@ -66,6 +95,8 @@ impl CommandArgs for Doctor {
 impl Doctor {
     /// Report what `recovery` finds, or apply the fix `--fix` names.
     ///
+    /// A report that lists a problem ends the run with
+    /// [`PROBLEMS_FOUND_EXIT_STATUS`].
     /// `interactive` says whether someone can answer the confirmation a fix
     /// asks for; `persists` is false under `--no-persist`, where `recovery`
     /// changes nothing.
@@ -78,18 +109,21 @@ impl Doctor {
     ) -> Output {
         let diagnosis = recovery.diagnose()?;
         let Some(fix) = self.fix else {
-            print_report(printer, &Report::from(&diagnosis));
-            return Ok(());
+            let report = Report::from(&diagnosis);
+            print_report(printer, &report);
+            if report.is_empty() {
+                return Ok(());
+            }
+            return Err(cmd::Error::from(PROBLEMS_FOUND_EXIT_STATUS).expected());
         };
 
-        let result = apply(
-            printer,
-            recovery,
-            &diagnosis,
-            fix,
-            self.confirm,
+        let fix = Fix {
+            repair: fix,
+            ids: self.ids,
+            confirm: self.confirm,
             interactive,
-        );
+        };
+        let result = fix.apply(printer, recovery, &diagnosis);
         if !persists {
             printer.println("");
             printer.println(no_persist_note());
@@ -103,18 +137,20 @@ pub(crate) struct Report<'a> {
     /// Conversations that do not load, one finding per stored copy.
     pub failures: Vec<Finding<'a>>,
 
-    /// What the conversation store holds that is not a conversation.
-    pub unrecognized: &'a [StorageLocation],
-
-    /// Leftovers of interrupted writes, which the next command's startup scan
-    /// removes.
-    pub leftovers: &'a [StorageLocation],
+    /// What the conversation store holds beside its conversations.
+    pub strays: &'a [StrayEntry],
 }
 
 /// A stored conversation that does not load, and the fix that makes it load.
 pub(crate) struct Finding<'a> {
     pub failure: LoadFailure<'a>,
     pub fix: Option<Repair>,
+}
+
+impl Report<'_> {
+    fn is_empty(&self) -> bool {
+        self.failures.is_empty() && self.strays.is_empty()
+    }
 }
 
 impl<'a> From<&'a Diagnosis> for Report<'a> {
@@ -128,8 +164,7 @@ impl<'a> From<&'a Diagnosis> for Report<'a> {
                     fix: diagnosed.repair,
                 })
                 .collect(),
-            unrecognized: &diagnosis.unrecognized,
-            leftovers: &diagnosis.leftovers,
+            strays: &diagnosis.strays,
         }
     }
 }
@@ -152,172 +187,129 @@ fn print_report(printer: &Printer, report: &Report<'_>) {
     printer.println(render_text(report));
 }
 
-/// Render the text report, grouped by section.
-pub(crate) fn render_text(report: &Report<'_>) -> String {
-    let blocks: Vec<_> = [
-        failures_block(&report.failures),
-        unrecognized_block(report.unrecognized),
-        leftovers_block(report.leftovers),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
+/// How serious a problem is, which colours its row.
+#[derive(Clone, Copy)]
+enum Severity {
+    /// Something the user's data is missing or cannot be read.
+    Error,
 
-    if blocks.is_empty() {
+    /// Something the store holds that it does not need.
+    Warning,
+}
+
+/// Orange, in the 256-colour palette.
+const WARNING_COLOR: Color = Color::AnsiValue(208);
+
+/// One problem, as a row of the report's table.
+struct Row {
+    severity: Severity,
+
+    /// What the problem is about.
+    target: String,
+
+    /// What is wrong with it.
+    problem: String,
+
+    /// The command that deals with it.
+    fix: String,
+}
+
+/// Render the text report: a table of problems under the section they belong
+/// to.
+pub(crate) fn render_text(report: &Report<'_>) -> String {
+    let rows: Vec<_> = conversation_rows(&report.failures)
+        .chain(report.strays.iter().map(stray_row))
+        .collect();
+    if rows.is_empty() {
         return "No problems found.".to_owned();
     }
 
-    format!("{}\n\n{}", "Conversations".bold(), blocks.join("\n\n"))
+    format!("# Report\n## Conversations\n{}", table(&rows))
 }
 
-/// The conversations that do not load, listed once each by the first copy's
-/// failure, then the fixes that make them load and the command that removes the
-/// rest.
-fn failures_block(findings: &[Finding<'_>]) -> Option<String> {
-    let mut seen = HashSet::new();
-    let findings: Vec<_> = findings
-        .iter()
-        .filter(|finding| seen.insert(finding.failure.id))
-        .collect();
-    if findings.is_empty() {
-        return None;
-    }
+/// Lay `rows` out in aligned columns, one bullet per row.
+fn table(rows: &[Row]) -> String {
+    let target_width = rows.iter().map(|row| display_width(&row.target)).max();
+    let problem_width = rows.iter().map(|row| display_width(&row.problem)).max();
+    let pad = |text: &str, width: Option<usize>| {
+        " ".repeat(width.unwrap_or_default() - display_width(text))
+    };
 
-    let count = findings.len();
-    let verb = if count == 1 { "fails" } else { "fail" };
-    let entries = findings
-        .iter()
-        .map(|finding| {
+    rows.iter()
+        .map(|row| {
+            let target = match row.severity {
+                Severity::Error => row.target.as_str().bold().red(),
+                Severity::Warning => row.target.as_str().bold().with(WARNING_COLOR),
+            };
             format!(
-                "- {}: {}",
-                finding.failure.id.to_string().bold().yellow(),
-                finding.failure.error
+                "- {target}{}  {}{}    {}",
+                pad(&row.target, target_width),
+                row.problem,
+                pad(&row.problem, problem_width),
+                row.fix
             )
         })
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    Some(format!(
-        "{} {verb} to load:\n\n{entries}\n\n{}",
-        counted(count, "conversation", "conversations")
-            .bold()
-            .yellow(),
-        failure_hints(&findings).join("\n")
-    ))
-}
-
-/// The commands that deal with `findings`: each fix that makes some of them
-/// load, then the removal of the ones no fix covers.
-fn failure_hints(findings: &[&Finding<'_>]) -> Vec<String> {
-    let count = findings.len();
-    let mut hints: Vec<_> = Repair::ALL
-        .into_iter()
-        .filter_map(|fix| {
-            let covered = findings
-                .iter()
-                .filter(|finding| finding.fix == Some(fix))
-                .count();
-            let subject = match covered {
-                0 => return None,
-                _ if covered < count => format!("{covered} of them"),
-                1 => "it".to_owned(),
-                _ => "them".to_owned(),
-            };
-            Some(format!(
-                "Run `jp doctor --fix {}` to make {subject} load.",
-                fix.name()
-            ))
-        })
-        .collect();
-
-    let unfixable: Vec<_> = findings
-        .iter()
-        .filter(|finding| finding.fix.is_none())
-        .map(|finding| finding.failure.id)
-        .collect();
-    if !unfixable.is_empty() {
-        let subject = match unfixable.len() {
-            _ if unfixable.len() < count => "the rest",
-            1 => "it",
-            _ => "them",
-        };
-        hints.push(format!(
-            "Run `jp conversation rm {}` to remove {subject}.",
-            joined_ids(&unfixable)
-        ));
-    }
-
-    hints
-}
-
-/// What the store holds that is not a conversation, and the command that
-/// removes it.
-fn unrecognized_block(locations: &[StorageLocation]) -> Option<String> {
-    if locations.is_empty() {
-        return None;
-    }
-
-    let count = locations.len();
-    let (verb, pronoun) = if count == 1 {
-        ("is not a conversation", "it")
-    } else {
-        ("are not conversations", "them")
-    };
-    let paths: Vec<_> = locations
-        .iter()
-        .map(|location| quoted(location.as_str()))
-        .collect();
-
-    Some(format!(
-        "{} in the conversation store {verb}:\n\n{}\n\nRun `rm -r {}` to remove {pronoun}.",
-        counted(count, "directory", "directories").bold().yellow(),
-        bullets(locations),
-        paths.join(" ")
-    ))
-}
-
-/// The leftovers of interrupted writes, which the next command removes.
-fn leftovers_block(locations: &[StorageLocation]) -> Option<String> {
-    if locations.is_empty() {
-        return None;
-    }
-
-    let subject = if locations.len() == 1 {
-        "1 leftover of an interrupted write".to_owned()
-    } else {
-        format!("{} leftovers of interrupted writes", locations.len())
-    };
-
-    Some(format!(
-        "{}, which the next `jp` command removes:\n\n{}",
-        subject.bold().yellow(),
-        bullets(locations)
-    ))
-}
-
-fn bullets(locations: &[StorageLocation]) -> String {
-    locations
-        .iter()
-        .map(|location| format!("- {location}"))
         .collect::<Vec<_>>()
         .join("\n")
 }
 
-/// `count` and the noun for it, e.g. `1 conversation` or `2 conversations`.
-fn counted(count: usize, one: &str, many: &str) -> String {
-    format!("{count} {}", if count == 1 { one } else { many })
+/// A row per conversation that does not load, by its first copy's failure.
+fn conversation_rows<'a>(findings: &'a [Finding<'_>]) -> impl Iterator<Item = Row> + 'a {
+    let mut seen = HashSet::new();
+    findings
+        .iter()
+        .filter(move |finding| seen.insert(finding.failure.id))
+        .map(|finding| {
+            let id = finding.failure.id;
+            let fix = match finding.fix {
+                Some(repair) => format!("jp doctor --id={id} --fix {}", repair.name()),
+                None => format!("jp c rm {id}"),
+            };
+
+            Row {
+                severity: Severity::Error,
+                target: id.to_string(),
+                problem: finding.failure.error.to_string(),
+                fix,
+            }
+        })
 }
 
-fn joined_ids(ids: &[ConversationId]) -> String {
-    ids.iter()
-        .map(ToString::to_string)
-        .collect::<Vec<_>>()
-        .join(" ")
+fn stray_row(stray: &StrayEntry) -> Row {
+    Row {
+        severity: Severity::Warning,
+        target: stray.name.clone(),
+        problem: stray_kind(stray.kind).message.to_owned(),
+        fix: format!("rm -r {}", quoted(stray.location.as_str())),
+    }
 }
 
 /// `text` quoted for a POSIX shell when it needs quoting.
 fn quoted(text: &str) -> String {
     shlex::try_quote(text).map_or_else(|_| text.to_owned(), Cow::into_owned)
+}
+
+/// The fixed fields of a stray entry's problem.
+struct StrayProblem {
+    code: &'static str,
+    message: &'static str,
+}
+
+const fn stray_kind(kind: StrayKind) -> StrayProblem {
+    match kind {
+        StrayKind::NotAConversation => StrayProblem {
+            code: "not_a_conversation",
+            message: "directory is not a conversation",
+        },
+        StrayKind::TempFile => StrayProblem {
+            code: "unused_temporary_file",
+            message: "unused temporary file",
+        },
+        StrayKind::ImportStaging => StrayProblem {
+            code: "unused_import_directory",
+            message: "unused import directory",
+        },
+    }
 }
 
 /// Render one JSON record per problem.
@@ -335,163 +327,163 @@ pub(crate) fn render_json(report: &Report<'_>, pretty: bool) -> serde_json::Resu
         )?);
     }
 
-    let located = [
-        (report.unrecognized, UNRECOGNIZED),
-        (report.leftovers, LEFTOVER),
-    ];
-    for (locations, kind) in located {
-        for location in locations {
-            let record = LocationRecord {
-                level: kind.level,
-                code: kind.code,
-                message: kind.message,
-                context: LocationContext { location },
-            };
-            records.push(if pretty {
-                serde_json::to_string_pretty(&record)?
-            } else {
-                serde_json::to_string(&record)?
-            });
-        }
+    for stray in report.strays {
+        let problem = stray_kind(stray.kind);
+        let record = StrayRecord {
+            level: "warning",
+            code: problem.code,
+            message: problem.message,
+            context: StrayContext {
+                name: &stray.name,
+                location: &stray.location,
+            },
+        };
+        records.push(if pretty {
+            serde_json::to_string_pretty(&record)?
+        } else {
+            serde_json::to_string(&record)?
+        });
     }
 
     Ok(records)
 }
 
-/// The fixed fields of a problem found at a location.
-#[derive(Clone, Copy)]
-struct LocationKind {
+/// A stray entry's problem, as a JSON record.
+#[derive(Serialize)]
+struct StrayRecord<'a> {
     level: &'static str,
     code: &'static str,
     message: &'static str,
-}
-
-const UNRECOGNIZED: LocationKind = LocationKind {
-    level: "warning",
-    code: "not_a_conversation",
-    message: "not a conversation",
-};
-
-const LEFTOVER: LocationKind = LocationKind {
-    level: "info",
-    code: "interrupted_write_leftover",
-    message: "leftover of an interrupted write",
-};
-
-/// A problem found at a location, as a JSON record.
-#[derive(Serialize)]
-struct LocationRecord<'a> {
-    level: &'static str,
-    code: &'static str,
-    message: &'static str,
-    context: LocationContext<'a>,
+    context: StrayContext<'a>,
 }
 
 #[derive(Serialize)]
-struct LocationContext<'a> {
+struct StrayContext<'a> {
+    name: &'a str,
     location: &'a StorageLocation,
 }
 
-/// Apply `fix` to every conversation the diagnosis says it covers, after one
-/// confirmation for all of them.
-///
-/// A conversation the fix cannot change is skipped, and the run ends with an
-/// error naming each one.
-fn apply(
-    printer: &Printer,
-    recovery: &dyn RecoveryBackend,
-    diagnosis: &Diagnosis,
-    fix: Repair,
+/// A run of `--fix`: the repair, and what to apply it to.
+struct Fix {
+    repair: Repair,
+
+    /// The conversations `--id` names; every conversation the diagnosis says
+    /// the repair covers when empty.
+    ids: Vec<ConversationId>,
+
     confirm: ConfirmFlag,
     interactive: bool,
-) -> Output {
-    let mut seen = HashSet::new();
-    let ids: Vec<_> = diagnosis
-        .invalid
-        .iter()
-        .filter(|diagnosed| diagnosed.repair == Some(fix))
-        .map(|diagnosed| diagnosed.conversation.id)
-        .filter(|id| seen.insert(*id))
-        .collect();
-    if ids.is_empty() {
-        printer.println(format!("Nothing to fix with `{}`.", fix.name()));
-        return Ok(());
-    }
-
-    let subject = counted(ids.len(), "conversation", "conversations");
-    if confirm.preference() != Some(false) && !ask(printer, fix, &subject, interactive)? {
-        printer.println("Nothing changed.");
-        return Ok(());
-    }
-
-    let mut failed = vec![];
-    for id in &ids {
-        match recovery.repair(id, fix, &mut |_| true)? {
-            RepairOutcome::Repaired => {}
-            outcome => failed.push((*id, outcome)),
-        }
-    }
-
-    let applied = ids.len() - failed.len();
-    if applied > 0 {
-        printer.println(format!(
-            "Applied `{}` to {}.",
-            fix.name(),
-            counted(applied, "conversation", "conversations")
-        ));
-    }
-    if failed.is_empty() {
-        return Ok(());
-    }
-
-    let entries = failed
-        .iter()
-        .map(|(id, outcome)| format!("{id}:  {}", why_not(*outcome)))
-        .collect::<Vec<_>>()
-        .join("\n");
-    Err(format!(
-        "Failed to apply `{}` to {} of {subject}:\n\n{entries}",
-        fix.name(),
-        failed.len()
-    )
-    .into())
 }
 
-/// Ask whether to apply `fix` to `subject`, the conversations it covers.
-///
-/// Fails when nobody can answer: writing to the user's conversations is never
-/// assumed.
-fn ask(
-    printer: &Printer,
-    fix: Repair,
-    subject: &str,
-    interactive: bool,
-) -> Result<bool, cmd::Error> {
-    if !interactive {
-        return Err(format!(
-            "applying `{}` to {subject} needs a confirmation and nobody is available to give one; \
-             pass --no-confirm to apply it without asking",
-            fix.name()
+impl Fix {
+    /// Apply the repair to every conversation it is for, after one confirmation
+    /// for all of them.
+    ///
+    /// A conversation the repair cannot change is skipped, and the run ends
+    /// with an error naming each one.
+    fn apply(
+        self,
+        printer: &Printer,
+        recovery: &dyn RecoveryBackend,
+        diagnosis: &Diagnosis,
+    ) -> Output {
+        let name = self.repair.name();
+        let ids = self.targets(diagnosis);
+        if ids.is_empty() {
+            printer.println(format!("Nothing to fix with `{name}`."));
+            return Ok(());
+        }
+
+        let subject = counted(ids.len(), "conversation", "conversations");
+        if self.confirm.preference() != Some(false) && !self.ask(printer, &subject)? {
+            printer.println("Nothing changed.");
+            return Ok(());
+        }
+
+        let mut failed = vec![];
+        for id in &ids {
+            match recovery.repair(id, self.repair, &mut |_| true)? {
+                RepairOutcome::Repaired => {}
+                outcome => failed.push((*id, outcome)),
+            }
+        }
+
+        let applied = ids.len() - failed.len();
+        if applied > 0 {
+            printer.println(format!(
+                "Applied `{name}` to {}.",
+                counted(applied, "conversation", "conversations")
+            ));
+        }
+        if failed.is_empty() {
+            return Ok(());
+        }
+
+        let entries = failed
+            .iter()
+            .map(|(id, outcome)| format!("{id}:  {}", why_not(*outcome)))
+            .collect::<Vec<_>>()
+            .join("\n");
+        Err(format!(
+            "Failed to apply `{name}` to {} of {subject}:\n\n{entries}",
+            failed.len()
         )
-        .into());
+        .into())
     }
 
-    let options = vec![
-        InlineOption::new('y', "yes, apply it"),
-        InlineOption::new('n', "no, change nothing"),
-    ];
-    let select = InlineSelect::new(format!("Apply `{}` to {subject}?", fix.name()), options)
-        .with_default('n');
+    /// The conversations to apply the repair to, each once.
+    fn targets(&self, diagnosis: &Diagnosis) -> Vec<ConversationId> {
+        let mut seen = HashSet::new();
+        if !self.ids.is_empty() {
+            return self
+                .ids
+                .iter()
+                .copied()
+                .filter(|id| seen.insert(*id))
+                .collect();
+        }
 
-    Ok(decide(select.prompt(&mut printer.prompt_writer()))?)
+        diagnosis
+            .invalid
+            .iter()
+            .filter(|diagnosed| diagnosed.repair == Some(self.repair))
+            .map(|diagnosed| diagnosed.conversation.id)
+            .filter(|id| seen.insert(*id))
+            .collect()
+    }
+
+    /// Ask whether to apply the repair to `subject`, the conversations it is
+    /// for.
+    ///
+    /// Fails when nobody can answer: writing to the user's conversations is
+    /// never assumed.
+    fn ask(&self, printer: &Printer, subject: &str) -> Result<bool, cmd::Error> {
+        if !self.interactive {
+            return Err("Cannot run `--fix` in a non-interactive environment.".into());
+        }
+
+        let options = vec![
+            InlineOption::new('y', "yes, apply it"),
+            InlineOption::new('n', "no, change nothing"),
+        ];
+        let question = format!("Apply `{}` to {subject}?", self.repair.name());
+        let select = InlineSelect::new(question, options).with_default('n');
+
+        Ok(decide(select.prompt(&mut printer.prompt_writer()))?)
+    }
+}
+
+/// `count` and the noun for it, e.g. `1 conversation` or `2 conversations`.
+fn counted(count: usize, one: &str, many: &str) -> String {
+    format!("{count} {}", if count == 1 { one } else { many })
 }
 
 /// Why a repair left a conversation unchanged.
 const fn why_not(outcome: RepairOutcome) -> &'static str {
     match outcome {
         RepairOutcome::Locked => "in use by another process",
-        RepairOutcome::NotFound => "no longer stored",
-        RepairOutcome::NotApplicable => "the fix no longer applies",
+        RepairOutcome::NotFound => "no conversation with this ID",
+        RepairOutcome::NotApplicable => "the fix does not apply",
         RepairOutcome::Declined => "skipped",
         RepairOutcome::Repaired => "repaired",
     }

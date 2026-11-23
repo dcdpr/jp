@@ -110,13 +110,38 @@ pub struct Diagnosis {
     /// Stored conversations that fail validation, sorted by location.
     pub invalid: Vec<DiagnosedConversation>,
 
-    /// What the store holds alongside its conversations that is not a
-    /// conversation, sorted.
-    pub unrecognized: Vec<StorageLocation>,
+    /// What the store holds beside its conversations, sorted by location.
+    pub strays: Vec<StrayEntry>,
+}
 
-    /// Leftovers of the store's own interrupted writes, which hold no user data
-    /// and which the next [`RecoveryBackend::scan`] removes, sorted.
-    pub leftovers: Vec<StorageLocation>,
+/// Something the store holds beside its conversations.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StrayEntry {
+    /// The name the store lists it under: for the filesystem backend, the
+    /// directory in `conversations/` that it is, or that holds it.
+    pub name: String,
+
+    pub kind: StrayKind,
+    pub location: StorageLocation,
+}
+
+/// What a [`StrayEntry`] is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StrayKind {
+    /// An entry whose name is not a conversation's.
+    NotAConversation,
+
+    /// A file an interrupted write left beside a conversation's parts.
+    ///
+    /// It holds no user data, and the next [`RecoveryBackend::scan`] removes
+    /// it.
+    TempFile,
+
+    /// A copy of a conversation an interrupted import left behind.
+    ///
+    /// The conversation it copies is still stored, and the next
+    /// [`RecoveryBackend::scan`] removes it.
+    ImportStaging,
 }
 
 /// A stored conversation that fails validation, and how it can be made to load.
@@ -162,6 +187,10 @@ pub struct StoredConversation {
     /// The title stored in the conversation's metadata, when the metadata loads
     /// and has one.
     pub title: Option<String>,
+
+    /// The repair that makes the conversation load, when it does not and one
+    /// does.
+    pub repair: Option<Repair>,
 }
 
 /// The outcome of [`RecoveryBackend::remove`].
@@ -219,7 +248,6 @@ impl RecoveryBackend for NullRecoveryBackend {
 /// [`RecoveryBackend::remove`] and [`RecoveryBackend::repair`] ask `decide` as
 /// the backend would and report its answer, without taking a lock or changing
 /// the store.
-/// A repair is taken to apply: the caller picks it from a [`Diagnosis`].
 #[derive(Debug, Clone)]
 pub struct DryRunRecovery {
     inner: Arc<dyn RecoveryBackend>,
@@ -260,11 +288,12 @@ impl RecoveryBackend for DryRunRecovery {
     fn repair(
         &self,
         id: &ConversationId,
-        _repair: Repair,
+        repair: Repair,
         decide: &mut dyn FnMut(&StoredConversation) -> bool,
     ) -> Result<RepairOutcome> {
         Ok(match self.inner.inspect(id) {
             None => RepairOutcome::NotFound,
+            Some(stored) if stored.repair != Some(repair) => RepairOutcome::NotApplicable,
             Some(stored) if decide(&stored) => RepairOutcome::Repaired,
             Some(_) => RepairOutcome::Declined,
         })
