@@ -1,6 +1,6 @@
 # RFD 139: Browser UIs in Rust with Leptos
 
-- **Status**: Discussion
+- **Status**: Accepted
 - **Category**: Decision
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-11-18
