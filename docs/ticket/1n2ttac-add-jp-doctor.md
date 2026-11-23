@@ -40,13 +40,6 @@ told to, with no fixing logic of its own.
       and the directory name
 - [x] Reports leftover `.tmp` files and import staging directories, which the
       startup scan of any other command removes
-- [ ] Lists conversations with no turns and a query draft as unsent drafts, as a
-      notice: what a run interrupted before its turn leaves, and what the
-      one-time trash restore made of the draft-only directories older versions
-      trashed
-- [ ] Suggests removing all listed unsent drafts with one command, `jp
-      conversation rm <id> <id> ...`, and shows each draft's first line so the
-      user sees what they would lose
 - [ ] Validates the archive partition (`conversations/.archive/`), which startup
       validation never reads, and reports archived conversations that fail to
       load
@@ -59,3 +52,15 @@ told to, with no fixing logic of its own.
 - [ ] Workspace and config sections: start with the checks the conversation
       section's structure makes easy (missing or malformed workspace ID, config
       files that fail to parse), and leave the rest to follow-ups
+
+## Comments
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-23T23:11:20Z
+
+Removed the two unsent-draft items.
+A conversation with no turns and a query draft beside it loads fine: it is not
+an error or a warning, so `jp doctor` does not report it.
+Such conversations show in `jp c ls` like any other, and `jp c rm` removes them.
