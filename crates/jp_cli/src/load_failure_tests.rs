@@ -68,9 +68,8 @@ fn one_failure_is_listed_in_the_singular() {
     );
 }
 
-// However many there are: the report is the only place a user learns of them.
 #[test]
-fn every_failure_is_listed() {
+fn up_to_five_failures_are_listed() {
     let missing = missing_metadata();
     let corrupt = corrupt_metadata();
     let failures = [
@@ -79,23 +78,48 @@ fn every_failure_is_listed() {
         failure("17636257523", &missing),
         failure("17636257524", &missing),
         failure("17636257525", &missing),
-        failure("17636257526", &missing),
     ];
 
     let expected = [
-        "6 conversations failed to load:",
+        "5 conversations failed to load:",
         "",
         "- jp-c17636257521: missing metadata.json",
         "- jp-c17636257522: metadata.json: invalid JSON at line 1, column 2",
         "- jp-c17636257523: missing metadata.json",
         "- jp-c17636257524: missing metadata.json",
         "- jp-c17636257525: missing metadata.json",
-        "- jp-c17636257526: missing metadata.json",
         "",
         "Run `jp conversation rm jp-c17636257521 jp-c17636257522 jp-c17636257523 jp-c17636257524 \
-         jp-c17636257525 jp-c17636257526` to remove them.",
+         jp-c17636257525` to remove them.",
     ];
     assert_eq!(plain(&failures), Some(expected.join("\n")));
+}
+
+// The report follows every command, so past five it is a count, and `jp doctor`
+// lists them with what fixes each.
+#[test]
+fn more_than_five_failures_point_at_doctor() {
+    let missing = missing_metadata();
+    let failures = [
+        failure("17636257521", &missing),
+        failure("17636257522", &missing),
+        failure("17636257523", &missing),
+        failure("17636257524", &missing),
+        failure("17636257525", &missing),
+        failure("17636257526", &missing),
+    ];
+
+    assert_eq!(
+        plain(&failures).as_deref(),
+        Some("6 conversations failed to load. Run `jp doctor` to list them.")
+    );
+    assert_eq!(
+        render_text(&failures).unwrap(),
+        format!(
+            "{} failed to load. Run `jp doctor` to list them.",
+            "6 conversations".bold().yellow()
+        )
+    );
 }
 
 // The count and each conversation are what the user acts on, so they carry the
@@ -263,7 +287,7 @@ fn nothing_prints_when_every_conversation_loads() {
 
 // Scripts get every failure, never the human report's summary.
 #[test]
-fn json_lists_every_failure_past_three() {
+fn json_lists_every_failure_past_five() {
     let error = missing_metadata();
     let records = render_json(
         &[
@@ -271,10 +295,12 @@ fn json_lists_every_failure_past_three() {
             failure("17636257522", &error),
             failure("17636257523", &error),
             failure("17636257524", &error),
+            failure("17636257525", &error),
+            failure("17636257526", &error),
         ],
         false,
     )
     .unwrap();
 
-    assert_eq!(records.len(), 4);
+    assert_eq!(records.len(), 6);
 }

@@ -46,7 +46,7 @@ told to, with no fixing logic of its own.
 - [x] Lists directories under `conversations/` whose name is not a conversation
       ID (`ValidationResult::unrecognized`), which the load-failure report
       leaves out, suggesting `rm -r <path>` for each
-- [ ] The load-failure report printed after every command
+- [x] The load-failure report printed after every command
       (`jp_cli::load_failure::render_text`) lists at most 5 failures again, and
       above that ends with "Run `jp doctor` to list them"
 - [ ] Workspace and config sections: start with the checks the conversation

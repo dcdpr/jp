@@ -114,10 +114,15 @@ impl<'a> From<&'a InvalidConversation> for LoadFailure<'a> {
     }
 }
 
+/// The most failures the text report lists; past it, the report is a count
+/// pointing at `jp doctor`.
+const MAX_LISTED: usize = 5;
+
 /// Render the text report, or `None` when nothing failed to load.
 ///
-/// Every failure is listed with its ID and error, followed by the `jp
-/// conversation rm` command that removes them.
+/// Up to [`MAX_LISTED`] failures are listed with their ID and error, followed
+/// by the `jp conversation rm` command that removes them.
+/// More than that is reported as a count, and `jp doctor` lists them.
 pub(crate) fn render_text(failures: &[LoadFailure<'_>]) -> Option<String> {
     let count = failures.len();
     let noun = match count {
@@ -125,6 +130,14 @@ pub(crate) fn render_text(failures: &[LoadFailure<'_>]) -> Option<String> {
         1 => "conversation",
         _ => "conversations",
     };
+    let subject = format!("{count} {noun}");
+
+    if count > MAX_LISTED {
+        return Some(format!(
+            "{} failed to load. Run `jp doctor` to list them.",
+            subject.bold().yellow()
+        ));
+    }
 
     let entries = failures
         .iter()
@@ -137,7 +150,6 @@ pub(crate) fn render_text(failures: &[LoadFailure<'_>]) -> Option<String> {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    let subject = format!("{count} {noun}");
 
     Some(format!(
         "{} failed to load:\n\n{entries}\n\n{}",
