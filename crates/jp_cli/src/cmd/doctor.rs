@@ -163,6 +163,10 @@ pub(crate) struct Report<'a> {
 pub(crate) struct Finding<'a> {
     pub failure: LoadFailure<'a>,
     pub fix: Option<Repair>,
+
+    /// Whether a command naming the conversation's ID reaches another copy of
+    /// it, so this copy is dealt with by its location.
+    pub shadowed: bool,
 }
 
 impl Report<'_> {
@@ -180,6 +184,7 @@ impl<'a> From<&'a Diagnosis> for Report<'a> {
                 .map(|diagnosed| Finding {
                     failure: LoadFailure::from(&diagnosed.conversation),
                     fix: diagnosed.repair,
+                    shadowed: diagnosed.shadowed,
                 })
                 .collect(),
             strays: &diagnosis.strays,
@@ -305,6 +310,9 @@ fn table(rows: &[Row]) -> String {
 
 /// Build one table row per unique conversation ID in the given partition
 /// (`archived`), using the first failing copy's error.
+///
+/// A shadowed copy gets a row of its own, whose command removes it by its
+/// location: a command naming the ID would act on the other copy.
 fn conversation_rows<'a>(
     findings: &'a [Finding<'_>],
     archived: bool,
@@ -313,10 +321,13 @@ fn conversation_rows<'a>(
     findings
         .iter()
         .filter(move |finding| finding.failure.archived == archived)
-        .filter(move |finding| seen.insert(finding.failure.id))
+        .filter(move |finding| finding.shadowed || seen.insert(finding.failure.id))
         .map(|finding| {
             let id = finding.failure.id;
             let fix = match finding.fix {
+                _ if finding.shadowed => {
+                    format!("rm -r {}", quoted(finding.failure.location.as_str()))
+                }
                 Some(repair) => format!("jp doctor --id={id} --fix {}", repair.name()),
                 None => format!("jp c rm {id}"),
             };

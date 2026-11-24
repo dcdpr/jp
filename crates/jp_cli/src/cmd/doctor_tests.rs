@@ -7,7 +7,7 @@ use camino::Utf8PathBuf;
 use camino_tempfile::Utf8TempDir;
 use clap::error::ErrorKind;
 use crossterm::style::{Color, Stylize as _};
-use jp_conversation::ConversationId;
+use jp_conversation::{Conversation, ConversationId};
 use jp_printer::{OutputFormat, Printer, SharedBuffer};
 use jp_storage::{
     Error as StorageError,
@@ -56,6 +56,7 @@ fn failure<'a>(dirname: &str, error: &'a ValidationError, fix: Option<Repair>) -
             archived: false,
         },
         fix,
+        shadowed: false,
     }
 }
 
@@ -72,6 +73,21 @@ fn archived_failure<'a>(
             archived: true,
         },
         fix,
+        shadowed: false,
+    }
+}
+
+/// An archived copy at `location` of a conversation that also has a live copy.
+fn shadowed_failure<'a>(dirname: &str, error: &'a ValidationError, location: &str) -> Finding<'a> {
+    Finding {
+        failure: LoadFailure {
+            id: ConversationId::try_from_dirname(dirname).unwrap(),
+            location: StorageLocation::new(location),
+            error,
+            archived: true,
+        },
+        fix: None,
+        shadowed: true,
     }
 }
 
@@ -233,6 +249,39 @@ fn a_report_of_only_archived_problems_has_only_their_section() {
     );
 }
 
+// `jp c rm <id>` reaches the live copy, so an archived copy beside one is
+// removed by its path, and each copy gets a row of its own.
+#[test]
+fn an_archived_copy_beside_a_live_one_is_removed_by_its_path() {
+    let corrupt = corrupt_events("17941219992");
+    let report = Report {
+        failures: vec![
+            shadowed_failure(
+                "17941219992",
+                &corrupt,
+                "/ws/.jp/conversations/.archive/17941219992",
+            ),
+            shadowed_failure(
+                "17941219992",
+                &corrupt,
+                "/Users/me/Library/Application Support/jp/conversations/.archive/17941219992",
+            ),
+        ],
+        strays: &[],
+    };
+
+    assert_eq!(
+        plain(&report),
+        "\
+# Report
+## Archived conversations
+- jp-c17941219992  events.json: invalid JSON at line 1, column 2    rm -r \
+         /ws/.jp/conversations/.archive/17941219992
+- jp-c17941219992  events.json: invalid JSON at line 1, column 2    rm -r \
+         '/Users/me/Library/Application Support/jp/conversations/.archive/17941219992'"
+    );
+}
+
 #[test]
 fn an_archived_conversation_s_record_says_it_is_archived() {
     let corrupt = corrupt_events("17941219992");
@@ -345,7 +394,7 @@ fn the_json_report_is_one_typed_record_per_problem() {
 }
 
 struct Store {
-    _tmp: Utf8TempDir,
+    tmp: Utf8TempDir,
     fs: Arc<FsStorageBackend>,
     conversations: Utf8PathBuf,
     printer: Printer,
@@ -359,7 +408,7 @@ fn store() -> Store {
     let (printer, out, _err) = Printer::memory(OutputFormat::Text);
 
     Store {
-        _tmp: tmp,
+        tmp,
         fs,
         conversations: storage.join("conversations"),
         printer,
@@ -441,6 +490,26 @@ fn an_archived_conversation_that_fails_to_load_is_reported() {
         s.out.lock().as_str(),
         "# Report\n## Archived conversations\n- jp-c17941219991  metadata.json: invalid JSON at \
          line 1, column 2    jp c rm jp-c17941219991\n"
+    );
+}
+
+// Running the suggested command must leave the live conversation, which loads,
+// where it is.
+#[test]
+fn an_archived_copy_beside_a_live_conversation_is_not_removed_by_id() {
+    let s = store();
+    let id = ConversationId::try_from_dirname("17941219991").unwrap();
+    s.fs.write_test_conversation(&id, &Conversation::default());
+    let archived = s.conversations.join(".archive").join("17941219991");
+    fs::create_dir_all(&archived).unwrap();
+    fs::write(archived.join("metadata.json"), "not json").unwrap();
+
+    run(&s, s.fs.as_ref(), &[], true).unwrap_err();
+
+    assert_eq!(
+        s.out.lock().replace(s.tmp.path().as_str(), "[TMP]"),
+        "# Report\n## Archived conversations\n- jp-c17941219991  metadata.json: invalid JSON at \
+         line 1, column 2    rm -r [TMP]/.jp/conversations/.archive/17941219991\n"
     );
 }
 

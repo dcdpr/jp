@@ -317,12 +317,42 @@ fn an_archived_copy_beside_a_live_copy_gets_no_repair() {
     let found: Vec<_> = diagnosis
         .invalid
         .iter()
-        .map(|diagnosed| (diagnosed.conversation.path(), diagnosed.repair))
+        .map(|diagnosed| {
+            (
+                diagnosed.conversation.path(),
+                diagnosed.repair,
+                diagnosed.shadowed,
+            )
+        })
         .collect();
     assert_eq!(found, vec![
-        (archived, None),
-        (live, Some(Repair::RebuildMetadata))
+        (archived, None, true),
+        (live, Some(Repair::RebuildMetadata), false)
     ]);
+}
+
+// A lookup by ID reaches the live copy, so a command naming the ID would act
+// on the live conversation, not on the broken archived copy.
+#[test]
+fn an_archived_copy_beside_a_live_copy_that_loads_is_shadowed() {
+    let (_tmp, fs, conversations) = setup();
+    fs.write_test_conversation(&id("17941219991"), &Conversation::default());
+    let archived = broken(&conversations.join(".archive"), "17941219991");
+
+    let diagnosis = fs.diagnose().unwrap();
+
+    let found: Vec<_> = diagnosis
+        .invalid
+        .iter()
+        .map(|diagnosed| {
+            (
+                diagnosed.conversation.path(),
+                diagnosed.repair,
+                diagnosed.shadowed,
+            )
+        })
+        .collect();
+    assert_eq!(found, vec![(archived, None, true)]);
 }
 
 #[test]
