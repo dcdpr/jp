@@ -301,8 +301,8 @@ fn tag(recording: bool) -> String {
     }
 }
 
-/// One conversation, answered from `script` when there is one and by the
-/// runtime, under `login`, when there is not.
+/// Run one conversation against `script` in replay mode, or against the live
+/// runtime under `login` when recording.
 async fn attempt(
     policy: CachePolicy,
     tag: &str,
@@ -336,14 +336,13 @@ fn tokens(snapshot: &Value, key: &str) -> u64 {
 /// Replayed by default, so this costs nothing and proves the recorded traffic
 /// still decodes into the events and usage JP reports.
 /// Under `RECORD=1` it reaches the runtime instead, and adds the measurements
-/// only a live service can answer — that an entry was created, that a second
+/// only a live service can answer: that an entry was created, that a second
 /// session reconstructed it, and that turning caching off stops both.
 /// Those cannot be replayed: a fixture compared against itself passes whatever
 /// it contains.
 #[tokio::test]
 async fn cache_reconstruction() {
     let recording = cassette::recording();
-    // A replay reaches no runtime, so it reads no login either.
     let login = recording.then(recording_login).flatten();
     if recording {
         // Reaching the runtime with a stale adapter or a lapsed login produces

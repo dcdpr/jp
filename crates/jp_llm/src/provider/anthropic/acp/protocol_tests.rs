@@ -438,9 +438,9 @@ fn recovered_connection_does_not_explain_a_later_failure() {
     );
 }
 
-/// Claude Code tags a server fault mid-response `server_error` too, and
-/// continues the turn after it the same way, so it is held and retried like a
-/// lost connection.
+/// Claude Code also reports mid-response server faults as `server_error` and
+/// attempts to continue the turn, so an unrecovered server fault is reported as
+/// transient just like a dropped connection.
 #[test]
 fn server_fault_the_runtime_gave_up_on_is_retryable() {
     let mut state = state();

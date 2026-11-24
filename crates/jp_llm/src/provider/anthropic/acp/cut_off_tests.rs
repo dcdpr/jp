@@ -13,32 +13,32 @@
 //! [`a_turn_claude_code_continues_after_a_cut_completes`] replays the same
 //! fixture through JP's protocol translation to verify that recovery.
 //!
-//! A second fixture (`cut_off_text.jsonl`) interrupts a response while its text
-//! streams and before any of its blocks has completed.
-//! Claude Code reports no error for that cut: it closes the text block, ends
+//! A second fixture (`cut_off_text.jsonl`) interrupts a response while text is
+//! streaming and before any content block has completed.
+//! Claude Code reports no error for that drop: it closes the text block, ends
 //! the response, emits an `api_retry` system message, and re-issues the
-//! request, which writes the text again from the start.
-//! JP has streamed and committed the text of the first attempt by then, so the
-//! conversation holds that text followed by the retried answer;
-//! [`a_response_claude_code_retries_keeps_the_text_of_both_attempts`] replays
-//! the fixture to pin that.
+//! request, which streams the text again from the beginning.
+//! Because JP has already streamed and committed the first attempt's text, the
+//! conversation ends up containing both the partial text and the retried
+//! answer; [`a_response_claude_code_retries_keeps_the_text_of_both_attempts`]
+//! replays the fixture to record that behavior.
 //!
-//! A third fixture (`cut_off_reasoned_text.jsonl`) interrupts the text of a
-//! response whose thinking block has completed.
+//! A third fixture (`cut_off_reasoned_text.jsonl`) interrupts a response's text
+//! stream after its thinking block has completed.
 //! Claude Code closes the text block, ends the response without an assistant
-//! message for that text, and sends the model a synthetic user message asking
-//! it to resume, with no error and no `api_retry`.
-//! The next response writes the answer from the start, so JP again holds the
-//! text of both attempts;
+//! message for the interrupted text, and sends a synthetic user message asking
+//! the model to resume, with no error and no `api_retry`.
+//! The follow-up response writes the answer from the beginning, so JP again
+//! commits the text of both attempts;
 //! [`a_response_claude_code_resumes_keeps_the_text_of_both_attempts`] replays
-//! the fixture to pin that.
+//! the fixture to record that behavior.
 //!
-//! Holding the text of both attempts is a defect (T-1r592pw).
-//! The two replay tests pin it so its fix has assertions to change.
+//! Committing the text of both attempts is tracked in T-1r592pw.
 //!
 //! When `RECORD=1` is set, the runtime connects to the Anthropic API through a
-//! local forward proxy that drops all active `CONNECT` tunnels at the point its
-//! [`Scenario`] names (simulating a connection drop such as system sleep).
+//! local forward proxy that drops all active `CONNECT` tunnels at the point
+//! specified by [`Scenario::cut_at`] (simulating a connection drop such as
+//! system sleep).
 //! Without `RECORD`, the tests replay the fixtures without spawning a proxy,
 //! tool server, or adapter process.
 //! The fixtures also exercise `session/request_permission` and tool-call
@@ -96,37 +96,34 @@ const LOOKUP: &str = "lookup";
 /// Tool whose call is interrupted in the [`TOOL_CALL`] scenario.
 const STORE: &str = "store";
 
-/// One recorded cut: what the model is asked for and where the connection
-/// drops.
+/// Test scenario defining the prompt, model parameters, and point at which the
+/// proxy drops the connection.
 struct Scenario {
-    /// Name of the recording under `tests/fixtures/acp`.
     fixture: &'static str,
     prompt: &'static str,
     reasoning: ReasoningConfig,
-    /// Output-token limit of each API request, with room for the hundred
-    /// integers to be generated twice (once before the drop and once after).
-    /// Reasoning tokens count toward it.
+    /// Per-request output-token limit, sized to fit both the interrupted
+    /// response and the retry (including reasoning tokens).
     max_tokens: u32,
     cut_at: CutAt,
 }
 
-/// The point in a response at which the proxy drops the connection.
+/// Point in the response stream at which the proxy drops active tunnels.
 #[derive(Clone, Copy)]
 enum CutAt {
-    /// The content block of the [`STORE`] call opens.
+    /// When the [`STORE`] tool-call content block starts.
     StoreCall,
 
-    /// The [`TEXT_DELTAS_BEFORE_CUT`]th text delta arrives after [`LOOKUP`] was
+    /// On the [`TEXT_DELTAS_BEFORE_CUT`]th text delta after [`LOOKUP`] is
     /// dispatched.
     AnswerText,
 
-    /// The [`TEXT_DELTAS_BEFORE_CUT`]th text delta arrives in a response that
-    /// opened a thinking block first.
+    /// On the [`TEXT_DELTAS_BEFORE_CUT`]th text delta of a response that starts
+    /// with a thinking block.
     TextAfterThinking,
 }
 
-/// Text deltas JP receives before a cut that lands in a text block, so the
-/// interrupted block holds text by then.
+/// Number of text deltas to let through before dropping a streaming text block.
 const TEXT_DELTAS_BEFORE_CUT: usize = 5;
 
 /// Two tool calls in a single response: a fast call (`lookup`) that completes
@@ -169,14 +166,13 @@ const REASONED_TEXT: Scenario = Scenario {
     cut_at: CutAt::TextAfterThinking,
 };
 
-/// The answer the [`TEXT`] and [`REASONED_TEXT`] scenarios ask for.
+/// Expected text response for the [`TEXT`] and [`REASONED_TEXT`] scenarios.
 const INTEGERS: &str = "1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 \
                         28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 \
                         52 53 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68 69 70 71 72 73 74 75 \
                         76 77 78 79 80 81 82 83 84 85 86 87 88 89 90 91 92 93 94 95 96 97 98 99 \
                         100";
 
-/// Outline entry marking the point at which the probe cut the connection.
 const CUT: &str = "cut every connection to the API";
 
 /// Hosts bypassed by the proxy (`NO_PROXY`) so local MCP tool calls connect
@@ -495,8 +491,9 @@ fn blocks(content: &Value) -> Value {
 /// Build a snapshot summary entry for an SDK message, or `None` for content
 /// delta events.
 ///
-/// Omits what varies across recordings (IDs, timestamps, token usage, streaming
-/// deltas, and `thinking_tokens` progress messages) as well as null fields.
+/// Omits unstable fields that vary across recordings (IDs, timestamps, token
+/// usage, streaming deltas, and `thinking_tokens` progress messages) as well as
+/// null fields.
 fn entry(message: &Value) -> Option<Value> {
     let mut entry = match message["type"].as_str()? {
         "stream_event" => stream_entry(&message["event"])?,
@@ -533,7 +530,6 @@ fn entry(message: &Value) -> Option<Value> {
     Some(entry)
 }
 
-/// Build the [`entry`] of a stream event, or `None` for a content delta.
 fn stream_entry(event: &Value) -> Option<Value> {
     Some(match event["type"].as_str()? {
         "message_start" | "message_stop" | "content_block_stop" => {
@@ -552,7 +548,6 @@ fn stream_entry(event: &Value) -> Option<Value> {
     })
 }
 
-/// Whether this SDK message opens the content block of the [`STORE`] call.
 fn opens_store_call(message: &Value) -> bool {
     let event = &message["event"];
     message["type"] == "stream_event"
@@ -560,7 +555,6 @@ fn opens_store_call(message: &Value) -> bool {
         && event["content_block"]["name"].as_str() == Some(tool_name(STORE).as_str())
 }
 
-/// Whether this SDK message carries text of a response's text block.
 fn is_text_delta(message: &Value) -> bool {
     let event = &message["event"];
     message["type"] == "stream_event"
@@ -568,12 +562,10 @@ fn is_text_delta(message: &Value) -> bool {
         && event["delta"]["type"] == "text_delta"
 }
 
-/// Whether this SDK message starts a response.
 fn starts_response(message: &Value) -> bool {
     message["type"] == "stream_event" && message["event"]["type"] == "message_start"
 }
 
-/// Whether this SDK message opens a thinking block.
 fn opens_thinking_block(message: &Value) -> bool {
     let event = &message["event"];
     message["type"] == "stream_event"
@@ -581,11 +573,11 @@ fn opens_thinking_block(message: &Value) -> bool {
         && event["content_block"]["type"] == "thinking"
 }
 
-/// Decides which SDK message the cut fires on, once per turn.
+/// Tracks stream state to trigger the proxy connection drop at `cut_at` once
+/// per turn.
 struct Trigger {
     cut_at: CutAt,
     lookup_dispatched: bool,
-    /// Whether the current response has opened a thinking block.
     thinking_seen: bool,
     text_deltas: usize,
     fired: bool,
@@ -602,7 +594,6 @@ impl Trigger {
         }
     }
 
-    /// Note the tool a permission request named.
     fn dispatched(&mut self, tool: Option<&Value>) {
         self.lookup_dispatched |= tool == Some(&json!(tool_name(LOOKUP)));
     }
@@ -637,7 +628,7 @@ impl Trigger {
 }
 
 /// Build a handler that records SDK messages into `outline`, approves every
-/// tool permission request, and triggers `cut` at the point `cut_at` names.
+/// tool permission request, and triggers `cut` at `cut_at`.
 ///
 /// Unlike `transport::inbound`, this handler acknowledges error SDK messages
 /// without aborting so the session stays open to observe Claude Code's
@@ -835,13 +826,12 @@ async fn outline(scenario: &Scenario) -> Vec<Value> {
     turn
 }
 
-/// Position of the first entry in `turn` that `found` accepts.
 fn position(turn: &[Value], found: impl Fn(&Value) -> bool) -> Option<usize> {
     turn.iter().position(found)
 }
 
-/// Replay the fixture of `scenario` through `transport::drive` and return the
-/// events JP's protocol translation produced for the turn.
+/// Replay `scenario`'s fixture through `transport::drive` and return the
+/// resulting stream events.
 async fn driven(scenario: &Scenario) -> Vec<Event> {
     let model = model_details(&"claude-opus-5".parse().unwrap());
     let prepared = PreparedRequest::new(&model, query(scenario)).unwrap();
@@ -881,11 +871,8 @@ async fn driven(scenario: &Scenario) -> Vec<Event> {
     events.into_iter().collect::<Result<Vec<_>, _>>().unwrap()
 }
 
-/// Return the text of each assistant message `events` commit, in commit order.
-///
-/// Folds the events through [`EventBuilder`], the buffer the turn loop commits
-/// responses from: a flush commits one block, and a finish commits whatever is
-/// still open.
+/// Return the assistant message texts committed by `events` via
+/// [`EventBuilder`], in commit order.
 fn committed_messages(events: Vec<Event>) -> Vec<String> {
     let mut builder = EventBuilder::new();
     let mut committed = vec![];
@@ -980,14 +967,13 @@ async fn a_turn_claude_code_continues_after_a_cut_completes() {
     );
 }
 
-/// Verify that Claude Code retries on its own when the API connection drops
-/// while a response's text streams and none of its blocks has completed.
+/// Verify that Claude Code retries automatically when the API connection drops
+/// while text is streaming and before any content block has completed.
 ///
-/// In the snapshot, the cut is followed by a `content_block_stop` and a
-/// `message_stop` with no `message_delta` between them, an `api_retry` system
-/// message, and a new `message_start` whose response writes the text again from
-/// the start.
-/// No assistant message carries an `error`.
+/// In the snapshot, the cut is followed by `content_block_stop` and
+/// `message_stop` (with no `message_delta` between them), an `api_retry` system
+/// message, and a new `message_start` that streams the text again from the
+/// beginning without emitting an assistant error message.
 ///
 /// To re-record against a live subscription:
 ///
@@ -998,8 +984,7 @@ async fn a_turn_claude_code_continues_after_a_cut_completes() {
 async fn turn_after_a_cut_off_text_block() {
     let turn = outline(&TEXT).await;
 
-    // Verify that the cut landed in a response that was still streaming: a
-    // response that had already finished needs no second request.
+    // Verify that a new response started after the connection drop.
     let cut = position(&turn, |entry| entry.get("probe") == Some(&json!(CUT)));
     let resumed = turn
         .iter()
@@ -1013,16 +998,11 @@ async fn turn_after_a_cut_off_text_block() {
     insta::assert_json_snapshot!("turn_after_a_cut_off_text_block", turn);
 }
 
-/// Replay the [`TEXT`] fixture through `transport::drive` and verify what JP
-/// commits for a response Claude Code retried: the text of the interrupted
-/// attempt, then the complete answer of the retry.
-///
-/// Claude Code discards the interrupted attempt and JP does not, so the
-/// conversation holds the start of the answer twice.
+/// Replay the [`TEXT`] fixture through `transport::drive` and verify that JP
+/// commits the partial text from the interrupted attempt followed by the full
+/// text from Claude Code's retry (T-1r592pw).
 #[tokio::test]
 async fn a_response_claude_code_retries_keeps_the_text_of_both_attempts() {
-    // Under `RECORD`, the recording test is rewriting the fixture this replay
-    // reads.
     if cassette::recording() {
         return;
     }
@@ -1030,8 +1010,9 @@ async fn a_response_claude_code_retries_keeps_the_text_of_both_attempts() {
     assert_keeps_the_text_of_both_attempts(driven(&TEXT).await);
 }
 
-/// Assert that `events` complete a turn whose last two committed messages are
-/// the start of [`INTEGERS`], cut short, and then the whole of it.
+/// Assert that `events` end in [`FinishReason::Completed`] and that the last
+/// two committed messages are a non-empty prefix of [`INTEGERS`] followed by
+/// the full [`INTEGERS`] string.
 fn assert_keeps_the_text_of_both_attempts(events: Vec<Event>) {
     assert_eq!(
         events.last(),
@@ -1044,7 +1025,6 @@ fn assert_keeps_the_text_of_both_attempts(events: Vec<Event>) {
     };
     assert_eq!(answer, INTEGERS);
 
-    // The interrupted attempt got part of the way through the same answer.
     let interrupted = interrupted.trim_end();
     assert!(
         !interrupted.is_empty() && interrupted != INTEGERS && INTEGERS.starts_with(interrupted),
@@ -1052,15 +1032,14 @@ fn assert_keeps_the_text_of_both_attempts(events: Vec<Event>) {
     );
 }
 
-/// Verify that Claude Code asks the model to resume when the API connection
-/// drops while a response's text streams, after the response's thinking block
-/// completed.
+/// Verify that Claude Code sends a synthetic resume prompt when the API
+/// connection drops while text is streaming after a completed thinking block.
 ///
-/// In the snapshot, the cut is followed by a `content_block_stop` and a
-/// `message_stop` with no `message_delta` between them, and by a synthetic
+/// In the snapshot, the cut is followed by `content_block_stop` and
+/// `message_stop` (with no `message_delta` between them), then a synthetic
 /// `user` message asking the model to resume.
-/// No assistant message carries the interrupted text or an `error`, and the
-/// next response thinks again and writes the text from the start.
+/// No assistant message is emitted for the interrupted text, and the next
+/// response reasons again and writes the text from the beginning.
 ///
 /// To re-record against a live subscription:
 ///
@@ -1071,8 +1050,6 @@ fn assert_keeps_the_text_of_both_attempts(events: Vec<Event>) {
 async fn turn_after_a_cut_off_reasoned_text() {
     let turn = outline(&REASONED_TEXT).await;
 
-    // Verify that the cut landed in text that followed a thinking block, and
-    // that Claude Code answered it by asking the model to resume.
     let thinking = position(&turn, |entry| entry["block"] == "thinking");
     let cut = position(&turn, |entry| entry.get("probe") == Some(&json!(CUT)));
     let resume = position(&turn, |entry| entry["synthetic"] == true);
@@ -1086,15 +1063,10 @@ async fn turn_after_a_cut_off_reasoned_text() {
 }
 
 /// Replay the [`REASONED_TEXT`] fixture through `transport::drive` and verify
-/// what JP commits for a response Claude Code asked the model to resume: the
-/// text of the interrupted attempt, then the complete answer.
-///
-/// The model starts the answer over, and JP has already committed the
-/// interrupted text, so the conversation holds the start of the answer twice.
+/// that JP commits the partial text from the interrupted attempt followed by
+/// the full text from the resumed response (T-1r592pw).
 #[tokio::test]
 async fn a_response_claude_code_resumes_keeps_the_text_of_both_attempts() {
-    // Under `RECORD`, the recording test is rewriting the fixture this replay
-    // reads.
     if cassette::recording() {
         return;
     }

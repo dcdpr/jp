@@ -10,70 +10,70 @@
 - **Label**: type=bug
 
 On the Claude Code (ACP) route, when the API connection drops while a response's
-text streams, Claude Code discards that text and has the model produce the
+text is streaming, Claude Code discards the partial text and requests the
 response again.
-JP has rendered and committed the text by then, because the `content_block_stop`
-Claude Code sends for the interrupted block commits it.
-The conversation then holds the start of the answer twice: the interrupted text,
-followed by the complete answer.
-Both are sent back to the model on the next request.
+By that point JP has already rendered and committed the partial text, because
+Claude Code sends a `content_block_stop` for the interrupted block.
+The conversation ends up holding the start of the answer twice (the interrupted
+prefix followed by the complete answer), and both messages are sent back to the
+model on the next turn.
 
-Two recordings show it, each replayed through `transport::drive` by a test in
-`crates/jp_llm/src/provider/anthropic/acp/cut_off_tests.rs`:
+Two recordings in `crates/jp_llm/src/provider/anthropic/acp/cut_off_tests.rs`
+reproduce this through `transport::drive`:
 
-- `cut_off_text.jsonl`: a cut before any block of the response completed.
-  Claude Code closes the text block, sends `message_stop`, reports a `system`
+- `cut_off_text.jsonl`: connection dropped before any content block in the
+  response completed.
+  Claude Code closes the text block, sends `message_stop`, emits a `system`
   message with subtype `api_retry`, and re-issues the request.
-  Pinned by `a_response_claude_code_retries_keeps_the_text_of_both_attempts`.
-- `cut_off_reasoned_text.jsonl`: reasoning on, and a cut mid-text after the
-  thinking block completed.
-  Claude Code closes the text block, sends `message_stop`, emits no assistant
-  message for the text, and sends the model a synthetic user message: "Your
+  Tested by `a_response_claude_code_retries_keeps_the_text_of_both_attempts`.
+- `cut_off_reasoned_text.jsonl`: reasoning enabled, with the connection dropped
+  mid-text after the thinking block completed.
+  Claude Code closes the text block, sends `message_stop` without emitting an
+  assistant message for the text, and sends a synthetic user message: "Your
   response above was cut off mid-stream.
   Resume directly from where it stops [...]
   If none of it survived, answer the request from the start."
-  The model thinks again and writes the answer from the start.
-  Pinned by `a_response_claude_code_resumes_keeps_the_text_of_both_attempts`.
+  The model reasons again and writes the answer from the start.
+  Tested by `a_response_claude_code_resumes_keeps_the_text_of_both_attempts`.
 
-In both, the interrupted response ends with `message_stop` and no
-`message_delta` carrying a stop reason, and no assistant message carries an
+In both cases, the interrupted response ends with `message_stop` without a
+preceding `message_delta` stop reason, and no assistant message carries an
 `error`.
 
-The API-key route does not have this problem.
-JP's own retry commits the partial response and rebuilds the request from
-committed history, so the model continues from it (`handle_stream_error` in
+The API-key route does not have this problem: JP's retry handler commits the
+partial response and rebuilds the request from committed history so the model
+continues from where it stopped (`handle_stream_error` in
 `crates/jp_cli/src/cmd/query/stream/retry.rs`).
 
 ## Fix
 
-Make JP the only side that recovers from a lost connection, so the ACP route
-behaves like the API-key route: Claude Code reports the failure, and JP's retry
-commits the partial response and restarts the request from committed history.
+Have JP handle connection recovery on the ACP route the same way it does on the
+API-key route: let Claude Code report the failure, and let JP commit the partial
+response and restart the request from committed history.
 
-None of the settings this needs is verified.
-Settle each with a probe recording (the `Scenario` harness in
-`cut_off_tests.rs`) before changing code:
+Verify which settings control Claude Code's retry and resume behavior using the
+`Scenario` harness in `cut_off_tests.rs` before changing production code:
 
-- [ ] Check whether `CLAUDE_CODE_MAX_RETRIES=0` is accepted, whether it stops
-      the mid-stream re-send in `cut_off_text.jsonl`, and what Claude Code
-      reports instead.
-- [ ] Check whether any setting stops the synthetic resume prompt in
-      `cut_off_reasoned_text.jsonl`.
-      Claude Code's error reference documents the prompt (up to three in a row
-      in a non-interactive session) without naming a switch.
-- [ ] Check what the `server_error` path in `cut_off.jsonl` does under those
-      settings, since JP holds that report until the SDK result.
-- [ ] Set the settings in `options::environment`, and map the failure Claude
-      Code then reports to a retryable `StreamError`.
-- [ ] Replace the two `keeps_the_text_of_both_attempts` tests with ones that
-      assert a single copy of the answer.
+- [ ] Check whether `CLAUDE_CODE_MAX_RETRIES=0` is respected, whether it
+      disables the mid-stream retry in `cut_off_text.jsonl`, and what error
+      Claude Code reports instead.
+- [ ] Check whether any setting disables the synthetic resume prompt in
+      `cut_off_reasoned_text.jsonl` (Claude Code's error reference documents up
+      to three consecutive resume prompts in non-interactive sessions without
+      naming a toggle).
+- [ ] Check how the `server_error` path in `cut_off.jsonl` behaves under those
+      settings, since JP holds `server_error` until the final SDK result.
+- [ ] Configure the verified settings in `options::environment` and map the
+      resulting Claude Code error to a retryable `StreamError`.
+- [ ] Update the two `keeps_the_text_of_both_attempts` tests to assert that only
+      a single copy of the answer is committed.
 
-If the resume prompt cannot be turned off, retract on that path instead: treat a
-`message_stop` with no preceding stop reason as an abandoned response, and
-remove what its last block committed, the way `FinishReason::Refused` revokes
-content.
-That corrects the conversation but not the terminal, which has already shown the
-text.
+If the synthetic resume prompt cannot be disabled, retract the partial block on
+that path instead: treat a `message_stop` with no preceding stop reason as an
+abandoned response and revoke the last committed block (similar to how
+`FinishReason::Refused` revokes content).
+This keeps the conversation history clean, though the partial text has already
+been printed to the terminal.
 
-Each JP retry on this route starts a new adapter process and reloads the
-transcript, so a retry costs more here than on the API-key route.
+Note that each JP retry on the ACP route spawns a new adapter process and
+reloads the transcript, so retries are heavier than on the API-key route.
