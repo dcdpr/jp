@@ -128,6 +128,14 @@ impl Page {
     fn compose(self) -> Compose {
         self.compose.get_value()
     }
+
+    /// Whether the page was left, which disposes of its state.
+    ///
+    /// A task the page spawned checks this after each `await` before it touches
+    /// the page: reading a disposed signal panics.
+    fn gone(self) -> bool {
+        self.view.try_with_untracked(|_| ()).is_none()
+    }
 }
 
 /// The classes of what holds the page's columns, centered together: the file's
@@ -237,13 +245,15 @@ fn columns(page: Page, inline: Memo<Option<Inline>>, site: Memo<Option<Site>>) -
 /// the file is drawn in `pane`, at its place among what else sits there; or out
 /// of the file's text, to the end of `stage`, when `under` is `None`, or none
 /// of the text is drawn.
+///
+/// Returns whether `host` sits in the file's text.
 fn seat_under(
     page: Page,
     host: &Element,
     pane: Option<HtmlDivElement>,
     stage: &Element,
     under: Option<([usize; 2], Order)>,
-) {
+) -> bool {
     let seat = under.zip(pane).and_then(|((bytes, order), pane)| {
         page.file.with_untracked(|file| {
             let source = &file.as_ref()?.as_ref().ok()?.source;
@@ -251,10 +261,13 @@ fn seat_under(
         })
     });
 
-    match seat {
-        Some((seat, order)) => seat::take(host, &seat, order),
-        None => seat::park(host, stage),
-    }
+    let Some((seat, order)) = seat else {
+        seat::park(host, stage);
+        return false;
+    };
+    seat::take(host, &seat, order);
+
+    true
 }
 
 /// Poll the review for as long as the page shows it, asking again at once when
@@ -301,8 +314,9 @@ async fn read(
         .filter(|(version, _)| *version == asked)
         .map(|(_, revision)| revision);
     let answer = client::get::<DetailReply>(&client::detail_url(id, since, asked)).await;
-    // Another version was asked for meanwhile, whose comments sit elsewhere.
-    if page.view.with_untracked(|view| view.version) != asked {
+    // The page was left meanwhile, or another version was asked for, whose
+    // comments sit elsewhere.
+    if page.view.try_with_untracked(|view| view.version) != Some(asked) {
         return;
     }
     let reply = match answer {
@@ -399,7 +413,8 @@ fn fetch_diff(page: Page, id: String) {
         let id = id.clone();
         spawn_local(async move {
             let answer = client::get::<DiffView>(&client::diff_url(&id, span, &file)).await;
-            if key.get_untracked() == Some((span, file, latest)) {
+            // `None` once the page was left.
+            if key.try_get_untracked() == Some(Some((span, file, latest))) {
                 page.diff.set(Some(answer));
             }
         });
@@ -431,7 +446,8 @@ fn fetch_file(page: Page, id: String) {
         let id = id.clone();
         spawn_local(async move {
             let answer = client::get::<FileReply>(&client::file_url(&id, version, &file)).await;
-            if key.get_untracked() == Some((version, file)) {
+            // `None` once the page was left.
+            if key.try_get_untracked() == Some(Some((version, file))) {
                 page.file.set(Some(answer));
             }
         });

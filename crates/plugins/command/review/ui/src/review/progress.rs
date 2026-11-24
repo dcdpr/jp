@@ -4,7 +4,7 @@
 
 use jp_review_api::Approval;
 use leptos_dom::helpers::request_animation_frame;
-use reactive_graph::{computed::Memo, effect::Effect, prelude::*};
+use reactive_graph::{computed::Memo, effect::Effect, prelude::*, signal::RwSignal};
 use tachys::{
     html::element::{Div, div, li, p, section, span, ul},
     prelude::*,
@@ -52,13 +52,18 @@ fn read_to(page: Page) -> Option<[usize; 2]> {
 
 /// The line that says how far the file shown was read, in an element kept under
 /// the last block read.
+///
+/// The line shows only while the element sits in the file's text: a file whose
+/// text before the line read renders as nothing has no block to put it under,
+/// and the end of the file would say the whole of it was read.
 pub(super) fn read_line(page: Page) -> impl RenderHtml {
     let host = NodeRef::<Div>::new();
     let read = Memo::new(move |_| read_to(page).is_some());
-    seat(page, host);
+    let seated = RwSignal::new(false);
+    seat(page, host, seated);
 
     div().node_ref(host).class(PLAIN).child(move || {
-        read.get().then(|| {
+        (read.get() && seated.get()).then(|| {
             let remove = write::writable(page).then(|| {
                 widget::small_action(Tone::Quiet, "Remove", move || write::forget_read(page))
             });
@@ -78,8 +83,12 @@ pub(super) fn read_line(page: Page) -> impl RenderHtml {
 }
 
 /// Keep the element `host` holds under the last block read of the file shown,
-/// and out of the file's text while there is none.
-fn seat(page: Page, host: NodeRef<Div>) {
+/// and out of the file's text while there is none, saying in `seated` which.
+///
+/// The last line read may render as nothing, as a blank line does, so the
+/// element goes under the last text rendered from the file up to the end of
+/// that line.
+fn seat(page: Page, host: NodeRef<Div>, seated: RwSignal<bool>) {
     let bytes = Memo::new(move |_| read_to(page));
 
     Effect::new(move |_| {
@@ -94,8 +103,8 @@ fn seat(page: Page, host: NodeRef<Div>) {
         drop(request_animation_frame(move || {
             if let (Some(host), Some(stage)) = (host.get_untracked(), stage) {
                 // After a comment on the block, which was read too.
-                let under = bytes.map(|bytes| (bytes, Order::Last));
-                seat_under(page, &host, pane, &stage, under);
+                let under = bytes.map(|[_, end]| ([0, end], Order::Last));
+                seated.set(seat_under(page, &host, pane, &stage, under));
             }
         }));
     });

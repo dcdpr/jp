@@ -125,6 +125,20 @@ fn under_a_nested_items_text_is_at_the_end_of_that_item() {
     assert_eq!(children(&inner), ["SPAN.", "DIV.host"]);
 }
 
+/// The read marker of a blank line goes under the text before it, which is what
+/// was read: the blank line between the paragraphs is line 2, bytes 7 to 7.
+#[wasm_bindgen_test]
+fn the_text_up_to_a_blank_line_ends_in_the_block_before_it() {
+    let pane = pane(&[FIRST, SECOND]);
+    let (_home, host) = host();
+
+    assert_eq!(under(&pane, PARAGRAPHS, [7, 7]), None, "the line alone");
+    let seat = under(&pane, PARAGRAPHS, [0, 7]).unwrap();
+    take(&host, &seat, Order::Last);
+
+    assert_eq!(children(&pane), ["DIV.jp-text", "DIV.host", "DIV.jp-text"]);
+}
+
 #[wasm_bindgen_test]
 fn bytes_with_no_text_drawn_have_no_seat() {
     let pane = pane(&[FIRST, SECOND]);

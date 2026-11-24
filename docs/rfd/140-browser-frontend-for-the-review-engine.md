@@ -288,8 +288,8 @@ both:
 
 - **Approve** marks the passage approved and highlights it.
   Clicking an approved passage offers to take the approval back.
-  Once the passage changes in a later version it loses its highlight, and the
-  comments panel lists it as changed since it was approved.
+  While the passage reads otherwise in the version shown it has no highlight,
+  and the comments panel lists it as changed since it was approved.
 - **Read to here** draws a line across the file under the block the selection
   ends in: the reviewer has read this far, and no further.
   A file has one such line, which setting it again moves.

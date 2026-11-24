@@ -112,7 +112,7 @@ fn an_edit_patches_the_draft_comment() {
     assert_eq!(call("R-1h4k2m9", &draft), Call {
         method: Method::Patch,
         url: "/api/reviews/R-1h4k2m9/comments/3".to_owned(),
-        body: Some(r#"{"body":"Name it.","suggestion":"is bold"}"#.to_owned()),
+        body: Some(r#"{"body":"Name it.","suggestion":"is bold","draft":"comment"}"#.to_owned()),
     });
 }
 

@@ -43,7 +43,7 @@ jobs:
           # build. See `docs/rfd/139-browser-uis-in-rust-with-leptos.md`.
           browser='^crates/plugins/command/[^/]+/(api|ui)/'
           renderer='^crates/internal/md-html/'
-          build='^Cargo\.lock$|^rust-toolchain\.toml$|^justfile$|^\.github/workflows/web\.yml$'
+          build='^Cargo\.toml$|^Cargo\.lock$|^rust-toolchain\.toml$|^justfile$|^\.github/workflows/web\.yml$'
 
           if grep -Eq "$browser|$renderer|$build" changed-files.txt; then
             echo "web=true" >> "$GITHUB_OUTPUT"

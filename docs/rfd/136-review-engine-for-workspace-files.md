@@ -226,9 +226,10 @@ the text they did not comment on:
 - An **approval** marks a range as read and fine as it stands.
   It is advisory: the assistant is told to leave the passage as it is unless
   acting on a comment requires changing it, and to say so when it does.
-  An approval is anchored like a comment and holds only while its anchor
-  carries: once a line of the passage changes, the passage is no longer
-  approved.
+  An approval is anchored like a comment, and holds while the passage reads as
+  it did when it was approved.
+  While a line of it reads otherwise, the passage is not approved, and the
+  approval is kept as changed since until the reviewer takes it back.
 - A **read-until line**, one per file, marks the last line the reviewer has
   read.
   The lines after it are unread, so the absence of comments there means nothing

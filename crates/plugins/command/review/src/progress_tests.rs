@@ -127,6 +127,49 @@ fn an_approval_is_taken_back_by_its_number() {
     assert_eq!(left, [2]);
 }
 
+/// A page that read approval 2 before it was taken back can't take back the
+/// approval made since.
+#[test]
+fn a_number_taken_back_is_not_given_to_the_next_approval() {
+    let mut progress = Progress::default();
+    progress
+        .approve(lines("2-3"), "Jane".to_owned(), at(1))
+        .unwrap();
+    progress
+        .approve(lines("7"), "Jane".to_owned(), at(2))
+        .unwrap();
+    progress.unapprove(2).unwrap();
+
+    assert_eq!(
+        progress.approve(lines("9"), "Jane".to_owned(), at(3)),
+        Ok(3)
+    );
+    assert_eq!(progress.unapprove(2), Err(Refusal::Approval(2)));
+
+    let left: Vec<u32> = progress
+        .approvals
+        .iter()
+        .map(|approval| approval.number)
+        .collect();
+    assert_eq!(left, [1, 3]);
+}
+
+/// A review written before the highest number was stored numbers on from its
+/// approvals.
+#[test]
+fn approvals_stored_without_the_highest_number_are_numbered_on_from() {
+    let mut progress: Progress = serde_json::from_str(
+        r#"{"approvals": [{"number": 4, "author": "Jane", "created_at": "2026-11-17T10:01:00Z",
+            "anchor": {"version": 1, "path": "a.md", "range": "2"}}]}"#,
+    )
+    .unwrap();
+
+    assert_eq!(
+        progress.approve(lines("9"), "Jane".to_owned(), at(3)),
+        Ok(5)
+    );
+}
+
 #[test]
 fn a_file_is_read_to_one_line_at_a_time() {
     let mut progress = Progress::default();
@@ -195,6 +238,7 @@ fn progress_is_stored_beside_the_comments() {
       }
     }
   ],
+  "last_approval": 1,
   "read_until": {
     "a.md": {
       "version": 1,

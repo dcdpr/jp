@@ -154,10 +154,12 @@ pub(crate) fn edit(
         let anchor = at
             .map(|at| anchor_at(ctx, review, blobs, Some(at), written))
             .transpose()?;
+        // The command acts on the comment as it is, whichever draft it holds.
         let edit = Edit {
             anchor,
             suggestion: replace,
             body: body.map(|body| body.trim().to_owned()),
+            expects: None,
         };
         review
             .edit(comment.number, edit)

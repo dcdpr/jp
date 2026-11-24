@@ -90,8 +90,17 @@ fn an_edit_names_only_what_changes() {
             anchor: None,
             body: Some("Rename it.".to_owned()),
             suggestion: None,
+            draft: None,
         },
         r#"{"body":"Rename it."}"#,
+    );
+    pinned(
+        &EditRequest {
+            body: Some("Rename it.".to_owned()),
+            draft: Some(Draft::Comment),
+            ..EditRequest::default()
+        },
+        r#"{"body":"Rename it.","draft":"comment"}"#,
     );
 }
 

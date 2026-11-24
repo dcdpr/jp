@@ -2348,17 +2348,23 @@ build-ui PLUGIN PROFILE="wasm-release": (_rustup_target "wasm32-unknown-unknown"
         wasm-release) out="${target}/ui/{{PLUGIN}}" ;;
         *) out="${target}/ui/{{PLUGIN}}.{{PROFILE}}" ;;
     esac
-    # Compiled beside the bundle and moved in, so a stylesheet Tailwind refuses
-    # stops here, before the last build is cleared.
+    # Built whole beside the last build and swapped in, so a page loading
+    # meanwhile gets one build or the other, and a stylesheet Tailwind refuses
+    # leaves the last build as it was.
+    next="${out}.next"
+    rm -rf "$next"
+    mkdir -p "$next"
     "${target}/tools/tailwindcss-{{tailwindcss_version}}" --minify \
-        --input "${dir}/style.css" --output "${out}.css"
-    rm -rf "$out"
-    mkdir -p "$out"
-    wasm-bindgen --target web --no-typescript --out-dir "$out" \
+        --input "${dir}/style.css" --output "${next}/style.css"
+    wasm-bindgen --target web --no-typescript --out-dir "$next" \
         "${target}/wasm32-unknown-unknown/{{PROFILE}}/${library}.wasm"
-    mv "${out}.css" "${out}/style.css"
-    cat "$out"/*.js "$out"/*.wasm "$out/style.css" | cksum | cut -d ' ' -f 1 > "$out/build.tmp"
-    mv "$out/build.tmp" "$out/build"
+    cat "$next"/*.js "$next"/*.wasm "$next/style.css" | cksum | cut -d ' ' -f 1 > "$next/build"
+    rm -rf "${out}.old"
+    if [ -d "$out" ]; then
+        mv "$out" "${out}.old"
+    fi
+    mv "$next" "$out"
+    rm -rf "${out}.old"
     echo "Built the browser UI of jp-{{PLUGIN}} into ${out}."
 
 # Install the `wasm-bindgen` CLI, `wasm-bindgen-test-runner` included, at the

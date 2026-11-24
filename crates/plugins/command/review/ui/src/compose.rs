@@ -259,6 +259,11 @@ impl Compose {
     pub(crate) fn refreshed(self) {
         self.refresh.update(|count| *count = count.wrapping_add(1));
     }
+
+    /// Whether the page writing this was left, which disposes of its state.
+    fn gone(self) -> bool {
+        self.draft.try_with_untracked(|_| ()).is_none()
+    }
 }
 
 /// The range `draft` writes a new comment on.
@@ -305,6 +310,9 @@ fn save(compose: Compose) {
     compose.saving.set(true);
     spawn_local(async move {
         let answer = client::send::<Value>(call).await;
+        if compose.gone() {
+            return;
+        }
         compose.saving.set(false);
         // Another composer was opened meanwhile, which this save leaves alone.
         if compose

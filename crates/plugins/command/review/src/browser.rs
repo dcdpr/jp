@@ -3,8 +3,18 @@
 
 use std::{
     env,
-    process::{Command, Stdio},
+    process::{Child, Command, Stdio},
+    sync::mpsc::{self, RecvTimeoutError},
+    thread,
+    time::Duration,
 };
+
+/// How long opening a page waits for the program opening it to exit, to report
+/// a failure.
+///
+/// `xdg-open` runs a browser that isn't running yet in the foreground, and only
+/// exits once the browser does: one still running by then is left to run.
+const GRACE: Duration = Duration::from_secs(2);
 
 /// Opens a URL in a browser.
 pub trait Browser {
@@ -18,6 +28,7 @@ pub struct SystemBrowser;
 impl Browser for SystemBrowser {
     /// The command runs with its output discarded: this process's stdout is its
     /// connection to the host.
+    /// Returns once the command exits, or after [`GRACE`] while it still runs.
     fn open(&self, url: &str) -> Result<(), String> {
         let (program, args) = opener(env::consts::OS, url).ok_or_else(|| {
             format!(
@@ -26,20 +37,37 @@ impl Browser for SystemBrowser {
             )
         })?;
 
-        let status = Command::new(program)
+        let child = Command::new(program)
             .args(&args)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
-            .status()
+            .spawn()
             .map_err(|error| format!("Couldn't run `{program}` to open {url}: {error}"))?;
-        if status.success() {
-            return Ok(());
-        }
 
-        Err(format!(
-            "`{program}` couldn't open {url} ({status}); open it in a browser."
-        ))
+        settle(child, GRACE).map_err(|why| {
+            format!("`{program}` couldn't open {url} ({why}); open it in a browser.")
+        })
+    }
+}
+
+/// Wait up to `grace` for `child` to exit, returning how it exited when it
+/// failed.
+///
+/// A child still running after `grace` is waited for on a thread of its own, so
+/// it doesn't linger as a zombie, and counts as a success.
+fn settle(mut child: Child, grace: Duration) -> Result<(), String> {
+    let (sender, exited) = mpsc::channel();
+    thread::spawn(move || {
+        // Nobody listens once `grace` has passed.
+        drop(sender.send(child.wait()));
+    });
+
+    match exited.recv_timeout(grace) {
+        Ok(Ok(status)) if status.success() => Ok(()),
+        Ok(Ok(status)) => Err(status.to_string()),
+        Ok(Err(error)) => Err(error.to_string()),
+        Err(RecvTimeoutError::Timeout | RecvTimeoutError::Disconnected) => Ok(()),
     }
 }
 

@@ -157,6 +157,10 @@ pub struct Edit {
     pub anchor: Option<Anchor>,
     pub suggestion: Option<String>,
     pub body: Option<String>,
+
+    /// The draft the edit was written for: the comment, or its draft reply.
+    /// Whichever the comment holds when `None`.
+    pub expects: Option<Draft>,
 }
 
 /// What a reply did to the comment's draft reply.
@@ -212,8 +216,7 @@ pub enum Why {
     /// The comment is a draft, so it has nothing to reply to or resolve.
     Draft,
 
-    /// The comment was sent and holds no draft reply, so it has nothing to edit
-    /// or withdraw.
+    /// The comment was sent, so it is no longer a draft to change or withdraw.
     Sent,
 
     /// The comment is resolved, so it takes no reply.
@@ -296,7 +299,7 @@ impl Why {
             Self::Missing => format!("No comment {comment}."),
             Self::Withdrawn => format!("{comment} was withdrawn."),
             Self::Draft => format!("{comment} is a draft, not yet sent."),
-            Self::Sent => format!("{comment} has been sent, and holds no draft reply."),
+            Self::Sent => format!("{comment} has been sent, so it is no longer a draft to change."),
             Self::Resolved => format!("{comment} is resolved."),
             Self::DraftReply => {
                 format!("{comment} holds a draft reply; withdraw it before resolving the comment.")
@@ -499,14 +502,24 @@ impl Review {
     }
 
     /// Change a draft comment, or the body of the draft reply on a sent one.
+    ///
+    /// Refused when the comment no longer holds the draft `edit` expects.
     pub fn edit(&mut self, number: u32, edit: Edit) -> Result<Draft, Refusal> {
         self.writable()?;
-        if edit == Edit::default() {
+        if edit.anchor.is_none() && edit.suggestion.is_none() && edit.body.is_none() {
             return Err(Refusal::NothingToChange);
         }
 
         let comment = self.comment_mut(number)?;
-        if comment.status() == Status::Draft {
+        let draft = comment.status() == Status::Draft;
+        match (edit.expects, draft) {
+            (Some(Draft::Comment), false) => {
+                return Err(Refusal::Comment(number, Why::Sent));
+            }
+            (Some(Draft::Reply), true) => return Err(Refusal::Comment(number, Why::Draft)),
+            _ => {}
+        }
+        if draft {
             let content = comment.content.edited(edit);
             content.check()?;
             comment.content = content;

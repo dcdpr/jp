@@ -5,6 +5,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::response::Draft;
+
 /// The body of `POST /api/reviews`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -82,6 +84,12 @@ pub struct EditRequest {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub suggestion: Option<String>,
+
+    /// The draft the edit was written for; the edit is refused once the comment
+    /// holds another.
+    /// Whichever the comment holds when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub draft: Option<Draft>,
 }
 
 /// The body of `POST /api/reviews/{id}/comments/{n}/replies`.

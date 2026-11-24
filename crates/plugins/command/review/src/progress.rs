@@ -2,9 +2,11 @@
 //! tells the assistant beside the comments.
 //!
 //! An [`Approval`] says a passage is fine as it stands.
-//! It holds while the lines of the passage are unchanged: once one changes, the
-//! anchor no longer carries to the latest version, and the passage is not
-//! approved any more.
+//! It holds while the lines of the passage read as they did when it was
+//! approved: while one of them reads otherwise, the anchor doesn't carry to the
+//! version shown, and the passage is not approved there.
+//! An approval's number is never given to another, so taking one back by a
+//! number read earlier can't take back a later one.
 //!
 //! A [`ReadUntil`] says how far down a file the reviewer has read.
 //! The lines after it are unread, so that they carry no comment says nothing
@@ -24,6 +26,7 @@
 //!   "created_at": "2026-11-17T10:01:00Z",
 //!   "anchor": { "version": 2, "path": "docs/a.md", "range": "12-18" }
 //! }],
+//! "last_approval": 1,
 //! "read_until": {
 //!   "docs/a.md": {
 //!     "version": 2,
@@ -49,6 +52,11 @@ use crate::{
 pub struct Progress {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub approvals: Vec<Approval>,
+
+    /// The highest number an approval has taken, including approvals since
+    /// taken back.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub last_approval: u32,
 
     /// How far the reviewer has read each file, by its path.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -95,8 +103,11 @@ impl Progress {
             return Ok(standing.number);
         }
 
+        // A review written before `last_approval` was stored has only its
+        // approvals to go by.
         let highest = self.approvals.iter().map(|found| found.number).max();
-        let number = highest.unwrap_or(0) + 1;
+        let number = highest.unwrap_or(0).max(self.last_approval) + 1;
+        self.last_approval = number;
         self.approvals.push(Approval {
             number,
             author,
@@ -130,6 +141,14 @@ impl Progress {
     pub fn unread(&mut self, path: &str) -> bool {
         self.read_until.remove(path).is_some()
     }
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde passes a reference"
+)]
+fn is_zero(number: &u32) -> bool {
+    *number == 0
 }
 
 #[cfg(test)]

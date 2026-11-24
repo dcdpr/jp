@@ -109,7 +109,11 @@ fn act(page: Page, action: Action, comment: &Comment) {
 /// didn't.
 fn write(page: Page, call: Call) {
     spawn_local(async move {
-        match client::send::<Value>(call).await {
+        let answer = client::send::<Value>(call).await;
+        if page.gone() {
+            return;
+        }
+        match answer {
             Ok(_) => {
                 page.notice.set(None);
                 page.compose().refreshed();
@@ -322,7 +326,11 @@ pub(super) fn record_button(page: Page) -> Option<impl RenderHtml> {
 fn record(page: Page) {
     let call = Call::post_empty(client::versions_url(&page.compose().id.get_value()));
     spawn_local(async move {
-        match client::send::<Recorded>(call).await {
+        let answer = client::send::<Recorded>(call).await;
+        if page.gone() {
+            return;
+        }
+        match answer {
             Ok(_) => {
                 let view = page.view.get_untracked();
                 page.nav.go(Route::Review(ReviewView {

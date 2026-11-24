@@ -501,6 +501,7 @@ pub(crate) fn edit(
             anchor,
             suggestion: request.suggestion,
             body: request.body.map(|body| body.trim().to_owned()),
+            expects: request.draft,
         };
         review
             .edit(comment.number, edit)

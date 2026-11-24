@@ -7,7 +7,8 @@
 //! was written for.
 
 use jp_review_api::{
-    AnchorRequest, Comment, EditRequest, NewCommentRequest, PassRequest, ReplyRequest,
+    AnchorRequest, Comment, Draft as Drafted, EditRequest, NewCommentRequest, PassRequest,
+    ReplyRequest,
 };
 use serde::{Deserialize, Serialize};
 
@@ -223,10 +224,13 @@ pub fn call(id: &str, draft: &Draft) -> Call {
                 suggestion,
             })
         }
+        // A draft restored after the comment was sent is refused, not saved over
+        // the reply the comment holds since.
         Kind::Edit { number, .. } => Call::patch(client::comment_url(id, *number), &EditRequest {
             anchor: None,
             body: Some(body),
             suggestion: draft.replacement.clone(),
+            draft: Some(Drafted::Comment),
         }),
         Kind::Reply { number } => {
             Call::post(client::replies_url(id, *number), &ReplyRequest { body })

@@ -196,6 +196,7 @@ fn editing_changes_a_draft_comment() {
         anchor: Some(anchor.clone()),
         suggestion: Some("three".to_owned()),
         body: Some("Better.".to_owned()),
+        expects: Some(Draft::Comment),
     });
 
     assert_eq!(edited, Ok(Draft::Comment));
@@ -259,6 +260,38 @@ fn editing_a_sent_comment_changes_only_its_draft_reply() {
     let comment = review.comment(1).unwrap();
     assert_eq!(comment.content.body, "First.");
     assert_eq!(comment.draft_reply.as_ref().unwrap().body, "Certain?");
+}
+
+/// An edit begun on the draft comment, and saved after the comment was sent and
+/// given a draft reply, would otherwise replace the reply.
+#[test]
+fn an_edit_is_refused_once_the_comment_holds_another_draft() {
+    let mut review = review();
+    review.add_comment(on_review("First.")).unwrap();
+    let edit = |expects| Edit {
+        body: Some("Changed.".to_owned()),
+        expects: Some(expects),
+        ..Edit::default()
+    };
+
+    assert_eq!(
+        review.edit(1, edit(Draft::Reply)),
+        Err(refused(1, Why::Draft))
+    );
+
+    review.comments[0].pass = Some(1);
+    review
+        .reply(1, "Jane".to_owned(), at(3), "Sure?".to_owned())
+        .unwrap();
+
+    assert_eq!(
+        review.edit(1, edit(Draft::Comment)),
+        Err(refused(1, Why::Sent))
+    );
+    let comment = review.comment(1).unwrap();
+    assert_eq!(comment.content.body, "First.");
+    assert_eq!(comment.draft_reply.as_ref().unwrap().body, "Sure?");
+    assert_eq!(review.edit(1, edit(Draft::Reply)), Ok(Draft::Reply));
 }
 
 #[test]
