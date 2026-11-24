@@ -14,10 +14,12 @@ use std::{borrow::Cow, collections::HashSet, str::FromStr as _};
 use clap::{Arg, ArgAction, ArgMatches, Command, builder::PossibleValuesParser};
 use crossterm::style::{Color, Stylize as _};
 use jp_conversation::ConversationId;
-use jp_inquire::{InlineOption, InlineSelect};
 use jp_printer::Printer;
 use jp_storage::{
-    backend::{Diagnosis, RecoveryBackend, Repair, RepairOutcome, StrayEntry, StrayKind},
+    backend::{
+        Diagnosis, RecoveryBackend, Repair, RepairOutcome, StoredConversation, StrayEntry,
+        StrayKind,
+    },
     validate::StorageLocation,
 };
 use jp_term::width::display_width;
@@ -29,7 +31,7 @@ use crate::{
     cmd::{self, Output},
     format::no_persist_note,
     load_failure::{self, LoadFailure},
-    shared::confirm::{ConfirmFlag, decide},
+    shared::confirm::{self, Answer, Answers, ConfirmFlag, Prompt, heading, stored_details},
 };
 
 /// The exit status of a report that lists a problem.
@@ -107,6 +109,31 @@ impl Doctor {
         interactive: bool,
         persists: bool,
     ) -> Output {
+        let Some(repair) = self.fix else {
+            return self.run_with(printer, recovery, None, persists);
+        };
+
+        let prompt = fix_prompt(repair);
+        let pretty = printer.pretty_printing_enabled();
+        let mut ask = |stored: &StoredConversation, more: bool| -> Result<Answer, cmd::Error> {
+            let details =
+                stored_details(stored, pretty).with_heading(heading("Fixing", stored.id, pretty));
+            Ok(confirm::ask(printer, &prompt, &details.to_string(), more)?)
+        };
+
+        let ask = interactive.then_some(&mut ask as &mut Ask<'_>);
+        self.run_with(printer, recovery, ask, persists)
+    }
+
+    /// [`Self::run`], with `ask` answering the confirmation the fix asks for
+    /// each conversation; `None` when nobody can answer.
+    fn run_with(
+        self,
+        printer: &Printer,
+        recovery: &dyn RecoveryBackend,
+        ask: Option<&mut Ask<'_>>,
+        persists: bool,
+    ) -> Output {
         let diagnosis = recovery.diagnose()?;
         let Some(fix) = self.fix else {
             let report = Report::from(&diagnosis);
@@ -121,9 +148,8 @@ impl Doctor {
             repair: fix,
             ids: self.ids,
             confirm: self.confirm,
-            interactive,
         };
-        let result = fix.apply(printer, recovery, &diagnosis);
+        let result = fix.apply(printer, recovery, &diagnosis, ask);
         if !persists {
             printer.println("");
             printer.println(no_persist_note());
@@ -408,6 +434,21 @@ struct StrayContext<'a> {
     location: &'a StorageLocation,
 }
 
+/// Asks whether to apply the fix to a conversation, and whether more follow it.
+type Ask<'a> = dyn FnMut(&StoredConversation, bool) -> Result<Answer, cmd::Error> + 'a;
+
+/// The wording of the question `--fix` asks for each conversation.
+fn fix_prompt(repair: Repair) -> Prompt {
+    Prompt {
+        question: format!("Apply `{}` to this conversation?", repair.name()).into(),
+        accept: "yes, apply it",
+        accept_rest: "yes, and apply it to every remaining one",
+        decline: "no, leave it as it is",
+        decline_rest: "no, and leave every remaining one",
+        caution: None,
+    }
+}
+
 /// A run of `--fix`: the repair, and what to apply it to.
 struct Fix {
     repair: Repair,
@@ -417,20 +458,22 @@ struct Fix {
     ids: Vec<ConversationId>,
 
     confirm: ConfirmFlag,
-    interactive: bool,
 }
 
 impl Fix {
-    /// Apply the repair to every conversation it is for, after one confirmation
-    /// for all of them.
+    /// Apply the repair to every conversation it is for, asking `ask` for each
+    /// unless `--yes` was given.
     ///
-    /// A conversation the repair cannot change is skipped, and the run ends
-    /// with an error naming each one.
+    /// The question is asked while the conversation's lock is held, so it shows
+    /// the conversation the answer acts on.
+    /// A conversation the user declines is left alone; one the repair cannot
+    /// change is skipped, and the run ends with an error naming each one.
     fn apply(
         self,
         printer: &Printer,
         recovery: &dyn RecoveryBackend,
         diagnosis: &Diagnosis,
+        ask: Option<&mut Ask<'_>>,
     ) -> Output {
         let name = self.repair.name();
         let ids = self.targets(diagnosis);
@@ -439,41 +482,54 @@ impl Fix {
             return Ok(());
         }
 
-        let subject = counted(ids.len(), "conversation", "conversations");
-        if self.confirm.preference() != Some(false) && !self.ask(printer, &subject)? {
-            printer.println("Nothing changed.");
-            return Ok(());
+        // Writing to the user's conversations is never assumed when nobody can
+        // be asked.
+        let answers = self.confirm.answers();
+        if ask.is_none() && answers.rest().is_none() {
+            return Err("Cannot run `--fix` in a non-interactive environment.".into());
         }
 
-        let mut failed = vec![];
-        for id in &ids {
-            match recovery.repair(id, self.repair, &mut |_| true)? {
-                RepairOutcome::Repaired => {}
-                outcome => failed.push((*id, outcome)),
+        let tally = self.repair_each(recovery, &ids, answers, ask)?;
+        tally.report(printer, name, ids.len())
+    }
+
+    /// Apply the repair to each of `ids` in turn, asking `ask` unless `answers`
+    /// already holds the answer.
+    fn repair_each(
+        &self,
+        recovery: &dyn RecoveryBackend,
+        ids: &[ConversationId],
+        mut answers: Answers,
+        mut ask: Option<&mut Ask<'_>>,
+    ) -> Result<Tally, cmd::Error> {
+        let mut tally = Tally::default();
+        for (index, id) in ids.iter().enumerate() {
+            // `N` declined the rest, so none of their locks is taken.
+            if answers.rest() == Some(false) {
+                break;
             }
+
+            let more = index + 1 < ids.len();
+            let mut prompt_error = None;
+            let outcome = recovery.repair(id, self.repair, &mut |stored| {
+                answers
+                    .decide(more, |more| match ask.as_mut() {
+                        Some(ask) => ask(stored, more),
+                        None => Ok(Answer::YesToAll),
+                    })
+                    .unwrap_or_else(|error| {
+                        prompt_error = Some(error);
+                        false
+                    })
+            })?;
+            if let Some(error) = prompt_error {
+                return Err(error);
+            }
+
+            tally.record(*id, outcome);
         }
 
-        let applied = ids.len() - failed.len();
-        if applied > 0 {
-            printer.println(format!(
-                "Applied `{name}` to {}.",
-                counted(applied, "conversation", "conversations")
-            ));
-        }
-        if failed.is_empty() {
-            return Ok(());
-        }
-
-        let entries = failed
-            .iter()
-            .map(|(id, outcome)| format!("{id}:  {}", why_not(*outcome)))
-            .collect::<Vec<_>>()
-            .join("\n");
-        Err(format!(
-            "Failed to apply `{name}` to {} of {subject}:\n\n{entries}",
-            failed.len()
-        )
-        .into())
+        Ok(tally)
     }
 
     /// The conversations to apply the repair to, each once.
@@ -496,25 +552,53 @@ impl Fix {
             .filter(|id| seen.insert(*id))
             .collect()
     }
+}
 
-    /// Ask whether to apply the repair to `subject`, the conversations it is
-    /// for.
-    ///
-    /// Fails when nobody can answer: writing to the user's conversations is
-    /// never assumed.
-    fn ask(&self, printer: &Printer, subject: &str) -> Result<bool, cmd::Error> {
-        if !self.interactive {
-            return Err("Cannot run `--fix` in a non-interactive environment.".into());
+/// What a run of `--fix` did to the conversations it covered.
+#[derive(Debug, Default)]
+struct Tally {
+    applied: usize,
+
+    /// The conversations the repair could not change, and why.
+    failed: Vec<(ConversationId, RepairOutcome)>,
+}
+
+impl Tally {
+    fn record(&mut self, id: ConversationId, outcome: RepairOutcome) {
+        match outcome {
+            RepairOutcome::Repaired => self.applied += 1,
+            RepairOutcome::Declined => {}
+            outcome => self.failed.push((id, outcome)),
+        }
+    }
+
+    /// Print how many conversations fix `name` changed, of the `count` it
+    /// covered, and fail naming each one it could not change.
+    fn report(self, printer: &Printer, name: &str, count: usize) -> Output {
+        if self.applied > 0 {
+            printer.println(format!(
+                "Applied `{name}` to {}.",
+                counted(self.applied, "conversation", "conversations")
+            ));
+        } else if self.failed.is_empty() {
+            printer.println("Nothing changed.");
+        }
+        if self.failed.is_empty() {
+            return Ok(());
         }
 
-        let options = vec![
-            InlineOption::new('y', "yes, apply it"),
-            InlineOption::new('n', "no, change nothing"),
-        ];
-        let question = format!("Apply `{}` to {subject}?", self.repair.name());
-        let select = InlineSelect::new(question, options).with_default('n');
-
-        Ok(decide(select.prompt(&mut printer.prompt_writer()))?)
+        let entries = self
+            .failed
+            .iter()
+            .map(|(id, outcome)| format!("{id}:  {}", why_not(*outcome)))
+            .collect::<Vec<_>>()
+            .join("\n");
+        Err(format!(
+            "Failed to apply `{name}` to {} of {}:\n\n{entries}",
+            self.failed.len(),
+            counted(count, "conversation", "conversations")
+        )
+        .into())
     }
 }
 

@@ -63,11 +63,12 @@ fn only_the_irreversible_action_cautions_the_user() {
 /// raised and this is the only thing that can end a bulk run part-way through.
 #[test]
 fn esc_declines_but_ctrl_c_ends_the_run() {
-    assert!(decide(Ok('y')).unwrap(), "y accepts");
-    assert!(!decide(Ok('n')).unwrap(), "n declines");
-    assert!(
-        !decide(Err(InquireError::OperationCanceled)).unwrap(),
-        "Esc declines"
+    assert_eq!(decide(Ok('y')).unwrap(), Answer::Yes);
+    assert_eq!(decide(Ok('n')).unwrap(), Answer::No);
+    assert_eq!(
+        decide(Err(InquireError::OperationCanceled)).unwrap(),
+        Answer::No,
+        "Esc declines this one only"
     );
 
     let error = decide(Err(InquireError::OperationInterrupted))
@@ -77,6 +78,84 @@ fn esc_declines_but_ctrl_c_ends_the_run() {
     };
     assert_eq!(error.code.get(), 130, "the shell's status for a SIGINT");
     assert_eq!(error.message, None, "Ctrl-C needs no diagnostic");
+}
+
+#[test]
+fn the_capitals_answer_for_every_remaining_conversation() {
+    assert_eq!(decide(Ok('Y')).unwrap(), Answer::YesToAll);
+    assert_eq!(decide(Ok('N')).unwrap(), Answer::NoToAll);
+}
+
+// A lone conversation has no "remaining" for `Y` and `N` to answer.
+#[test]
+fn yes_and_no_to_all_are_offered_only_when_more_follow() {
+    let prompt = ConversationAction::Remove.prompt();
+    let keys = |more| {
+        options(&prompt, more)
+            .into_iter()
+            .map(|option| option.key)
+            .collect::<String>()
+    };
+
+    assert_eq!(keys(true), "yYnN");
+    assert_eq!(keys(false), "yn");
+}
+
+/// An `ask` for a question that must not be asked.
+fn never_asked(_more: bool) -> std::result::Result<Answer, ()> {
+    panic!("asked a question the answers already settled")
+}
+
+#[test]
+fn yes_answers_only_this_conversation() {
+    let mut answers = Answers::default();
+    let mut asked = vec![];
+
+    for more in [true, true, false] {
+        let accepted = answers
+            .decide(more, |more| {
+                asked.push(more);
+                Ok::<_, ()>(Answer::Yes)
+            })
+            .unwrap();
+        assert!(accepted);
+    }
+
+    assert_eq!(asked, [true, true, false]);
+    assert_eq!(answers.rest(), None);
+}
+
+#[test]
+fn yes_to_all_answers_every_remaining_conversation_without_asking() {
+    let mut answers = Answers::default();
+
+    let first = answers.decide(true, |_| Ok::<_, ()>(Answer::YesToAll));
+    let second = answers.decide(true, never_asked);
+    let last = answers.decide(false, never_asked);
+
+    assert_eq!((first, second, last), (Ok(true), Ok(true), Ok(true)));
+    assert_eq!(answers.rest(), Some(true));
+}
+
+#[test]
+fn no_to_all_declines_every_remaining_conversation_without_asking() {
+    let mut answers = Answers::default();
+
+    let first = answers.decide(true, |_| Ok::<_, ()>(Answer::NoToAll));
+    let second = answers.decide(false, never_asked);
+
+    assert_eq!((first, second), (Ok(false), Ok(false)));
+    assert_eq!(answers.rest(), Some(false));
+}
+
+// `--yes` is the same answer, given before the first question.
+#[test]
+fn answers_that_start_at_yes_to_all_never_ask() {
+    let mut answers = Answers::yes_to_all();
+
+    let accepted = answers.decide(true, never_asked);
+
+    assert_eq!(accepted, Ok(true));
 }
 
 /// A terminal that cannot be read is a broken prompt, not a choice the user
@@ -321,7 +400,7 @@ fn an_unloaded_removal_nobody_can_confirm_fails() {
     let mut ctx = test_ctx(id, Conversation::default());
     ctx.term.interactive = false;
 
-    let error = confirm_unloaded_removal(&ctx, &stored(None, Ok(())))
+    let error = confirm_unloaded_removal(&ctx, &stored(None, Ok(())), false)
         .expect_err("a removal nobody can confirm must not be assumed");
     let crate::error::Error::Command(error) = error else {
         panic!("expected a command error, got: {error}");
@@ -369,7 +448,7 @@ fn a_prompt_nobody_can_answer_fails_and_names_the_way_through() {
     };
 
     let message = |action| {
-        let error = confirm_conversation_action(&ctx, action, &lock, None)
+        let error = confirm_conversation_action(&ctx, action, &lock, None, false)
             .expect_err("an action nobody can confirm must not be assumed either way");
         let crate::error::Error::Command(error) = error else {
             panic!("expected a command error, got: {error}");

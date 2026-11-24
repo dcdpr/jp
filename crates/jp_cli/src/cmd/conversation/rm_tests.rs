@@ -192,7 +192,13 @@ fn a_waived_confirmation_removes_without_a_user() {
     let handle = ctx.workspace.acquire_conversation(&id).unwrap();
     let removed = Runtime::new()
         .unwrap()
-        .block_on(remove(&mut ctx, handle, None, true))
+        .block_on(remove(
+            &mut ctx,
+            handle,
+            None,
+            &mut Answers::yes_to_all(),
+            false,
+        ))
         .expect("nothing left to ask");
 
     assert!(removed, "the removal is reported to the caller");

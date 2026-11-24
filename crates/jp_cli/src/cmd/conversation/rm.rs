@@ -14,9 +14,7 @@ use crate::{
     },
     ctx::Ctx,
     format::no_persist_note,
-    shared::confirm::{
-        ConfirmFlag, ConversationAction, confirm_conversation_action, confirm_unloaded_removal,
-    },
+    shared::confirm::{Answers, ConfirmFlag, ConversationAction, confirm_unloaded_removal},
 };
 
 /// `jp conversation rm`.
@@ -77,12 +75,21 @@ impl Rm {
 
         // Removal is destructive, so the default (`None`) prompts; only an
         // explicit `--no-confirm` / `--yes` skips it.
-        let force = self.confirm.preference() == Some(false);
+        let mut answers = self.confirm.answers();
+        let count = removals.len();
         let mut removed = 0_usize;
-        for removal in removals {
+        for (index, removal) in removals.into_iter().enumerate() {
+            // `N` declined the rest, so none of their locks is taken.
+            if answers.rest() == Some(false) {
+                break;
+            }
+
+            let more = index + 1 < count;
             let done = match removal {
-                Removal::Loaded(handle) => remove(ctx, handle, active_id, force).await?,
-                Removal::Unloaded(id) => remove_unloaded(ctx, id, force).await?,
+                Removal::Loaded(handle) => {
+                    remove(ctx, handle, active_id, &mut answers, more).await?
+                }
+                Removal::Unloaded(id) => remove_unloaded(ctx, id, &mut answers, more).await?,
             };
             if done {
                 removed += 1;
@@ -172,26 +179,31 @@ fn resolve_literal(ctx: &Ctx, ids: &[ConversationId]) -> Result<Vec<Removal>, cm
         .collect()
 }
 
-/// Remove a conversation the index leaves out, asking first unless `force`.
+/// Remove a conversation the index leaves out, asking first unless `answers`
+/// already holds the answer.
 ///
 /// What the prompt shows is read while the conversation's lock is held, so it
 /// describes exactly what the removal deletes.
 /// While another process holds the lock, waits as for any other conversation.
+/// `more` says whether more conversations follow this one.
 /// Returns whether the conversation was removed.
-async fn remove_unloaded(ctx: &Ctx, id: ConversationId, force: bool) -> Result<bool, cmd::Error> {
+async fn remove_unloaded(
+    ctx: &Ctx,
+    id: ConversationId,
+    answers: &mut Answers,
+    more: bool,
+) -> Result<bool, cmd::Error> {
     loop {
         // `decide` can only answer yes or no, so a failed prompt answers no and
         // its error is returned once the lock is released.
         let mut prompt_error = None;
         let removal = ctx.recovery.remove(&id, &mut |stored| {
-            if force {
-                return true;
-            }
-
-            confirm_unloaded_removal(ctx, stored).unwrap_or_else(|error| {
-                prompt_error = Some(error);
-                false
-            })
+            answers
+                .decide(more, |more| confirm_unloaded_removal(ctx, stored, more))
+                .unwrap_or_else(|error| {
+                    prompt_error = Some(error);
+                    false
+                })
         })?;
 
         if let Some(error) = prompt_error {
@@ -213,9 +225,10 @@ async fn remove_unloaded(ctx: &Ctx, id: ConversationId, force: bool) -> Result<b
     }
 }
 
-/// Remove one conversation, asking first unless `force` says the caller already
-/// decided.
+/// Remove one conversation, asking first unless `answers` already holds the
+/// answer.
 ///
+/// `more` says whether more conversations follow this one.
 /// Returns whether the conversation was removed.
 /// Declining leaves it in place and is not an error: the user answered the
 /// question they were asked, and the next conversation in the run still gets
@@ -228,7 +241,8 @@ async fn remove(
     ctx: &mut Ctx,
     handle: ConversationHandle,
     active_id: Option<ConversationId>,
-    force: bool,
+    answers: &mut Answers,
+    more: bool,
 ) -> Result<bool, crate::error::Error> {
     let lock = match acquire_lock(LockRequest::from_ctx(handle, ctx)).await? {
         LockOutcome::Acquired(lock) => lock,
@@ -236,7 +250,7 @@ async fn remove(
         LockOutcome::ForkConversation(_) => unreachable!("fork not allowed"),
     };
 
-    if !force && !confirm_conversation_action(ctx, ConversationAction::Remove, &lock, active_id)? {
+    if !answers.confirm_action(ctx, ConversationAction::Remove, &lock, active_id, more)? {
         return Ok(false);
     }
 

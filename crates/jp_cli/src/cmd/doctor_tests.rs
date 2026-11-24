@@ -22,7 +22,7 @@ use jp_storage::{
 };
 
 use super::*;
-use crate::{cli::parse_args, load_failure::LoadFailure};
+use crate::{cli::parse_args, load_failure::LoadFailure, shared::confirm::Answer};
 
 /// Where the filesystem backend keeps conversation `dirname`'s `file`.
 fn file_location(dirname: &str, file: &str) -> StorageLocation {
@@ -403,6 +403,26 @@ fn run(store: &Store, recovery: &dyn RecoveryBackend, args: &[&str], persists: b
     result
 }
 
+/// Run `jp doctor` with `args`, answering its questions with `answers` in
+/// order, and return what it asked: each conversation's ID, and whether `Y` and
+/// `N` were offered for it.
+fn run_answering(
+    store: &Store,
+    args: &[&str],
+    answers: &[Answer],
+) -> (Output, Vec<(String, bool)>) {
+    let mut answers = answers.iter().copied();
+    let mut asked = vec![];
+    let mut ask = |stored: &StoredConversation, more: bool| {
+        asked.push((stored.id.to_string(), more));
+        Ok(answers.next().expect("asked more often than answered"))
+    };
+
+    let result = doctor(args).run_with(&store.printer, store.fs.as_ref(), Some(&mut ask), true);
+    store.printer.flush();
+    (result, asked)
+}
+
 #[test]
 fn a_clean_store_exits_successfully() {
     let s = store();
@@ -606,6 +626,84 @@ fn the_fix_under_no_persist_writes_nothing() {
          no files on disk were modified or removed.\n"
     );
     assert!(!dir.join("metadata.json").exists());
+}
+
+// The fix asks for each conversation, as `jp conversation rm` does, so one the
+// user does not want changed is left alone.
+#[test]
+fn the_fix_asks_for_each_conversation() {
+    let s = store();
+    let declined = events_only(&s, "17941219991");
+    let accepted = events_only(&s, "17941219992");
+
+    let (result, asked) = run_answering(&s, &["--fix", "rebuild-metadata"], &[
+        Answer::No,
+        Answer::Yes,
+    ]);
+
+    result.unwrap();
+    assert_eq!(asked, [
+        ("jp-c17941219991".to_owned(), true),
+        ("jp-c17941219992".to_owned(), false),
+    ]);
+    assert_eq!(
+        s.out.lock().as_str(),
+        "Applied `rebuild-metadata` to 1 conversation.\n"
+    );
+    assert!(!declined.join("metadata.json").exists());
+    assert!(accepted.join("metadata.json").is_file());
+}
+
+#[test]
+fn yes_to_all_applies_the_fix_to_every_remaining_conversation() {
+    let s = store();
+    let first = events_only(&s, "17941219991");
+    let second = events_only(&s, "17941219992");
+
+    let (result, asked) = run_answering(&s, &["--fix", "rebuild-metadata"], &[Answer::YesToAll]);
+
+    result.unwrap();
+    assert_eq!(asked, [("jp-c17941219991".to_owned(), true)]);
+    assert_eq!(
+        s.out.lock().as_str(),
+        "Applied `rebuild-metadata` to 2 conversations.\n"
+    );
+    assert!(first.join("metadata.json").is_file());
+    assert!(second.join("metadata.json").is_file());
+}
+
+// Declining is an answer, not a failure: the run ends without an error.
+#[test]
+fn no_to_all_leaves_every_remaining_conversation_alone() {
+    let s = store();
+    let first = events_only(&s, "17941219991");
+    let second = events_only(&s, "17941219992");
+
+    let (result, asked) = run_answering(&s, &["--fix", "rebuild-metadata"], &[Answer::NoToAll]);
+
+    result.unwrap();
+    assert_eq!(asked, [("jp-c17941219991".to_owned(), true)]);
+    assert_eq!(s.out.lock().as_str(), "Nothing changed.\n");
+    assert!(!first.join("metadata.json").exists());
+    assert!(!second.join("metadata.json").exists());
+}
+
+// With one conversation there is no "remaining" for `Y` and `N` to answer.
+#[test]
+fn one_named_conversation_is_asked_about_alone() {
+    let s = store();
+    let named = events_only(&s, "17941219991");
+    events_only(&s, "17941219992");
+
+    let (result, asked) = run_answering(
+        &s,
+        &["--fix", "rebuild-metadata", "--id=jp-c17941219991"],
+        &[Answer::Yes],
+    );
+
+    result.unwrap();
+    assert_eq!(asked, [("jp-c17941219991".to_owned(), false)]);
+    assert!(named.join("metadata.json").is_file());
 }
 
 #[test]
