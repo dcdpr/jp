@@ -28,7 +28,9 @@ Each check returns typed findings; a finding with a fix carries the fix's name.
 told to, with no fixing logic of its own.
 
 - [x] `jp doctor` runs without the pre-run step: no trash restore, no startup
-      scan, no load-failure report, and nothing written to disk
+      scan, no load-failure report, and nothing written to the conversation
+      store; selecting the workspace (`-w`, the session's workspace, the
+      conflict prompt) works as for any command
 - [x] Findings are typed and grouped by section; each section prints the exact
       `jp doctor --fix <name>` command for the findings it can fix, and a
       suggestion (a command or an edit) for those it cannot
