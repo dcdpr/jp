@@ -1,6 +1,6 @@
 # Add jp doctor
 
-- **Status**: In Progress
+- **Status**: Done
 - **Authors**: jp
 - **Date**: 2026-11-18
 - **Label**: client=cli
@@ -51,9 +51,6 @@ told to, with no fixing logic of its own.
 - [x] The load-failure report printed after every command
       (`jp_cli::load_failure::render_text`) lists at most 5 failures again, and
       above that ends with "Run `jp doctor` to list them"
-- [ ] Workspace and config sections: start with the checks the conversation
-      section's structure makes easy (missing or malformed workspace ID, config
-      files that fail to parse), and leave the rest to follow-ups
 
 ## Comments
 
@@ -102,3 +99,16 @@ Plain `jp c ls` does not read the archive.
 
 A rebuilt archived conversation's archive time is the directory's modification
 time, read before the new `metadata.json` is written.
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-24T12:27:17Z
+
+The workspace and config sections moved to their own tickets, as extensions of
+`jp doctor`: T-1r5g63p (workspace) and T-1r5g63q (config).
+Everything else on this ticket has landed, so it closes.
+
+The load-failure report printed after every command now ends with "Run `jp
+doctor` to see how to fix it/them" instead of a `jp conversation rm` command, so
+every remedy is found in `jp doctor`.
