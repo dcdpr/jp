@@ -440,6 +440,21 @@ fn waits_for_a_conversation_another_process_holds() {
     assert!(!exists);
 }
 
+// An archived conversation is not in the conversation list, so a typed ID is
+// what reaches it.
+#[test]
+fn removes_an_archived_conversation_by_id() {
+    let mut s = store(true);
+    let dir = write_dir(&s.workspace.join(".archive"), "17941219991-old-work", &[
+        ("metadata.json", "{}"),
+        ("events.json", "[]"),
+    ]);
+
+    run(&mut s, rm_ids(&["17941219991"], &["--no-confirm"])).unwrap();
+
+    assert!(!dir.exists());
+}
+
 // Removal cannot be undone, so it is never assumed when nobody can be asked.
 #[test]
 fn asks_before_removing_and_fails_when_nobody_can_answer() {

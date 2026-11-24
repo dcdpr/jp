@@ -284,8 +284,7 @@ fn the_diagnosis_lists_what_the_store_holds_beside_its_conversations() {
 }
 
 // The startup scan never reads the archive, so the diagnosis is the only place
-// an archived conversation that stopped loading shows up. A repair applies to
-// live conversations only.
+// an archived conversation that stopped loading shows up.
 #[test]
 fn the_diagnosis_covers_the_archive() {
     let (_tmp, fs, conversations) = setup();
@@ -309,16 +308,16 @@ fn the_diagnosis_covers_the_archive() {
         })
         .collect();
     assert_eq!(found, vec![
-        (archived, true, None),
+        (archived, true, Some(Repair::RebuildMetadata)),
         (live.clone(), false, None)
     ]);
     assert_eq!(scanned_paths(&fs), [live]);
 }
 
-// A repair rebuilds live copies, so it is never offered for an archived copy,
-// even of a conversation whose live copy it does fix.
+// A conversation with a live copy and an archived copy has two copies that
+// disagree, which no repair settles; the live copy is repaired on its own.
 #[test]
-fn an_archived_copy_is_never_offered_the_live_copy_s_repair() {
+fn an_archived_copy_beside_a_live_copy_gets_no_repair() {
     let (_tmp, fs, conversations) = setup();
     let live = events_only(&conversations, "17941219991");
     let archived = events_only(&conversations.join(".archive"), "17941219991");
@@ -334,6 +333,68 @@ fn an_archived_copy_is_never_offered_the_live_copy_s_repair() {
         (archived, None),
         (live, Some(Repair::RebuildMetadata))
     ]);
+}
+
+// A conversation with no live copy is looked for in the archive.
+#[test]
+fn inspect_finds_an_archived_conversation() {
+    let (_tmp, fs, conversations) = setup();
+    let dir = events_only(&conversations.join(".archive"), "17941219991-old-work");
+
+    let found = fs.inspect(&id("17941219991")).unwrap();
+
+    assert!(found.archived);
+    assert_eq!(found.locations, [StorageLocation::new(dir.as_str())]);
+    assert_eq!(found.repair, Some(Repair::RebuildMetadata));
+}
+
+// The repair writes the metadata where the conversation is, so it stays archived.
+#[test]
+fn rebuilding_metadata_repairs_an_archived_conversation_in_place() {
+    let (_tmp, fs, conversations) = setup();
+    let dir = events_only(&conversations.join(".archive"), "17941219991-old-work");
+
+    let outcome = fs
+        .repair(&id("17941219991"), Repair::RebuildMetadata, &mut |_| true)
+        .unwrap();
+
+    assert_eq!(outcome, RepairOutcome::Repaired);
+    assert!(dir.join("metadata.json").is_file());
+    assert!(!conversations.join("17941219991-old-work").exists());
+    assert!(fs.diagnose().unwrap().invalid.is_empty());
+}
+
+#[test]
+fn removal_deletes_an_archived_conversation() {
+    let (_tmp, fs, conversations) = setup();
+    let dir = events_only(&conversations.join(".archive"), "17941219991");
+    fs::write(dir.join("metadata.json"), "{}").unwrap();
+
+    let mut shown = vec![];
+    let outcome = fs
+        .remove(&id("17941219991"), &mut |found| {
+            shown.clone_from(&found.locations);
+            true
+        })
+        .unwrap();
+
+    assert_eq!(outcome, Removal::Removed);
+    assert_eq!(shown, [StorageLocation::new(dir.as_str())]);
+    assert!(!dir.exists());
+}
+
+// The archive is read only for a conversation with no live copy: a live copy is
+// what the store holds for the ID, whatever the archive also has.
+#[test]
+fn inspect_prefers_the_live_copy() {
+    let (_tmp, fs, conversations) = setup();
+    let live = broken(&conversations, "17941219991");
+    events_only(&conversations.join(".archive"), "17941219991");
+
+    let found = fs.inspect(&id("17941219991")).unwrap();
+
+    assert!(!found.archived);
+    assert_eq!(found.locations, [StorageLocation::new(live.as_str())]);
 }
 
 #[test]

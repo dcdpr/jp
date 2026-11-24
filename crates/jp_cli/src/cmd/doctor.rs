@@ -299,9 +299,6 @@ fn table(rows: &[Row]) -> String {
 
 /// A row per conversation that does not load, live or `archived`, by its first
 /// copy's failure.
-///
-/// An archived conversation is out of reach of the fixes and of `jp c rm`, so
-/// its row suggests unarchiving it.
 fn conversation_rows<'a>(
     findings: &'a [Finding<'_>],
     archived: bool,
@@ -314,7 +311,6 @@ fn conversation_rows<'a>(
         .map(|finding| {
             let id = finding.failure.id;
             let fix = match finding.fix {
-                _ if finding.archived => format!("jp c unarchive {id}"),
                 Some(repair) => format!("jp doctor --id={id} --fix {}", repair.name()),
                 None => format!("jp c rm {id}"),
             };

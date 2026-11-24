@@ -64,3 +64,23 @@ Removed the two unsent-draft items.
 A conversation with no turns and a query draft beside it loads fine: it is not
 an error or a warning, so `jp doctor` does not report it.
 Such conversations show in `jp c ls` like any other, and `jp c rm` removes them.
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-23T23:59:25Z
+
+Archived conversations that fail to load are fixed and removed where they are:
+`jp doctor --fix rebuild-metadata` and `jp conversation rm <id>` reach the
+archive, and the conversation stays archived.
+
+The archive is never read on the regular path.
+The startup scan, the conversation index, `jp q` and `jp c ls` read live
+conversations only.
+`jp doctor` reads the whole archive; a lookup by ID (`jp c rm <id>`, a `--fix
+--id`) reads it only for a conversation with no live copy.
+
+A rebuilt `metadata.json` has no `archived_at`, so the conversation stays
+archived but sorts last in `jp c ls --archived`.
+`jp c ls --archived` still leaves out an archived conversation whose metadata
+fails to load, without saying so.

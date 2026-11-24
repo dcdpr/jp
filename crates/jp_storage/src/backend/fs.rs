@@ -5,7 +5,7 @@
 //! The `Storage` struct remains as an internal implementation detail; external
 //! code interacts through the traits.
 
-use std::collections::HashSet;
+use std::{collections::HashSet, fs};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, Utc};
@@ -278,16 +278,7 @@ impl LoadBackend for FsStorageBackend {
     }
 
     fn conversation_locations(&self, id: &ConversationId) -> Vec<StorageLocation> {
-        let mut dirs = self.live_conversation_dirs(id);
-        if dirs.is_empty() {
-            let prefix = id.to_dirname(None);
-            dirs = self
-                .conversations_dirs()
-                .iter()
-                .flat_map(|dir| conversation_dirs_for_id(&dir.join(ARCHIVE_DIR), &prefix))
-                .collect();
-        }
-
+        let (dirs, _) = self.stored_dirs(id);
         dirs.iter()
             .map(|dir| StorageLocation::of_path(dir))
             .collect()
@@ -386,31 +377,7 @@ impl RecoveryBackend for FsStorageBackend {
     }
 
     fn inspect(&self, id: &ConversationId) -> Option<StoredConversation> {
-        let dirs = self.live_conversation_dirs(id);
-        if dirs.is_empty() {
-            return None;
-        }
-
-        let state = dirs
-            .iter()
-            .try_for_each(|dir| validate_conversation_dir(dir));
-        let locations = dirs
-            .iter()
-            .map(|dir| StorageLocation::of_path(dir))
-            .collect();
-        let title = self
-            .storage
-            .load_conversation_metadata(id)
-            .ok()
-            .and_then(|metadata| metadata.title);
-
-        Some(StoredConversation {
-            id: *id,
-            locations,
-            state,
-            title,
-            repair: applicable_repair(&dirs),
-        })
+        self.stored(id).map(|(stored, _)| stored)
     }
 
     fn remove(
@@ -425,14 +392,16 @@ impl RecoveryBackend for FsStorageBackend {
             return Ok(Removal::Locked);
         };
 
-        let Some(stored) = self.inspect(id) else {
+        let Some((stored, dirs)) = self.stored(id) else {
             return Ok(Removal::NotFound);
         };
         if !decide(&stored) {
             return Ok(Removal::Declined);
         }
 
-        self.storage.remove_conversation(id)?;
+        for dir in dirs {
+            fs::remove_dir_all(dir)?;
+        }
         Ok(Removal::Removed)
     }
 
@@ -443,14 +412,19 @@ impl RecoveryBackend for FsStorageBackend {
             .invalid
             .into_iter()
             .filter(|entry| !self.storage.is_conversation_locked(&entry.id.to_string()))
-            .map(|conversation| DiagnosedConversation {
-                // A repair works on live conversations only.
-                repair: if conversation.archived {
-                    None
+            .map(|conversation| {
+                // An archived copy beside a live copy disagrees with it, and no
+                // repair settles that; the live copy is repaired on its own.
+                let (dirs, archived) = self.stored_dirs(&conversation.id);
+                let repair = if archived == conversation.archived {
+                    applicable_repair(&dirs)
                 } else {
-                    applicable_repair(&self.live_conversation_dirs(&conversation.id))
-                },
-                conversation,
+                    None
+                };
+                DiagnosedConversation {
+                    conversation,
+                    repair,
+                }
             })
             .collect();
 
@@ -485,7 +459,7 @@ impl RecoveryBackend for FsStorageBackend {
             return Ok(RepairOutcome::Locked);
         };
 
-        let Some(stored) = self.inspect(id) else {
+        let Some((stored, dirs)) = self.stored(id) else {
             return Ok(RepairOutcome::NotFound);
         };
         if stored.repair != Some(repair) {
@@ -497,8 +471,8 @@ impl RecoveryBackend for FsStorageBackend {
 
         match repair {
             Repair::RebuildMetadata => {
-                for dir in self.live_conversation_dirs(id) {
-                    rebuild_metadata(&dir, id)?;
+                for dir in &dirs {
+                    rebuild_metadata(dir, id)?;
                 }
             }
         }
@@ -507,8 +481,66 @@ impl RecoveryBackend for FsStorageBackend {
     }
 }
 
-/// The repair that makes the conversation in `dirs`, its live directories,
-/// load: one every directory needs.
+impl FsStorageBackend {
+    /// Every directory of conversation `id` in the archive of each storage
+    /// root, workspace first.
+    fn archived_conversation_dirs(&self, id: &ConversationId) -> Vec<Utf8PathBuf> {
+        let prefix = id.to_dirname(None);
+        self.conversations_dirs()
+            .iter()
+            .flat_map(|dir| conversation_dirs_for_id(&dir.join(ARCHIVE_DIR), &prefix))
+            .collect()
+    }
+
+    /// The directories conversation `id` is stored in, and whether they are in
+    /// the archive: its live directories, or its archived ones when it has no
+    /// live copy.
+    ///
+    /// The archive is read only in the second case, so looking up a live
+    /// conversation costs the same however large the archive is.
+    fn stored_dirs(&self, id: &ConversationId) -> (Vec<Utf8PathBuf>, bool) {
+        let live = self.live_conversation_dirs(id);
+        if !live.is_empty() {
+            return (live, false);
+        }
+        (self.archived_conversation_dirs(id), true)
+    }
+
+    /// What the store holds for conversation `id`, and the directories it is
+    /// in.
+    fn stored(&self, id: &ConversationId) -> Option<(StoredConversation, Vec<Utf8PathBuf>)> {
+        let (dirs, archived) = self.stored_dirs(id);
+        if dirs.is_empty() {
+            return None;
+        }
+
+        let state = dirs
+            .iter()
+            .try_for_each(|dir| validate_conversation_dir(dir));
+        let locations = dirs
+            .iter()
+            .map(|dir| StorageLocation::of_path(dir))
+            .collect();
+        let metadata = if archived {
+            self.storage.load_archived_conversation_metadata(id)
+        } else {
+            self.storage.load_conversation_metadata(id)
+        };
+
+        let stored = StoredConversation {
+            id: *id,
+            locations,
+            state,
+            title: metadata.ok().and_then(|metadata| metadata.title),
+            repair: applicable_repair(&dirs),
+            archived,
+        };
+        Some((stored, dirs))
+    }
+}
+
+/// The repair that makes the conversation in `dirs`, the directories of one
+/// partition, load: one every directory needs.
 ///
 /// A conversation with one directory that loads and one that does not has two
 /// copies that disagree, which no repair settles.

@@ -237,6 +237,7 @@ fn stored(
         state,
         title: title.map(str::to_owned),
         repair: None,
+        archived: false,
     }
 }
 

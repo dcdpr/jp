@@ -1,5 +1,4 @@
 use std::{
-    fs,
     sync::{Arc, mpsc},
     thread,
     time::Duration,
@@ -9,7 +8,7 @@ use camino_tempfile::Utf8TempDir;
 use jp_config::AppConfig;
 use jp_conversation::{Conversation, ConversationId};
 use jp_printer::{OutputFormat, Printer};
-use jp_storage::backend::{FsStorageBackend, LockBackend as _, RecoveryBackend as _, Repair};
+use jp_storage::backend::{FsStorageBackend, LockBackend as _};
 use jp_workspace::Workspace;
 use tokio::runtime::Runtime;
 
@@ -46,50 +45,6 @@ fn archived(interactive: bool) -> (Utf8TempDir, Ctx, Arc<FsStorageBackend>) {
     ctx.term.interactive = interactive;
 
     (tmp, ctx, fs)
-}
-
-// `jp doctor` suggests unarchiving an archived conversation that fails to load:
-// back in the live store, the fixes for live conversations reach it.
-#[test]
-fn an_archived_conversation_that_fails_to_load_is_unarchived() {
-    let tmp = camino_tempfile::tempdir().unwrap();
-    let fs = Arc::new(FsStorageBackend::new(&tmp.path().join(".jp")).unwrap());
-    let conversations = tmp.path().join(".jp").join("conversations");
-    let archived = conversations.join(".archive").join("17941219991");
-    fs::create_dir_all(&archived).unwrap();
-    fs::write(
-        archived.join("events.json"),
-        r#"[{"timestamp":"2026-01-01T10:00:00Z","type":"chat_request","content":"a"}]"#,
-    )
-    .unwrap();
-
-    let mut ws = Workspace::in_memory(tmp.path()).with_backend(Arc::clone(&fs));
-    ws.load_conversation_index();
-    let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
-    let mut ctx = Ctx::new(
-        ExecutionContext::for_workspace(&ws),
-        ws,
-        Some(Arc::clone(&fs)),
-        Runtime::new().unwrap(),
-        Globals::default(),
-        AppConfig::new_test(),
-        None,
-        printer,
-    );
-
-    unarchive(&mut ctx).unwrap();
-
-    let diagnosis = fs.diagnose().unwrap();
-    let found: Vec<_> = diagnosis
-        .invalid
-        .iter()
-        .map(|diagnosed| (diagnosed.conversation.path(), diagnosed.repair))
-        .collect();
-    assert!(!archived.exists());
-    assert_eq!(found, vec![(
-        conversations.join("17941219991"),
-        Some(Repair::RebuildMetadata)
-    )]);
 }
 
 fn unarchive(ctx: &mut Ctx) -> Output {

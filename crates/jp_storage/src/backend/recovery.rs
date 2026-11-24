@@ -16,8 +16,13 @@ use crate::{
 };
 
 /// Access to the conversations a store holds that do not load.
+///
+/// [`Self::scan`] reads live conversations only, since it runs before every
+/// command; the archive can hold thousands of conversations.
+/// The other methods reach the archive: [`Self::diagnose`] reads all of it, and
+/// a lookup by ID reads it only for a conversation with no live copy.
 pub trait RecoveryBackend: Debug + Send + Sync {
-    /// Every stored conversation that fails validation, sorted by location.
+    /// Every live conversation that fails validation, sorted by location.
     ///
     /// A conversation another process holds the lock on is left out, because it
     /// may be partway through a write.
@@ -25,7 +30,8 @@ pub trait RecoveryBackend: Debug + Send + Sync {
     /// moves or deletes a conversation.
     fn scan(&self) -> Result<Vec<InvalidConversation>>;
 
-    /// What the store holds for conversation `id`, read without loading it.
+    /// What the store holds for conversation `id`, read without loading it: its
+    /// live copy, or its archived copy when it has no live copy.
     ///
     /// `None` when the store holds nothing for `id`.
     fn inspect(&self, id: &ConversationId) -> Option<StoredConversation>;
@@ -47,8 +53,8 @@ pub trait RecoveryBackend: Debug + Send + Sync {
         decide: &mut dyn FnMut(&StoredConversation) -> bool,
     ) -> Result<Removal>;
 
-    /// What the store holds that needs the user's attention, read without
-    /// changing anything.
+    /// What the store holds that needs the user's attention, live and archived,
+    /// read without changing anything.
     ///
     /// A conversation another process holds the lock on is left out, as in
     /// [`Self::scan`].
@@ -191,6 +197,9 @@ pub struct StoredConversation {
     /// The repair that makes the conversation load, when it does not and one
     /// does.
     pub repair: Option<Repair>,
+
+    /// Whether the conversation is in the archive.
+    pub archived: bool,
 }
 
 /// The outcome of [`RecoveryBackend::remove`].

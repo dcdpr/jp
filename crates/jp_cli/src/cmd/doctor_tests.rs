@@ -60,14 +60,18 @@ fn failure<'a>(dirname: &str, error: &'a ValidationError, fix: Option<Repair>) -
     }
 }
 
-fn archived_failure<'a>(dirname: &str, error: &'a ValidationError) -> Finding<'a> {
+fn archived_failure<'a>(
+    dirname: &str,
+    error: &'a ValidationError,
+    fix: Option<Repair>,
+) -> Finding<'a> {
     Finding {
         failure: LoadFailure {
             id: ConversationId::try_from_dirname(dirname).unwrap(),
             location: StorageLocation::new(format!("/ws/.jp/conversations/.archive/{dirname}")),
             error,
         },
-        fix: None,
+        fix,
         archived: true,
     }
 }
@@ -186,16 +190,22 @@ fn copies_of_one_conversation_count_once_toward_the_command_for_all() {
     );
 }
 
-// An archived conversation is out of reach of the fixes and of `jp c rm`, so its
-// row suggests unarchiving it, after which the report lists it with those.
+// Archived conversations are fixed and removed where they are, with the same
+// commands as live ones; the fix-all line counts both.
 #[test]
 fn archived_conversations_that_fail_to_load_have_their_own_section() {
     let missing = missing_metadata("17941219991");
+    let archived_missing = missing_metadata("17941219993");
     let corrupt = corrupt_events("17941219992");
     let report = Report {
         failures: vec![
             failure("17941219991", &missing, Some(Repair::RebuildMetadata)),
-            archived_failure("17941219992", &corrupt),
+            archived_failure("17941219992", &corrupt, None),
+            archived_failure(
+                "17941219993",
+                &archived_missing,
+                Some(Repair::RebuildMetadata),
+            ),
         ],
         strays: &[],
     };
@@ -207,7 +217,11 @@ fn archived_conversations_that_fail_to_load_have_their_own_section() {
 ## Conversations
 - jp-c17941219991  missing metadata.json    jp doctor --id=jp-c17941219991 --fix rebuild-metadata
 ## Archived conversations
-- jp-c17941219992  events.json: invalid JSON at line 1, column 2    jp c unarchive jp-c17941219992"
+- jp-c17941219992  events.json: invalid JSON at line 1, column 2    jp c rm jp-c17941219992
+- jp-c17941219993  missing metadata.json                            jp doctor --id=jp-c17941219993 \
+         --fix rebuild-metadata
+
+Run `jp doctor --fix rebuild-metadata` to fix all 2 conversations it covers."
     );
 }
 
@@ -215,7 +229,7 @@ fn archived_conversations_that_fail_to_load_have_their_own_section() {
 fn a_report_of_only_archived_problems_has_only_their_section() {
     let corrupt = corrupt_events("17941219992");
     let report = Report {
-        failures: vec![archived_failure("17941219992", &corrupt)],
+        failures: vec![archived_failure("17941219992", &corrupt, None)],
         strays: &[],
     };
 
@@ -224,7 +238,7 @@ fn a_report_of_only_archived_problems_has_only_their_section() {
         "\
 # Report
 ## Archived conversations
-- jp-c17941219992  events.json: invalid JSON at line 1, column 2    jp c unarchive jp-c17941219992"
+- jp-c17941219992  events.json: invalid JSON at line 1, column 2    jp c rm jp-c17941219992"
     );
 }
 
@@ -232,7 +246,7 @@ fn a_report_of_only_archived_problems_has_only_their_section() {
 fn an_archived_conversation_s_record_says_it_is_archived() {
     let corrupt = corrupt_events("17941219992");
     let report = Report {
-        failures: vec![archived_failure("17941219992", &corrupt)],
+        failures: vec![archived_failure("17941219992", &corrupt, None)],
         strays: &[],
     };
 
@@ -428,8 +442,36 @@ fn an_archived_conversation_that_fails_to_load_is_reported() {
     assert_eq!(
         s.out.lock().as_str(),
         "# Report\n## Archived conversations\n- jp-c17941219991  metadata.json: invalid JSON at \
-         line 1, column 2    jp c unarchive jp-c17941219991\n"
+         line 1, column 2    jp c rm jp-c17941219991\n"
     );
+}
+
+// The fix writes where the conversation is, so an archived one stays archived.
+#[test]
+fn the_fix_repairs_an_archived_conversation_where_it_is() {
+    let s = store();
+    let archived = s.conversations.join(".archive").join("17941219991");
+    fs::create_dir_all(&archived).unwrap();
+    fs::write(
+        archived.join("events.json"),
+        r#"[{"timestamp":"2026-01-01T10:00:00Z","type":"chat_request","content":"a"}]"#,
+    )
+    .unwrap();
+
+    run(
+        &s,
+        s.fs.as_ref(),
+        &["--fix", "rebuild-metadata", "--yes"],
+        true,
+    )
+    .unwrap();
+
+    assert_eq!(
+        s.out.lock().as_str(),
+        "Applied `rebuild-metadata` to 1 conversation.\n"
+    );
+    assert!(archived.join("metadata.json").is_file());
+    assert!(!s.conversations.join("17941219991").exists());
 }
 
 // The report reads the store as it is: what the startup scan of any other
