@@ -32,6 +32,7 @@ use crate::{
     location::StorageLocation,
     lock::LockInfo,
     rebuild::rebuild_metadata,
+    resource_lock::ResourceGuard,
     validate::{
         InvalidConversation, ValidationResult, missing_only_metadata, validate_conversation_dir,
     },
@@ -120,6 +121,16 @@ impl FsStorageBackend {
     #[must_use]
     pub fn user_or_root_with_path(&self, path: &RelativePath) -> Utf8PathBuf {
         self.storage.user_or_root_with_path(path)
+    }
+
+    /// Block until this process holds the store-wide lock named `resource`; see
+    /// [`Storage::lock_store`].
+    ///
+    /// # Errors
+    ///
+    /// Fails when the lock file cannot be created or locked.
+    pub fn lock_store(&self, resource: &str) -> Result<Box<dyn ResourceGuard>> {
+        self.storage.lock_store(resource)
     }
 
     /// List orphaned lock file paths in user storage.

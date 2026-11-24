@@ -1,4 +1,9 @@
-use std::{fs, sync::Arc};
+use std::{
+    fs,
+    sync::{Arc, mpsc},
+    thread,
+    time::Duration,
+};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::{Utf8TempDir, tempdir};
@@ -61,6 +66,39 @@ fn listed(conversations: &Utf8Path) -> Vec<String> {
         .collect();
     names.sort();
     names
+}
+
+// Two processes starting at once must not both fix and move the same entry, so
+// a restore waits for one already running, and reads the trash only after it
+// finishes.
+#[test]
+fn a_restore_waits_for_one_already_running() {
+    let (_tmp, backend, conversations) = setup();
+    let entry = trashed(&conversations, "17941219991", &[("events.json", EVENTS)]);
+    let running = backend.lock_store(RESTORE_LOCK).unwrap();
+
+    let (done, finished) = mpsc::channel();
+    let waiting = backend.clone();
+    thread::spawn(move || done.send(restore(&waiting)).unwrap());
+
+    // Generous: a restore that does not wait moves the entry in milliseconds.
+    thread::sleep(Duration::from_millis(300));
+    assert!(entry.is_dir(), "restored while another restore was running");
+    assert!(!conversations.join("17941219991").exists());
+
+    drop(running);
+    let leftovers = finished
+        .recv_timeout(Duration::from_secs(5))
+        .expect("the restore did not finish once the other one let go");
+
+    assert_eq!(leftovers, []);
+    assert!(
+        conversations
+            .join("17941219991")
+            .join("events.json")
+            .is_file()
+    );
+    assert!(!conversations.join(".trash").exists());
 }
 
 #[test]

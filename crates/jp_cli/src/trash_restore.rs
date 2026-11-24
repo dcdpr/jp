@@ -25,6 +25,9 @@ const TRASH_DIR: &str = ".trash";
 const ARCHIVE_DIR: &str = ".archive";
 const TRASHED_FILE: &str = "TRASHED.md";
 
+/// The store-wide lock a restore holds from start to finish.
+const RESTORE_LOCK: &str = "trash-restore";
+
 const CONVERSATION_FILES: [&str; 3] = ["metadata.json", "base_config.json", "events.json"];
 
 /// A `.trash/` entry that [`restore_trash`] could not restore.
@@ -72,12 +75,29 @@ impl LeftoverReason {
 /// - Allocates the next free [`ConversationId`] if the entry's ID is already in
 ///   use in the live or archive partition.
 ///
+/// Holds a store-wide lock from start to finish, waiting for a restore another
+/// process is running, so two processes never fix or move the same entry.
+/// The trash is read only once the lock is held.
+/// When the lock cannot be taken, nothing is restored this run.
+///
 /// Returns any entries that could not be restored.
 pub(crate) fn restore_trash(
     fs: &FsStorageBackend,
     config: impl FnOnce() -> Option<Arc<AppConfig>>,
 ) -> Vec<Leftover> {
     let roots = fs.conversations_dirs();
+    if !roots.iter().any(|root| root.join(TRASH_DIR).is_dir()) {
+        return vec![];
+    }
+
+    let _restoring = match fs.lock_store(RESTORE_LOCK) {
+        Ok(guard) => guard,
+        Err(error) => {
+            warn!(%error, "Not restoring the trash: failed to take its lock.");
+            return vec![];
+        }
+    };
+
     let mut config = Some(config);
     let mut built = None;
     let mut base_config = || {
