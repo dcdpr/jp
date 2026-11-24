@@ -102,7 +102,7 @@ fn an_archived_conversation_that_fails_to_load_is_reported() {
     assert_eq!(
         strip_str(err.lock().as_str()),
         "1 archived conversation failed to load:\n\n- jp-c17941219992: metadata.json: invalid \
-         JSON at line 1, column 2\n\nRun `jp conversation rm jp-c17941219992` to remove it.\n"
+         JSON at line 1, column 2\n\nRun `jp doctor` to see how to fix it.\n"
     );
 }
 

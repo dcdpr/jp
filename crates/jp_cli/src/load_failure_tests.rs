@@ -73,7 +73,7 @@ fn archived_failures_are_reported_as_archived() {
         plain(&[archived_failure("17941219994", &error)]).as_deref(),
         Some(
             "1 archived conversation failed to load:\n\n- jp-c17941219994: missing \
-             metadata.json\n\nRun `jp conversation rm jp-c17941219994` to remove it."
+             metadata.json\n\nRun `jp doctor` to see how to fix it."
         )
     );
 }
@@ -87,7 +87,7 @@ fn one_failure_is_listed_in_the_singular() {
         report.as_deref(),
         Some(
             "1 conversation failed to load:\n\n- jp-c17636257526: missing metadata.json\n\nRun \
-             `jp conversation rm jp-c17636257526` to remove it."
+             `jp doctor` to see how to fix it."
         )
     );
 }
@@ -113,8 +113,7 @@ fn up_to_five_failures_are_listed() {
         "- jp-c17636257524: missing metadata.json",
         "- jp-c17636257525: missing metadata.json",
         "",
-        "Run `jp conversation rm jp-c17636257521 jp-c17636257522 jp-c17636257523 jp-c17636257524 \
-         jp-c17636257525` to remove them.",
+        "Run `jp doctor` to see how to fix them.",
     ];
     assert_eq!(plain(&failures), Some(expected.join("\n")));
 }
@@ -155,8 +154,8 @@ fn the_count_and_conversations_are_highlighted() {
     assert_eq!(
         listed,
         format!(
-            "{} failed to load:\n\n- {}: missing metadata.json\n\nRun `jp conversation rm \
-             jp-c17636257526` to remove it.",
+            "{} failed to load:\n\n- {}: missing metadata.json\n\nRun `jp doctor` to see how to \
+             fix it.",
             "1 conversation".bold().yellow(),
             "jp-c17636257526".bold().yellow(),
         )
@@ -256,7 +255,7 @@ fn the_text_report_prints_when_the_notice_drops_even_under_quiet() {
     assert_eq!(
         strip_ansi_escapes::strip_str(err.lock().as_str()),
         "1 conversation failed to load:\n\n- jp-c17941219994: metadata.json: invalid JSON at line \
-         1, column 2\n\nRun `jp conversation rm jp-c17941219994` to remove it.\n"
+         1, column 2\n\nRun `jp doctor` to see how to fix it.\n"
     );
 }
 

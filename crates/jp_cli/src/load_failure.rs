@@ -137,7 +137,7 @@ const MAX_LISTED: usize = 5;
 /// Render the text report, or `None` when nothing failed to load.
 ///
 /// Up to [`MAX_LISTED`] failures are listed with their ID and error, followed
-/// by the `jp conversation rm` command that removes them.
+/// by a pointer to `jp doctor`, which names the fix or removal for each.
 /// More than that is reported as a count, and `jp doctor` lists them.
 pub(crate) fn render_text(failures: &[LoadFailure<'_>]) -> Option<String> {
     let count = failures.len();
@@ -172,25 +172,11 @@ pub(crate) fn render_text(failures: &[LoadFailure<'_>]) -> Option<String> {
         .collect::<Vec<_>>()
         .join("\n");
 
+    let pronoun = if count == 1 { "it" } else { "them" };
     Some(format!(
-        "{} failed to load:\n\n{entries}\n\n{}",
+        "{} failed to load:\n\n{entries}\n\nRun `jp doctor` to see how to fix {pronoun}.",
         subject.bold().yellow(),
-        rm_hint(failures)
     ))
-}
-
-/// The command that removes every listed failure.
-fn rm_hint(failures: &[LoadFailure<'_>]) -> String {
-    let ids: Vec<_> = failures
-        .iter()
-        .map(|failure| failure.id.to_string())
-        .collect();
-    let pronoun = if ids.len() == 1 { "it" } else { "them" };
-
-    format!(
-        "Run `jp conversation rm {}` to remove {pronoun}.",
-        ids.join(" ")
-    )
 }
 
 /// Render one JSON record per failure.
