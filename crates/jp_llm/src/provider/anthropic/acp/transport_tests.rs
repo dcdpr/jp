@@ -584,10 +584,8 @@ async fn quota_notification_survives_the_protocol_error_boundary() {
     assert!(receiver.recv().await.is_none());
 }
 
-/// Drive a request against an adapter that sends `report` once the prompt is
-/// open and then fails the prompt without an SDK result.
-///
-/// Returns the error the request ended with, and the events it emitted first.
+/// Drive a request against a scripted adapter that optionally emits `report`
+/// during `session/prompt` and then fails the prompt RPC without an SDK result.
 async fn prompt_failed_after(report: Option<Value>) -> (Error, Vec<Event>) {
     let agent = scripted(move |method, params, notifier| {
         let report = report.clone();
@@ -650,10 +648,9 @@ async fn prompt_failed_after(report: Option<Value>) -> (Error, Vec<Event>) {
     (error, events)
 }
 
-/// The adapter can fail the prompt without an SDK result after Claude Code
-/// reported a `server_error`.
-/// No result arrives to consume the held report, so the failed prompt does: the
-/// request is retryable, and the error says what Claude Code reported.
+/// If the prompt RPC fails without an SDK result after Claude Code reported a
+/// `server_error`, surface the pending `server_error` as a transient stream
+/// error.
 #[tokio::test]
 async fn a_prompt_that_fails_after_a_server_error_is_retryable() {
     let (error, events) = prompt_failed_after(Some(json!({
@@ -666,7 +663,6 @@ async fn a_prompt_that_fails_after_a_server_error_is_retryable() {
     })))
     .await;
 
-    // The report itself fails nothing: it only shows the connection is live.
     assert_eq!(events, vec![Event::KeepAlive]);
     let Error::Stream(error) = error else {
         panic!("expected the held server error, got {error:?}")
@@ -679,7 +675,6 @@ async fn a_prompt_that_fails_after_a_server_error_is_retryable() {
     );
 }
 
-/// Without a held report, a failed prompt stays the protocol error it is.
 #[tokio::test]
 async fn a_prompt_that_fails_without_a_server_error_is_a_protocol_error() {
     let (error, events) = prompt_failed_after(None).await;

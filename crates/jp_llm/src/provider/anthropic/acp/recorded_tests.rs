@@ -163,22 +163,14 @@ pub(super) fn context() -> QueryContext {
     }
 }
 
-/// The arguments of one `transport::drive` call that differ between a live run
-/// and a replay.
+/// Mode-specific inputs to `transport::drive` (live vs. replayed).
 struct Connection {
-    /// The transcript the session resumes from.
     artifact: NativeArtifact,
-
-    /// The environment the session options are built from.
     environment: BTreeMap<String, String>,
-
     transport: Box<dyn Transport>,
 }
 
 /// Run one conversation and return the usage the runtime reported.
-///
-/// Everything above the connection is shared by both modes: the same request,
-/// the same driver, the same assertions on what came back.
 async fn conversation(
     policy: CachePolicy,
     tag: &str,
@@ -246,8 +238,8 @@ fn live(
             .expect("a prepared launch");
         Connection {
             artifact: launch.artifact,
-            // The launch adds the storage settings of `login`, which a
-            // production request sends in its session options too.
+            // `launch` populates the storage environment variables for `login`
+            // so the session options match a production request.
             environment: launch.environment,
             transport: Box::new(transport::Spawned {
                 command: launch.command,
@@ -279,9 +271,6 @@ fn recorded_session(script: &[Framed]) -> Option<Uuid> {
 ///
 /// A recording with no `session/load` had no history to resume, and leaving the
 /// id unset is what makes the replay open with `session/new` as it did.
-///
-/// The environment holds no login: a replay reads none, and the recording
-/// answers by method whatever the session options carry.
 fn replayed(
     script: Vec<Framed>,
     policy: CachePolicy,

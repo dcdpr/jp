@@ -522,9 +522,9 @@ pub(super) async fn drive(
                     return Err(Error::Stream(Box::new(error)));
                 }
                 return result.map_err(|error| {
-                    // The adapter can fail the prompt without the SDK result
-                    // that reads a held `server_error`. The report is then the
-                    // reason the turn did not finish.
+                    // If the prompt RPC fails without emitting an SDK result,
+                    // surface any pending `server_error` as a transient stream
+                    // error instead of a generic protocol error.
                     let Some(reported) = state.take_server_error() else {
                         return Error::Protocol(error);
                     };

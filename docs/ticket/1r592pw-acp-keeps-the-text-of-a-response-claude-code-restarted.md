@@ -47,13 +47,12 @@ continues from where it stopped (`handle_stream_error` in
 
 ## Fix
 
-Remove the blocks Claude Code abandoned from the conversation, so JP's record
-matches what Claude Code kept in its own context.
+Remove the blocks that Claude Code abandoned from the conversation so JP's
+history matches what Claude Code kept in its context.
 
-Claude Code names those blocks.
-The SDK message that carries the interrupted response's `message_stop` has an
-`abandoned_blocks` field, holding the ID of the API message and the index of the
-first block Claude Code discarded:
+The `stream_event` SDK message carrying the interrupted response's
+`message_stop` includes an `abandoned_blocks` field with the API message ID and
+the index of the first discarded block (`from_block_index`):
 
 | Recording                         | `from_block_index` | Abandoned        | Kept                               |
 | --------------------------------- | ------------------ | ---------------- | ---------------------------------- |
@@ -61,51 +60,49 @@ first block Claude Code discarded:
 | `cut_off_reasoned_text.jsonl:114` | `1`                | the text block   | the thinking block                 |
 | `cut_off.jsonl:51`                | `2`                | the `store` call | a text block and the `lookup` call |
 
-The third recording is the `server_error` path, so the field is not specific to
-text.
-In all three, no other `message_stop` carries the field.
-JP discards it today: `SdkMessage::StreamEvent` in
-`crates/jp_llm/src/provider/anthropic/acp/protocol.rs` decodes only `event` and
-`parent_tool_use_id`.
+`cut_off.jsonl` is the `server_error` path, so `abandoned_blocks` is not
+specific to text responses.
+In all three fixtures, no other `message_stop` carries the field.
+`SdkMessage::StreamEvent` in
+`crates/jp_llm/src/provider/anthropic/acp/protocol.rs` currently deserializes
+only `event` and `parent_tool_use_id`, ignoring `abandoned_blocks`.
 
-- [ ] Decode `abandoned_blocks` from the `stream_event` envelope.
-- [ ] On a `message_stop` that carries it, emit a stream event that tells the
-      turn loop which blocks of the response Claude Code abandoned.
-- [ ] In the turn loop, remove the chat responses committed for those blocks and
-      persist the removal, the way `FinishReason::Refused` revokes content.
-- [ ] Replace the two `keeps_the_text_of_both_attempts` tests with tests that
-      assert a single copy of the answer is committed.
+- [ ] Deserialize `abandoned_blocks` on `SdkMessage::StreamEvent`.
+- [ ] On a `message_stop` carrying `abandoned_blocks`, emit a stream event
+      identifying the abandoned block range.
+- [ ] In the turn loop, remove the `ChatResponse` events committed for those
+      blocks and persist the removal (similar to how `FinishReason::Refused`
+      revokes content).
+- [ ] Update the two `keeps_the_text_of_both_attempts` tests to assert that only
+      a single copy of the answer is committed.
 
-Only chat responses are removed.
-A tool call JP has committed was dispatched and may have run, so it stays even
-if Claude Code lists it as abandoned.
-In `cut_off.jsonl` the abandoned `store` call was never committed, because JP
-holds a tool call back until Claude Code asks permission for it.
+Only `ChatResponse` events should be removed.
+A committed tool call has already been dispatched and may have executed, so it
+must remain in the conversation even if Claude Code lists it in
+`abandoned_blocks`.
+In `cut_off.jsonl`, the abandoned `store` call was never committed because JP
+only commits tool calls when Claude Code sends `session/request_permission`.
 
-Without the field, nothing is removed.
-Claude Code closes an interrupted text block with `content_block_stop`, so
-nothing else in the stream separates an abandoned block from a complete one.
-Inferring abandonment from the missing stop reason would remove a complete block
-in `cut_off.jsonl`, where the last block committed before `message_stop` is the
-`lookup` call.
-The type the Agent SDK reference gives for this message
-(`SDKPartialAssistantMessage`) does not list the field.
-Its presence is pinned by the three recordings, taken on the adapter and Claude
-Code versions JP qualifies.
+Do not remove blocks when `abandoned_blocks` is absent.
+Because Claude Code closes an interrupted text block with `content_block_stop`,
+nothing else in the stream distinguishes an abandoned block from a completed
+one; inferring abandonment from a missing stop reason would wrongly remove the
+completed `lookup` block in `cut_off.jsonl`.
+Although the Agent SDK reference for `SDKPartialAssistantMessage` does not
+document `abandoned_blocks`, the three recorded fixtures verify its presence on
+the qualified adapter and Claude Code versions.
 
 ## Follow-up
 
-Removing the abandoned blocks corrects the conversation but not the terminal,
-which has already printed the abandoned text and then prints the answer from the
-start.
+Removing abandoned blocks fixes the conversation history, but the terminal has
+already printed the interrupted text before printing the restarted answer.
 
-To fix that as well, have JP handle connection recovery on the ACP route the
-same way it does on the API-key route: let Claude Code report the failure, and
-let JP commit the partial response and restart the request from committed
-history.
-None of the Claude Code settings this depends on is verified.
-Check each with the `Scenario` harness in `cut_off_tests.rs` before changing
-production code:
+To avoid duplicate terminal output, have JP handle connection recovery on the
+ACP route the same way it does on the API-key route: let Claude Code report the
+failure, and let JP commit the partial response and restart the request from
+committed history.
+Verify which settings control Claude Code's retry and resume behavior using the
+`Scenario` harness in `cut_off_tests.rs` before changing production code:
 
 - Whether `CLAUDE_CODE_MAX_RETRIES=0` is respected, whether it disables the
   mid-stream retry in `cut_off_text.jsonl`, and what error Claude Code reports

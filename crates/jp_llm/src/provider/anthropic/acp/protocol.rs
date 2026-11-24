@@ -392,8 +392,8 @@ impl State {
             .collect()
     }
 
-    /// Take the `server_error` Claude Code reported for this turn, as the
-    /// retryable failure of a turn it did not go on to finish.
+    /// Take the `server_error` reported for this turn as a transient
+    /// [`StreamError`].
     pub(super) fn take_server_error(&mut self) -> Option<StreamError> {
         self.server_error.take().map(StreamError::transient)
     }
