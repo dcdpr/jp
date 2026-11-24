@@ -246,6 +246,15 @@ pub(super) struct State {
     pending_previews: IndexSet<String>,
     /// Held until quota metadata or the final SDK result disambiguates it.
     rate_limit_error: Option<String>,
+
+    /// `server_error` reported by Claude Code mid-turn when the API fails
+    /// partway through a response: a dropped connection, system sleep, or a
+    /// server fault.
+    ///
+    /// Claude Code preserves the content blocks completed before the failure,
+    /// executes any tool calls among them, and continues the turn, so this
+    /// error only fails the request if the final SDK result is an error.
+    server_error: Option<String>,
 }
 
 struct MessageIdentity {
@@ -277,6 +286,7 @@ impl State {
             open_tool_blocks: HashSet::new(),
             pending_previews: IndexSet::new(),
             rate_limit_error: None,
+            server_error: None,
         }
     }
 
@@ -380,6 +390,12 @@ impl State {
                 Event::ToolCallPendingEnd { id }
             })
             .collect()
+    }
+
+    /// Take the `server_error` reported for this turn as a transient
+    /// [`StreamError`].
+    pub(super) fn take_server_error(&mut self) -> Option<StreamError> {
+        self.server_error.take().map(StreamError::transient)
     }
 
     pub(super) fn usage_snapshot(&self) -> Value {
@@ -498,6 +514,10 @@ impl State {
                         self.rate_limit_error = Some(format!("Claude Code rate_limit: {detail}"));
                         return Ok(vec![]);
                     }
+                    if error == "server_error" {
+                        self.server_error = Some(format!("Claude Code {error}: {detail}"));
+                        return Ok(vec![]);
+                    }
                     let rejection = match error.as_str() {
                         "max_output_tokens" => {
                             return Err(StreamError::new(
@@ -537,6 +557,7 @@ impl State {
                     );
                 }
                 self.rate_limit_error = None;
+                self.server_error = None;
                 self.usage.observe(&message);
                 Ok(vec![])
             }
@@ -582,6 +603,12 @@ impl State {
                 } else if is_error || subtype != "success" {
                     if let Some(detail) = self.rate_limit_error.take() {
                         return Err(StreamError::other(detail));
+                    }
+                    // Claude Code aborted the turn after the API failed
+                    // mid-response; the same request can succeed once the
+                    // connection or the server recovers.
+                    if let Some(error) = self.take_server_error() {
+                        return Err(error);
                     }
                     let detail = errors.join("\n");
                     return Err(StreamError::other(if detail.is_empty() {

@@ -745,6 +745,10 @@ async fn read_output(mut command: Command, check: Check) -> Result<Vec<u8>, Erro
 mod recorded_tests;
 
 #[cfg(test)]
+#[path = "acp/cut_off_tests.rs"]
+mod cut_off_tests;
+
+#[cfg(test)]
 #[path = "acp/workflow_tests.rs"]
 mod workflow_tests;
 

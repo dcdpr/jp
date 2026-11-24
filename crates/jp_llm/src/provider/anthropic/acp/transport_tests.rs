@@ -187,6 +187,21 @@ fn an_unspecified_output_limit_does_not_inherit_the_http_fallback() {
 }
 
 #[test]
+fn the_runtime_sends_no_telemetry() {
+    let environment = options::environment(&prepared(), CachePolicy::Short);
+    assert_eq!(
+        environment.get("DISABLE_TELEMETRY").map(String::as_str),
+        Some("1")
+    );
+    assert_eq!(
+        environment
+            .get("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC")
+            .map(String::as_str),
+        Some("1")
+    );
+}
+
+#[test]
 fn an_explicit_output_limit_is_forwarded() {
     let prepared = prepared_with_limit(Some(8192));
     let environment = options::environment(&prepared, CachePolicy::Short);
@@ -567,6 +582,108 @@ async fn quota_notification_survives_the_protocol_error_boundary() {
     assert_eq!(error.quota_scope.as_deref(), Some("five_hour"));
     assert_eq!(error.quota_reset.unwrap().timestamp(), 1_783_080_000);
     assert!(receiver.recv().await.is_none());
+}
+
+/// Drive a request against a scripted adapter that optionally emits `report`
+/// during `session/prompt` and then fails the prompt RPC without an SDK result.
+async fn prompt_failed_after(report: Option<Value>) -> (Error, Vec<Event>) {
+    let agent = scripted(move |method, params, notifier| {
+        let report = report.clone();
+        async move {
+            match method.as_str() {
+                m if m == agent_method::INITIALIZE => Ok(json!({"protocolVersion": 1})),
+                m if m == agent_method::SESSION_NEW => {
+                    notifier.auth("Claude Max");
+                    Ok(json!({"sessionId": "11111111-1111-4111-8111-111111111111"}))
+                }
+                m if m == agent_method::SESSION_SET_CONFIG_OPTION => Ok(json!({
+                    "configOptions": [{
+                        "id": params["configId"],
+                        "name": "Setting",
+                        "type": "select",
+                        "currentValue": params["value"],
+                        "options": [],
+                    }],
+                })),
+                m if m == agent_method::SESSION_PROMPT => {
+                    if let Some(report) = report {
+                        notifier.sdk(report);
+                    }
+                    Err(RpcError::internal_error().data("The turn ended without a result."))
+                }
+                other => panic!("unexpected request: {other}"),
+            }
+        }
+    });
+    let prepared = prepared();
+    let environment = options::environment(&prepared, CachePolicy::Short);
+    let (sender, mut receiver) = mpsc::channel(16);
+    let error = timeout(
+        Duration::from_secs(5),
+        drive(
+            prepared,
+            QueryContext {
+                root: "/work/project".into(),
+                mcp_endpoint: None,
+                invocation: None,
+            },
+            vec![],
+            environment,
+            NativeArtifact {
+                session: None,
+                path: None,
+            },
+            agent,
+            sender,
+        ),
+    )
+    .await
+    .unwrap()
+    .unwrap_err();
+
+    let mut events = vec![];
+    while let Some(event) = receiver.recv().await {
+        events.push(event.unwrap());
+    }
+    (error, events)
+}
+
+/// If the prompt RPC fails without an SDK result after Claude Code reported a
+/// `server_error`, surface the pending `server_error` as a transient stream
+/// error.
+#[tokio::test]
+async fn a_prompt_that_fails_after_a_server_error_is_retryable() {
+    let (error, events) = prompt_failed_after(Some(json!({
+        "type": "assistant",
+        "error": "server_error",
+        "message": {"model": "<synthetic>", "content": [{
+            "type": "text",
+            "text": "API Error: Your computer went to sleep mid-response. The response above may be incomplete.",
+        }]},
+    })))
+    .await;
+
+    assert_eq!(events, vec![Event::KeepAlive]);
+    let Error::Stream(error) = error else {
+        panic!("expected the held server error, got {error:?}")
+    };
+    assert_eq!(error.kind, StreamErrorKind::Transient);
+    assert_eq!(
+        error.message(),
+        "Claude Code server_error: API Error: Your computer went to sleep mid-response. The \
+         response above may be incomplete."
+    );
+}
+
+#[tokio::test]
+async fn a_prompt_that_fails_without_a_server_error_is_a_protocol_error() {
+    let (error, events) = prompt_failed_after(None).await;
+
+    assert_eq!(events, vec![]);
+    let Error::Protocol(error) = error else {
+        panic!("expected a protocol error, got {error:?}")
+    };
+    assert_eq!(error.data, Some(json!("The turn ended without a result.")));
 }
 
 #[tokio::test]

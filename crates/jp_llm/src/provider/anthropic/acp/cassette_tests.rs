@@ -418,6 +418,14 @@ fn what_identifies_the_recorder_never_reaches_the_file() {
             "original_cwd": "/home/someone/work/crate",
         }}}),
     );
+    tap.observe(
+        Side::Jp,
+        &json!({"method": "session/new", "params": {"_meta": {"claudeCode": {"options": {"env": {
+            "CLAUDE_CONFIG_DIR": "/home/someone/.local/share/jp/claude/work",
+            "CLAUDE_SECURESTORAGE_CONFIG_DIR": "/home/someone/.local/share/jp/claude/work",
+            "DISABLE_TELEMETRY": "1",
+        }}}}}}),
+    );
 
     let contents = std::fs::read_to_string(&path).unwrap();
     let recorded = parse(&contents).unwrap();
@@ -441,6 +449,16 @@ fn what_identifies_the_recorder_never_reaches_the_file() {
     assert_eq!(
         recorded[2].message["params"]["message"]["original_cwd"],
         json!("[redacted]")
+    );
+    assert_eq!(
+        recorded[3].message["params"]["_meta"]["claudeCode"]["options"]["env"],
+        json!({
+            "CLAUDE_CONFIG_DIR": "[redacted]",
+            "CLAUDE_SECURESTORAGE_CONFIG_DIR": "[redacted]",
+            // The rest of the environment is JP's own settings, the same on
+            // every machine.
+            "DISABLE_TELEMETRY": "1",
+        })
     );
     assert!(!contents.contains("someone"), "{contents}");
     assert!(!contents.contains("Example Inc"), "{contents}");

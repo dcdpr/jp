@@ -161,11 +161,10 @@ pub(super) fn metadata(
     })
 }
 
-/// The adapter's wall-clock ceiling for one tool call, in milliseconds.
+/// The adapter's wall-clock timeout for one tool call, in milliseconds.
 ///
-/// `MCP_TOOL_TIMEOUT` has no "off" spelling, so the ceiling is a number large
-/// enough that no prompt outlives it: about 24 days, the most a 32-bit
-/// millisecond timer holds.
+/// `MCP_TOOL_TIMEOUT` cannot be disabled, so set it to the maximum 32-bit
+/// millisecond value (~24 days) so no user prompt exceeds it.
 const NO_TIMEOUT: i32 = i32::MAX;
 
 pub(super) fn environment(
@@ -179,19 +178,25 @@ pub(super) fn environment(
         ("CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS".into(), "0".into()),
         ("ENABLE_TOOL_SEARCH".into(), "false".into()),
         ("MAX_MCP_OUTPUT_TOKENS".into(), "100000".into()),
+        // Prevent Claude Code from sending usage telemetry and error logs to
+        // third-party hosts during a JP request.
+        ("DISABLE_TELEMETRY".into(), "1".into()),
+        (
+            "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC".into(),
+            "1".into(),
+        ),
         // A JP tool call stays silent while its approval prompt is open, and
         // the adapter's two per-call timers measure wall-clock time whether or
-        // not JP is running: a closed laptop looks exactly like a hung server.
-        // Both would otherwise abort the call and hand the model a failure for
-        // a question nobody has answered yet.
+        // not JP is running: a closed laptop looks the same as a hung server.
+        // Both timers would otherwise abort the call while the prompt is still
+        // waiting for the user.
         //
-        // Disabling the idle check rather than sending progress notifications
-        // is what survives suspension — a heartbeat only resets the timer if it
-        // arrives, and a suspended process sends nothing.
+        // Disable the idle check rather than sending progress notifications,
+        // because a suspended process cannot send heartbeats to reset the timer.
         //
-        // Deciding when to stop waiting is JP's job: the interrupt handler
-        // cancels a call the user abandons, and the MCP Host holds the reply
-        // the service is parked on until then.
+        // JP owns tool-call cancellation: the interrupt handler cancels a call
+        // the user abandons, and the MCP Host holds the HTTP response open
+        // until then.
         ("CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT".into(), "0".into()),
         ("MCP_TOOL_TIMEOUT".into(), NO_TIMEOUT.to_string()),
     ]);

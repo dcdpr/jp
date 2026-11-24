@@ -1,0 +1,134 @@
+---
+source: crates/jp_llm/src/provider/anthropic/acp/cut_off_tests.rs
+expression: turn
+---
+[
+  {
+    "system": "session_title_changed"
+  },
+  {
+    "system": "status"
+  },
+  {
+    "system": "session_state_changed"
+  },
+  {
+    "other": "command_lifecycle"
+  },
+  {
+    "other": "command_lifecycle"
+  },
+  {
+    "system": "init",
+    "tools": [
+      "mcp__jp__lookup",
+      "mcp__jp__store"
+    ]
+  },
+  {
+    "system": "status"
+  },
+  {
+    "user": [
+      {
+        "text": "Before you answer, think through which is larger: 17 * 23 or 19 * 21. Do not mention the comparison in your answer. Then"
+      }
+    ]
+  },
+  {
+    "stream": "message_start"
+  },
+  {
+    "stream": "content_block_start",
+    "block": "thinking"
+  },
+  {
+    "assistant": [
+      "thinking"
+    ]
+  },
+  {
+    "stream": "content_block_stop"
+  },
+  {
+    "stream": "content_block_start",
+    "block": "text"
+  },
+  {
+    "probe": "cut every connection to the API"
+  },
+  {
+    "stream": "content_block_stop"
+  },
+  {
+    "stream": "message_stop"
+  },
+  {
+    "user": [
+      {
+        "text": "Your response above was cut off mid-stream. Resume directly from where it stops — no apology, no recap. If none of it su"
+      }
+    ],
+    "synthetic": true
+  },
+  {
+    "system": "status"
+  },
+  {
+    "stream": "message_start"
+  },
+  {
+    "stream": "content_block_start",
+    "block": "thinking"
+  },
+  {
+    "assistant": [
+      "thinking"
+    ]
+  },
+  {
+    "stream": "content_block_stop"
+  },
+  {
+    "stream": "content_block_start",
+    "block": "text"
+  },
+  {
+    "assistant": [
+      {
+        "text": "1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 "
+      }
+    ]
+  },
+  {
+    "stream": "content_block_stop"
+  },
+  {
+    "stream": "message_delta",
+    "stop_reason": "end_turn"
+  },
+  {
+    "stream": "message_stop"
+  },
+  {
+    "other": "rate_limit_event"
+  },
+  {
+    "result": "success",
+    "is_error": false,
+    "stop_reason": "end_turn",
+    "terminal_reason": "completed"
+  },
+  {
+    "other": "command_lifecycle"
+  },
+  {
+    "system": "session_state_changed"
+  },
+  {
+    "other": "prompt_suggestion"
+  },
+  {
+    "probe": "the adapter answered the prompt"
+  }
+]

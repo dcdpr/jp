@@ -1,0 +1,211 @@
+---
+source: crates/jp_llm/src/provider/anthropic/acp/cut_off_tests.rs
+expression: turn
+---
+[
+  {
+    "system": "session_title_changed"
+  },
+  {
+    "system": "status"
+  },
+  {
+    "system": "session_state_changed"
+  },
+  {
+    "other": "command_lifecycle"
+  },
+  {
+    "other": "command_lifecycle"
+  },
+  {
+    "system": "init",
+    "tools": [
+      "mcp__jp__lookup",
+      "mcp__jp__store"
+    ]
+  },
+  {
+    "system": "status"
+  },
+  {
+    "user": [
+      {
+        "text": "Make two tool calls in a single response, in this order. First call `lookup` with no arguments. Then call `store`, with "
+      }
+    ]
+  },
+  {
+    "stream": "message_start"
+  },
+  {
+    "stream": "content_block_start",
+    "block": "text"
+  },
+  {
+    "assistant": [
+      {
+        "text": "I'll make both calls in a single response."
+      }
+    ]
+  },
+  {
+    "stream": "content_block_stop"
+  },
+  {
+    "stream": "content_block_start",
+    "block": "tool_use",
+    "tool": "mcp__jp__lookup"
+  },
+  {
+    "assistant": [
+      {
+        "tool_use": "mcp__jp__lookup"
+      }
+    ]
+  },
+  {
+    "system": "session_state_changed"
+  },
+  {
+    "permission": "mcp__jp__lookup"
+  },
+  {
+    "stream": "content_block_stop"
+  },
+  {
+    "stream": "content_block_start",
+    "block": "tool_use",
+    "tool": "mcp__jp__store"
+  },
+  {
+    "probe": "cut every connection to the API"
+  },
+  {
+    "stream": "message_stop"
+  },
+  {
+    "assistant": [
+      {
+        "text": "API Error: Connection lost mid-response. The response above may be incomplete."
+      }
+    ],
+    "error": "server_error"
+  },
+  {
+    "system": "session_state_changed"
+  },
+  {
+    "user": [
+      {
+        "tool_result": "[{\"type\":\"text\",\"text\":\"INV-1042\"}]"
+      }
+    ]
+  },
+  {
+    "system": "status"
+  },
+  {
+    "stream": "message_start"
+  },
+  {
+    "stream": "content_block_start",
+    "block": "text"
+  },
+  {
+    "assistant": [
+      {
+        "text": "I need to make the `store` call, which I should have included in the same block. Let me do that now."
+      }
+    ]
+  },
+  {
+    "stream": "content_block_stop"
+  },
+  {
+    "stream": "content_block_start",
+    "block": "tool_use",
+    "tool": "mcp__jp__store"
+  },
+  {
+    "assistant": [
+      {
+        "tool_use": "mcp__jp__store"
+      }
+    ]
+  },
+  {
+    "system": "session_state_changed"
+  },
+  {
+    "permission": "mcp__jp__store"
+  },
+  {
+    "stream": "content_block_stop"
+  },
+  {
+    "stream": "message_delta",
+    "stop_reason": "tool_use"
+  },
+  {
+    "stream": "message_stop"
+  },
+  {
+    "other": "rate_limit_event"
+  },
+  {
+    "system": "session_state_changed"
+  },
+  {
+    "user": [
+      {
+        "tool_result": "[{\"type\":\"text\",\"text\":\"Stored.\"}]"
+      }
+    ]
+  },
+  {
+    "system": "status"
+  },
+  {
+    "stream": "message_start"
+  },
+  {
+    "stream": "content_block_start",
+    "block": "text"
+  },
+  {
+    "assistant": [
+      {
+        "text": "INV-1042"
+      }
+    ]
+  },
+  {
+    "stream": "content_block_stop"
+  },
+  {
+    "stream": "message_delta",
+    "stop_reason": "end_turn"
+  },
+  {
+    "stream": "message_stop"
+  },
+  {
+    "result": "success",
+    "is_error": false,
+    "stop_reason": "end_turn",
+    "terminal_reason": "completed"
+  },
+  {
+    "other": "command_lifecycle"
+  },
+  {
+    "system": "session_state_changed"
+  },
+  {
+    "other": "prompt_suggestion"
+  },
+  {
+    "probe": "the adapter answered the prompt"
+  }
+]

@@ -400,6 +400,66 @@ fn synthetic_error_reports_the_reason_not_a_model_mismatch() {
     );
 }
 
+/// Claude Code continues a turn after an API connection drop, so the
+/// `server_error` message alone does not fail the request; if the turn ends in
+/// an error result, the failure is reported as transient.
+#[test]
+fn lost_connection_the_runtime_gave_up_on_is_retryable() {
+    let mut state = state();
+    let report = state.sdk(notification(json!({"type":"assistant","error":"server_error","message":{"model":"<synthetic>","content":[{"type":"text","text":"API Error: Your computer went to sleep mid-response. The response above may be incomplete."}]}})));
+    assert_eq!(report.unwrap(), vec![]);
+
+    let error = state
+        .sdk(notification(
+            json!({"type":"result","subtype":"error_during_execution","is_error":true,"errors":[]}),
+        ))
+        .unwrap_err();
+    assert_eq!(error.kind, StreamErrorKind::Transient);
+    assert_eq!(
+        error.message(),
+        "Claude Code server_error: API Error: Your computer went to sleep mid-response. The \
+         response above may be incomplete."
+    );
+}
+
+/// A subsequent assistant message clears a prior `server_error`, so a later
+/// failure reports its own error rather than the earlier connection drop.
+#[test]
+fn recovered_connection_does_not_explain_a_later_failure() {
+    let mut state = state();
+    state.sdk(notification(json!({"type":"assistant","error":"server_error","message":{"model":"<synthetic>","content":[{"type":"text","text":"API Error: Connection lost mid-response."}]}}))).unwrap();
+    state.sdk(notification(json!({"type":"assistant","message":{"id":"msg-fixed","model":"claude-opus-5","content":[{"type":"text","text":"Continuing."}],"usage":{"input_tokens":1,"output_tokens":1}}}))).unwrap();
+
+    let error = state.sdk(notification(json!({"type":"result","subtype":"error_during_execution","is_error":true,"errors":["Adapter disconnected."]}))).unwrap_err();
+    assert_eq!(error.kind, StreamErrorKind::Other);
+    assert_eq!(
+        error.message(),
+        "Claude Code request failed (error_during_execution): Adapter disconnected."
+    );
+}
+
+/// Claude Code also reports mid-response server faults as `server_error` and
+/// attempts to continue the turn, so an unrecovered server fault is reported as
+/// transient just like a dropped connection.
+#[test]
+fn server_fault_the_runtime_gave_up_on_is_retryable() {
+    let mut state = state();
+    let report = state.sdk(notification(json!({"type":"assistant","error":"server_error","message":{"model":"<synthetic>","content":[{"type":"text","text":"API Error: Server error mid-response. The response above may be incomplete."}]}})));
+    assert_eq!(report.unwrap(), vec![]);
+
+    let error = state
+        .sdk(notification(
+            json!({"type":"result","subtype":"error_during_execution","is_error":true,"errors":[]}),
+        ))
+        .unwrap_err();
+    assert_eq!(error.kind, StreamErrorKind::Transient);
+    assert_eq!(
+        error.message(),
+        "Claude Code server_error: API Error: Server error mid-response. The response above may \
+         be incomplete."
+    );
+}
+
 #[test]
 fn runtime_can_resolve_a_model_alias() {
     let mut state = state();

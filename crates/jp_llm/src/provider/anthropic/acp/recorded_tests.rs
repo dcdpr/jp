@@ -12,13 +12,14 @@
 //! hand, and a fixture written from the same reading of the spec would agree
 //! with them whether or not the adapter does.
 //!
-//! What it does not cover is a tool host, so it carries no
-//! `session/request_permission` and no tool-call session update — the two
-//! messages whose fields are most hand-written.
-//! Capturing those needs a run with tools available, which today means a real
-//! `RECORD=1 jp query`.
+//! `live.jsonl` does not cover a tool host, so it has no
+//! `session/request_permission` requests or tool-call session updates.
+//! Capturing those requires a recording with tools enabled: `cut_off_tests`
+//! records against a stub tool server, and `RECORD=1 jp query` records against
+//! the JP MCP Host.
 
 use std::{
+    collections::BTreeMap,
     env, fmt,
     sync::{Arc, Mutex},
     time::Duration,
@@ -32,6 +33,7 @@ use jp_conversation::{
     event::{ChatRequest, ChatResponse, ConversationEvent},
     thread::ThreadBuilder,
 };
+use jp_credentials::{CATEGORY_LLM, CredentialSecret, CredentialStore, PROVIDER_ANTHROPIC};
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use tracing::{
@@ -60,6 +62,25 @@ use crate::{
     event::{Event, EventPart, FinishReason},
     query::{ChatQuery, QueryContext},
 };
+
+/// Return the Claude Code login directory to use when recording fixtures.
+///
+/// Picks the lexicographically first subscription profile registered via `jp
+/// provider llm auth login anthropic`.
+/// Returns `None` if no subscription profile is registered, falling back to
+/// Claude Code's default login.
+pub(super) fn recording_login() -> Option<Utf8PathBuf> {
+    let document = CredentialStore::file_default().ok()?.load().ok()?;
+    document
+        .profiles(CATEGORY_LLM, PROVIDER_ANTHROPIC)?
+        .iter()
+        .filter_map(|(name, credential)| match &credential.secret {
+            CredentialSecret::External { directory } => Some((name, directory)),
+            _ => None,
+        })
+        .min_by_key(|(name, _)| *name)
+        .map(|(_, directory)| directory.clone())
+}
 
 /// Test-only observer of the production diagnostic event, never conversation
 /// metadata.
@@ -134,7 +155,7 @@ fn query(policy: CachePolicy, tag: &str) -> ChatQuery {
         .into()
 }
 
-fn context() -> QueryContext {
+pub(super) fn context() -> QueryContext {
     QueryContext {
         root: Utf8PathBuf::from_path_buf(env::current_dir().unwrap()).unwrap(),
         mcp_endpoint: None,
@@ -142,19 +163,26 @@ fn context() -> QueryContext {
     }
 }
 
+/// Mode-specific inputs to `transport::drive` (live vs. replayed).
+struct Connection {
+    artifact: NativeArtifact,
+    environment: BTreeMap<String, String>,
+    transport: Box<dyn Transport>,
+}
+
 /// Run one conversation and return the usage the runtime reported.
-///
-/// Everything above the transport is shared by both modes: the same request,
-/// the same driver, the same assertions on what came back.
 async fn conversation(
     policy: CachePolicy,
     tag: &str,
-    prepare: impl FnOnce(&PreparedRequest) -> (NativeArtifact, Box<dyn Transport>),
+    prepare: impl FnOnce(&PreparedRequest) -> Connection,
 ) -> Value {
     let model = model_details(&"claude-opus-5".parse().unwrap());
     let prepared = PreparedRequest::new(&model, query(policy, tag)).unwrap();
-    let (artifact, transport) = prepare(&prepared);
-    let environment = options::environment(&prepared, policy);
+    let Connection {
+        artifact,
+        environment,
+        transport,
+    } = prepare(&prepared);
 
     let capture = UsageCapture::default();
     let subscriber = registry().with(capture.clone());
@@ -198,21 +226,26 @@ async fn conversation(
     capture.snapshot().expect("runtime did not report usage")
 }
 
-/// Reach the installed adapter, writing the transcript it resumes from and
-/// recording every message it exchanges.
+/// Reach the installed adapter under `login`, writing the transcript it resumes
+/// from and recording every message it exchanges into `fixture`.
 fn live(
+    fixture: &'static str,
     policy: CachePolicy,
-) -> impl FnOnce(&PreparedRequest) -> (NativeArtifact, Box<dyn Transport>) {
+    login: Option<Utf8PathBuf>,
+) -> impl FnOnce(&PreparedRequest) -> Connection {
     move |prepared| {
-        let launch =
-            transport::launch(prepared, &context(), policy, None).expect("a prepared launch");
-        (
-            launch.artifact,
-            Box::new(transport::Spawned {
+        let launch = transport::launch(prepared, &context(), policy, login.as_deref())
+            .expect("a prepared launch");
+        Connection {
+            artifact: launch.artifact,
+            // `launch` populates the storage environment variables for `login`
+            // so the session options match a production request.
+            environment: launch.environment,
+            transport: Box::new(transport::Spawned {
                 command: launch.command,
-                tap: cassette::tap("live"),
+                tap: cassette::tap(fixture),
             }),
-        )
+        }
     }
 }
 
@@ -240,15 +273,15 @@ fn recorded_session(script: &[Framed]) -> Option<Uuid> {
 /// id unset is what makes the replay open with `session/new` as it did.
 fn replayed(
     script: Vec<Framed>,
-) -> impl FnOnce(&PreparedRequest) -> (NativeArtifact, Box<dyn Transport>) {
-    move |_| {
-        (
-            NativeArtifact {
-                session: recorded_session(&script),
-                path: None,
-            },
-            Box::new(Recorded(script)),
-        )
+    policy: CachePolicy,
+) -> impl FnOnce(&PreparedRequest) -> Connection {
+    move |prepared| Connection {
+        artifact: NativeArtifact {
+            session: recorded_session(&script),
+            path: None,
+        },
+        environment: options::environment(prepared, policy),
+        transport: Box::new(Recorded(script)),
     }
 }
 
@@ -280,12 +313,24 @@ fn tag(recording: bool) -> String {
     }
 }
 
-/// One conversation, answered from `script` when there is one and by the
-/// runtime when there is not.
-async fn attempt(policy: CachePolicy, tag: &str, script: Option<Vec<Framed>>) -> Value {
+/// Run one conversation against `script` in replay mode, or against the live
+/// runtime under `login` when recording.
+async fn attempt(
+    policy: CachePolicy,
+    tag: &str,
+    script: Option<Vec<Framed>>,
+    login: Option<&Utf8Path>,
+) -> Value {
     match script {
-        Some(script) => conversation(policy, tag, replayed(script)).await,
-        None => conversation(policy, tag, live(policy)).await,
+        Some(script) => conversation(policy, tag, replayed(script, policy)).await,
+        None => {
+            conversation(
+                policy,
+                tag,
+                live("live", policy, login.map(Utf8Path::to_owned)),
+            )
+            .await
+        }
     }
 }
 
@@ -310,17 +355,18 @@ fn tokens(snapshot: &Value, key: &str) -> u64 {
 /// Replayed by default, so this costs nothing and proves the recorded traffic
 /// still decodes into the events and usage JP reports.
 /// Under `RECORD=1` it reaches the runtime instead, and adds the measurements
-/// only a live service can answer — that an entry was created, that a second
+/// only a live service can answer: that an entry was created, that a second
 /// session reconstructed it, and that turning caching off stops both.
 /// Those cannot be replayed: a fixture compared against itself passes whatever
 /// it contains.
 #[tokio::test]
 async fn cache_reconstruction() {
     let recording = cassette::recording();
+    let login = recording.then(recording_login).flatten();
     if recording {
         // Reaching the runtime with a stale adapter or a lapsed login produces
         // a failure that reads as a protocol problem, so check first.
-        inspect(None)
+        inspect(login.as_deref())
             .await
             .expect("a qualified adapter and an active login");
     }
@@ -340,9 +386,10 @@ async fn cache_reconstruction() {
     }
     .into_iter();
 
-    let first = attempt(CachePolicy::Short, &tag, scripts.next()).await;
-    let repeat = attempt(CachePolicy::Short, &tag, scripts.next()).await;
-    let off = attempt(CachePolicy::Off, &tag, scripts.next()).await;
+    let login = login.as_deref();
+    let first = attempt(CachePolicy::Short, &tag, scripts.next(), login).await;
+    let repeat = attempt(CachePolicy::Short, &tag, scripts.next(), login).await;
+    let off = attempt(CachePolicy::Off, &tag, scripts.next(), login).await;
 
     insta::assert_json_snapshot!(
         "cache_reconstruction_usage",
@@ -373,7 +420,7 @@ async fn cache_reconstruction() {
     assert_eq!(tokens(&off, "cache_creation_input_tokens"), 0);
 }
 
-fn only_connection(name: &str) -> Vec<Framed> {
+pub(super) fn only_connection(name: &str) -> Vec<Framed> {
     let read = cassette::read(name).unwrap_or_else(|error| panic!("{error}"));
     let mut scripts = cassette::connections(read);
     assert_eq!(scripts.len(), 1, "`{name}` should hold one connection");
@@ -385,10 +432,11 @@ fn only_connection(name: &str) -> Vec<Framed> {
 #[tokio::test]
 async fn listed_models() {
     let listed = if cassette::recording() {
-        inspect(None)
+        let login = recording_login();
+        inspect(login.as_deref())
             .await
             .expect("a qualified adapter and an active login");
-        transport::list_models(None).await.unwrap()
+        transport::list_models(login.as_deref()).await.unwrap()
     } else {
         let script = only_connection("models");
         transport::models(Box::new(Recorded(script)), Utf8Path::new("/tmp"))
@@ -432,28 +480,24 @@ fn short_query(model: &str) -> ChatQuery {
 #[tokio::test]
 async fn unknown_model_is_refused_as_unknown() {
     let recording = cassette::recording();
+    let login = recording.then(recording_login).flatten();
     if recording {
-        inspect(None)
+        inspect(login.as_deref())
             .await
             .expect("a qualified adapter and an active login");
     }
 
     let model = model_details(&"foobarbaz".parse().unwrap());
     let prepared = PreparedRequest::new(&model, short_query("foobarbaz")).unwrap();
-    let (artifact, transport): (NativeArtifact, Box<dyn Transport>) = if recording {
-        let launch = transport::launch(&prepared, &context(), CachePolicy::Off, None)
-            .expect("a prepared launch");
-        (
-            launch.artifact,
-            Box::new(transport::Spawned {
-                command: launch.command,
-                tap: cassette::tap("unknown_model"),
-            }),
-        )
+    let Connection {
+        artifact,
+        environment,
+        transport,
+    } = if recording {
+        live("unknown_model", CachePolicy::Off, login)(&prepared)
     } else {
-        replayed(only_connection("unknown_model"))(&prepared)
+        replayed(only_connection("unknown_model"), CachePolicy::Off)(&prepared)
     };
-    let environment = options::environment(&prepared, CachePolicy::Off);
 
     let (sender, mut receiver) = mpsc::channel(64);
     let driver = transport::drive(
