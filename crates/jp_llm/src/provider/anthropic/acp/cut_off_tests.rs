@@ -1,44 +1,65 @@
-//! What Claude Code does with a turn after it loses its connection to the API
-//! partway through a response.
+//! Tests for how Claude Code handles an API connection drop mid-response.
 //!
-//! The probe drives the adapter with a handler that refuses nothing, leaves the
-//! prompt open, and outlines every SDK message the turn produces.
-//! The recording shows Claude Code reporting the loss as an assistant message
-//! carrying `error: "server_error"`, then running the call that completed
-//! before the cut and asking the model again, which issues the interrupted call
-//! anew and finishes the turn.
-//! That is why JP holds the report rather than ending the request on it, and
+//! The test harness drives the ACP adapter with a handler that approves every
+//! tool call, keeps the prompt request open, and records a summary of each SDK
+//! message in the turn.
+//! The recorded fixture (`tests/fixtures/acp/cut_off.jsonl`) shows that when a
+//! response stream is interrupted after one tool call has completed, Claude
+//! Code emits an assistant message with `error: "server_error"`, executes the
+//! completed tool call, and sends a follow-up API request that re-issues the
+//! interrupted tool call and finishes the turn.
+//! Because Claude Code recovers on its own, JP holds `server_error` rather than
+//! aborting the request on arrival;
 //! [`a_turn_claude_code_continues_after_a_cut_completes`] replays the same
-//! recording through JP's own translation to pin that.
+//! fixture through JP's protocol translation to verify that recovery.
 //!
-//! Under `RECORD=1` the runtime reaches the API through a proxy this file runs,
-//! and the proxy drops its tunnels at a chosen point in the response.
-//! Claude Code documents a connection broken by system sleep as one it counts
-//! as dropped, so the cut stands in for closing the laptop lid.
-//! The model is asked for two tool calls in one response and the cut lands
-//! while the second is being written: the first is complete by then, which is
-//! the case Claude Code reports to its caller instead of retrying out of sight.
+//! A second fixture (`cut_off_text.jsonl`) interrupts a response while its text
+//! streams and before any of its blocks has completed.
+//! Claude Code reports no error for that cut: it closes the text block, ends
+//! the response, emits an `api_retry` system message, and re-issues the
+//! request, which writes the text again from the start.
+//! JP has streamed and committed the text of the first attempt by then, so the
+//! conversation holds that text followed by the retried answer;
+//! [`a_response_claude_code_retries_keeps_the_text_of_both_attempts`] replays
+//! the fixture to pin that.
 //!
-//! Without `RECORD` the probe replays `tests/fixtures/acp/cut_off.jsonl`
-//! through the same handler, with no proxy, no tool server, and no runtime.
-//! That recording also carries `session/request_permission` and the tool-call
-//! session updates, which `live.jsonl` has none of.
+//! A third fixture (`cut_off_reasoned_text.jsonl`) interrupts the text of a
+//! response whose thinking block has completed.
+//! Claude Code closes the text block, ends the response without an assistant
+//! message for that text, and sends the model a synthetic user message asking
+//! it to resume, with no error and no `api_retry`.
+//! The next response writes the answer from the start, so JP again holds the
+//! text of both attempts;
+//! [`a_response_claude_code_resumes_keeps_the_text_of_both_attempts`] replays
+//! the fixture to pin that.
+//!
+//! Holding the text of both attempts is a defect (T-1r592pw).
+//! The two replay tests pin it so its fix has assertions to change.
+//!
+//! When `RECORD=1` is set, the runtime connects to the Anthropic API through a
+//! local forward proxy that drops all active `CONNECT` tunnels at the point its
+//! [`Scenario`] names (simulating a connection drop such as system sleep).
+//! Without `RECORD`, the tests replay the fixtures without spawning a proxy,
+//! tool server, or adapter process.
+//! The fixtures also exercise `session/request_permission` and tool-call
+//! session updates, which `live.jsonl` does not cover.
 
 use std::{
     collections::BTreeMap,
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
-    },
+    sync::{Arc, Mutex},
     time::Duration,
 };
 
 use camino::Utf8Path;
 use datetime_literal::datetime;
-use jp_config::{AppConfig, assistant::request::CachePolicy, model::parameters::ReasoningConfig};
+use jp_config::{
+    AppConfig,
+    assistant::request::CachePolicy,
+    model::parameters::{CustomReasoningConfig, ReasoningConfig, ReasoningEffort},
+};
 use jp_conversation::{
     ConversationStream,
-    event::{ChatRequest, ConversationEvent},
+    event::{ChatRequest, ChatResponse, ConversationEvent},
     thread::ThreadBuilder,
 };
 use serde_json::{Value, json};
@@ -65,45 +86,117 @@ use super::{
 };
 use crate::{
     event::{Event, EventPart, FinishReason, ToolCallPart},
+    event_builder::EventBuilder,
     query::{ChatQuery, QueryContext},
 };
 
-/// The recording this probe writes and replays.
-const FIXTURE: &str = "cut_off";
-
-/// The tool whose call completes before the cut.
+/// Tool whose call completes before the proxy drops the connection.
 const LOOKUP: &str = "lookup";
 
-/// The tool whose call the cut interrupts.
+/// Tool whose call is interrupted in the [`TOOL_CALL`] scenario.
 const STORE: &str = "store";
 
-/// Asks for two tool calls in one response: a short one that completes, then
-/// one whose argument takes a few seconds to write, which is the window the cut
-/// lands in.
-const PROMPT: &str = "Make two tool calls in a single response, in this order. First call \
-                      `lookup` with no arguments. Then call `store`, with `text` set to the \
-                      integers from 1 to 100 separated by single spaces. Once both results \
-                      arrive, reply with only the value that `lookup` returned.";
+/// One recorded cut: what the model is asked for and where the connection
+/// drops.
+struct Scenario {
+    /// Name of the recording under `tests/fixtures/acp`.
+    fixture: &'static str,
+    prompt: &'static str,
+    reasoning: ReasoningConfig,
+    /// Output-token limit of each API request, with room for the hundred
+    /// integers to be generated twice (once before the drop and once after).
+    /// Reasoning tokens count toward it.
+    max_tokens: u32,
+    cut_at: CutAt,
+}
 
-/// Hosts the proxy must not be used for.
-///
-/// The tool server listens on loopback, and the proxy only tunnels.
+/// The point in a response at which the proxy drops the connection.
+#[derive(Clone, Copy)]
+enum CutAt {
+    /// The content block of the [`STORE`] call opens.
+    StoreCall,
+
+    /// The [`TEXT_DELTAS_BEFORE_CUT`]th text delta arrives after [`LOOKUP`] was
+    /// dispatched.
+    AnswerText,
+
+    /// The [`TEXT_DELTAS_BEFORE_CUT`]th text delta arrives in a response that
+    /// opened a thinking block first.
+    TextAfterThinking,
+}
+
+/// Text deltas JP receives before a cut that lands in a text block, so the
+/// interrupted block holds text by then.
+const TEXT_DELTAS_BEFORE_CUT: usize = 5;
+
+/// Two tool calls in a single response: a fast call (`lookup`) that completes
+/// first, followed by a call (`store`) with a large argument payload so the
+/// connection can be dropped while it streams.
+const TOOL_CALL: Scenario = Scenario {
+    fixture: "cut_off",
+    prompt: "Make two tool calls in a single response, in this order. First call `lookup` with no \
+             arguments. Then call `store`, with `text` set to the integers from 1 to 100 \
+             separated by single spaces. Once both results arrive, reply with only the value that \
+             `lookup` returned.",
+    reasoning: ReasoningConfig::Off,
+    max_tokens: 1024,
+    cut_at: CutAt::StoreCall,
+};
+
+/// A tool call followed by an answer long enough for the connection to be
+/// dropped while its text streams.
+const TEXT: Scenario = Scenario {
+    fixture: "cut_off_text",
+    prompt: "Call `lookup` with no arguments. Once its result arrives, reply with only the \
+             integers from 1 to 100 separated by single spaces.",
+    reasoning: ReasoningConfig::Off,
+    max_tokens: 1024,
+    cut_at: CutAt::AnswerText,
+};
+
+/// A reasoned answer long enough for the connection to be dropped while its
+/// text streams, after the response's thinking block has completed.
+const REASONED_TEXT: Scenario = Scenario {
+    fixture: "cut_off_reasoned_text",
+    prompt: "Before you answer, think through which is larger: 17 * 23 or 19 * 21. Do not mention \
+             the comparison in your answer. Then reply with only the integers from 1 to 100 \
+             separated by single spaces.",
+    reasoning: ReasoningConfig::Custom(CustomReasoningConfig {
+        effort: ReasoningEffort::High,
+        exclude: false,
+    }),
+    max_tokens: 2048,
+    cut_at: CutAt::TextAfterThinking,
+};
+
+/// The answer the [`TEXT`] and [`REASONED_TEXT`] scenarios ask for.
+const INTEGERS: &str = "1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 \
+                        28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 \
+                        52 53 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68 69 70 71 72 73 74 75 \
+                        76 77 78 79 80 81 82 83 84 85 86 87 88 89 90 91 92 93 94 95 96 97 98 99 \
+                        100";
+
+/// Outline entry marking the point at which the probe cut the connection.
+const CUT: &str = "cut every connection to the API";
+
+/// Hosts bypassed by the proxy (`NO_PROXY`) so local MCP tool calls connect
+/// directly.
 const LOOPBACK: &str = "127.0.0.1,localhost";
 
-/// What the turn produced, in the order it arrived.
 type Outline = Arc<Mutex<Vec<Value>>>;
 
-fn query() -> ChatQuery {
+fn query(scenario: &Scenario) -> ChatQuery {
     let mut config = AppConfig::new_test();
     config.assistant.model.id = "anthropic/claude-opus-5".parse().unwrap();
-    // Room for the argument twice over, since the runtime asks for the
-    // interrupted call again.
-    config.assistant.model.parameters.max_tokens = Some(1024);
-    config.assistant.model.parameters.reasoning = Some(ReasoningConfig::Off);
+    config.assistant.model.parameters.max_tokens = Some(scenario.max_tokens);
+    config.assistant.model.parameters.reasoning = Some(scenario.reasoning);
     config.assistant.request.cache = CachePolicy::Off;
     let timestamp = datetime!(2026-11-24 12:00:00 Z);
     let mut events = ConversationStream::new(config.into()).with_created_at(timestamp);
-    events.extend([ConversationEvent::new(ChatRequest::from(PROMPT), timestamp)]);
+    events.extend([ConversationEvent::new(
+        ChatRequest::from(scenario.prompt),
+        timestamp,
+    )]);
     ThreadBuilder::new()
         .with_events(events)
         .build()
@@ -111,9 +204,8 @@ fn query() -> ChatQuery {
         .into()
 }
 
-/// Read one HTTP/1.1 request: its first line and its body.
-///
-/// Returns `None` when the client goes away before finishing one.
+/// Read the request line and body of an HTTP/1.1 request, or return `None` on
+/// EOF.
 async fn read_request(stream: &mut BufReader<TcpStream>) -> Option<(String, Vec<u8>)> {
     let mut first = String::new();
     let mut body_size = 0_usize;
@@ -142,20 +234,13 @@ async fn read_request(stream: &mut BufReader<TcpStream>) -> Option<(String, Vec<
     Some((first, body))
 }
 
-/// A forward proxy for `CONNECT` tunnels that can drop every tunnel it has
-/// open.
+/// HTTP `CONNECT` forward proxy that can drop all active tunnels on demand.
 ///
-/// A tunnel opened after a cut is left alone, so whatever the runtime does next
-/// reaches the API.
+/// Tunnels opened after a `cut` signal are unaffected, allowing subsequent
+/// retry requests from the runtime to reach the API.
 struct Proxy {
     url: String,
-
-    /// Drops the tunnels open at the moment it is sent on.
     cut: broadcast::Sender<()>,
-
-    /// Every request the proxy received, with what came of it, which says
-    /// whether the runtime used the proxy at all and what it reached through
-    /// it.
     log: Arc<Mutex<Vec<String>>>,
 }
 
@@ -179,7 +264,6 @@ impl Proxy {
         Self { url, cut, log }
     }
 
-    /// How many tunnels reached their target.
     fn tunnels(&self) -> usize {
         self.log
             .lock()
@@ -190,7 +274,8 @@ impl Proxy {
     }
 }
 
-/// Carry one `CONNECT` tunnel until either end closes it or `cut` fires.
+/// Relay one `CONNECT` tunnel until either peer closes the connection or `cut`
+/// fires.
 async fn tunnel(client: TcpStream, mut cut: broadcast::Receiver<()>, log: Arc<Mutex<Vec<String>>>) {
     let note = |line: String| log.lock().unwrap().push(line);
     let mut client = BufReader::new(client);
@@ -229,19 +314,15 @@ async fn tunnel(client: TcpStream, mut cut: broadcast::Receiver<()>, log: Arc<Mu
     }
     note(format!("{request}: tunnelled"));
 
-    // Returning closes both sockets, which is the cut.
+    // Returning drops both sockets, severing the connection.
     tokio::select! {
         _ = tokio::io::copy_bidirectional(&mut client, &mut upstream) => {}
         _ = cut.recv() => {}
     }
 }
 
-/// Serve [`LOOKUP`] and [`STORE`] over MCP's Streamable HTTP transport, and
-/// return the URL to reach them at.
-///
-/// A stand-in for JP's tool server, which lives above this crate.
-/// It answers every request with a single JSON body and opens no stream of its
-/// own, which is the least the transport allows.
+/// Start a stub MCP Streamable HTTP server for [`LOOKUP`] and [`STORE`] and
+/// return its endpoint URL.
 async fn tool_server() -> String {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}/mcp", listener.local_addr().unwrap());
@@ -261,11 +342,11 @@ async fn serve_tools(client: TcpStream) {
         let response = match serde_json::from_slice::<Value>(&body) {
             Ok(message) => match answer(&message) {
                 Some(answer) => http("200 OK", &answer.to_string()),
-                // A notification, which is acknowledged without a body.
+                // JSON-RPC notifications take an empty 202 response.
                 None => http("202 Accepted", ""),
             },
-            // Only a POST carries a message. A GET asks for a stream this
-            // server never has anything to send on.
+            // Reject non-JSON requests (such as GET requests for a server-sent
+            // event stream).
             Err(_) => http("405 Method Not Allowed", ""),
         };
         if client.write_all(response.as_bytes()).await.is_err() {
@@ -281,8 +362,7 @@ fn http(status: &str, body: &str) -> String {
     )
 }
 
-/// Answer one MCP request, or return `None` for a message that expects no
-/// answer.
+/// Build a JSON-RPC response for an MCP request, or `None` for a notification.
 fn answer(message: &Value) -> Option<Value> {
     let id = message.get("id")?;
     let result = match message["method"].as_str()? {
@@ -315,42 +395,38 @@ fn answer(message: &Value) -> Option<Value> {
             };
             json!({"content": [{"type": "text", "text": text}], "isError": false})
         }
-        // `ping`, the one other request a client sends a server that offers
-        // nothing but tools.
+        // Empty response for `ping` and any other method.
         _ => json!({}),
     };
 
     Some(json!({"jsonrpc": "2.0", "id": id, "result": result}))
 }
 
-/// One way of reaching an adapter, and how patiently to watch it.
 struct Probe {
     transport: Box<dyn Transport>,
-
-    /// The environment the session options hand the runtime.
     environment: BTreeMap<String, String>,
-
-    /// Where the session's one MCP server listens.
     tools: String,
-
-    /// Drops the runtime's connections to the API.
     cut: broadcast::Sender<()>,
-
-    /// How long the adapter has to stay silent before the turn counts as over.
+    cut_at: CutAt,
+    /// Idle duration required after the prompt finishes before ending capture.
     quiet: Duration,
-
-    /// How long to wait on a turn that reports no result.
+    /// Maximum duration to wait for a turn result.
     limit: Duration,
 }
 
-/// Reach the installed adapter, with its runtime behind `proxy` and a tool
-/// server for it to call.
-async fn live(prepared: &PreparedRequest, proxy: &Proxy, login: Option<&Utf8Path>) -> Probe {
+/// Configure a live probe that spawns the installed adapter behind `proxy` with
+/// a local stub tool server, recording into the fixture of `scenario`.
+async fn live(
+    prepared: &PreparedRequest,
+    proxy: &Proxy,
+    login: Option<&Utf8Path>,
+    scenario: &Scenario,
+) -> Probe {
     let mut launch = transport::launch(prepared, &context(), CachePolicy::Off, login)
         .expect("a prepared launch");
 
-    // Set on the adapter and in the session options, as JP's own variables
-    // are, and in both spellings, since Claude Code reads the lowercase one
+    // Set both uppercase and lowercase proxy variables on the adapter process
+    // and in the session options, since Claude Code checks the lowercase form
     // first.
     for (name, value) in [
         ("HTTPS_PROXY", proxy.url.as_str()),
@@ -365,41 +441,38 @@ async fn live(prepared: &PreparedRequest, proxy: &Proxy, login: Option<&Utf8Path
     Probe {
         transport: Box::new(Spawned {
             command: launch.command,
-            tap: cassette::tap(FIXTURE),
+            tap: cassette::tap(scenario.fixture),
         }),
         environment: launch.environment,
         tools: tool_server().await,
         cut: proxy.cut.clone(),
-        // Long enough to notice a runtime that starts another request after
-        // reporting a result.
+        cut_at: scenario.cut_at,
+        // Wait long enough to catch any follow-up request started after a
+        // result message.
         quiet: Duration::from_secs(20),
         limit: Duration::from_mins(5),
     }
 }
 
-/// Answer from the recording.
-///
-/// Nothing connects to the tool server or the API during a replay, so the URL
-/// names no listener and the cut has no tunnel to drop.
-fn replayed(prepared: &PreparedRequest) -> Probe {
+/// Configure a probe that replays the fixture of `scenario` without network or
+/// process I/O.
+fn replayed(prepared: &PreparedRequest, scenario: &Scenario) -> Probe {
     Probe {
-        transport: Box::new(Recorded(only_connection(FIXTURE))),
+        transport: Box::new(Recorded(only_connection(scenario.fixture))),
         environment: options::environment(prepared, CachePolicy::Off),
         tools: "http://127.0.0.1:1/mcp".to_owned(),
         cut: broadcast::channel(1).0,
-        // A replay delivers the whole recording at once.
+        cut_at: scenario.cut_at,
         quiet: Duration::from_millis(250),
         limit: Duration::from_secs(5),
     }
 }
 
-/// Enough of a text to recognise it by.
 fn excerpt(text: &str) -> String {
     text.chars().take(120).collect()
 }
 
-/// What each content block of a message is, with the text of the ones that hold
-/// any.
+/// Summarize a message's content blocks for snapshot comparison.
 fn blocks(content: &Value) -> Value {
     // A user message may hold a bare string.
     if let Some(text) = content.as_str() {
@@ -419,37 +492,23 @@ fn blocks(content: &Value) -> Value {
         .collect()
 }
 
-/// The outline entry for one SDK message, or `None` for a stream event that
-/// only carries content.
+/// Build a snapshot summary entry for an SDK message, or `None` for content
+/// delta events.
 ///
-/// Keeps what says how the turn is going and leaves out what differs between
-/// two recordings of the same behaviour: identifiers, timestamps, usage, and
-/// the deltas themselves.
-/// A field the message does not have is left out of its entry.
+/// Omits what varies across recordings (IDs, timestamps, token usage, streaming
+/// deltas, and `thinking_tokens` progress messages) as well as null fields.
 fn entry(message: &Value) -> Option<Value> {
     let mut entry = match message["type"].as_str()? {
-        "stream_event" => {
-            let event = &message["event"];
-            match event["type"].as_str()? {
-                "message_start" | "message_stop" => json!({"stream": event["type"]}),
-                "content_block_start" => json!({
-                    "stream": "content_block_start",
-                    "block": event["content_block"]["type"],
-                    "tool": event["content_block"]["name"],
-                }),
-                "message_delta" => json!({
-                    "stream": "message_delta",
-                    "stop_reason": event["delta"]["stop_reason"],
-                }),
-                _ => return None,
-            }
-        }
+        "stream_event" => stream_entry(&message["event"])?,
         "assistant" => json!({
             "assistant": blocks(&message["message"]["content"]),
             "error": message["error"],
             "aborted": message["aborted"],
         }),
-        "user" => json!({"user": blocks(&message["message"]["content"])}),
+        "user" => json!({
+            "user": blocks(&message["message"]["content"]),
+            "synthetic": message["isSynthetic"],
+        }),
         "result" => json!({
             "result": message["subtype"],
             "is_error": message["is_error"],
@@ -458,6 +517,7 @@ fn entry(message: &Value) -> Option<Value> {
             "api_error_status": message["api_error_status"],
             "errors": message["errors"],
         }),
+        "system" if message["subtype"] == "thinking_tokens" => return None,
         "system" => json!({
             "system": message["subtype"],
             "tools": message["tools"],
@@ -473,6 +533,25 @@ fn entry(message: &Value) -> Option<Value> {
     Some(entry)
 }
 
+/// Build the [`entry`] of a stream event, or `None` for a content delta.
+fn stream_entry(event: &Value) -> Option<Value> {
+    Some(match event["type"].as_str()? {
+        "message_start" | "message_stop" | "content_block_stop" => {
+            json!({"stream": event["type"]})
+        }
+        "content_block_start" => json!({
+            "stream": "content_block_start",
+            "block": event["content_block"]["type"],
+            "tool": event["content_block"]["name"],
+        }),
+        "message_delta" => json!({
+            "stream": "message_delta",
+            "stop_reason": event["delta"]["stop_reason"],
+        }),
+        _ => return None,
+    })
+}
+
 /// Whether this SDK message opens the content block of the [`STORE`] call.
 fn opens_store_call(message: &Value) -> bool {
     let event = &message["event"];
@@ -481,28 +560,103 @@ fn opens_store_call(message: &Value) -> bool {
         && event["content_block"]["name"].as_str() == Some(tool_name(STORE).as_str())
 }
 
-/// Outline everything the adapter sends, allow every tool call, and cut the
-/// runtime's connections once, when the [`STORE`] call opens.
+/// Whether this SDK message carries text of a response's text block.
+fn is_text_delta(message: &Value) -> bool {
+    let event = &message["event"];
+    message["type"] == "stream_event"
+        && event["type"] == "content_block_delta"
+        && event["delta"]["type"] == "text_delta"
+}
+
+/// Whether this SDK message starts a response.
+fn starts_response(message: &Value) -> bool {
+    message["type"] == "stream_event" && message["event"]["type"] == "message_start"
+}
+
+/// Whether this SDK message opens a thinking block.
+fn opens_thinking_block(message: &Value) -> bool {
+    let event = &message["event"];
+    message["type"] == "stream_event"
+        && event["type"] == "content_block_start"
+        && event["content_block"]["type"] == "thinking"
+}
+
+/// Decides which SDK message the cut fires on, once per turn.
+struct Trigger {
+    cut_at: CutAt,
+    lookup_dispatched: bool,
+    /// Whether the current response has opened a thinking block.
+    thinking_seen: bool,
+    text_deltas: usize,
+    fired: bool,
+}
+
+impl Trigger {
+    fn new(cut_at: CutAt) -> Self {
+        Self {
+            cut_at,
+            lookup_dispatched: false,
+            thinking_seen: false,
+            text_deltas: 0,
+            fired: false,
+        }
+    }
+
+    /// Note the tool a permission request named.
+    fn dispatched(&mut self, tool: Option<&Value>) {
+        self.lookup_dispatched |= tool == Some(&json!(tool_name(LOOKUP)));
+    }
+
+    fn fires_on(&mut self, message: &Value) -> bool {
+        if self.fired {
+            return false;
+        }
+
+        self.fired = match self.cut_at {
+            CutAt::StoreCall => opens_store_call(message),
+            CutAt::AnswerText => {
+                if self.lookup_dispatched && is_text_delta(message) {
+                    self.text_deltas += 1;
+                }
+                self.text_deltas == TEXT_DELTAS_BEFORE_CUT
+            }
+            CutAt::TextAfterThinking => {
+                if starts_response(message) {
+                    self.thinking_seen = false;
+                    self.text_deltas = 0;
+                }
+                self.thinking_seen |= opens_thinking_block(message);
+                if self.thinking_seen && is_text_delta(message) {
+                    self.text_deltas += 1;
+                }
+                self.text_deltas == TEXT_DELTAS_BEFORE_CUT
+            }
+        };
+        self.fired
+    }
+}
+
+/// Build a handler that records SDK messages into `outline`, approves every
+/// tool permission request, and triggers `cut` at the point `cut_at` names.
 ///
-/// Unlike `transport::inbound`, an SDK message that reports a failure is
-/// outlined and acknowledged like any other, so the connection outlives it.
-///
-/// `activity` is notified for every message and `finished` for every SDK
-/// result.
+/// Unlike `transport::inbound`, this handler acknowledges error SDK messages
+/// without aborting so the session stays open to observe Claude Code's
+/// recovery.
 fn observer(
     outline: Outline,
     activity: Arc<Notify>,
     finished: Arc<Notify>,
     cut: broadcast::Sender<()>,
+    cut_at: CutAt,
 ) -> Handler {
-    let was_cut = Arc::new(AtomicBool::new(false));
+    let trigger = Arc::new(Mutex::new(Trigger::new(cut_at)));
 
     Box::new(move |inbound| {
         let outline = outline.clone();
         let activity = activity.clone();
         let finished = finished.clone();
         let cut = cut.clone();
-        let was_cut = was_cut.clone();
+        let trigger = trigger.clone();
 
         Box::pin(async move {
             let (Inbound::Notification { method, params } | Inbound::Request { method, params }) =
@@ -513,11 +667,11 @@ fn observer(
                 let message = &params["message"];
                 let mut entries = outline.lock().unwrap();
                 entries.extend(entry(message));
-                if opens_store_call(message) && !was_cut.swap(true, Ordering::Relaxed) {
-                    // A replay has no tunnel listening, and takes the same
-                    // path so its outline matches the recording's.
+                if trigger.lock().unwrap().fires_on(message) {
+                    // Record the cut marker in both live and replay runs so the
+                    // resulting outline matches the snapshot.
                     drop(cut.send(()));
-                    entries.push(json!({"probe": "cut every connection to the API"}));
+                    entries.push(json!({"probe": CUT}));
                 }
                 drop(entries);
 
@@ -537,6 +691,7 @@ fn observer(
                     .and_then(|meta| meta.get("claudeCode"))
                     .and_then(|claude| claude.get("toolName"))
                     .cloned();
+                trigger.lock().unwrap().dispatched(tool.as_ref());
                 outline.lock().unwrap().push(json!({"permission": tool}));
 
                 let option = request
@@ -567,12 +722,8 @@ async fn silence(activity: &Notify, quiet: Duration) {
     {}
 }
 
-/// Send [`PROMPT`] in a fresh session and return the outline of the turn.
-///
-/// The session is set up the way `transport::drive` sets one up, less the
-/// history.
-/// The last entry says how the turn ended, since a runtime that has reported a
-/// failure may never answer the prompt.
+/// Send the prepared prompt in a new session and return the recorded message
+/// outline.
 async fn observe(probe: Probe, prepared: PreparedRequest) -> Vec<Value> {
     let outline: Outline = Arc::default();
     let activity = Arc::new(Notify::new());
@@ -582,6 +733,7 @@ async fn observe(probe: Probe, prepared: PreparedRequest) -> Vec<Value> {
         activity.clone(),
         finished.clone(),
         probe.cut,
+        probe.cut_at,
     );
 
     let options = options::metadata(&prepared, &probe.environment).unwrap();
@@ -626,8 +778,8 @@ async fn observe(probe: Probe, prepared: PreparedRequest) -> Vec<Value> {
                 let answer = peer.request(request);
                 tokio::pin!(answer);
 
-                // Each ending waits for silence before it is recorded, so
-                // whatever trails it is in the outline first.
+                // Wait for `quiet` of inactivity before recording the final
+                // probe event so any trailing notifications are captured first.
                 let ending = tokio::select! {
                     answer = &mut answer => {
                         answer?;
@@ -655,74 +807,44 @@ async fn observe(probe: Probe, prepared: PreparedRequest) -> Vec<Value> {
     outline.lock().unwrap().clone()
 }
 
-/// The snapshot is the finding: read the entries that follow the assistant
-/// message carrying an `error`.
-/// A `message_start` there means the runtime sent another request by itself,
-/// and the `result` says whether the turn it belongs to succeeded.
-///
-/// Recording spends a little subscription allowance and takes about a minute:
-///
-/// ```sh
-/// RECORD=1 cargo test -p jp_llm turn_after_a_cut_off_response -- --nocapture
-/// ```
-#[tokio::test]
-async fn turn_after_a_cut_off_response() {
+/// Return the outline of the turn `scenario` describes: recorded against the
+/// installed runtime under `RECORD`, replayed from its fixture otherwise.
+async fn outline(scenario: &Scenario) -> Vec<Value> {
     let model = model_details(&"claude-opus-5".parse().unwrap());
-    let prepared = PreparedRequest::new(&model, query()).unwrap();
+    let prepared = PreparedRequest::new(&model, query(scenario)).unwrap();
 
-    let turn = if cassette::recording() {
-        // Reaching the runtime with a stale adapter or a lapsed login produces
-        // a failure that reads as a protocol problem, so check first.
-        let login = recording_login();
-        inspect(login.as_deref())
-            .await
-            .expect("a qualified adapter and an active login");
+    if !cassette::recording() {
+        return observe(replayed(&prepared, scenario), prepared).await;
+    }
 
-        let proxy = Proxy::start().await;
-        let turn = observe(live(&prepared, &proxy, login.as_deref()).await, prepared).await;
+    let login = recording_login();
+    inspect(login.as_deref())
+        .await
+        .expect("a qualified adapter and an active login");
 
-        // Printed before anything is asserted, so a recording that misses its
-        // subject still shows what happened instead.
-        println!("{:#}", json!(turn));
-        println!("{:#}", json!(*proxy.log.lock().unwrap()));
-        assert!(
-            proxy.tunnels() > 0,
-            "Claude Code never reached the API through the proxy, so no connection was cut"
-        );
-        turn
-    } else {
-        observe(replayed(&prepared), prepared).await
-    };
+    let proxy = Proxy::start().await;
+    let probe = live(&prepared, &proxy, login.as_deref(), scenario).await;
+    let turn = observe(probe, prepared).await;
 
-    // The subject is a cut after one call completed. A login that fails, or a
-    // model that orders the calls differently, also ends in an error, and
-    // says nothing about what follows a cut.
-    let position = |found: &dyn Fn(&Value) -> bool| turn.iter().position(found);
-    let lookup = position(&|entry| entry["permission"] == json!(tool_name(LOOKUP)));
-    let cut =
-        position(&|entry| entry.get("probe") == Some(&json!("cut every connection to the API")));
-    let error = position(&|entry| entry.get("assistant").is_some() && entry.get("error").is_some());
+    println!("{:#}", json!(turn));
+    println!("{:#}", json!(*proxy.log.lock().unwrap()));
     assert!(
-        matches!((lookup, cut, error), (Some(lookup), Some(cut), Some(error)) if lookup < cut && cut < error),
-        "expected `lookup` to be dispatched, then the cut, then an assistant message carrying an \
-         error; got them at {lookup:?}, {cut:?}, {error:?}: {turn:#?}"
+        proxy.tunnels() > 0,
+        "Claude Code never reached the API through the proxy, so no connection was cut"
     );
-
-    insta::assert_json_snapshot!("turn_after_a_cut_off_response", turn);
+    turn
 }
 
-/// The recorded cut, replayed through JP's own translation of the adapter.
-///
-/// Claude Code reports the lost connection and then finishes the turn itself:
-/// it runs the call that completed before the cut, asks the model again, and
-/// the model issues the interrupted call anew.
-/// JP passes through that report the way the API path passes through a dropped
-/// connection it recovers from, so the request ends as an ordinary completed
-/// one, with each call handed to JP exactly once.
-#[tokio::test]
-async fn a_turn_claude_code_continues_after_a_cut_completes() {
+/// Position of the first entry in `turn` that `found` accepts.
+fn position(turn: &[Value], found: impl Fn(&Value) -> bool) -> Option<usize> {
+    turn.iter().position(found)
+}
+
+/// Replay the fixture of `scenario` through `transport::drive` and return the
+/// events JP's protocol translation produced for the turn.
+async fn driven(scenario: &Scenario) -> Vec<Event> {
     let model = model_details(&"claude-opus-5".parse().unwrap());
-    let prepared = PreparedRequest::new(&model, query()).unwrap();
+    let prepared = PreparedRequest::new(&model, query(scenario)).unwrap();
     let environment = options::environment(&prepared, CachePolicy::Off);
     let (sender, mut receiver) = mpsc::channel(64);
     let driver = transport::drive(
@@ -738,7 +860,7 @@ async fn a_turn_claude_code_continues_after_a_cut_completes() {
             session: None,
             path: None,
         },
-        Box::new(Recorded(only_connection(FIXTURE))),
+        Box::new(Recorded(only_connection(scenario.fixture))),
         sender,
     );
     let collect = async {
@@ -756,7 +878,91 @@ async fn a_turn_claude_code_continues_after_a_cut_completes() {
     .expect("the replay did not finish");
 
     result.unwrap();
-    let events = events.into_iter().collect::<Result<Vec<_>, _>>().unwrap();
+    events.into_iter().collect::<Result<Vec<_>, _>>().unwrap()
+}
+
+/// Return the text of each assistant message `events` commit, in commit order.
+///
+/// Folds the events through [`EventBuilder`], the buffer the turn loop commits
+/// responses from: a flush commits one block, and a finish commits whatever is
+/// still open.
+fn committed_messages(events: Vec<Event>) -> Vec<String> {
+    let mut builder = EventBuilder::new();
+    let mut committed = vec![];
+    for event in events {
+        match event {
+            Event::Part {
+                index,
+                part,
+                metadata,
+            } => builder.handle_part(index, part, metadata),
+            Event::Flush { index, metadata } => {
+                committed.extend(builder.handle_flush(index, metadata).ok().flatten());
+            }
+            Event::Finished(_) => committed.extend(builder.drain()),
+            _ => {}
+        }
+    }
+
+    committed
+        .into_iter()
+        .filter_map(ConversationEvent::into_chat_response)
+        .filter_map(|response| match response {
+            ChatResponse::Message { message } => Some(message),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Verify that Claude Code recovers when the API connection drops mid-response
+/// after a completed tool call.
+///
+/// In the snapshot, the cut is followed by a `message_stop` with no
+/// `content_block_stop` for the `store` block, and the `assistant` entry with
+/// `"error": "server_error"` is followed by the execution of `lookup`, a new
+/// `message_start` request, the re-issued `store` tool call, and a final
+/// `result` with `"subtype": "success"`.
+///
+/// To re-record against a live subscription:
+///
+/// ```sh
+/// RECORD=1 cargo test -p jp_llm turn_after_a_cut_off_response -- --nocapture
+/// ```
+#[tokio::test]
+async fn turn_after_a_cut_off_response() {
+    let turn = outline(&TOOL_CALL).await;
+
+    // Verify that `lookup` was dispatched before the connection drop and that
+    // the drop produced an assistant `server_error` message.
+    let lookup = position(&turn, |entry| {
+        entry["permission"] == json!(tool_name(LOOKUP))
+    });
+    let cut = position(&turn, |entry| entry.get("probe") == Some(&json!(CUT)));
+    let error = position(&turn, |entry| {
+        entry.get("assistant").is_some() && entry.get("error").is_some()
+    });
+    assert!(
+        matches!((lookup, cut, error), (Some(lookup), Some(cut), Some(error)) if lookup < cut && cut < error),
+        "expected `lookup` to be dispatched, then the cut, then an assistant message carrying an \
+         error; got them at {lookup:?}, {cut:?}, {error:?}: {turn:#?}"
+    );
+
+    insta::assert_json_snapshot!("turn_after_a_cut_off_response", turn);
+}
+
+/// Replay the [`TOOL_CALL`] fixture through `transport::drive` and verify that
+/// JP ignores the intermediate `server_error`, dispatches [`LOOKUP`] and
+/// [`STORE`] once each, and finishes the turn with [`FinishReason::Completed`].
+#[tokio::test]
+async fn a_turn_claude_code_continues_after_a_cut_completes() {
+    // Under `RECORD`, the recording test is rewriting the fixture this replay
+    // reads.
+    if cassette::recording() {
+        return;
+    }
+
+    let events = driven(&TOOL_CALL).await;
+
     let calls = events
         .iter()
         .filter_map(|event| match event {
@@ -772,4 +978,126 @@ async fn a_turn_claude_code_continues_after_a_cut_completes() {
         events.last(),
         Some(&Event::Finished(FinishReason::Completed))
     );
+}
+
+/// Verify that Claude Code retries on its own when the API connection drops
+/// while a response's text streams and none of its blocks has completed.
+///
+/// In the snapshot, the cut is followed by a `content_block_stop` and a
+/// `message_stop` with no `message_delta` between them, an `api_retry` system
+/// message, and a new `message_start` whose response writes the text again from
+/// the start.
+/// No assistant message carries an `error`.
+///
+/// To re-record against a live subscription:
+///
+/// ```sh
+/// RECORD=1 cargo test -p jp_llm turn_after_a_cut_off_text_block -- --nocapture
+/// ```
+#[tokio::test]
+async fn turn_after_a_cut_off_text_block() {
+    let turn = outline(&TEXT).await;
+
+    // Verify that the cut landed in a response that was still streaming: a
+    // response that had already finished needs no second request.
+    let cut = position(&turn, |entry| entry.get("probe") == Some(&json!(CUT)));
+    let resumed = turn
+        .iter()
+        .rposition(|entry| entry["stream"] == "message_start");
+    assert!(
+        matches!((cut, resumed), (Some(cut), Some(resumed)) if cut < resumed),
+        "expected the cut, then a response started after it; got them at {cut:?}, {resumed:?}: \
+         {turn:#?}"
+    );
+
+    insta::assert_json_snapshot!("turn_after_a_cut_off_text_block", turn);
+}
+
+/// Replay the [`TEXT`] fixture through `transport::drive` and verify what JP
+/// commits for a response Claude Code retried: the text of the interrupted
+/// attempt, then the complete answer of the retry.
+///
+/// Claude Code discards the interrupted attempt and JP does not, so the
+/// conversation holds the start of the answer twice.
+#[tokio::test]
+async fn a_response_claude_code_retries_keeps_the_text_of_both_attempts() {
+    // Under `RECORD`, the recording test is rewriting the fixture this replay
+    // reads.
+    if cassette::recording() {
+        return;
+    }
+
+    assert_keeps_the_text_of_both_attempts(driven(&TEXT).await);
+}
+
+/// Assert that `events` complete a turn whose last two committed messages are
+/// the start of [`INTEGERS`], cut short, and then the whole of it.
+fn assert_keeps_the_text_of_both_attempts(events: Vec<Event>) {
+    assert_eq!(
+        events.last(),
+        Some(&Event::Finished(FinishReason::Completed))
+    );
+
+    let messages = committed_messages(events);
+    let [.., interrupted, answer] = messages.as_slice() else {
+        panic!("expected the interrupted text and the answer: {messages:#?}");
+    };
+    assert_eq!(answer, INTEGERS);
+
+    // The interrupted attempt got part of the way through the same answer.
+    let interrupted = interrupted.trim_end();
+    assert!(
+        !interrupted.is_empty() && interrupted != INTEGERS && INTEGERS.starts_with(interrupted),
+        "expected the start of the answer, cut short: {interrupted:?}"
+    );
+}
+
+/// Verify that Claude Code asks the model to resume when the API connection
+/// drops while a response's text streams, after the response's thinking block
+/// completed.
+///
+/// In the snapshot, the cut is followed by a `content_block_stop` and a
+/// `message_stop` with no `message_delta` between them, and by a synthetic
+/// `user` message asking the model to resume.
+/// No assistant message carries the interrupted text or an `error`, and the
+/// next response thinks again and writes the text from the start.
+///
+/// To re-record against a live subscription:
+///
+/// ```sh
+/// RECORD=1 cargo test -p jp_llm turn_after_a_cut_off_reasoned_text -- --nocapture
+/// ```
+#[tokio::test]
+async fn turn_after_a_cut_off_reasoned_text() {
+    let turn = outline(&REASONED_TEXT).await;
+
+    // Verify that the cut landed in text that followed a thinking block, and
+    // that Claude Code answered it by asking the model to resume.
+    let thinking = position(&turn, |entry| entry["block"] == "thinking");
+    let cut = position(&turn, |entry| entry.get("probe") == Some(&json!(CUT)));
+    let resume = position(&turn, |entry| entry["synthetic"] == true);
+    assert!(
+        matches!((thinking, cut, resume), (Some(thinking), Some(cut), Some(resume)) if thinking < cut && cut < resume),
+        "expected a thinking block, then the cut, then a synthetic user message; got them at \
+         {thinking:?}, {cut:?}, {resume:?}: {turn:#?}"
+    );
+
+    insta::assert_json_snapshot!("turn_after_a_cut_off_reasoned_text", turn);
+}
+
+/// Replay the [`REASONED_TEXT`] fixture through `transport::drive` and verify
+/// what JP commits for a response Claude Code asked the model to resume: the
+/// text of the interrupted attempt, then the complete answer.
+///
+/// The model starts the answer over, and JP has already committed the
+/// interrupted text, so the conversation holds the start of the answer twice.
+#[tokio::test]
+async fn a_response_claude_code_resumes_keeps_the_text_of_both_attempts() {
+    // Under `RECORD`, the recording test is rewriting the fixture this replay
+    // reads.
+    if cassette::recording() {
+        return;
+    }
+
+    assert_keeps_the_text_of_both_attempts(driven(&REASONED_TEXT).await);
 }

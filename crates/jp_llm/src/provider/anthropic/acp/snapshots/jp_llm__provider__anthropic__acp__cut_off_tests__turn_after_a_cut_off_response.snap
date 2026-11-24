@@ -50,6 +50,9 @@ expression: turn
     ]
   },
   {
+    "stream": "content_block_stop"
+  },
+  {
     "stream": "content_block_start",
     "block": "tool_use",
     "tool": "mcp__jp__lookup"
@@ -66,6 +69,9 @@ expression: turn
   },
   {
     "permission": "mcp__jp__lookup"
+  },
+  {
+    "stream": "content_block_stop"
   },
   {
     "stream": "content_block_start",
@@ -114,6 +120,9 @@ expression: turn
     ]
   },
   {
+    "stream": "content_block_stop"
+  },
+  {
     "stream": "content_block_start",
     "block": "tool_use",
     "tool": "mcp__jp__store"
@@ -130,6 +139,9 @@ expression: turn
   },
   {
     "permission": "mcp__jp__store"
+  },
+  {
+    "stream": "content_block_stop"
   },
   {
     "stream": "message_delta",
@@ -167,6 +179,9 @@ expression: turn
         "text": "INV-1042"
       }
     ]
+  },
+  {
+    "stream": "content_block_stop"
   },
   {
     "stream": "message_delta",

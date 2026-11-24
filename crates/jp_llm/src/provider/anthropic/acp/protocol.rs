@@ -247,11 +247,13 @@ pub(super) struct State {
     /// Held until quota metadata or the final SDK result disambiguates it.
     rate_limit_error: Option<String>,
 
-    /// A lost connection to the API that Claude Code reported mid-turn.
+    /// `server_error` reported by Claude Code mid-turn when the API fails
+    /// partway through a response: a dropped connection, system sleep, or a
+    /// server fault.
     ///
-    /// Claude Code keeps the blocks completed before the loss, runs the tool
-    /// calls among them, and continues the turn by itself, so the report only
-    /// fails the request if the final SDK result does.
+    /// Claude Code preserves the content blocks completed before the failure,
+    /// executes any tool calls among them, and continues the turn, so this
+    /// error only fails the request if the final SDK result is an error.
     server_error: Option<String>,
 }
 
@@ -596,8 +598,9 @@ impl State {
                     if let Some(detail) = self.rate_limit_error.take() {
                         return Err(StreamError::other(detail));
                     }
-                    // Claude Code gave up on the turn after losing the API:
-                    // the same request can succeed once the connection is back.
+                    // Claude Code aborted the turn after the API failed
+                    // mid-response; the same request can succeed once the
+                    // connection or the server recovers.
                     if let Some(detail) = self.server_error.take() {
                         return Err(StreamError::transient(detail));
                     }

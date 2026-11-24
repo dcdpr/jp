@@ -12,12 +12,11 @@
 //! hand, and a fixture written from the same reading of the spec would agree
 //! with them whether or not the adapter does.
 //!
-//! What it does not cover is a tool host, so it carries no
-//! `session/request_permission` and no tool-call session update — the two
-//! messages whose fields are most hand-written.
-//! Capturing those needs a run with tools available: `cut_off_tests` records
-//! one against a stub tool server, and a real `RECORD=1 jp query` records one
-//! against JP's own.
+//! `live.jsonl` does not cover a tool host, so it has no
+//! `session/request_permission` requests or tool-call session updates.
+//! Capturing those requires a recording with tools enabled: `cut_off_tests`
+//! records against a stub tool server, and `RECORD=1 jp query` records against
+//! the JP MCP Host.
 
 use std::{
     env, fmt,
@@ -63,13 +62,12 @@ use crate::{
     query::{ChatQuery, QueryContext},
 };
 
-/// The Claude Code login a recording runs against.
+/// Return the Claude Code login directory to use when recording fixtures.
 ///
-/// The lowest-named subscription registered with `jp provider llm auth login
-/// anthropic`, which is the login a JP query uses when its `auth` chain names
-/// it, so two runs land on the same account without one being named.
-/// `None` when none is registered, which leaves Claude Code on its own active
-/// login.
+/// Picks the lexicographically first subscription profile registered via `jp
+/// provider llm auth login anthropic`.
+/// Returns `None` if no subscription profile is registered, falling back to
+/// Claude Code's default login.
 pub(super) fn recording_login() -> Option<Utf8PathBuf> {
     let document = CredentialStore::file_default().ok()?.load().ok()?;
     document
@@ -220,14 +218,15 @@ async fn conversation(
     capture.snapshot().expect("runtime did not report usage")
 }
 
-/// Reach the installed adapter, writing the transcript it resumes from and
-/// recording every message it exchanges.
+/// Reach the installed adapter under `login`, writing the transcript it resumes
+/// from and recording every message it exchanges.
 fn live(
     policy: CachePolicy,
+    login: Option<Utf8PathBuf>,
 ) -> impl FnOnce(&PreparedRequest) -> (NativeArtifact, Box<dyn Transport>) {
     move |prepared| {
-        let launch =
-            transport::launch(prepared, &context(), policy, None).expect("a prepared launch");
+        let launch = transport::launch(prepared, &context(), policy, login.as_deref())
+            .expect("a prepared launch");
         (
             launch.artifact,
             Box::new(transport::Spawned {
@@ -303,11 +302,16 @@ fn tag(recording: bool) -> String {
 }
 
 /// One conversation, answered from `script` when there is one and by the
-/// runtime when there is not.
-async fn attempt(policy: CachePolicy, tag: &str, script: Option<Vec<Framed>>) -> Value {
+/// runtime, under `login`, when there is not.
+async fn attempt(
+    policy: CachePolicy,
+    tag: &str,
+    script: Option<Vec<Framed>>,
+    login: Option<&Utf8Path>,
+) -> Value {
     match script {
         Some(script) => conversation(policy, tag, replayed(script)).await,
-        None => conversation(policy, tag, live(policy)).await,
+        None => conversation(policy, tag, live(policy, login.map(Utf8Path::to_owned))).await,
     }
 }
 
@@ -339,10 +343,12 @@ fn tokens(snapshot: &Value, key: &str) -> u64 {
 #[tokio::test]
 async fn cache_reconstruction() {
     let recording = cassette::recording();
+    // A replay reaches no runtime, so it reads no login either.
+    let login = recording.then(recording_login).flatten();
     if recording {
         // Reaching the runtime with a stale adapter or a lapsed login produces
         // a failure that reads as a protocol problem, so check first.
-        inspect(None)
+        inspect(login.as_deref())
             .await
             .expect("a qualified adapter and an active login");
     }
@@ -362,9 +368,10 @@ async fn cache_reconstruction() {
     }
     .into_iter();
 
-    let first = attempt(CachePolicy::Short, &tag, scripts.next()).await;
-    let repeat = attempt(CachePolicy::Short, &tag, scripts.next()).await;
-    let off = attempt(CachePolicy::Off, &tag, scripts.next()).await;
+    let login = login.as_deref();
+    let first = attempt(CachePolicy::Short, &tag, scripts.next(), login).await;
+    let repeat = attempt(CachePolicy::Short, &tag, scripts.next(), login).await;
+    let off = attempt(CachePolicy::Off, &tag, scripts.next(), login).await;
 
     insta::assert_json_snapshot!(
         "cache_reconstruction_usage",
@@ -407,10 +414,11 @@ pub(super) fn only_connection(name: &str) -> Vec<Framed> {
 #[tokio::test]
 async fn listed_models() {
     let listed = if cassette::recording() {
-        inspect(None)
+        let login = recording_login();
+        inspect(login.as_deref())
             .await
             .expect("a qualified adapter and an active login");
-        transport::list_models(None).await.unwrap()
+        transport::list_models(login.as_deref()).await.unwrap()
     } else {
         let script = only_connection("models");
         transport::models(Box::new(Recorded(script)), Utf8Path::new("/tmp"))
@@ -454,8 +462,9 @@ fn short_query(model: &str) -> ChatQuery {
 #[tokio::test]
 async fn unknown_model_is_refused_as_unknown() {
     let recording = cassette::recording();
+    let login = recording.then(recording_login).flatten();
     if recording {
-        inspect(None)
+        inspect(login.as_deref())
             .await
             .expect("a qualified adapter and an active login");
     }
@@ -463,7 +472,7 @@ async fn unknown_model_is_refused_as_unknown() {
     let model = model_details(&"foobarbaz".parse().unwrap());
     let prepared = PreparedRequest::new(&model, short_query("foobarbaz")).unwrap();
     let (artifact, transport): (NativeArtifact, Box<dyn Transport>) = if recording {
-        let launch = transport::launch(&prepared, &context(), CachePolicy::Off, None)
+        let launch = transport::launch(&prepared, &context(), CachePolicy::Off, login.as_deref())
             .expect("a prepared launch");
         (
             launch.artifact,

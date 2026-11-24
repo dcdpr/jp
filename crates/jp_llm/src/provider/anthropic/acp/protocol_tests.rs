@@ -400,8 +400,9 @@ fn synthetic_error_reports_the_reason_not_a_model_mismatch() {
     );
 }
 
-/// Claude Code continues a turn after losing the API, so the report alone fails
-/// nothing; only a turn it gave up on is retried.
+/// Claude Code continues a turn after an API connection drop, so the
+/// `server_error` message alone does not fail the request; if the turn ends in
+/// an error result, the failure is reported as transient.
 #[test]
 fn lost_connection_the_runtime_gave_up_on_is_retryable() {
     let mut state = state();
@@ -421,8 +422,8 @@ fn lost_connection_the_runtime_gave_up_on_is_retryable() {
     );
 }
 
-/// A turn that recovered from a lost connection and then failed for another
-/// reason reports that reason, not the connection it recovered from.
+/// A subsequent assistant message clears a prior `server_error`, so a later
+/// failure reports its own error rather than the earlier connection drop.
 #[test]
 fn recovered_connection_does_not_explain_a_later_failure() {
     let mut state = state();
@@ -434,6 +435,28 @@ fn recovered_connection_does_not_explain_a_later_failure() {
     assert_eq!(
         error.message(),
         "Claude Code request failed (error_during_execution): Adapter disconnected."
+    );
+}
+
+/// Claude Code tags a server fault mid-response `server_error` too, and
+/// continues the turn after it the same way, so it is held and retried like a
+/// lost connection.
+#[test]
+fn server_fault_the_runtime_gave_up_on_is_retryable() {
+    let mut state = state();
+    let report = state.sdk(notification(json!({"type":"assistant","error":"server_error","message":{"model":"<synthetic>","content":[{"type":"text","text":"API Error: Server error mid-response. The response above may be incomplete."}]}})));
+    assert_eq!(report.unwrap(), vec![]);
+
+    let error = state
+        .sdk(notification(
+            json!({"type":"result","subtype":"error_during_execution","is_error":true,"errors":[]}),
+        ))
+        .unwrap_err();
+    assert_eq!(error.kind, StreamErrorKind::Transient);
+    assert_eq!(
+        error.message(),
+        "Claude Code server_error: API Error: Server error mid-response. The response above may \
+         be incomplete."
     );
 }
 
