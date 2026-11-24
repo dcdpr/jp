@@ -1,6 +1,9 @@
+use std::{fs, sync::Arc};
+
 use camino_tempfile::tempdir;
 use jp_config::AppConfig;
 use jp_printer::{OutputFormat, OutputWidth, Printer, SharedBuffer};
+use jp_storage::backend::FsStorageBackend;
 use jp_workspace::Workspace;
 use strip_ansi_escapes::strip_str;
 
@@ -48,6 +51,92 @@ fn ls() -> Ls {
         archived: false,
         labels: vec![],
     }
+}
+
+// The archive index leaves out an archived conversation that fails to load, so
+// the listing reports it, the way every command reports a live one.
+#[test]
+fn an_archived_conversation_that_fails_to_load_is_reported() {
+    let tmp = tempdir().unwrap();
+    let backend = Arc::new(FsStorageBackend::new(&tmp.path().join(".jp")).unwrap());
+    let conversations = tmp.path().join(".jp").join("conversations");
+    let archive = conversations.join(".archive");
+    fs::create_dir_all(&archive).unwrap();
+
+    let loads = ConversationId::try_from_dirname("17941219991").unwrap();
+    backend.write_test_conversation(&loads, &Conversation::default());
+    fs::rename(
+        conversations.join("17941219991"),
+        archive.join("17941219991"),
+    )
+    .unwrap();
+    let broken = archive.join("17941219992");
+    fs::create_dir_all(&broken).unwrap();
+    fs::write(broken.join("metadata.json"), "not json").unwrap();
+
+    let mut workspace = Workspace::in_memory(tmp.path()).with_backend(Arc::clone(&backend));
+    workspace.load_conversation_index();
+    let (printer, out, err) = Printer::memory(OutputFormat::Text);
+    let mut ctx = Ctx::new(
+        crate::bootstrap::ExecutionContext::for_workspace(&workspace),
+        workspace,
+        Some(backend),
+        tokio::runtime::Runtime::new().unwrap(),
+        Globals::default(),
+        AppConfig::new_test(),
+        None,
+        printer,
+    );
+
+    Ls {
+        archived: true,
+        ..ls()
+    }
+    .run(&mut ctx, &[])
+    .unwrap();
+    ctx.printer.flush();
+
+    let listed = out.lock().clone();
+    assert!(listed.contains("jp-c17941219991"), "{listed}");
+    assert!(!listed.contains("jp-c17941219992"), "{listed}");
+    assert_eq!(
+        strip_str(err.lock().as_str()),
+        "1 archived conversation failed to load:\n\n- jp-c17941219992: metadata.json: invalid \
+         JSON at line 1, column 2\n\nRun `jp conversation rm jp-c17941219992` to remove it.\n"
+    );
+}
+
+// Reading the archive is the archived listing's business alone.
+#[test]
+fn the_live_listing_does_not_report_the_archive() {
+    let tmp = tempdir().unwrap();
+    let backend = Arc::new(FsStorageBackend::new(&tmp.path().join(".jp")).unwrap());
+    let broken = tmp
+        .path()
+        .join(".jp")
+        .join("conversations")
+        .join(".archive")
+        .join("17941219992");
+    fs::create_dir_all(&broken).unwrap();
+    fs::write(broken.join("metadata.json"), "not json").unwrap();
+
+    let workspace = Workspace::in_memory(tmp.path()).with_backend(Arc::clone(&backend));
+    let (printer, _out, err) = Printer::memory(OutputFormat::Text);
+    let mut ctx = Ctx::new(
+        crate::bootstrap::ExecutionContext::for_workspace(&workspace),
+        workspace,
+        Some(backend),
+        tokio::runtime::Runtime::new().unwrap(),
+        Globals::default(),
+        AppConfig::new_test(),
+        None,
+        printer,
+    );
+
+    ls().run(&mut ctx, &[]).unwrap();
+    ctx.printer.flush();
+
+    assert_eq!(err.lock().as_str(), "");
 }
 
 /// A conversation created a fixed time after the epoch.

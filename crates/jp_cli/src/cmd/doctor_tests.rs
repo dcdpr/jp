@@ -54,9 +54,9 @@ fn failure<'a>(dirname: &str, error: &'a ValidationError, fix: Option<Repair>) -
             id: ConversationId::try_from_dirname(dirname).unwrap(),
             location: StorageLocation::new(format!("/ws/.jp/conversations/{dirname}")),
             error,
+            archived: false,
         },
         fix,
-        archived: false,
     }
 }
 
@@ -70,9 +70,9 @@ fn archived_failure<'a>(
             id: ConversationId::try_from_dirname(dirname).unwrap(),
             location: StorageLocation::new(format!("/ws/.jp/conversations/.archive/{dirname}")),
             error,
+            archived: true,
         },
         fix,
-        archived: true,
     }
 }
 
@@ -642,6 +642,10 @@ struct LockAfterDiagnosis {
 impl RecoveryBackend for LockAfterDiagnosis {
     fn scan(&self) -> Result<Vec<InvalidConversation>, StorageError> {
         self.fs.scan()
+    }
+
+    fn scan_archive(&self) -> Result<Vec<InvalidConversation>, StorageError> {
+        self.fs.scan_archive()
     }
 
     fn inspect(&self, id: &ConversationId) -> Option<StoredConversation> {

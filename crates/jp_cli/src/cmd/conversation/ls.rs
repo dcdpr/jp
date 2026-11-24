@@ -1,8 +1,11 @@
+use std::sync::Arc;
+
 use chrono::{DateTime, FixedOffset, Local, Utc};
 use clap::{Arg, ArgAction, ArgMatches, Command, value_parser};
 use comfy_table::{Cell, CellAlignment, Row};
 use crossterm::style::{Color, Stylize as _};
 use jp_conversation::{Conversation, ConversationId};
+use jp_printer::Printer;
 use jp_storage::backend::StoragePresence;
 use jp_term::{
     osc::hyperlink,
@@ -14,11 +17,12 @@ use jp_workspace::ConversationHandle;
 use crate::{
     cli::{CommandArgs, many},
     cmd::{
-        ConversationLoadRequest, Output,
+        self, ConversationLoadRequest, Output,
         conversation_id::PositionalIds,
         label::{self, LabelSelector},
     },
     ctx::Ctx,
+    load_failure::{self, LoadFailure, LoadFailureNotice},
     output::print_table,
 };
 
@@ -197,7 +201,7 @@ impl Ls {
         ConversationLoadRequest::explicit_or_none(&self.target)
     }
 
-    #[expect(clippy::unnecessary_wraps, clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     pub(crate) fn run(&self, ctx: &mut Ctx, handles: &[ConversationHandle]) -> Output {
         let active_conversation_id = ctx
             .session
@@ -254,6 +258,15 @@ impl Ls {
                     matches_filters(id, &c, local).then(|| to_details(*id, &c, local, external))
                 })
                 .collect()
+        };
+
+        // After the listing above, whose validation of the archive leaves the
+        // conversations that load in the scan cache, so this re-reads only the
+        // ones that do not. Held until the listing is printed.
+        let _archive_failures = if self.archived {
+            Some(archive_failure_notice(ctx)?)
+        } else {
+            None
         };
 
         let count = conversations.len();
@@ -470,6 +483,19 @@ fn build_header_row(columns: Columns, marker: Option<SortMarker>) -> Row {
     }
 
     header
+}
+
+/// The report of the archived conversations the archived listing leaves out
+/// because they do not load, printed when it drops.
+fn archive_failure_notice(ctx: &Ctx) -> Result<LoadFailureNotice, cmd::Error> {
+    let invalid = ctx.recovery.scan_archive()?;
+    let failures: Vec<_> = invalid.iter().map(LoadFailure::from).collect();
+
+    Ok(load_failure::notice(
+        Printer::clone(&ctx.printer),
+        Arc::clone(&ctx.recovery),
+        &failures,
+    ))
 }
 
 /// The column header that should carry the sort marker, if any.

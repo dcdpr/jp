@@ -376,6 +376,18 @@ impl RecoveryBackend for FsStorageBackend {
         Ok(invalid)
     }
 
+    fn scan_archive(&self) -> Result<Vec<InvalidConversation>> {
+        let mut invalid: Vec<_> = self
+            .storage
+            .validate_archive()
+            .into_iter()
+            .filter(|entry| !self.storage.is_conversation_locked(&entry.id.to_string()))
+            .collect();
+        invalid.sort_by_key(InvalidConversation::path);
+
+        Ok(invalid)
+    }
+
     fn inspect(&self, id: &ConversationId) -> Option<StoredConversation> {
         self.stored(id).map(|(stored, _)| stored)
     }

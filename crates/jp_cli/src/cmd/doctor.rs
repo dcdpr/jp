@@ -28,7 +28,7 @@ use crate::{
     cli::CommandArgs,
     cmd::{self, Output},
     format::no_persist_note,
-    load_failure::{self, LoadFailure, RecordExtras},
+    load_failure::{self, LoadFailure},
     shared::confirm::{ConfirmFlag, decide},
 };
 
@@ -145,9 +145,6 @@ pub(crate) struct Report<'a> {
 pub(crate) struct Finding<'a> {
     pub failure: LoadFailure<'a>,
     pub fix: Option<Repair>,
-
-    /// Whether the conversation is in the archive.
-    pub archived: bool,
 }
 
 impl Report<'_> {
@@ -165,7 +162,6 @@ impl<'a> From<&'a Diagnosis> for Report<'a> {
                 .map(|diagnosed| Finding {
                     failure: LoadFailure::from(&diagnosed.conversation),
                     fix: diagnosed.repair,
-                    archived: diagnosed.conversation.archived,
                 })
                 .collect(),
             strays: &diagnosis.strays,
@@ -306,7 +302,7 @@ fn conversation_rows<'a>(
     let mut seen = HashSet::new();
     findings
         .iter()
-        .filter(move |finding| finding.archived == archived)
+        .filter(move |finding| finding.failure.archived == archived)
         .filter(move |finding| seen.insert(finding.failure.id))
         .map(|finding| {
             let id = finding.failure.id;
@@ -369,13 +365,9 @@ const fn stray_kind(kind: StrayKind) -> StrayProblem {
 pub(crate) fn render_json(report: &Report<'_>, pretty: bool) -> serde_json::Result<Vec<String>> {
     let mut records = vec![];
     for finding in &report.failures {
-        let extras = RecordExtras {
-            fix: finding.fix.map(Repair::name),
-            archived: finding.archived,
-        };
         records.push(load_failure::render_record(
             &finding.failure,
-            extras,
+            finding.fix.map(Repair::name),
             pretty,
         )?);
     }

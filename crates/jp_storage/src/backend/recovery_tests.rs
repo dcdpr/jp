@@ -207,6 +207,7 @@ fn the_null_backend_holds_nothing() {
         Removal::NotFound
     );
     assert!(null.diagnose().unwrap().invalid.is_empty());
+    assert!(null.scan_archive().unwrap().is_empty());
     assert_eq!(
         null.repair(&id("17941219991"), Repair::RebuildMetadata, &mut |_| {
             panic!("not asked")
@@ -333,6 +334,30 @@ fn an_archived_copy_beside_a_live_copy_gets_no_repair() {
         (archived, None),
         (live, Some(Repair::RebuildMetadata))
     ]);
+}
+
+// The archive's counterpart of `scan`, for a command that lists the archive:
+// archived conversations only, and none another process holds.
+#[test]
+fn scanning_the_archive_finds_only_archived_conversations_that_fail_to_load() {
+    let (_tmp, fs, conversations) = setup();
+    let archive = conversations.join(".archive");
+    broken(&conversations, "17941219991");
+    let archived = broken(&archive, "17941219992-old-work");
+    let loads = events_only(&archive, "17941219993");
+    fs::write(loads.join("metadata.json"), "{}").unwrap();
+    let held = broken(&archive, "17941219994");
+    let _lock = fs.try_lock("jp-c17941219994", None).unwrap().unwrap();
+
+    let found: Vec<_> = fs
+        .scan_archive()
+        .unwrap()
+        .iter()
+        .map(|invalid| (invalid.path(), invalid.archived))
+        .collect();
+
+    assert_eq!(found, vec![(archived, true)]);
+    assert!(held.join("metadata.json").is_file());
 }
 
 // A conversation with no live copy is looked for in the archive.

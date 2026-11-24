@@ -27,6 +27,9 @@ pub(crate) struct LoadFailure<'a> {
     pub id: ConversationId,
     pub location: StorageLocation,
     pub error: &'a ValidationError,
+
+    /// Whether the conversation is in the archive.
+    pub archived: bool,
 }
 
 impl LoadFailure<'_> {
@@ -50,30 +53,41 @@ impl LoadFailure<'_> {
 pub(crate) fn notice(
     printer: Printer,
     recovery: Arc<dyn RecoveryBackend>,
-    invalid: &[InvalidConversation],
+    failures: &[LoadFailure<'_>],
 ) -> LoadFailureNotice {
-    for failure in invalid.iter().map(LoadFailure::from) {
+    for failure in failures {
         failure.log();
     }
 
     LoadFailureNotice {
         printer,
         recovery,
-        failed: invalid
+        failed: failures
             .iter()
-            .map(|invalid| (invalid.id, invalid.location()))
+            .map(|failure| Failed {
+                id: failure.id,
+                location: failure.location.clone(),
+                archived: failure.archived,
+            })
             .collect(),
     }
 }
 
 /// The load-failure report, printed on stderr when dropped.
 ///
-/// Holds the conversations that failed the scan at startup, and reports those
-/// the store still holds and that still fail when it drops.
+/// Holds the conversations that failed to load, and reports those the store
+/// still holds and that still fail when it drops.
 pub(crate) struct LoadFailureNotice {
     printer: Printer,
     recovery: Arc<dyn RecoveryBackend>,
-    failed: Vec<(ConversationId, StorageLocation)>,
+    failed: Vec<Failed>,
+}
+
+/// A conversation that failed to load, checked again when the report prints.
+struct Failed {
+    id: ConversationId,
+    location: StorageLocation,
+    archived: bool,
 }
 
 impl Drop for LoadFailureNotice {
@@ -81,18 +95,19 @@ impl Drop for LoadFailureNotice {
         let still_failing: Vec<_> = self
             .failed
             .drain(..)
-            .filter_map(|(id, location)| {
-                let error = self.recovery.inspect(&id)?.state.err()?;
-                Some((id, location, error))
+            .filter_map(|failed| {
+                let error = self.recovery.inspect(&failed.id)?.state.err()?;
+                Some((failed, error))
             })
             .collect();
 
         let failures: Vec<_> = still_failing
             .iter()
-            .map(|(id, location, error)| LoadFailure {
-                id: *id,
-                location: location.clone(),
+            .map(|(failed, error)| LoadFailure {
+                id: failed.id,
+                location: failed.location.clone(),
                 error,
+                archived: failed.archived,
             })
             .collect();
 
@@ -110,6 +125,7 @@ impl<'a> From<&'a InvalidConversation> for LoadFailure<'a> {
             id: invalid.id,
             location: invalid.location(),
             error: &invalid.error,
+            archived: invalid.archived,
         }
     }
 }
@@ -130,7 +146,12 @@ pub(crate) fn render_text(failures: &[LoadFailure<'_>]) -> Option<String> {
         1 => "conversation",
         _ => "conversations",
     };
-    let subject = format!("{count} {noun}");
+    let archived = if failures.iter().all(|failure| failure.archived) {
+        "archived "
+    } else {
+        ""
+    };
+    let subject = format!("{count} {archived}{noun}");
 
     if count > MAX_LISTED {
         return Some(format!(
@@ -181,31 +202,23 @@ pub(crate) fn render_json(
 ) -> serde_json::Result<Vec<String>> {
     failures
         .iter()
-        .map(|failure| render_record(failure, RecordExtras::default(), pretty))
+        .map(|failure| render_record(failure, None, pretty))
         .collect()
 }
 
-/// What a record says beyond the failure itself.
-#[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct RecordExtras {
-    /// The name of the `jp doctor` fix that makes the conversation load.
-    pub fix: Option<&'static str>,
-
-    /// Whether the conversation is in the archive.
-    pub archived: bool,
-}
-
-/// Render one failure as a JSON record, with what `extras` adds.
+/// Render one failure as a JSON record, naming `fix` when a `jp doctor` fix
+/// makes the conversation load.
 ///
 /// With `pretty`, the record is indented across several lines.
 pub(crate) fn render_record(
     failure: &LoadFailure<'_>,
-    extras: RecordExtras,
+    fix: Option<&'static str>,
     pretty: bool,
 ) -> serde_json::Result<String> {
-    let mut record = Record::from(failure);
-    record.fix = extras.fix;
-    record.context.conversation.archived = extras.archived;
+    let record = Record {
+        fix,
+        ..Record::from(failure)
+    };
 
     if pretty {
         serde_json::to_string_pretty(&record)
@@ -286,7 +299,7 @@ impl<'a> From<&'a LoadFailure<'a>> for Record<'a> {
                 conversation: ConversationContext {
                     id: failure.id.to_string(),
                     location: &failure.location,
-                    archived: false,
+                    archived: failure.archived,
                 },
             },
             causes: causes(failure.error),

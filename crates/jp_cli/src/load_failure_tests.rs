@@ -16,6 +16,15 @@ fn failure<'a>(dirname: &str, error: &'a ValidationError) -> LoadFailure<'a> {
         id: ConversationId::try_from_dirname(dirname).unwrap(),
         location: StorageLocation::new(format!("/ws/.jp/conversations/{dirname}")),
         error,
+        archived: false,
+    }
+}
+
+fn archived_failure<'a>(dirname: &str, error: &'a ValidationError) -> LoadFailure<'a> {
+    LoadFailure {
+        location: StorageLocation::new(format!("/ws/.jp/conversations/.archive/{dirname}")),
+        archived: true,
+        ..failure(dirname, error)
     }
 }
 
@@ -52,6 +61,21 @@ fn plain(failures: &[LoadFailure<'_>]) -> Option<String> {
 fn no_failures_renders_nothing() {
     assert_eq!(render_text(&[]), None);
     assert_eq!(render_json(&[], false).unwrap(), Vec::<String>::new());
+}
+
+// `jp c ls --archived` reports the archived conversations it cannot list, and
+// says they are archived.
+#[test]
+fn archived_failures_are_reported_as_archived() {
+    let error = missing_metadata();
+
+    assert_eq!(
+        plain(&[archived_failure("17941219994", &error)]).as_deref(),
+        Some(
+            "1 archived conversation failed to load:\n\n- jp-c17941219994: missing \
+             metadata.json\n\nRun `jp conversation rm jp-c17941219994` to remove it."
+        )
+    );
 }
 
 #[test]
@@ -194,6 +218,10 @@ fn an_unavailable_part_lists_the_read_error_as_a_cause() {
     )]);
 }
 
+fn failures(invalid: &[InvalidConversation]) -> Vec<LoadFailure<'_>> {
+    invalid.iter().map(LoadFailure::from).collect()
+}
+
 /// A store holding one conversation whose `metadata.json` is not JSON, and the
 /// conversations its scan reports.
 fn scanned_store(root: &Utf8Path) -> (Arc<dyn RecoveryBackend>, Vec<InvalidConversation>) {
@@ -214,7 +242,7 @@ fn the_text_report_prints_when_the_notice_drops_even_under_quiet() {
     let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
     let printer = printer.with_chrome(Chrome::Silenced);
 
-    let report = notice(printer.clone(), recovery, &invalid);
+    let report = notice(printer.clone(), recovery, &failures(&invalid));
     printer.flush();
     assert_eq!(
         err.lock().as_str(),
@@ -240,7 +268,7 @@ fn a_conversation_the_command_dealt_with_is_not_reported() {
     let (recovery, invalid) = scanned_store(tmp.path());
     let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
 
-    let report = notice(printer.clone(), recovery, &invalid);
+    let report = notice(printer.clone(), recovery, &failures(&invalid));
     fs::remove_dir_all(tmp.path().join("conversations/17941219994")).unwrap();
     drop(report);
     printer.flush();
@@ -255,7 +283,7 @@ fn the_json_report_prints_raw_records_even_under_quiet() {
     let (printer, out, err) = Printer::memory(OutputFormat::Json);
     let printer = printer.with_chrome(Chrome::Silenced);
 
-    drop(notice(printer, recovery, &invalid));
+    drop(notice(printer, recovery, &failures(&invalid)));
 
     assert_eq!(out.lock().as_str(), "");
     assert_eq!(

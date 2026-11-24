@@ -86,3 +86,19 @@ A rebuilt `metadata.json` has no `archived_at`, so the conversation stays
 archived but sorts last in `jp c ls --archived`.
 `jp c ls --archived` still leaves out an archived conversation whose metadata
 fails to load, without saying so.
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-24T12:04:33Z
+
+`jp conversation ls --archived` now reports the archived conversations it leaves
+out because they fail to load, after the listing, as `N archived conversation(s)
+failed to load`.
+The archive index already validated them; `RecoveryBackend::scan_archive` hands
+back the ones it dropped, re-reading only those, since the index left the others
+in the in-memory scan cache.
+Plain `jp c ls` does not read the archive.
+
+A rebuilt archived conversation's archive time is the directory's modification
+time, read before the new `metadata.json` is written.

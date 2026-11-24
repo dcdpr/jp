@@ -1176,10 +1176,14 @@ fn prepare_conversation_store(
 
     trace!("Scanning for conversations that do not load.");
     let invalid = recovery.scan().map_err(cmd::Error::from)?;
+    let failures: Vec<_> = invalid
+        .iter()
+        .map(load_failure::LoadFailure::from)
+        .collect();
 
     Ok(StoreReports {
         _trash: trash,
-        _load_failures: load_failure::notice(printer.clone(), recovery, &invalid),
+        _load_failures: load_failure::notice(printer.clone(), recovery, &failures),
     })
 }
 

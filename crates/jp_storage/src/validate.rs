@@ -318,7 +318,6 @@ impl Storage {
         self.load_scan_cache();
 
         let mut validation = ValidationResult::default();
-        let mut archive = ValidationResult::default();
         let mut leftovers = vec![];
         for root in [Some(&self.root), self.user.as_ref()].into_iter().flatten() {
             let conversations_dir = root.join(CONVERSATIONS_DIR);
@@ -328,15 +327,10 @@ impl Storage {
 
             leftovers.extend(leftovers_in(&conversations_dir));
             validate_root(&conversations_dir, &self.scan, &mut validation, &mut vec![]);
-
-            let archive_dir = conversations_dir.join(ARCHIVE_DIR);
-            if archive_dir.is_dir() {
-                validate_root(&archive_dir, &self.scan, &mut archive, &mut vec![]);
-            }
         }
 
         let mut invalid = validation.invalid;
-        invalid.extend(archive.invalid);
+        invalid.extend(self.validate_archive());
         invalid.sort_by_key(InvalidConversation::path);
         let mut unrecognized = validation.unrecognized;
         unrecognized.sort();
@@ -347,6 +341,23 @@ impl Storage {
             unrecognized,
             leftovers,
         }
+    }
+
+    /// Archived conversations that fail [`Self::validate_conversations`]'s
+    /// checks, changing nothing on disk.
+    ///
+    /// Uses the scan cache without writing it, so a directory the conversation
+    /// index just validated in this process is not read again.
+    pub(crate) fn validate_archive(&self) -> Vec<InvalidConversation> {
+        let mut archive = ValidationResult::default();
+        for root in [Some(&self.root), self.user.as_ref()].into_iter().flatten() {
+            let archive_dir = root.join(CONVERSATIONS_DIR).join(ARCHIVE_DIR);
+            if archive_dir.is_dir() {
+                validate_root(&archive_dir, &self.scan, &mut archive, &mut vec![]);
+            }
+        }
+
+        archive.invalid
     }
 
     /// IDs of the conversations under `conversations_dir` that pass

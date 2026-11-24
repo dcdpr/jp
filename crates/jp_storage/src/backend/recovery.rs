@@ -19,8 +19,9 @@ use crate::{
 ///
 /// [`Self::scan`] reads live conversations only, since it runs before every
 /// command; the archive can hold thousands of conversations.
-/// The other methods reach the archive: [`Self::diagnose`] reads all of it, and
-/// a lookup by ID reads it only for a conversation with no live copy.
+/// The other methods reach the archive: [`Self::scan_archive`] and
+/// [`Self::diagnose`] read all of it, and a lookup by ID reads it only for a
+/// conversation with no live copy.
 pub trait RecoveryBackend: Debug + Send + Sync {
     /// Every live conversation that fails validation, sorted by location.
     ///
@@ -29,6 +30,18 @@ pub trait RecoveryBackend: Debug + Send + Sync {
     /// The store may remove leftovers of its own interrupted writes, but never
     /// moves or deletes a conversation.
     fn scan(&self) -> Result<Vec<InvalidConversation>>;
+
+    /// Every archived conversation that fails validation, sorted by location,
+    /// read without changing anything.
+    ///
+    /// For a command that lists the archive.
+    /// A conversation another process holds the lock on is left out, as in
+    /// [`Self::scan`].
+    ///
+    /// # Errors
+    ///
+    /// Fails when the store cannot be read.
+    fn scan_archive(&self) -> Result<Vec<InvalidConversation>>;
 
     /// What the store holds for conversation `id`, read without loading it: its
     /// live copy, or its archived copy when it has no live copy.
@@ -226,6 +239,10 @@ impl RecoveryBackend for NullRecoveryBackend {
         Ok(vec![])
     }
 
+    fn scan_archive(&self) -> Result<Vec<InvalidConversation>> {
+        Ok(vec![])
+    }
+
     fn inspect(&self, _id: &ConversationId) -> Option<StoredConversation> {
         None
     }
@@ -272,6 +289,10 @@ impl DryRunRecovery {
 impl RecoveryBackend for DryRunRecovery {
     fn scan(&self) -> Result<Vec<InvalidConversation>> {
         self.inner.scan()
+    }
+
+    fn scan_archive(&self) -> Result<Vec<InvalidConversation>> {
+        self.inner.scan_archive()
     }
 
     fn inspect(&self, id: &ConversationId) -> Option<StoredConversation> {
