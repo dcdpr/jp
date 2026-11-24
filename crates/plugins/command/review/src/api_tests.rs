@@ -379,17 +379,22 @@ fn markdown_is_rendered_as_markdown_and_other_files_as_text() {
     let text = body(&file(&workspace.store, id, 1, &html("docs/b.txt")).unwrap());
 
     assert_eq!(markdown["source"], MARKDOWN);
-    assert!(
-        markdown["html"]
-            .as_str()
-            .unwrap()
-            .starts_with(r#"<h1><span data-s="2" data-e="7">Title</span></h1>"#),
-        "{markdown}"
+    // The heading carries the anchor the site gives it.
+    assert_eq!(
+        markdown["html"],
+        "<h1 id=\"title\"><span data-s=\"2\" data-e=\"7\">Title</span></h1>\n<p><span \
+         data-s=\"9\" data-e=\"20\">First line.</span>\n<span data-s=\"21\" data-e=\"33\">Second \
+         line.</span></p>\n"
+    );
+    assert_eq!(
+        markdown["headings"],
+        json!([{ "level": 1, "text": "Title", "anchor": "title" }])
     );
     assert_eq!(
         text["html"],
         "<pre><span data-s=\"0\" data-e=\"12\">plain &lt;text&gt;</span>\n</pre>\n"
     );
+    assert_eq!(text.get("headings"), None, "a text file has none");
 }
 
 #[test]
@@ -731,6 +736,53 @@ fn a_sent_comment_takes_a_reply_and_is_resolved() {
     );
 }
 
+#[test]
+fn a_resolved_comment_is_opened_again() {
+    let (_tmp, workspace) = workspace();
+    let id = started(&workspace);
+    comment(&workspace.context(), id, new_comment(&json!(null), "Hm.")).unwrap();
+    comment(
+        &workspace.context(),
+        id,
+        new_comment(&json!(null), "Later."),
+    )
+    .unwrap();
+    let first = CommentRef {
+        review: id,
+        number: 1,
+    };
+    let pass = send(&workspace, id);
+    end(&workspace, id);
+    drop(pass);
+    comment(&workspace.context(), id, new_comment(&json!(null), "New.")).unwrap();
+    resolve(&workspace.store, first).unwrap();
+
+    let reopened = reopen_comment(&workspace.store, first).unwrap();
+    let again = reopen_comment(&workspace.store, first).unwrap();
+
+    assert_eq!(reopened.status, StatusCode::OK);
+    assert_eq!(body(&reopened)["id"], format!("{id}#1"));
+    assert_eq!(body(&reopened)["status"], "open");
+    assert_eq!(body(&reopened).get("resolved_at"), None);
+    assert_eq!(body(&again)["status"], "open");
+    assert_eq!(
+        reopen_comment(&workspace.store, CommentRef {
+            review: id,
+            number: 3,
+        }),
+        Err(ApiError::conflict(format!(
+            "{id}#3 is a draft, not yet sent."
+        )))
+    );
+    assert_eq!(
+        reopen_comment(&workspace.store, CommentRef {
+            review: id,
+            number: 9,
+        }),
+        Err(ApiError::not_found(format!("No comment {id}#9.")))
+    );
+}
+
 /// The assistant answering a running pass could no longer write its replies.
 #[test]
 fn a_review_with_a_pass_running_is_not_closed() {
@@ -750,6 +802,267 @@ fn a_review_with_a_pass_running_is_not_closed() {
     );
 }
 
+fn place(anchor: &Value) -> AnchorRequest {
+    serde_json::from_value(anchor.clone()).unwrap()
+}
+
+/// The review as `GET /api/reviews/{id}` answers it, in its latest version.
+fn shown(workspace: &Workspace, id: ReviewId) -> Value {
+    let reply = detail(workspace, id, &DetailQuery::default(), None).unwrap();
+
+    body(&reply)["review"].clone()
+}
+
+#[test]
+fn a_closed_review_is_opened_again() {
+    let (_tmp, workspace) = workspace();
+    let id = started(&workspace);
+    close(&workspace.store, id).unwrap();
+
+    let reopened = reopen(&workspace.store, id).unwrap();
+    let again = reopen(&workspace.store, id).unwrap();
+    let commented = comment(&workspace.context(), id, new_comment(&json!(null), "More."));
+
+    assert_eq!(reopened.status, StatusCode::OK);
+    assert_eq!(body(&reopened)["status"], "open");
+    assert_eq!(body(&reopened).get("closed_at"), None);
+    assert_eq!(body(&again)["status"], "open");
+    assert_eq!(commented.map(|reply| reply.status), Ok(StatusCode::CREATED));
+}
+
+#[test]
+fn a_passage_approved_is_listed_with_the_review() {
+    let (_tmp, workspace) = workspace();
+    let id = started(&workspace);
+
+    let reply = approve(
+        &workspace.context(),
+        id,
+        place(&json!({ "version": 1, "path": "docs/a.md", "bytes": [9, 14] })),
+    )
+    .unwrap();
+
+    let made = body(&reply);
+    assert_eq!(reply.status, StatusCode::CREATED);
+    assert_eq!(made["number"], 1);
+    assert_eq!(made["author"], "Jane Doe <jane@example.com>");
+    assert_eq!(made["excerpt"], "First");
+    assert_eq!(
+        made["anchor"],
+        json!({
+            "version": 1,
+            "path": "docs/a.md",
+            "range": "3:1-3:6",
+            "projected": { "version": 1, "range": "3:1-3:6", "bytes": [9, 14] },
+            "outdated": false
+        })
+    );
+    assert_eq!(shown(&workspace, id)["approvals"], json!([made]));
+}
+
+/// The approval was of the text as it stood.
+#[test]
+fn an_approval_is_outdated_once_a_line_of_its_passage_changes() {
+    let (_tmp, workspace) = workspace();
+    let id = started(&workspace);
+    approve(
+        &workspace.context(),
+        id,
+        place(&json!({ "version": 1, "path": "docs/a.md", "range": "3" })),
+    )
+    .unwrap();
+    approve(
+        &workspace.context(),
+        id,
+        place(&json!({ "version": 1, "path": "docs/a.md", "range": "4" })),
+    )
+    .unwrap();
+
+    fs::write(
+        workspace.root.join("docs/a.md"),
+        "# Title\n\nFirst line, changed.\nSecond line.\n",
+    )
+    .unwrap();
+    record_tree(&workspace, id);
+
+    let approvals = shown(&workspace, id)["approvals"].clone();
+    assert_eq!(
+        approvals[0]["anchor"],
+        json!({
+            "version": 1,
+            "path": "docs/a.md",
+            "range": "3",
+            "outdated": true,
+            "resolved": { "version": 1, "range": "3", "bytes": [9, 20] }
+        })
+    );
+    assert_eq!(
+        approvals[1]["anchor"]["projected"],
+        json!({ "version": 2, "range": "4", "bytes": [30, 42] })
+    );
+}
+
+#[test]
+fn an_approval_is_taken_back_by_its_number() {
+    let (_tmp, workspace) = workspace();
+    let id = started(&workspace);
+    approve(
+        &workspace.context(),
+        id,
+        place(&json!({ "version": 1, "path": "docs/a.md", "range": "3" })),
+    )
+    .unwrap();
+
+    let taken = unapprove(&workspace.store, id, 1).unwrap();
+    let again = unapprove(&workspace.store, id, 1);
+
+    assert_eq!(
+        body(&taken),
+        json!({ "review": id.to_string(), "approval": 1 })
+    );
+    assert_eq!(
+        again,
+        Err(ApiError::not_found(format!("{id} has no approval 1.")))
+    );
+    assert_eq!(shown(&workspace, id).get("approvals"), None);
+}
+
+#[test]
+fn only_a_range_is_approved_or_read_to() {
+    let (_tmp, workspace) = workspace();
+    let id = started(&workspace);
+    let whole_file = json!({ "version": 1, "path": "docs/a.md" });
+
+    assert_eq!(
+        approve(&workspace.context(), id, place(&whole_file)),
+        Err(ApiError::invalid(
+            "An approval is of a range of a file: lines, or a span within them."
+        ))
+    );
+    assert_eq!(
+        read_until(&workspace.context(), id, place(&whole_file)),
+        Err(ApiError::invalid(
+            "Name the last line read, as a range in `path`."
+        ))
+    );
+}
+
+/// The browser names the end of the block read by its bytes; the review keeps
+/// the line, which moves with the lines added above it.
+#[test]
+fn a_file_is_read_through_the_last_line_of_a_range() {
+    let (_tmp, workspace) = workspace();
+    let id = started(&workspace);
+
+    let reply = read_until(
+        &workspace.context(),
+        id,
+        place(&json!({ "version": 1, "path": "docs/a.md", "bytes": [20, 20] })),
+    )
+    .unwrap();
+
+    let read = body(&reply);
+    assert_eq!(reply.status, StatusCode::OK);
+    assert_eq!(read["path"], "docs/a.md");
+    assert_eq!(read["author"], "Jane Doe <jane@example.com>");
+    assert_eq!((&read["version"], &read["line"]), (&json!(1), &json!(3)));
+    assert_eq!(
+        read["projected"],
+        json!({ "version": 1, "range": "3", "bytes": [9, 20] })
+    );
+
+    fs::write(
+        workspace.root.join("docs/a.md"),
+        format!("Intro.\n{MARKDOWN}"),
+    )
+    .unwrap();
+    record_tree(&workspace, id);
+
+    let listed = shown(&workspace, id)["read_until"].clone();
+    assert_eq!(listed.as_array().map(Vec::len), Some(1));
+    assert_eq!(
+        (&listed[0]["version"], &listed[0]["line"]),
+        (&json!(1), &json!(3))
+    );
+    assert_eq!(
+        listed[0]["projected"],
+        json!({ "version": 2, "range": "4", "bytes": [16, 27] })
+    );
+}
+
+#[test]
+fn reading_a_file_further_replaces_how_far_it_was_read() {
+    let (_tmp, workspace) = workspace();
+    let id = started(&workspace);
+    let read = |range: &str| {
+        read_until(
+            &workspace.context(),
+            id,
+            place(&json!({ "version": 1, "path": "docs/a.md", "range": range })),
+        )
+        .unwrap()
+    };
+
+    read("1");
+    read("3-4");
+
+    let listed = shown(&workspace, id)["read_until"].clone();
+    assert_eq!(listed.as_array().map(Vec::len), Some(1));
+    assert_eq!(listed[0]["line"], 4);
+}
+
+#[test]
+fn how_far_a_file_was_read_is_forgotten() {
+    let (_tmp, workspace) = workspace();
+    let id = started(&workspace);
+    read_until(
+        &workspace.context(),
+        id,
+        place(&json!({ "version": 1, "path": "docs/a.md", "range": "3" })),
+    )
+    .unwrap();
+    let forget = |path: &str| {
+        unread(&workspace.store, id, &ReadQuery {
+            path: path.to_owned(),
+        })
+    };
+
+    let cleared = forget("docs/a.md").unwrap();
+    let again = forget("docs/a.md").unwrap();
+
+    assert_eq!(
+        body(&cleared),
+        json!({ "review": id.to_string(), "path": "docs/a.md", "cleared": true })
+    );
+    assert_eq!(body(&again)["cleared"], false);
+    assert_eq!(
+        forget("docs/c.md").map_err(|error| error.status),
+        Err(StatusCode::NOT_FOUND)
+    );
+    assert_eq!(shown(&workspace, id).get("read_until"), None);
+}
+
+#[test]
+fn a_closed_review_takes_no_approval_and_no_line_read() {
+    let (_tmp, workspace) = workspace();
+    let id = started(&workspace);
+    let line = json!({ "version": 1, "path": "docs/a.md", "range": "3" });
+    approve(&workspace.context(), id, place(&line)).unwrap();
+    read_until(&workspace.context(), id, place(&line)).unwrap();
+    close(&workspace.store, id).unwrap();
+    let closed = || Err(ApiError::conflict(format!("{id} is closed.")));
+
+    assert_eq!(approve(&workspace.context(), id, place(&line)), closed());
+    assert_eq!(unapprove(&workspace.store, id, 1), closed());
+    assert_eq!(read_until(&workspace.context(), id, place(&line)), closed());
+    assert_eq!(
+        unread(&workspace.store, id, &ReadQuery {
+            path: "docs/a.md".to_owned(),
+        }),
+        closed()
+    );
+}
+
 #[test]
 fn a_refusal_answers_with_the_status_that_fits_it() {
     let id: ReviewId = "R-1h4k2m9".parse().unwrap();
@@ -762,6 +1075,11 @@ fn a_refusal_answers_with_the_status_that_fits_it() {
     assert_eq!(
         status(Refusal::Comment(2, Why::Withdrawn)),
         StatusCode::NOT_FOUND
+    );
+    assert_eq!(status(Refusal::Approval(2)), StatusCode::NOT_FOUND);
+    assert_eq!(
+        status(Refusal::ApprovalWithoutRange),
+        StatusCode::BAD_REQUEST
     );
     assert_eq!(status(Refusal::NothingToChange), StatusCode::BAD_REQUEST);
     assert_eq!(

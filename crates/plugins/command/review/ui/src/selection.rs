@@ -35,7 +35,7 @@ pub enum Refusal {
 }
 
 impl Refusal {
-    /// Why the selection can't take a comment, as the comment bar says it.
+    /// Why the selection can't take a comment, as the reader is told.
     #[must_use]
     pub fn reason(self) -> &'static str {
         match self {
@@ -48,15 +48,15 @@ impl Refusal {
     }
 }
 
-/// How long a press on the comment bar keeps a selection that ends, in
+/// How long a press on a selection's actions keeps a selection that ends, in
 /// milliseconds from when the press began.
 pub const PRESS_WINDOW: f64 = 1000.0;
 
 /// Whether a selection that ended at `now` keeps the range it captured, where
-/// `pressed` is when the last press on the comment bar began.
+/// `pressed` is when the last press on the selection's actions began.
 ///
-/// Only a press on the bar keeps it, since a tap on a touch screen can end the
-/// selection before the button sees the tap.
+/// Only a press on the actions keeps it, since a tap on a touch screen can end
+/// the selection before the button sees the tap.
 /// Any other way the selection ends drops the range and its highlight.
 #[must_use]
 pub fn kept(pressed: Option<f64>, now: f64) -> bool {

@@ -28,6 +28,16 @@ pub enum Cover {
     Whole { span: usize },
 }
 
+impl Cover {
+    /// The index of the span covered.
+    #[must_use]
+    pub fn span(self) -> usize {
+        match self {
+            Self::Part { span, .. } | Self::Whole { span } => span,
+        }
+    }
+}
+
 /// Where a deletion is marked: before the span's text, or after it when nothing
 /// follows the deleted lines.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,6 +72,29 @@ pub fn covers(spans: &[Span], source: &str, [start, end]: [usize; 2]) -> Vec<Cov
             })
         })
         .collect()
+}
+
+/// The runs of `covers` drawn as one stretch of text each, as half-open ranges
+/// of indexes into `covers`: neighbours that cover consecutive spans, which
+/// `joined` says are set in the same lines of text.
+///
+/// What lies between two spans of a run is drawn with them: the line ending of
+/// the source, which shows as the space between two words, and text the
+/// renderer wrote without a source range.
+#[must_use]
+pub fn runs(covers: &[Cover], joined: impl Fn(usize, usize) -> bool) -> Vec<[usize; 2]> {
+    let mut runs: Vec<[usize; 2]> = vec![];
+    for (index, cover) in covers.iter().enumerate() {
+        let before = index.checked_sub(1).map(|before| covers[before].span());
+        let continues =
+            before.is_some_and(|before| before + 1 == cover.span() && joined(before, cover.span()));
+        match runs.last_mut() {
+            Some(run) if continues => run[1] = index + 1,
+            _ => runs.push([index, index + 1]),
+        }
+    }
+
+    runs
 }
 
 /// How many of the lines `added` are not shown by any of `spans`: lines with

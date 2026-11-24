@@ -23,6 +23,9 @@ pub enum Action {
 
     /// Close a sent comment.
     Resolve,
+
+    /// Open a resolved comment again.
+    Reopen,
 }
 
 impl Action {
@@ -36,20 +39,21 @@ impl Action {
             Self::EditReply => "Edit reply",
             Self::WithdrawReply => "Withdraw reply",
             Self::Resolve => "Resolve",
+            Self::Reopen => "Reopen",
         }
     }
 }
 
 /// What a card offers to do with `comment`: edit or withdraw a draft; reply, or
-/// edit or withdraw the draft reply, on a sent one, and resolve it; nothing on
-/// a resolved one.
+/// edit or withdraw the draft reply, on a sent one, and resolve it; and open a
+/// resolved one again.
 #[must_use]
 pub fn actions(comment: &Comment) -> Vec<Action> {
     match (comment.status, comment.draft_reply.is_some()) {
         (Status::Draft, _) => vec![Action::Edit, Action::Withdraw],
         (Status::Open, false) => vec![Action::Reply, Action::Resolve],
         (Status::Open, true) => vec![Action::EditReply, Action::WithdrawReply, Action::Resolve],
-        (Status::Resolved, _) => vec![],
+        (Status::Resolved, _) => vec![Action::Reopen],
     }
 }
 

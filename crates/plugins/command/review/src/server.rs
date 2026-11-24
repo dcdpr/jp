@@ -37,7 +37,7 @@ use axum::{
     http::{Method, StatusCode, header},
     middleware::{self, Next},
     response::{IntoResponse, Response},
-    routing::{get, patch, post},
+    routing::{delete, get, patch, post, put},
 };
 use camino::Utf8Path;
 use jp_plugin::{
@@ -48,8 +48,8 @@ use jp_plugin::{
     stdio::{print_to, send_exit},
 };
 use jp_review_api::{
-    DetailQuery, DiffQuery, EditRequest, FileQuery, NewCommentRequest, NewReview, PassRequest,
-    ReplyRequest, StopRequest, Stopping,
+    AnchorRequest, DetailQuery, DiffQuery, EditRequest, FileQuery, NewCommentRequest, NewReview,
+    PassRequest, ReadQuery, ReplyRequest, StopRequest, Stopping,
 };
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value};
@@ -58,7 +58,7 @@ use tokio::{sync::watch, time};
 use crate::{
     api::{self, ApiError, Reply, Workspace},
     browser::Browser,
-    id::CommentRef,
+    id::{CommentRef, ReviewId},
     options::{Options, Overrides},
     running::{self, Passes, Stop},
     store::{Serving, Store},
@@ -314,9 +314,17 @@ fn router(server: Arc<Server>) -> Router {
         )
         .route("/api/reviews/{id}/comments/{number}/replies", post(reply))
         .route("/api/reviews/{id}/comments/{number}/resolve", post(resolve))
+        .route(
+            "/api/reviews/{id}/comments/{number}/reopen",
+            post(reopen_comment),
+        )
+        .route("/api/reviews/{id}/approvals", post(approve))
+        .route("/api/reviews/{id}/approvals/{number}", delete(unapprove))
+        .route("/api/reviews/{id}/read", put(read_until).delete(unread))
         .route("/api/reviews/{id}/passes", post(submit))
         .route("/api/reviews/{id}/stop", post(stop))
         .route("/api/reviews/{id}/close", post(close))
+        .route("/api/reviews/{id}/reopen", post(reopen))
         .fallback(not_found)
         .method_not_allowed_fallback(method_not_allowed)
         .layer(middleware::from_fn_with_state(
@@ -424,6 +432,62 @@ fn query<T>(query: Result<Query<T>, QueryRejection>) -> Result<T, ApiError> {
     query
         .map(|Query(query)| query)
         .map_err(|rejection| ApiError::invalid(rejection.body_text()))
+}
+
+/// Answer a request on the review `id` names that carries `body`, with what
+/// `operation` makes of the two.
+async fn with_body<T: DeserializeOwned + Send + 'static>(
+    server: &Server,
+    id: &str,
+    body: &[u8],
+    operation: impl FnOnce(&Workspace, ReviewId, T) -> Result<Reply, ApiError> + Send + 'static,
+) -> Response {
+    let answer = async {
+        let id = api::review_id(id)?;
+        let request: T = read_body(body)?;
+        server
+            .work(move |workspace| operation(workspace, id, request))
+            .await
+    };
+
+    server.respond(answer.await)
+}
+
+/// Answer a request on the review `id` names that asks `asked`, with what
+/// `operation` makes of the two.
+async fn with_query<T: Send + 'static>(
+    server: &Server,
+    id: &str,
+    asked: Result<Query<T>, QueryRejection>,
+    operation: impl FnOnce(&Workspace, ReviewId, T) -> Result<Reply, ApiError> + Send + 'static,
+) -> Response {
+    let answer = async {
+        let id = api::review_id(id)?;
+        let asked = query(asked)?;
+        server
+            .work(move |workspace| operation(workspace, id, asked))
+            .await
+    };
+
+    server.respond(answer.await)
+}
+
+/// Answer a request on the comment `id` and `number` name, with what
+/// `operation` makes of it.
+async fn with_comment(
+    server: &Server,
+    id: &str,
+    number: &str,
+    operation: impl FnOnce(&Workspace, CommentRef) -> Result<Reply, ApiError> + Send + 'static,
+) -> Response {
+    let answer = async {
+        let comment = comment_in(id, number)?;
+        server
+            .work(move |workspace| operation(workspace, comment))
+            .await
+    };
+
+    server.respond(answer.await)
 }
 
 /// The comment a request path names: its review, and its number there.
@@ -637,15 +701,10 @@ async fn diff(
     Path(id): Path<String>,
     asked: Result<Query<DiffQuery>, QueryRejection>,
 ) -> Response {
-    let answer = async {
-        let id = api::review_id(&id)?;
-        let asked = query(asked)?;
-        server
-            .work(move |workspace| api::diff(&workspace.store, id, &asked))
-            .await
-    };
+    let compare =
+        |workspace: &Workspace, id, asked: DiffQuery| api::diff(&workspace.store, id, &asked);
 
-    server.respond(answer.await)
+    with_query(&server, &id, asked, compare).await
 }
 
 async fn record(State(server): State<Arc<Server>>, Path(id): Path<String>) -> Response {
@@ -664,15 +723,11 @@ async fn comment(
     Path(id): Path<String>,
     body: Bytes,
 ) -> Response {
-    let answer = async {
-        let id = api::review_id(&id)?;
-        let request: NewCommentRequest = read_body(&body)?;
-        server
-            .work(move |workspace| api::comment(&workspace.context(), id, request))
-            .await
+    let add = |workspace: &Workspace, id, request: NewCommentRequest| {
+        api::comment(&workspace.context(), id, request)
     };
 
-    server.respond(answer.await)
+    with_body(&server, &id, &body, add).await
 }
 
 async fn edit(
@@ -695,14 +750,9 @@ async fn withdraw(
     State(server): State<Arc<Server>>,
     Path((id, number)): Path<(String, String)>,
 ) -> Response {
-    let answer = async {
-        let comment = comment_in(&id, &number)?;
-        server
-            .work(move |workspace| api::withdraw(&workspace.store, comment))
-            .await
-    };
+    let withdraw = |workspace: &Workspace, comment| api::withdraw(&workspace.store, comment);
 
-    server.respond(answer.await)
+    with_comment(&server, &id, &number, withdraw).await
 }
 
 async fn reply(
@@ -725,14 +775,18 @@ async fn resolve(
     State(server): State<Arc<Server>>,
     Path((id, number)): Path<(String, String)>,
 ) -> Response {
-    let answer = async {
-        let comment = comment_in(&id, &number)?;
-        server
-            .work(move |workspace| api::resolve(&workspace.store, comment))
-            .await
-    };
+    let resolve = |workspace: &Workspace, comment| api::resolve(&workspace.store, comment);
 
-    server.respond(answer.await)
+    with_comment(&server, &id, &number, resolve).await
+}
+
+async fn reopen_comment(
+    State(server): State<Arc<Server>>,
+    Path((id, number)): Path<(String, String)>,
+) -> Response {
+    let reopen = |workspace: &Workspace, comment| api::reopen_comment(&workspace.store, comment);
+
+    with_comment(&server, &id, &number, reopen).await
 }
 
 async fn submit(
@@ -776,11 +830,72 @@ async fn stop(State(server): State<Arc<Server>>, Path(id): Path<String>, body: B
     server.respond(answer.await)
 }
 
+async fn approve(
+    State(server): State<Arc<Server>>,
+    Path(id): Path<String>,
+    body: Bytes,
+) -> Response {
+    let approve = |workspace: &Workspace, id, request: AnchorRequest| {
+        api::approve(&workspace.context(), id, request)
+    };
+
+    with_body(&server, &id, &body, approve).await
+}
+
+async fn unapprove(
+    State(server): State<Arc<Server>>,
+    Path((id, number)): Path<(String, String)>,
+) -> Response {
+    let answer = async {
+        let id = api::review_id(&id)?;
+        let number = api::approval_number(id, &number)?;
+        server
+            .work(move |workspace| api::unapprove(&workspace.store, id, number))
+            .await
+    };
+
+    server.respond(answer.await)
+}
+
+async fn read_until(
+    State(server): State<Arc<Server>>,
+    Path(id): Path<String>,
+    body: Bytes,
+) -> Response {
+    let read = |workspace: &Workspace, id, request: AnchorRequest| {
+        api::read_until(&workspace.context(), id, request)
+    };
+
+    with_body(&server, &id, &body, read).await
+}
+
+async fn unread(
+    State(server): State<Arc<Server>>,
+    Path(id): Path<String>,
+    asked: Result<Query<ReadQuery>, QueryRejection>,
+) -> Response {
+    let forget =
+        |workspace: &Workspace, id, asked: ReadQuery| api::unread(&workspace.store, id, &asked);
+
+    with_query(&server, &id, asked, forget).await
+}
+
 async fn close(State(server): State<Arc<Server>>, Path(id): Path<String>) -> Response {
     let answer = async {
         let id = api::review_id(&id)?;
         server
             .work(move |workspace| api::close(&workspace.store, id))
+            .await
+    };
+
+    server.respond(answer.await)
+}
+
+async fn reopen(State(server): State<Arc<Server>>, Path(id): Path<String>) -> Response {
+    let answer = async {
+        let id = api::review_id(&id)?;
+        server
+            .work(move |workspace| api::reopen(&workspace.store, id))
             .await
     };
 

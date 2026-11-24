@@ -64,6 +64,54 @@ pub enum Span {
     Versions { from: Option<u32>, to: Option<u32> },
 }
 
+/// What the review page shows of a file, as the header's picker offers it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Showing {
+    /// The file as the latest version holds it, moving on to newer ones.
+    Latest,
+
+    /// The file as one version holds it.
+    Version(u32),
+
+    /// What a pass changed.
+    Pass(u32),
+
+    /// What changed between two versions.
+    Compare,
+}
+
+impl Showing {
+    /// The value of the picker's option for this: `latest`, `v3`, `p2`, or
+    /// `compare`.
+    #[must_use]
+    pub fn value(self) -> String {
+        match self {
+            Self::Latest => "latest".to_owned(),
+            Self::Version(version) => format!("v{version}"),
+            Self::Pass(pass) => format!("p{pass}"),
+            Self::Compare => "compare".to_owned(),
+        }
+    }
+
+    /// What the option valued `value` shows; `None` for a value no option has.
+    #[must_use]
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "latest" => return Some(Self::Latest),
+            "compare" => return Some(Self::Compare),
+            _ => {}
+        }
+        let (kind, number) = value.split_at_checked(1)?;
+        let number = number.parse().ok()?;
+
+        match kind {
+            "v" => Some(Self::Version(number)),
+            "p" => Some(Self::Pass(number)),
+            _ => None,
+        }
+    }
+}
+
 impl Route {
     /// The page `path`, with its `query` (without the `?`), names.
     #[must_use]
@@ -163,6 +211,49 @@ impl ReviewView {
             ..Self::default()
         }
     }
+
+    /// What the view shows of its file.
+    #[must_use]
+    pub fn showing(&self) -> Showing {
+        match (self.changes.map(|changes| changes.span), self.version) {
+            (Some(Span::Pass(pass)), _) => Showing::Pass(pass),
+            (Some(Span::Versions { .. }), _) => Showing::Compare,
+            (None, Some(version)) => Showing::Version(version),
+            (None, None) => Showing::Latest,
+        }
+    }
+
+    /// The view showing `showing` of the same file.
+    ///
+    /// A changes view keeps showing rendered or unified changes, as it did.
+    /// Comparing starts from the version shown and the one before it.
+    #[must_use]
+    pub fn show(&self, showing: Showing) -> Self {
+        let changes = |span| {
+            Some(Changes {
+                span,
+                unified: self.changes.is_some_and(|changes| changes.unified),
+            })
+        };
+        let (version, changes) = match showing {
+            Showing::Latest => (None, None),
+            Showing::Version(version) => (Some(version), None),
+            Showing::Pass(pass) => (self.version, changes(Span::Pass(pass))),
+            Showing::Compare => (
+                self.version,
+                changes(Span::Versions {
+                    from: None,
+                    to: self.version,
+                }),
+            ),
+        };
+
+        Self {
+            version,
+            changes,
+            ..self.clone()
+        }
+    }
 }
 
 /// The decoded `key=value` pairs of a query.
@@ -183,9 +274,16 @@ const ESCAPE_LENGTH: usize = "%XX".len();
 /// The radix of the digits in a percent escape.
 const HEX: u32 = 16;
 
-/// `text` with `%XX` escapes and `+` decoded; an escape that isn't one is kept
-/// as it is.
+/// `text`, a part of a query, with `%XX` escapes and `+` decoded; an escape
+/// that isn't one is kept as it is.
 fn decode(text: &str) -> String {
+    unescape(text, true)
+}
+
+/// `text` with `%XX` escapes decoded, and `+` read as a space when `plus` says
+/// it stands for one, as it does in a query and not in a path; an escape that
+/// isn't one is kept as it is.
+pub(crate) fn unescape(text: &str, plus: bool) -> String {
     let bytes = text.as_bytes();
     let mut decoded = Vec::with_capacity(bytes.len());
     let mut index = 0;
@@ -199,7 +297,7 @@ fn decode(text: &str) -> String {
                 decoded.push(byte);
                 index += ESCAPE_LENGTH;
             }
-            (b'+', _) => {
+            (b'+', _) if plus => {
                 decoded.push(b' ');
                 index += 1;
             }

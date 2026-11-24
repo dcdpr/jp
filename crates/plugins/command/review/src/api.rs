@@ -15,12 +15,12 @@
 
 use axum::http::StatusCode;
 use camino::{Utf8Path, Utf8PathBuf};
-use doc::author;
+use doc::{author, heading::headings};
 use jp_plugin::message::OutputFormat;
 use jp_review_api::{
     AnchorRequest, DetailQuery, DetailReply, DiffQuery, EditRequest, ErrorBody, FileQuery,
-    FileReply, Format, Listing, NewCommentRequest, NewReview, PassRequest, Recorded, ReplyRequest,
-    Resolved, Running, Unreadable, Withdrawal,
+    FileReply, Format, Heading, Listing, NewCommentRequest, NewReview, PassRequest, ReadQuery,
+    Recorded, ReplyRequest, Resolved, Running, Unapproved, Unread, Unreadable, Withdrawal,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -33,7 +33,8 @@ use crate::{
     model::{Content, Edit, Failure, NewComment, Refusal, Review, Role, Why},
     options::Options,
     pass::{PassRef, Unspanned},
-    snapshot,
+    progress::ReadUntil,
+    reading, snapshot,
     store::{Blobs, Store, now},
     submit::{self, Request},
     text::{Range, Text},
@@ -121,9 +122,12 @@ impl ApiError {
     /// appropriate HTTP status code.
     pub(crate) fn refused(id: ReviewId, refusal: &Refusal) -> Self {
         let status = match refusal {
-            Refusal::Comment(_, Why::Missing | Why::Withdrawn) => StatusCode::NOT_FOUND,
+            Refusal::Comment(_, Why::Missing | Why::Withdrawn) | Refusal::Approval(_) => {
+                StatusCode::NOT_FOUND
+            }
             Refusal::EmptyBody
             | Refusal::SuggestionWithoutRange
+            | Refusal::ApprovalWithoutRange
             | Refusal::NothingToChange
             | Refusal::Comment(_, Why::VerdictRequired | Why::VerdictRefused) => {
                 StatusCode::BAD_REQUEST
@@ -198,6 +202,13 @@ pub(crate) fn comment_ref(id: ReviewId, number: &str) -> Result<CommentRef, ApiE
         .filter(|number| *number > 0)
         .map(|number| CommentRef { review: id, number })
         .ok_or_else(|| ApiError::not_found(format!("No comment {id}#{number}.")))
+}
+
+/// The approval of the review `id` a request path names by its number.
+pub(crate) fn approval_number(id: ReviewId, number: &str) -> Result<u32, ApiError> {
+    number
+        .parse()
+        .map_err(|_| ApiError::not_found(format!("{id} has no approval {number}.")))
 }
 
 /// A version a request path names by its number.
@@ -341,28 +352,53 @@ pub(crate) fn file(
         .blob(number, path)
         .ok_or_else(|| ApiError::not_found(format!("{path} is absent from version {number}.")))?;
     let source = store.blobs(id).get(name)?;
+    let (html, headings) = match query.format {
+        Format::Html => {
+            let (html, headings) = rendered(path, &source);
+            (Some(html), headings)
+        }
+        Format::Text => (None, vec![]),
+    };
 
     Reply::new(StatusCode::OK, &FileReply {
         review: id.to_string(),
         version: number,
         path: path.to_owned(),
-        html: (query.format == Format::Html).then(|| rendered(path, &source)),
+        html,
+        headings,
         source,
     })
 }
 
-/// `source`, the file at `path`, as HTML: Markdown when its extension says it
-/// is, and preformatted text otherwise.
-fn rendered(path: &str, source: &str) -> String {
+/// `source`, the file at `path`, as HTML, and its headings: Markdown when its
+/// extension says it is, and preformatted text, which has no headings,
+/// otherwise.
+///
+/// A Markdown heading carries the anchor the site gives it as its `id`, so a
+/// `#fragment` link written for the site lands on the same heading here.
+fn rendered(path: &str, source: &str) -> (String, Vec<Heading>) {
     let markdown = Utf8Path::new(path).extension().is_some_and(|extension| {
         extension.eq_ignore_ascii_case("md") || extension.eq_ignore_ascii_case("markdown")
     });
-
-    if markdown {
-        md_html::render(source).html
-    } else {
-        md_html::render_text(source).html
+    if !markdown {
+        return (md_html::render_text(source).html, vec![]);
     }
+
+    let found = headings(source);
+    let anchors = found
+        .iter()
+        .map(|heading| (heading.line, heading.slug.clone()))
+        .collect();
+    let listed = found
+        .into_iter()
+        .map(|heading| Heading {
+            level: heading.level,
+            text: heading.text,
+            anchor: heading.slug,
+        })
+        .collect();
+
+    (md_html::render_with_anchors(source, &anchors).html, listed)
 }
 
 /// `GET /api/reviews/{id}/diff`: what changed from one version to another, in
@@ -536,6 +572,21 @@ pub(crate) fn resolve(store: &Store, comment: CommentRef) -> Result<Reply, ApiEr
     })
 }
 
+/// `POST /api/reviews/{id}/comments/{n}/reopen`: open a resolved comment again.
+pub(crate) fn reopen_comment(store: &Store, comment: CommentRef) -> Result<Reply, ApiError> {
+    let id = comment.review;
+    exists(store, id)?;
+    store.update(id, |review, _| {
+        comments::reopen_in(review, comment.number)
+            .map_err(|refusal| ApiError::refused(id, &refusal))
+    })?;
+
+    Ok(Reply {
+        status: StatusCode::OK,
+        json: comments::record(store, comment)?,
+    })
+}
+
 /// `POST /api/reviews/{id}/versions`: record what the working tree holds of the
 /// review's files as a new version, when it differs from the latest.
 ///
@@ -602,6 +653,111 @@ pub(crate) fn close(store: &Store, id: ReviewId) -> Result<Reply, ApiError> {
     })?;
 
     Reply::new(StatusCode::OK, &view::summary(id, &store.read(id)?))
+}
+
+/// `POST /api/reviews/{id}/reopen`: open a closed review again.
+pub(crate) fn reopen(store: &Store, id: ReviewId) -> Result<Reply, ApiError> {
+    exists(store, id)?;
+    store.update(id, |review, _| Ok::<_, ApiError>(review.reopen()))?;
+
+    Reply::new(StatusCode::OK, &view::summary(id, &store.read(id)?))
+}
+
+/// `POST /api/reviews/{id}/approvals`: approve the range `request` names.
+pub(crate) fn approve(
+    ctx: &Context<'_>,
+    id: ReviewId,
+    request: AnchorRequest,
+) -> Result<Reply, ApiError> {
+    exists(&ctx.store, id)?;
+    let author = author::resolve(&ctx.root, ctx.config)?;
+    let at = now();
+
+    let number = ctx.store.update(id, |review, blobs| {
+        review
+            .writable()
+            .map_err(|refusal| ApiError::refused(id, &refusal))?;
+        let anchor = anchor(id, review, blobs, request)?;
+        review
+            .progress
+            .approve(anchor, author, at)
+            .map_err(|refusal| ApiError::refused(id, &refusal))
+    })?;
+    let (approval, _) = reading::approval(&ctx.store, id, number)?;
+
+    Reply::new(StatusCode::CREATED, &approval)
+}
+
+/// `DELETE /api/reviews/{id}/approvals/{n}`: take back an approval.
+pub(crate) fn unapprove(store: &Store, id: ReviewId, number: u32) -> Result<Reply, ApiError> {
+    exists(store, id)?;
+    store.update(id, |review, _| {
+        review
+            .writable()
+            .and_then(|()| review.progress.unapprove(number))
+            .map_err(|refusal| ApiError::refused(id, &refusal))
+    })?;
+
+    Reply::new(StatusCode::OK, &Unapproved {
+        review: id.to_string(),
+        approval: number,
+    })
+}
+
+/// `PUT /api/reviews/{id}/read`: record that the file `request` names was read
+/// through the last line of its range.
+pub(crate) fn read_until(
+    ctx: &Context<'_>,
+    id: ReviewId,
+    request: AnchorRequest,
+) -> Result<Reply, ApiError> {
+    exists(&ctx.store, id)?;
+    let author = author::resolve(&ctx.root, ctx.config)?;
+    let at = now();
+
+    let path = ctx.store.update(id, |review, blobs| {
+        review
+            .writable()
+            .map_err(|refusal| ApiError::refused(id, &refusal))?;
+        let anchor = anchor(id, review, blobs, request)?;
+        let Target::Range(path, range) = anchor.target else {
+            return Err(ApiError::invalid(
+                "Name the last line read, as a range in `path`.",
+            ));
+        };
+        review.progress.read(path.clone(), ReadUntil {
+            version: anchor.version,
+            line: range.last_line(),
+            author,
+            created_at: at,
+        });
+
+        Ok(path)
+    })?;
+    let (read, _) = reading::read(&ctx.store, id, &path)?;
+
+    Reply::new(StatusCode::OK, &read)
+}
+
+/// `DELETE /api/reviews/{id}/read`: forget how far the file `query.path` was
+/// read.
+pub(crate) fn unread(store: &Store, id: ReviewId, query: &ReadQuery) -> Result<Reply, ApiError> {
+    exists(store, id)?;
+    let (path, cleared) = store.update(id, |review, _| {
+        let path = tracked(id, review, &query.path)?.to_owned();
+        review
+            .writable()
+            .map_err(|refusal| ApiError::refused(id, &refusal))?;
+        let cleared = review.progress.unread(&path);
+
+        Ok::<_, ApiError>((path, cleared))
+    })?;
+
+    Reply::new(StatusCode::OK, &Unread {
+        review: id.to_string(),
+        path,
+        cleared,
+    })
 }
 
 /// What `request` anchors a comment to in `review`.

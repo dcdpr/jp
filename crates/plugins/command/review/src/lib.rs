@@ -43,7 +43,9 @@ mod model;
 mod options;
 mod pass;
 mod paths;
+mod progress;
 mod prompt;
+mod reading;
 mod render;
 mod running;
 mod server;
@@ -268,10 +270,62 @@ enum Command {
         accepted: Option<ReviewId>,
     },
 
+    /// Approve a passage of one of a review's files, as it stands.
+    ///
+    /// Each pass tells the assistant which passages are approved.
+    /// An approval ends once a line of its passage changes.
+    Approve {
+        /// The review: `R-1h4k2m9`.
+        id: ReviewId,
+
+        /// The passage: whole lines, `docs/a.md:42` or `docs/a.md:42-45`, or
+        /// the text from a line and column up to but not including another,
+        /// `docs/a.md:42:5-43:18`.
+        #[arg(long, value_name = "PATH:RANGE")]
+        at: String,
+    },
+
+    /// Take back an approval.
+    Unapprove {
+        /// The review: `R-1h4k2m9`.
+        id: ReviewId,
+
+        /// The approval's number, as `jp review show` lists it.
+        number: u32,
+    },
+
+    /// Say how far down a file the reviewer has read.
+    ///
+    /// Each pass tells the assistant that the lines after are unread, so that
+    /// they carry no comment says nothing about them.
+    /// It says nothing of the lines before: only `approve` approves.
+    ReadUntil {
+        /// The review: `R-1h4k2m9`.
+        id: ReviewId,
+
+        /// The last line read, `docs/a.md:120`; with `--clear`, the file alone.
+        #[arg(long, value_name = "PATH[:LINE]")]
+        at: String,
+
+        /// Stop saying how far the file was read.
+        #[arg(long)]
+        clear: bool,
+    },
+
     /// Close a review, after which it takes no changes.
     Close {
         /// The review: `R-1h4k2m9`.
         id: ReviewId,
+    },
+
+    /// Open a closed review again, or a resolved comment.
+    ///
+    /// A comment opened again waits on the assistant when the reviewer wrote in
+    /// it last, and the next pass sends it.
+    Reopen {
+        /// The review, `R-1h4k2m9`, or the comment, `R-1h4k2m9#2`.
+        #[arg(value_name = "ID|COMMENT")]
+        target: Reopened,
     },
 
     /// Open the review list, or a review, in the browser, as the running `jp
@@ -280,6 +334,28 @@ enum Command {
         /// The review: `R-1h4k2m9`; the review list when not given.
         id: Option<ReviewId>,
     },
+}
+
+/// What `jp review reopen` opens again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Reopened {
+    Review(ReviewId),
+    Comment(CommentRef),
+}
+
+impl FromStr for Reopened {
+    type Err = String;
+
+    /// Read a comment, which names its number after a `#`, or else a review.
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        if text.contains('#') {
+            return text.parse().map(Self::Comment);
+        }
+
+        text.parse()
+            .map(Self::Review)
+            .map_err(|_| format!("`{text}` is not a review (try R-1h4k2m9)."))
+    }
 }
 
 #[derive(Debug, clap::Args)]
@@ -710,7 +786,25 @@ fn execute(ctx: &Context<'_>, command: Command, browser: &dyn Browser) -> Result
         } => comments::edit(ctx, comment, at.as_deref(), replace, body),
         Command::Withdraw { comment } => comments::withdraw(ctx, comment),
         Command::Resolve { comments, accepted } => comments::resolve(ctx, &comments, accepted),
+        Command::Approve { id, at } => reading::approve(ctx, id, &at),
+        Command::Unapprove { id, number } => reading::unapprove(ctx, id, number),
+        Command::ReadUntil {
+            id,
+            at,
+            clear: true,
+        } => reading::unread(ctx, id, &at),
+        Command::ReadUntil {
+            id,
+            at,
+            clear: false,
+        } => reading::read_until(ctx, id, &at),
         Command::Close { id } => cmd::close(ctx, id),
+        Command::Reopen {
+            target: Reopened::Review(id),
+        } => cmd::reopen(ctx, id),
+        Command::Reopen {
+            target: Reopened::Comment(comment),
+        } => comments::reopen(ctx, comment),
         Command::Open { id } => {
             let url = cmd::open(ctx, id, browser)?;
             if ctx.format.is_json() {

@@ -133,6 +133,74 @@ fn a_location_encodes_what_a_query_would_misread() {
 }
 
 #[test]
+fn a_view_says_what_it_shows_of_its_file() {
+    assert_eq!(review("").showing(), Showing::Latest);
+    assert_eq!(review("version=2").showing(), Showing::Version(2));
+    assert_eq!(review("version=2&pass=3").showing(), Showing::Pass(3));
+    assert_eq!(review("from=1&to=3").showing(), Showing::Compare);
+    assert_eq!(review("changes=1").showing(), Showing::Compare);
+}
+
+#[test]
+fn showing_a_version_leaves_the_changes_view() {
+    let changes = review("file=docs/a.md&pass=2&diff=unified&resolved=1");
+
+    assert_eq!(
+        changes.show(Showing::Version(1)),
+        review("file=docs/a.md&version=1&resolved=1")
+    );
+    assert_eq!(
+        review("file=docs/a.md&version=1").show(Showing::Latest),
+        review("file=docs/a.md")
+    );
+}
+
+#[test]
+fn showing_changes_keeps_the_version_and_how_changes_are_shown() {
+    let unified = review("version=2&pass=1&diff=unified");
+
+    assert_eq!(
+        review("version=2").show(Showing::Pass(3)),
+        review("version=2&pass=3")
+    );
+    assert_eq!(
+        unified.show(Showing::Pass(3)),
+        review("version=2&pass=3&diff=unified")
+    );
+}
+
+/// The server compares with the version before `to`, and with the latest when
+/// `to` is absent too.
+#[test]
+fn comparing_starts_at_the_version_shown() {
+    assert_eq!(
+        review("version=2").show(Showing::Compare),
+        review("version=2&to=2")
+    );
+    assert_eq!(review("").show(Showing::Compare), review("changes=1"));
+}
+
+#[test]
+fn an_option_of_the_picker_reads_back_as_what_it_shows() {
+    let all = [
+        Showing::Latest,
+        Showing::Version(3),
+        Showing::Pass(12),
+        Showing::Compare,
+    ];
+
+    for showing in all {
+        assert_eq!(Showing::parse(&showing.value()), Some(showing));
+    }
+    assert_eq!(Showing::Version(3).value(), "v3");
+    assert_eq!(Showing::Pass(12).value(), "p12");
+    assert_eq!(Showing::parse(""), None);
+    assert_eq!(Showing::parse("v"), None);
+    assert_eq!(Showing::parse("x3"), None);
+    assert_eq!(Showing::parse("é1"), None, "not split inside a character");
+}
+
+#[test]
 fn a_broken_escape_is_kept_as_written() {
     assert_eq!(review("file=50%25%zz").file.as_deref(), Some("50%%zz"));
 }

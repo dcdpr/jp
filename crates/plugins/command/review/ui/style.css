@@ -1,648 +1,406 @@
 /*
- * The review UI. Mobile first: one column, each comment card under the block
- * its range starts in. From 1024 CSS pixels wide, the cards move into a margin
- * beside the file.
+ * The review UI's stylesheet, as Tailwind CSS reads it: `just build-ui`
+ * compiles it into the bundle's `style.css`, adding the utility classes the
+ * views in `src/` name.
+ *
+ * The views carry their own classes. What is here is what a class on an
+ * element can't say: the colors, which follow the system's light or dark
+ * scheme; the rendered Markdown of a file or a comment, whose elements the
+ * server wrote; and the highlights drawn over a file's text.
+ *
+ * The colors, the fonts, and the measures of a file's text are those of the
+ * documentation site, VitePress's default theme with the project's brand
+ * color, so a file reads here as its page does there.
  */
+
+@import "tailwindcss" source(none);
+@source "./src";
+
+@theme {
+  /* The site's stacks. Inter is used where the reader has it installed. */
+  --font-sans:
+    "Inter", -apple-system, BlinkMacSystemFont, sans-serif, "Apple Color Emoji", "Segoe UI Emoji",
+    "Segoe UI Symbol", "Noto Color Emoji";
+  --font-mono:
+    ui-monospace, "Menlo", "Monaco", "Consolas", "Liberation Mono", "Courier New", monospace;
+
+  /* From this width, a file's outline shows beside it. */
+  --breakpoint-toc: 72rem;
+
+  /* The page, and what sits on it. */
+  --color-canvas: var(--jp-canvas);
+  --color-surface: var(--jp-surface);
+  --color-raised: var(--jp-raised);
+  --color-line: var(--jp-line);
+
+  /* Text. */
+  --color-ink: var(--jp-ink);
+  --color-muted: var(--jp-muted);
+
+  /* What can be pressed, and what it says once pressed. */
+  --color-accent: var(--jp-accent);
+  --color-on-accent: var(--jp-on-accent);
+  --color-danger: var(--jp-danger);
+  --color-warn: var(--jp-warn);
+
+  /* A draft comment, and the two sides of a diff. */
+  --color-draft: var(--jp-draft);
+  --color-added: var(--jp-added);
+  --color-removed: var(--jp-removed);
+}
 
 :root {
   color-scheme: light dark;
-  --bg: #ffffff;
-  --fg: #1d1d1f;
-  --muted: #6e6e73;
-  --line: #d2d2d7;
-  --panel: #f5f5f7;
-  --accent: #0a66d8;
-  --draft: rgba(255, 196, 0, 0.35);
-  --open: rgba(10, 102, 216, 0.22);
-  --resolved: rgba(110, 110, 115, 0.18);
-  --changed: rgba(48, 170, 80, 0.28);
-  --added: #1f7a33;
-  --removed: #c0392b;
-  --warn: #fff4d6;
-  --error: #b3261e;
-  --pending: rgba(175, 82, 222, 0.28);
-  --tap: 44px;
+
+  --jp-canvas: #ffffff;
+  --jp-surface: #f6f6f7;
+  --jp-raised: rgba(142, 150, 170, 0.14);
+  --jp-code: #f6f6f7;
+  --jp-line: #e2e2e3;
+  --jp-ink: #3c3c43;
+  --jp-muted: #67676c;
+  --jp-accent: #646cff;
+  --jp-on-accent: #ffffff;
+  --jp-danger: #b8272c;
+  --jp-warn: rgba(234, 179, 8, 0.14);
+  --jp-draft: #915930;
+  --jp-added: #18794e;
+  --jp-removed: #b8272c;
+
+  --jp-mark-draft: rgba(255, 196, 0, 0.35);
+  --jp-mark-open: rgba(100, 108, 255, 0.18);
+  --jp-mark-resolved: rgba(110, 110, 115, 0.18);
+  --jp-mark-approved: rgba(24, 121, 78, 0.16);
+  --jp-mark-changed: rgba(48, 170, 80, 0.28);
+  --jp-mark-pending: rgba(175, 82, 222, 0.28);
+  --jp-mark-focus: rgba(100, 108, 255, 0.42);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #1a1a1a;
-    --fg: #f5f5f7;
-    --muted: #a1a1a6;
-    --line: #3a3a3c;
-    --panel: #242426;
-    --accent: #5ea2ff;
-    --draft: rgba(255, 196, 0, 0.3);
-    --open: rgba(94, 162, 255, 0.3);
-    --resolved: rgba(161, 161, 166, 0.2);
-    --changed: rgba(76, 200, 110, 0.28);
-    --added: #63d27c;
-    --removed: #ff6b5b;
-    --warn: #3d3215;
-    --error: #ff8a80;
-    --pending: rgba(191, 90, 242, 0.32);
+    --jp-canvas: #1b1b1f;
+    --jp-surface: #202127;
+    --jp-raised: rgba(101, 117, 133, 0.16);
+    --jp-code: #161618;
+    --jp-line: #2e2e32;
+    --jp-ink: #dfdfd6;
+    --jp-muted: #98989f;
+    --jp-accent: #646cff;
+    --jp-on-accent: #ffffff;
+    --jp-danger: #f66f81;
+    --jp-warn: rgba(234, 179, 8, 0.16);
+    --jp-draft: #f9b44e;
+    --jp-added: #3dd68c;
+    --jp-removed: #f66f81;
+
+    --jp-mark-draft: rgba(255, 196, 0, 0.3);
+    --jp-mark-open: rgba(100, 108, 255, 0.3);
+    --jp-mark-resolved: rgba(161, 161, 166, 0.2);
+    --jp-mark-approved: rgba(61, 214, 140, 0.18);
+    --jp-mark-changed: rgba(76, 200, 110, 0.28);
+    --jp-mark-pending: rgba(191, 90, 242, 0.32);
+    --jp-mark-focus: rgba(100, 108, 255, 0.55);
   }
 }
 
-* {
-  box-sizing: border-box;
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-canvas font-sans text-ink;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
+      env(safe-area-inset-left);
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+  }
 }
 
-html {
-  -webkit-text-size-adjust: 100%;
-}
+@layer components {
+  /*
+   * Rendered Markdown: `.jp-text` is one block of a file, and `.jp-body` a
+   * comment or a reply. Each block of a file is an element of its own, and the
+   * margins of neighbouring blocks collapse through them.
+   */
+  .jp-text,
+  .jp-body {
+    overflow-wrap: anywhere;
+  }
 
-body {
-  margin: 0;
-  background: var(--bg);
-  color: var(--fg);
-  font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
-    env(safe-area-inset-left);
-}
+  .jp-text {
+    font-size: 16px;
+    line-height: 28px;
+  }
 
-code,
-pre,
-.jp-line,
-.jp-diff {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.9em;
-}
+  /*
+   * What a file's text and a comment's share. What sits in a file's text
+   * without being part of it, as a comment under its passage does
+   * (`.jp-plain`), is styled by its own classes, and nothing in it is matched
+   * here.
+   */
+  :is(.jp-text, .jp-body) :not(:where(.jp-plain *)) {
+    &:where(h1, h2, h3, h4, h5, h6) {
+      font-weight: 600;
+    }
 
-a,
-.jp-link {
-  color: var(--accent);
-}
+    &:where(ul) {
+      list-style: disc;
+      padding-left: 1.25rem;
+    }
 
-.jp-page {
-  max-width: 1400px;
-  margin: 0 auto;
-  padding: 0 1rem 4rem;
-}
+    &:where(ol) {
+      list-style: decimal;
+      padding-left: 1.25rem;
+    }
 
-/* Header */
+    &:where(a) {
+      color: var(--jp-accent);
+      font-weight: 500;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
 
-.jp-header {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  background: var(--bg);
-  border-bottom: 1px solid var(--line);
-  margin: 0 -1rem 1rem;
-  padding: 0.5rem 1rem;
-}
+    &:where(strong) {
+      font-weight: 600;
+    }
 
-.jp-bar {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.5rem 0.75rem;
-}
+    &:where(code) {
+      @apply font-mono;
+      font-size: 0.875em;
+      padding: 3px 6px;
+      border-radius: 4px;
+      color: var(--jp-accent);
+      background: var(--jp-raised);
+    }
 
-.jp-home {
-  font-weight: 700;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  text-decoration: none;
-  min-height: var(--tap);
-  display: inline-flex;
-  align-items: center;
-}
+    &:where(pre) {
+      @apply font-mono;
+      overflow-x: auto;
+      padding: 20px 24px;
+      border-radius: 8px;
+      color: var(--jp-muted);
+      background: var(--jp-code);
+      font-size: 0.875em;
+      line-height: 1.7;
+    }
 
-.jp-title {
-  font-size: 1.1rem;
-  margin: 0;
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
+    &:where(blockquote) {
+      padding-left: 16px;
+      border-left: 2px solid var(--jp-line);
+      color: var(--jp-muted);
+    }
 
-.jp-running {
-  color: var(--accent);
-  font-weight: 600;
-}
+    &:where(table) {
+      display: block;
+      overflow-x: auto;
+      border-collapse: collapse;
+    }
 
-.jp-closing {
-  margin: 0.5rem 0;
-  padding: 0.5rem 0.75rem;
-  background: var(--panel);
-  border-radius: 8px;
-}
+    &:where(tr) {
+      border-top: 1px solid var(--jp-line);
+    }
 
-.jp-closing-head {
-  font-weight: 600;
-}
+    &:where(tr:nth-child(2n)) {
+      background: var(--jp-surface);
+    }
 
-.jp-closing-body {
-  margin: 0.25rem 0 0;
-  white-space: pre-wrap;
-  max-height: 12em;
-  overflow-y: auto;
-}
+    &:where(th, td) {
+      padding: 8px 16px;
+      border: 1px solid var(--jp-line);
+      font-size: 14px;
+      text-align: left;
+      vertical-align: top;
+    }
 
-.jp-passes,
-.jp-tabs,
-.jp-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.25rem 0.5rem;
-  margin-top: 0.25rem;
-}
+    &:where(th) {
+      color: var(--jp-muted);
+      background: var(--jp-surface);
+      font-weight: 600;
+    }
 
-.jp-tabs {
-  flex-wrap: nowrap;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-}
+    &:where(hr) {
+      border: 0;
+      border-top: 1px solid var(--jp-line);
+    }
 
-.jp-label {
-  color: var(--muted);
-  font-size: 0.9em;
-}
+    &:where(img) {
+      max-width: 100%;
+    }
 
-.jp-tab,
-.jp-chip,
-.jp-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  min-height: var(--tap);
-  min-width: var(--tap);
-  padding: 0 0.75rem;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--panel);
-  color: var(--fg);
-  font: inherit;
-  text-decoration: none;
-  white-space: nowrap;
-  cursor: pointer;
-}
+    &:where(.markdown-alert) {
+      padding: 16px 16px 8px;
+      border-radius: 8px;
+      color: var(--jp-muted);
+      background: var(--jp-raised);
+      font-size: 14px;
+      line-height: 24px;
+    }
 
-.jp-tab-active,
-.jp-chip-active {
-  border-color: var(--accent);
-  color: var(--accent);
-}
+    &:where(.markdown-alert-title) {
+      margin: 0;
+      font-weight: 600;
+    }
+  }
 
-.jp-count {
-  font-size: 0.8em;
-  background: var(--accent);
-  color: var(--bg);
-  border-radius: 999px;
-  padding: 0 0.45em;
-}
+  /* A file's text, with the measures the documentation site gives a page. */
+  .jp-text :not(:where(.jp-plain *)) {
+    &:where(h1, h2, h3, h4, h5, h6) {
+      /* Where a link to the heading scrolls it to: clear of the top bar. */
+      scroll-margin-top: 4rem;
+    }
 
-.jp-select {
-  min-height: var(--tap);
-  font: inherit;
-  padding: 0 0.5rem;
-  border-radius: 8px;
-}
+    &:where(h1) {
+      font-size: 28px;
+      line-height: 40px;
+      letter-spacing: -0.02em;
+    }
 
-.jp-banner {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem 1rem;
-  margin: 0.5rem 0;
-  padding: 0.5rem 0.75rem;
-  border-radius: 8px;
-  background: var(--panel);
-}
+    &:where(h2) {
+      margin: 48px 0 16px;
+      padding-top: 24px;
+      border-top: 1px solid var(--jp-line);
+      font-size: 24px;
+      line-height: 32px;
+      letter-spacing: -0.02em;
+    }
 
-.jp-banner p {
-  margin: 0;
-}
+    &:where(h3) {
+      margin: 32px 0 0;
+      font-size: 20px;
+      line-height: 28px;
+      letter-spacing: -0.01em;
+    }
 
-.jp-banner-warn {
-  background: var(--warn);
-}
+    &:where(h4, h5, h6) {
+      margin: 24px 0 0;
+      font-size: 18px;
+      line-height: 24px;
+      letter-spacing: -0.01em;
+    }
 
-.jp-note {
-  color: var(--muted);
-}
+    &:where(p, ul, ol, blockquote, pre, hr, .markdown-alert) {
+      margin: 16px 0;
+    }
 
-.jp-error {
-  color: var(--error);
-}
+    &:where(table) {
+      margin: 20px 0;
+    }
 
-/* The file and its comments */
+    &:where(li + li) {
+      margin-top: 8px;
+    }
+  }
 
-.jp-row {
-  display: block;
-}
+  @media (min-width: 48rem) {
+    .jp-text :where(h1):not(:where(.jp-plain *)) {
+      font-size: 32px;
+    }
+  }
 
-.jp-text {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
+  /* A comment, which is set smaller and closer. */
+  .jp-body :not(:where(.jp-plain *)) {
+    &:where(h1, h2, h3, h4, h5, h6) {
+      margin: 12px 0 4px;
+      font-size: 1.05em;
+    }
 
-.jp-text pre {
-  overflow-x: auto;
-  padding: 0.75rem;
-  background: var(--panel);
-  border-radius: 8px;
-}
+    &:where(p, ul, ol, blockquote, pre, table, hr, .markdown-alert) {
+      margin: 8px 0;
+    }
 
-.jp-text table {
-  display: block;
-  overflow-x: auto;
-  border-collapse: collapse;
-}
+    &:where(pre) {
+      padding: 10px 12px;
+    }
 
-.jp-text th,
-.jp-text td {
-  border: 1px solid var(--line);
-  padding: 0.25rem 0.5rem;
-}
+    &:where(li + li) {
+      margin-top: 4px;
+    }
+  }
 
-.jp-text img {
-  max-width: 100%;
-}
+  /* These name an element outright, to win over the rules above. */
+  :is(.jp-text, .jp-body) li > :where(ul, ol):not(:where(.jp-plain *)) {
+    margin: 8px 0 0;
+  }
 
-.jp-line {
-  white-space: pre-wrap;
-  min-height: 1.55em;
-}
+  :is(.jp-text, .jp-body) blockquote > :where(p):not(:where(.jp-plain *)) {
+    margin: 0;
+  }
 
-.jp-cards:empty {
-  display: none;
-}
+  :is(.jp-text, .jp-body) pre :where(code):not(:where(.jp-plain *)) {
+    padding: 0;
+    color: inherit;
+    background: none;
+    font-size: 1em;
+  }
 
-.jp-cards,
-.jp-above {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  margin: 0.5rem 0 1rem;
-}
+  :is(.jp-text, .jp-body) :is(h1, h2, h3, h4) > :where(code):not(:where(.jp-plain *)) {
+    font-size: 0.9em;
+  }
 
-.jp-card {
-  border: 1px solid var(--line);
-  border-left: 4px solid var(--line);
-  border-radius: 8px;
-  padding: 0.5rem 0.75rem;
-  background: var(--bg);
-  font-size: 0.95rem;
-}
+  .jp-body > :first-child {
+    margin-top: 0;
+  }
 
-.jp-card-draft {
-  border-left-color: #d9a400;
-}
+  .jp-body > :last-child {
+    margin-bottom: 0;
+  }
 
-.jp-card-open {
-  border-left-color: var(--accent);
-}
+  /* A line of a file rendered as plain text, which keeps its spacing. */
+  .jp-line {
+    @apply font-mono;
+    min-height: 1.7em;
+    font-size: 14px;
+    line-height: 1.7;
+    white-space: pre-wrap;
+  }
 
-.jp-card-resolved {
-  opacity: 0.75;
-}
+  /* Where lines were removed, in a changes view. */
+  .jp-removed-before::before,
+  .jp-removed-after::after {
+    content: "";
+    display: inline-block;
+    width: 0;
+    height: 1.1em;
+    margin: 0 0.15em;
+    border-left: 3px solid var(--jp-removed);
+    vertical-align: text-bottom;
+  }
 
-.jp-card-head,
-.jp-reply-head {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.25rem 0.5rem;
-  align-items: baseline;
-  color: var(--muted);
-  font-size: 0.85em;
-}
-
-.jp-card-number {
-  font-weight: 600;
-  color: var(--fg);
-}
-
-.jp-status,
-.jp-verdict {
-  border-radius: 4px;
-  padding: 0 0.35em;
-  background: var(--panel);
-}
-
-.jp-verdict-accept {
-  color: var(--added);
-}
-
-.jp-verdict-decline {
-  color: var(--removed);
-}
-
-.jp-body > :first-child {
-  margin-top: 0.25rem;
-}
-
-.jp-body > :last-child {
-  margin-bottom: 0.25rem;
-}
-
-.jp-reply {
-  margin-top: 0.5rem;
-  padding-top: 0.5rem;
-  border-top: 1px solid var(--line);
-}
-
-.jp-outdated,
-.jp-resolved-at {
-  color: var(--muted);
-  font-size: 0.85em;
-  margin: 0.25rem 0;
-}
-
-.jp-excerpt {
-  margin: 0.25rem 0;
-  padding-left: 0.75rem;
-  border-left: 3px solid var(--line);
-  color: var(--muted);
-  white-space: pre-wrap;
-}
-
-/* Diffs */
-
-.jp-diff {
-  margin: 0.5rem 0;
-  padding: 0.5rem 0;
-  background: var(--panel);
-  border-radius: 8px;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.jp-diff > div {
-  padding: 0 0.75rem;
-}
-
-.jp-diff-added {
-  color: var(--added);
-  background: var(--changed);
-}
-
-.jp-diff-removed {
-  color: var(--removed);
-}
-
-.jp-diff-hunk,
-.jp-diff-note {
-  color: var(--muted);
-}
-
-.jp-removed-before::before,
-.jp-removed-after::after {
-  content: "";
-  display: inline-block;
-  width: 0;
-  height: 1.1em;
-  margin: 0 0.15em;
-  vertical-align: text-bottom;
-  border-left: 3px solid var(--removed);
+  /* Set for one frame on a block whose highlights changed. Safari doesn't
+     redraw text a highlight stopped covering; moving the block onto a layer
+     of its own and back redraws all of it. */
+  .jp-repaint {
+    transform: translateZ(0);
+  }
 }
 
 /* Highlights, drawn without changing the file's DOM. */
 
 ::highlight(jp-draft) {
-  background-color: var(--draft);
+  background-color: var(--jp-mark-draft);
 }
 
 ::highlight(jp-open) {
-  background-color: var(--open);
+  background-color: var(--jp-mark-open);
 }
 
 ::highlight(jp-resolved) {
-  background-color: var(--resolved);
+  background-color: var(--jp-mark-resolved);
+}
+
+::highlight(jp-approved) {
+  background-color: var(--jp-mark-approved);
 }
 
 ::highlight(jp-changed) {
-  background-color: var(--changed);
+  background-color: var(--jp-mark-changed);
 }
 
 ::highlight(jp-pending) {
-  background-color: var(--pending);
+  background-color: var(--jp-mark-pending);
 }
 
-/* Set for one frame on a block whose highlights changed. Safari doesn't redraw
-   text a highlight stopped covering; moving the block onto a layer of its own
-   and back redraws all of it. */
-.jp-repaint {
-  transform: translateZ(0);
-}
-
-/* Writing: the header's controls, card actions, the comment bar, and the
-   composer sheet. The bar and sheet sit above the on-screen keyboard, by the
-   variables the UI sets from the visual viewport. */
-
-.jp-controls {
-  display: flex;
-  gap: 0.5rem;
-  margin-left: auto;
-}
-
-.jp-button-primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--bg);
-}
-
-.jp-button[disabled] {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.jp-button-small {
-  font-size: 0.85em;
-}
-
-.jp-tab-action {
-  border-style: dashed;
-  font: inherit;
-  cursor: pointer;
-}
-
-.jp-card-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.25rem 0.5rem;
-  margin-top: 0.5rem;
-}
-
-.jp-comment-bar {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: var(--jp-keyboard, 0px);
-  z-index: 3;
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 1rem calc(0.5rem + env(safe-area-inset-bottom));
-  background: var(--panel);
-  border-top: 1px solid var(--line);
-}
-
-.jp-bar-note {
-  margin: 0;
-  flex: 1 1 16rem;
-  color: var(--muted);
-  font-size: 0.9em;
-}
-
-.jp-sheet {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: var(--jp-keyboard, 0px);
-  z-index: 4;
-  max-height: calc(var(--jp-viewport, 100vh) * 0.85);
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-  display: grid;
-  gap: 0.5rem;
-  padding: 0.75rem 1rem calc(0.75rem + env(safe-area-inset-bottom));
-  background: var(--bg);
-  border-top: 1px solid var(--line);
-  border-radius: 12px 12px 0 0;
-  box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.18);
-}
-
-.jp-sheet-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-}
-
-.jp-sheet-head h2 {
-  margin: 0;
-  font-size: 1rem;
-  overflow-wrap: anywhere;
-}
-
-.jp-sheet-actions {
-  display: flex;
-  justify-content: flex-end;
-}
-
-.jp-suggest {
-  display: grid;
-  gap: 0.5rem;
-}
-
-.jp-sheet .jp-field textarea {
-  font-family: inherit;
-  resize: vertical;
-}
-
-.jp-suggest .jp-field textarea {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-}
-
-@media (min-width: 1024px) {
-  .jp-sheet {
-    left: auto;
-    right: 1.5rem;
-    bottom: 1.5rem;
-    width: 32rem;
-    border: 1px solid var(--line);
-    border-radius: 12px;
-  }
-
-  .jp-comment-bar {
-    left: auto;
-    right: 1.5rem;
-    bottom: 1.5rem;
-    border: 1px solid var(--line);
-    border-radius: 12px;
-  }
-}
-
-/* The review list */
-
-.jp-start form {
-  display: grid;
-  gap: 0.5rem;
-  max-width: 40rem;
-}
-
-.jp-start h2 {
-  font-size: 1rem;
-  margin: 0;
-}
-
-.jp-field {
-  display: grid;
-  gap: 0.25rem;
-  color: var(--muted);
-  font-size: 0.9em;
-}
-
-.jp-field textarea,
-.jp-field input {
-  font: inherit;
-  font-size: 16px;
-  color: var(--fg);
-  background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 0.5rem;
-  min-height: var(--tap);
-}
-
-.jp-items {
-  list-style: none;
-  padding: 0;
-  margin: 1.5rem 0 0;
-  display: grid;
-  gap: 0.5rem;
-}
-
-.jp-item {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 0.5rem 0.75rem;
-}
-
-.jp-item-title {
-  display: inline-flex;
-  align-items: center;
-  min-height: var(--tap);
-  font-weight: 600;
-}
-
-.jp-item-meta,
-.jp-item-files {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.25rem 0.75rem;
-  color: var(--muted);
-  font-size: 0.85em;
-  overflow-wrap: anywhere;
-}
-
-.jp-item-closed {
-  opacity: 0.7;
-}
-
-/* Wide screens: the cards move into a margin beside the file. */
-
-@media (min-width: 1024px) {
-  .jp-row {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 22rem;
-    column-gap: 1.5rem;
-    align-items: start;
-  }
-
-  .jp-cards:empty {
-    display: block;
-  }
-
-  .jp-cards {
-    margin: 0.5rem 0;
-  }
-
-  .jp-above {
-    max-width: calc(100% - 23.5rem);
-  }
+::highlight(jp-focus) {
+  background-color: var(--jp-mark-focus);
 }

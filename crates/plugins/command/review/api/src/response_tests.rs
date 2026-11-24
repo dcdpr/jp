@@ -167,6 +167,8 @@ fn a_detail_carries_versions_passes_and_placed_comments() {
                 }),
                 resolved_at: None,
             }],
+            approvals: vec![],
+            read_until: vec![],
         },
         concat!(
             r#"{"id":"R-1h4k2m9","title":"Notes","status":"open","#,
@@ -191,6 +193,78 @@ fn a_detail_carries_versions_passes_and_placed_comments() {
             r#""draft_reply":{"role":"reviewer","author":"Jane","created_at":"2026-11-17T10:05:00Z","#,
             r#""body":"Thanks.","body_html":"<p>Thanks.</p>\n"}}]}"#,
         ),
+    );
+}
+
+#[test]
+fn an_approval_carries_its_passage_and_where_it_falls() {
+    pinned(
+        &Approval {
+            number: 2,
+            author: "Jane".to_owned(),
+            created_at: at("2026-11-17T10:06:00Z"),
+            anchor: AnchorView {
+                version: 2,
+                path: Some("docs/notes.md".to_owned()),
+                range: Some("3-4".to_owned()),
+                projected: Some(Placed {
+                    version: 3,
+                    range: Some("5-6".to_owned()),
+                    bytes: Some([20, 41]),
+                }),
+                outdated: false,
+                resolved: None,
+            },
+            excerpt: Some("First\nSecond".to_owned()),
+        },
+        concat!(
+            r#"{"number":2,"author":"Jane","created_at":"2026-11-17T10:06:00Z","#,
+            r#""anchor":{"version":2,"path":"docs/notes.md","range":"3-4","#,
+            r#""projected":{"version":3,"range":"5-6","bytes":[20,41]},"outdated":false},"#,
+            r#""excerpt":"First\nSecond"}"#,
+        ),
+    );
+}
+
+#[test]
+fn how_far_a_file_was_read_carries_the_line_and_where_it_falls() {
+    pinned(
+        &ReadUntil {
+            path: "docs/notes.md".to_owned(),
+            author: "Jane".to_owned(),
+            created_at: at("2026-11-17T10:07:00Z"),
+            version: 2,
+            line: 40,
+            projected: Some(Placed {
+                version: 3,
+                range: Some("42".to_owned()),
+                bytes: Some([900, 931]),
+            }),
+        },
+        concat!(
+            r#"{"path":"docs/notes.md","author":"Jane","created_at":"2026-11-17T10:07:00Z","#,
+            r#""version":2,"line":40,"#,
+            r#""projected":{"version":3,"range":"42","bytes":[900,931]}}"#,
+        ),
+    );
+}
+
+#[test]
+fn taking_back_an_approval_or_a_read_line_names_what_was_taken_back() {
+    pinned(
+        &Unapproved {
+            review: "R-1h4k2m9".to_owned(),
+            approval: 2,
+        },
+        r#"{"review":"R-1h4k2m9","approval":2}"#,
+    );
+    pinned(
+        &Unread {
+            review: "R-1h4k2m9".to_owned(),
+            path: "docs/notes.md".to_owned(),
+            cleared: true,
+        },
+        r#"{"review":"R-1h4k2m9","path":"docs/notes.md","cleared":true}"#,
     );
 }
 
@@ -223,10 +297,36 @@ fn a_file_carries_its_source_and_maybe_its_html() {
             path: "docs/b.txt".to_owned(),
             source: "plain\n".to_owned(),
             html: Some("<pre><span data-s=\"0\" data-e=\"5\">plain</span>\n</pre>\n".to_owned()),
+            headings: vec![],
         },
         concat!(
             r#"{"review":"R-1h4k2m9","version":1,"path":"docs/b.txt","source":"plain\n","#,
             r#""html":"<pre><span data-s=\"0\" data-e=\"5\">plain</span>\n</pre>\n"}"#,
+        ),
+    );
+}
+
+#[test]
+fn a_markdown_file_carries_its_headings() {
+    pinned(
+        &FileReply {
+            review: "R-1h4k2m9".to_owned(),
+            version: 2,
+            path: "docs/a.md".to_owned(),
+            source: "A & B\n-----\n".to_owned(),
+            html: Some(
+                "<h2 id=\"a-b\"><span data-s=\"0\" data-e=\"5\">A &amp; B</span></h2>\n".to_owned(),
+            ),
+            headings: vec![Heading {
+                level: 2,
+                text: "A & B".to_owned(),
+                anchor: "a-b".to_owned(),
+            }],
+        },
+        concat!(
+            r#"{"review":"R-1h4k2m9","version":2,"path":"docs/a.md","source":"A & B\n-----\n","#,
+            r#""html":"<h2 id=\"a-b\"><span data-s=\"0\" data-e=\"5\">A &amp; B</span></h2>\n","#,
+            r#""headings":[{"level":2,"text":"A & B","anchor":"a-b"}]}"#,
         ),
     );
 }

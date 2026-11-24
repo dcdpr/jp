@@ -894,6 +894,46 @@ fn a_sent_comment_takes_replies_and_is_resolved() {
     );
 }
 
+/// The pass sent comment 1 and its turn left it unanswered, so the reviewer
+/// wrote in it last.
+#[test]
+fn a_resolved_comment_is_opened_again() {
+    let root = workspace();
+    let id = commented(root.path());
+    session(vec![
+        init_step(root.path(), &["submit", &id]),
+        created(),
+        completed(QueryOutcome::Finished),
+    ]);
+    run_args(root.path(), &["comment", &id, "Rename it."]);
+    let (first, draft) = (format!("{id}#1"), format!("{id}#2"));
+    run_args(root.path(), &["resolve", &first]);
+
+    assert_eq!(
+        run_args(root.path(), &["reopen", &first]).text,
+        format!("Reopened {first}.\n")
+    );
+    assert_eq!(
+        run_args(root.path(), &["reopen", &first]).text,
+        format!("{first} is open already.\n")
+    );
+    assert_eq!(
+        run_args(root.path(), &["reopen", &draft]).reason,
+        Some(format!("{draft} is a draft, not yet sent."))
+    );
+
+    let reopened = run_json(root.path(), &["show", &id])["comments"][0].clone();
+    assert_eq!(reopened["status"], "open");
+    assert_eq!(reopened.get("resolved_at"), None);
+
+    run_args(root.path(), &["resolve", &first]);
+    run_args(root.path(), &["close", &id]);
+    assert_eq!(
+        run_args(root.path(), &["reopen", &first]).reason,
+        Some(format!("{id} is closed."))
+    );
+}
+
 #[test]
 fn a_closed_review_takes_no_changes() {
     let root = workspace();
@@ -912,6 +952,95 @@ fn a_closed_review_takes_no_changes() {
     assert_eq!(refused.reason, Some(format!("{id} is closed.")));
     let listed = run_args(root.path(), &["ls"]).text;
     assert!(listed.starts_with(&format!("{id}  closed  ")), "{listed}");
+}
+
+#[test]
+fn a_closed_review_is_opened_again() {
+    let root = workspace();
+    let id = start(root.path());
+    run_args(root.path(), &["close", &id]);
+
+    assert_eq!(
+        run_args(root.path(), &["reopen", &id]).text,
+        format!("Reopened {id}.\n")
+    );
+    assert_eq!(
+        run_args(root.path(), &["reopen", &id]).text,
+        format!("{id} is open already.\n")
+    );
+
+    let commented = run_args(root.path(), &["comment", &id, "Not done yet."]);
+    assert_eq!(commented.reason, None);
+    let listed = run_args(root.path(), &["ls"]).text;
+    assert!(listed.starts_with(&format!("{id}  open  ")), "{listed}");
+}
+
+#[test]
+fn a_passage_is_approved_and_a_file_read_to_a_line() {
+    let root = workspace();
+    let id = start(root.path());
+
+    assert_eq!(
+        run_args(root.path(), &["approve", &id, "--at", "docs/a.md:3"]).text,
+        "Approved docs/a.md:3, as approval 1.\n"
+    );
+    assert_eq!(
+        run_args(root.path(), &["read-until", &id, "--at", "docs/a.md:3"]).text,
+        "Read docs/a.md through line 3.\n"
+    );
+
+    let shown = run_args(root.path(), &["show", &id]).text;
+    assert!(
+        shown.contains(
+            "\n## Read so far\n\n- docs/a.md through line 3\n\n## Approved\n\n- 1: docs/a.md:3\n"
+        ),
+        "{shown}"
+    );
+
+    assert_eq!(
+        run_args(root.path(), &["unapprove", &id, "1"]).text,
+        "Took back approval 1.\n"
+    );
+    assert_eq!(
+        run_args(root.path(), &["unapprove", &id, "1"]).reason,
+        Some(format!("{id} has no approval 1."))
+    );
+    let clear = ["read-until", &id, "--at", "docs/a.md", "--clear"];
+    assert_eq!(
+        run_args(root.path(), &clear).text,
+        "Forgot how far docs/a.md was read.\n"
+    );
+    assert_eq!(
+        run_args(root.path(), &clear).text,
+        format!("{id} doesn't say how far docs/a.md was read.\n")
+    );
+}
+
+#[test]
+fn approving_and_reading_need_lines_to_name() {
+    let root = workspace();
+    let id = start(root.path());
+
+    assert_eq!(
+        run_args(root.path(), &["approve", &id, "--at", "docs/a.md"]).reason,
+        Some("An approval is of a range of a file: lines, or a span within them.".to_owned())
+    );
+    assert_eq!(
+        run_args(root.path(), &["read-until", &id, "--at", "docs/a.md"]).reason,
+        Some(
+            "`docs/a.md` names no line; name the last line read, as in `docs/a.md:120`.".to_owned()
+        )
+    );
+
+    run_args(root.path(), &["close", &id]);
+    assert_eq!(
+        run_args(root.path(), &["approve", &id, "--at", "docs/a.md:3"]).reason,
+        Some(format!("{id} is closed."))
+    );
+    assert_eq!(
+        run_args(root.path(), &["read-until", &id, "--at", "docs/a.md:3"]).reason,
+        Some(format!("{id} is closed."))
+    );
 }
 
 /// Closing is the reviewer's call, but comments left behind are easy to miss.

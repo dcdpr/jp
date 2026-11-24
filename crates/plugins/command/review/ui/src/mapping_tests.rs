@@ -34,6 +34,42 @@ fn a_range_covers_part_of_each_span_it_touches() {
     ]);
 }
 
+fn part(span: usize) -> Cover {
+    Cover::Part {
+        span,
+        from: 0,
+        to: 1,
+    }
+}
+
+/// Two source lines of one paragraph are two spans, with the line ending
+/// between them shown as a space.
+#[test]
+fn covers_of_consecutive_spans_set_together_are_one_run() {
+    let covers = [part(3), part(4), Cover::Whole { span: 5 }];
+
+    assert_eq!(runs(&covers, |_, _| true), [[0, 3]]);
+}
+
+/// Spans 4 and 5 are in different paragraphs.
+#[test]
+fn a_run_ends_where_two_spans_are_not_set_together() {
+    let covers = [part(3), part(4), part(5), part(6)];
+
+    assert_eq!(runs(&covers, |one, other| (one, other) != (4, 5)), [
+        [0, 2],
+        [2, 4]
+    ]);
+}
+
+#[test]
+fn a_run_ends_where_a_span_between_is_not_covered() {
+    let covers = [part(3), part(5)];
+
+    assert_eq!(runs(&covers, |_, _| true), [[0, 1], [1, 2]]);
+    assert_eq!(runs(&[], |_, _| true), Vec::<[usize; 2]>::new());
+}
+
 /// The `**` around `bold` render as nothing, so a range over them alone covers
 /// no text.
 #[test]

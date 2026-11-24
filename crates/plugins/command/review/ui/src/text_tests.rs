@@ -1,7 +1,18 @@
+use std::collections::BTreeMap;
+
 use jp_review_api::Outcome;
 use pretty_assertions::assert_eq;
 
 use super::*;
+
+fn recorded(number: u32, label: Option<&str>) -> Version {
+    Version {
+        number,
+        label: label.map(ToOwned::to_owned),
+        created_at: "2026-11-17T10:00:00Z".parse().unwrap(),
+        files: BTreeMap::new(),
+    }
+}
 
 #[test]
 fn each_diff_line_says_what_it_is() {
@@ -73,6 +84,59 @@ fn a_pass_says_where_it_runs_and_how_it_ended() {
     assert_eq!(running(&running_here), "Pass 2 running");
     assert_eq!(running(&elsewhere), "Pass 2 running in another process");
     assert_eq!(pass(&ended), "Pass 1 stopped");
+}
+
+#[test]
+fn a_version_is_listed_with_what_sets_it_apart() {
+    assert_eq!(version(&recorded(2, None), false), "Version 2");
+    assert_eq!(
+        version(&recorded(1, Some("base")), false),
+        "Version 1 (base)"
+    );
+    assert_eq!(version(&recorded(3, None), true), "Version 3 (latest)");
+    assert_eq!(
+        version(&recorded(1, Some("base")), true),
+        "Version 1 (base, latest)"
+    );
+}
+
+#[test]
+fn the_header_names_what_the_page_shows_in_full_and_in_short() {
+    assert_eq!(
+        showing(Showing::Latest, 3),
+        ("Version 3".to_owned(), "v3".to_owned())
+    );
+    assert_eq!(
+        showing(Showing::Version(2), 3),
+        ("Version 2".to_owned(), "v2".to_owned())
+    );
+    assert_eq!(
+        showing(Showing::Pass(2), 3),
+        ("Pass 2 changes".to_owned(), "Pass 2".to_owned())
+    );
+    assert_eq!(
+        showing(Showing::Compare, 3),
+        ("Compare versions".to_owned(), "Compare".to_owned())
+    );
+}
+
+#[test]
+fn the_send_button_says_what_it_sends() {
+    assert_eq!(send(0), ("Send".to_owned(), "Send".to_owned()));
+    assert_eq!(send(1), ("Send 1 comment".to_owned(), "Send 1".to_owned()));
+    assert_eq!(send(2), ("Send 2 comments".to_owned(), "Send 2".to_owned()));
+}
+
+#[test]
+fn a_file_is_listed_with_its_unresolved_comments() {
+    assert_eq!(file("docs/a.md", 0), "docs/a.md");
+    assert_eq!(file("docs/a.md", 2), "docs/a.md (2 unresolved)");
+}
+
+#[test]
+fn the_resolved_switch_says_what_it_does_next() {
+    assert_eq!(resolved(2, false), "Show 2 resolved");
+    assert_eq!(resolved(2, true), "Hide resolved");
 }
 
 #[test]

@@ -13,6 +13,7 @@ llvm_cov_version     := "0.9.2"
 nextest_version      := "0.9.143"
 rustqual_version     := "1.8.2"
 shear_version        := "1.13.4"
+tailwindcss_version  := "4.3.5"
 vet_version          := "0.10.2"
 
 quiet_flag := if env_var_or_default("CI", "") == "true" { "" } else { "--quiet" }
@@ -2309,17 +2310,20 @@ review-ui-watch *ARGS: (_install "cargo-watch@" + cargo_watch_version)
 # cargo's target directory.
 #
 # Compiles the plugin's `ui` crate to WebAssembly under the size-optimized
-# `wasm-release` profile, runs `wasm-bindgen --target web` over it, and copies
-# the UI's stylesheet beside. Installs the `wasm-bindgen` CLI at the version
-# `Cargo.lock` pins for the `wasm-bindgen` crate, since the CLI refuses a module
-# compiled against another. See `docs/rfd/139-browser-uis-in-rust-with-leptos.md`.
+# `wasm-release` profile, runs `wasm-bindgen --target web` over it, and compiles
+# the UI's stylesheet beside it with Tailwind CSS, which writes the utility
+# classes the crate's sources name. Installs the `wasm-bindgen` CLI at the
+# version `Cargo.lock` pins for the `wasm-bindgen` crate, since the CLI refuses
+# a module compiled against another, and the Tailwind CSS CLI at
+# `tailwindcss_version`. See `docs/rfd/139-browser-uis-in-rust-with-leptos.md`.
 #
 # Another PROFILE, such as `wasm-dev`, builds into `<target>/ui/<plugin>.<profile>/`
 # instead, leaving the bundle `install-plugin` embeds alone.
 #
 # The file `build`, written last, names the build by its contents: a page served
 # from the directory (`jp review serve --ui-dir`) reloads once it names another.
-# A change that doesn't compile leaves the last build in place.
+# A change that doesn't compile, in the crate or the stylesheet, leaves the last
+# build in place.
 [group('plugins')]
 build-ui PLUGIN PROFILE="wasm-release": (_rustup_target "wasm32-unknown-unknown")
     #!/usr/bin/env sh
@@ -2336,6 +2340,7 @@ build-ui PLUGIN PROFILE="wasm-release": (_rustup_target "wasm32-unknown-unknown"
     target=$(cargo metadata --no-deps --format-version=1 | jq -r .target_directory)
 
     just _install-wasm-bindgen
+    just _install-tailwindcss
     cargo build {{quiet_flag}} --locked --package "$package" --lib \
         --target wasm32-unknown-unknown --profile "{{PROFILE}}"
 
@@ -2343,11 +2348,15 @@ build-ui PLUGIN PROFILE="wasm-release": (_rustup_target "wasm32-unknown-unknown"
         wasm-release) out="${target}/ui/{{PLUGIN}}" ;;
         *) out="${target}/ui/{{PLUGIN}}.{{PROFILE}}" ;;
     esac
+    # Compiled beside the bundle and moved in, so a stylesheet Tailwind refuses
+    # stops here, before the last build is cleared.
+    "${target}/tools/tailwindcss-{{tailwindcss_version}}" --minify \
+        --input "${dir}/style.css" --output "${out}.css"
     rm -rf "$out"
     mkdir -p "$out"
     wasm-bindgen --target web --no-typescript --out-dir "$out" \
         "${target}/wasm32-unknown-unknown/{{PROFILE}}/${library}.wasm"
-    cp "${dir}/style.css" "${out}/style.css"
+    mv "${out}.css" "${out}/style.css"
     cat "$out"/*.js "$out"/*.wasm "$out/style.css" | cksum | cut -d ' ' -f 1 > "$out/build.tmp"
     mv "$out/build.tmp" "$out/build"
     echo "Built the browser UI of jp-{{PLUGIN}} into ${out}."
@@ -2363,6 +2372,55 @@ _install-wasm-bindgen:
     if [ "$installed" != "$version" ]; then
         cargo install {{quiet_flag}} --locked wasm-bindgen-cli --version "$version"
     fi
+
+# Download the Tailwind CSS standalone CLI at `tailwindcss_version` into
+# `<target>/tools/`, unless it is there already.
+#
+# The CLI is one executable, which needs no Node.js. The download is checked
+# against the SHA-256 its release publishes for the file: bump the sums below
+# together with `tailwindcss_version`, from the release's `sha256sums.txt`.
+_install-tailwindcss:
+    #!/usr/bin/env sh
+    set -eu
+    target=$(cargo metadata --no-deps --format-version=1 | jq -r .target_directory)
+    bin="${target}/tools/tailwindcss-{{tailwindcss_version}}"
+    if [ -x "$bin" ]; then
+        exit 0
+    fi
+
+    case "$(uname -s) $(uname -m)" in
+        "Darwin arm64")
+            asset="tailwindcss-macos-arm64"
+            sum="f3f4f5d1727e2b693b8f1c9a1492b5dd87008c86ea286bee1589cb458e6235fc"
+            ;;
+        "Darwin x86_64")
+            asset="tailwindcss-macos-x64"
+            sum="a63702686a3ed048b3135d84a73be49ea9d47f880c9b20e54b3ef60934ad8cdf"
+            ;;
+        "Linux x86_64")
+            asset="tailwindcss-linux-x64"
+            sum="e47695cee3f0d90623a91f3939b08bdee610eb5ad99340adff9d4145b284d6cc"
+            ;;
+        "Linux aarch64")
+            asset="tailwindcss-linux-arm64"
+            sum="ffcd0d21dbd7c605dc12743ff0c0b47debc963c86b399674084c1c8f2c96ecad"
+            ;;
+        *)
+            echo "No Tailwind CSS standalone CLI is pinned for $(uname -s) $(uname -m)." >&2
+            exit 1
+            ;;
+    esac
+
+    mkdir -p "${target}/tools"
+    curl --proto '=https' --tlsv1.2 -fsSL -o "${bin}.download" \
+        "https://github.com/tailwindlabs/tailwindcss/releases/download/v{{tailwindcss_version}}/${asset}"
+    if ! echo "${sum}  ${bin}.download" | shasum -a 256 --check --status -; then
+        rm -f "${bin}.download"
+        echo "${asset} v{{tailwindcss_version}} is not the file its pinned SHA-256 names." >&2
+        exit 1
+    fi
+    chmod +x "${bin}.download"
+    mv "${bin}.download" "$bin"
 
 @_rustup_target +TARGETS:
     rustup target add {{TARGETS}}

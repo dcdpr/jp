@@ -77,6 +77,11 @@ impl Range {
         }
     }
 
+    /// The last line whose text the range covers.
+    pub fn last_line(self) -> usize {
+        self.covered().1
+    }
+
     fn runs_backwards(self) -> bool {
         match self {
             Self::Lines { first, last } => first > last,
@@ -330,6 +335,28 @@ impl LineMap {
         let to = self.ops.iter().find_map(|op| kept(op, first, last))?;
 
         Some(range.moved(first, to))
+    }
+
+    /// How many lines of the new version the first `count` lines of the old one
+    /// became: the line of the new version that the old version's line `count`
+    /// ends on, or 0 when nothing of those lines is left.
+    ///
+    /// Lines replaced keep their place, as far as the lines replacing them
+    /// reach, and lines added right after line `count` are not counted.
+    pub fn through(&self, count: usize) -> usize {
+        let mut reached = 0;
+        for op in &self.ops {
+            let (old, new) = (op.old_range(), op.new_range());
+            if count <= old.start {
+                return new.start;
+            }
+            if count < old.end {
+                return new.start + (count - old.start).min(new.len());
+            }
+            reached = new.end;
+        }
+
+        reached
     }
 }
 

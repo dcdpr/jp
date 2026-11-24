@@ -134,6 +134,14 @@ pub struct Detail {
     pub passes: Vec<Pass>,
 
     pub comments: Vec<Comment>,
+
+    /// The passages the reviewer approved.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub approvals: Vec<Approval>,
+
+    /// How far the reviewer has read each file they said so of.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub read_until: Vec<ReadUntil>,
 }
 
 /// A snapshot of the review's files.
@@ -304,6 +312,64 @@ pub struct Placed {
     pub bytes: Option<[usize; 2]>,
 }
 
+/// A passage the reviewer approved, with its anchor placed in the version
+/// shown.
+///
+/// The approval stands for as long as the lines of the passage are unchanged:
+/// an anchor outdated in the latest version is of text that changed since it
+/// was approved.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Approval {
+    pub number: u32,
+    pub author: String,
+    pub created_at: DateTime<Utc>,
+    pub anchor: AnchorView,
+
+    /// The text approved, in the version it was approved in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub excerpt: Option<String>,
+}
+
+/// How far down a file the reviewer has read: through `line`, and no further.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReadUntil {
+    pub path: String,
+    pub author: String,
+    pub created_at: DateTime<Utc>,
+
+    /// The version `line` is counted in.
+    pub version: u32,
+
+    /// The last line read.
+    pub line: usize,
+
+    /// The last line read as the version shown holds the file; absent when the
+    /// file is absent from that version, or none of the lines read are left in
+    /// it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub projected: Option<Placed>,
+}
+
+/// What taking back an approval answers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Unapproved {
+    pub review: String,
+
+    /// The number of the approval taken back.
+    pub approval: u32,
+}
+
+/// What forgetting how far a file was read answers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Unread {
+    pub review: String,
+    pub path: String,
+
+    /// Whether the review said how far the file was read; `false` when there
+    /// was nothing to forget.
+    pub cleared: bool,
+}
+
 /// What the file endpoint answers: a file as one version holds it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileReply {
@@ -318,6 +384,24 @@ pub struct FileReply {
     /// from, in `data-s` and `data-e`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub html: Option<String>,
+
+    /// The headings of a file rendered as Markdown, in document order; none for
+    /// any other file, or when `html` wasn't asked for.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub headings: Vec<Heading>,
+}
+
+/// A heading of a file rendered as Markdown.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Heading {
+    /// 1 for a `#` heading, up to 6 for `######`.
+    pub level: u8,
+
+    /// The heading's text, without its markup.
+    pub text: String,
+
+    /// The `id` the heading carries in `html`, which a `#fragment` link names.
+    pub anchor: String,
 }
 
 /// What changed in a review's files from one version to another.

@@ -13,7 +13,8 @@ in Chrome when `chromedriver` is on the `PATH`, unless `CHROMEDRIVER`, `GECKODRI
 `SAFARIDRIVER` names another.
 
 A browser crate sets `[package.metadata.jp] wasm = true` in its `Cargo.toml`. `just build-ui \
-<plugin>` builds a plugin's UI bundle, and `just install-plugin <plugin>` builds and embeds it.
+<plugin>` builds a plugin's UI bundle, compiling its `style.css` with the Tailwind CSS standalone \
+CLI, and `just install-plugin <plugin>` builds and embeds it.
 """
 
 [conversation.tools]
@@ -49,7 +50,16 @@ items = [
     Keep decisions in pure functions over owned types (routes, layout, mapping byte ranges, when \
     to poll) and test them on the host in `_tests.rs` files. Keep components and DOM bindings \
     thin. Test what needs a DOM with `wasm-bindgen-test` in the crate's `tests/`, each file \
-    gated on `#![cfg(target_arch = "wasm32")]`.\
+    gated on `#![cfg(target_arch = "wasm32")]`. The tests of one file share one page: look an \
+    element up in the container the test made, never by an `id` in the document, which an \
+    earlier test's elements may hold too. A browser reports positions in fractions of a pixel: \
+    compare them within a pixel, not for equality.\
+    """,
+    """\
+    A page's signals and node refs travel in one `Copy` struct, passed by value to the functions \
+    that build its views. Clippy flags a by-value argument over 256 bytes \
+    (`large_types_passed_by_value`) in every function that takes it, so a handle only one view \
+    reads is created in that view and stays out of the struct.\
     """,
     """\
     Bind a browser API `web-sys` gates behind `web_sys_unstable_apis` (the CSS Custom Highlight \
@@ -59,6 +69,20 @@ items = [
     """,
     """\
     The UI is mobile first: Safari on an iPhone is the primary client. Touch targets are at \
-    least 44 by 44 CSS pixels, nothing depends on hover, and a wider screen only adds room.\
+    least 44 by 44 CSS pixels under a finger (`pointer-coarse:`) and may be smaller under a \
+    mouse, nothing depends on hover, and a wider screen only adds room.\
+    """,
+    """\
+    Style views with Tailwind CSS utility classes on the elements. Tailwind reads the `ui` \
+    crate's sources as plain text for class names, so write every class name out in full: \
+    choose between complete strings in a `match`, never `format!("text-{tone}")`. Joining \
+    complete classes (`format!("{BUTTON} flex-1")`) is fine. Put classes several views share \
+    in a constant or a small builder function, as the review UI's `widget` module does.\
+    """,
+    """\
+    Keep `style.css` for what a class on an element can't say: the theme's colors and fonts, \
+    the styles of HTML the server rendered (Markdown from `md-html`, which carries no classes), \
+    and rules such as `::highlight()`. Name colors by role (`bg-surface`, `text-muted`) through \
+    the theme, so one media query switches light and dark.\
     """,
 ]

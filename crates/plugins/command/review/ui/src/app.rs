@@ -4,10 +4,7 @@
 use leptos_dom::helpers::window;
 use reactive_graph::{computed::Memo, prelude::*, signal::RwSignal};
 use tachys::{
-    html::{
-        element::{a, button, div, h1, main, p},
-        event as ev,
-    },
+    html::element::{a, div, h1, main, p},
     prelude::*,
 };
 
@@ -15,6 +12,7 @@ use crate::{
     dom::{self, Nav},
     list, review,
     route::Route,
+    widget::{self, Tone},
 };
 
 /// Which page shows; the review page keeps its state while only what it shows
@@ -39,7 +37,7 @@ pub(crate) fn app() -> impl RenderHtml {
         Route::Unknown(path) => Page::Unknown(path),
     });
 
-    div().class("jp-app").child((
+    div().child((
         move || moved(served.clone(), seen.get()),
         move || match page.get() {
             Page::List => list::page(nav, seen).into_any(),
@@ -59,24 +57,31 @@ fn moved(served: Option<String>, seen: Option<String>) -> Option<impl RenderHtml
     }
 
     Some(
-        div().class("jp-banner jp-banner-warn").child((
-            p().child(format!(
-                "This page was opened for {served}, and the server now serves {seen}."
+        div()
+            .class(
+                "flex flex-wrap items-center justify-between gap-x-4 gap-y-2 bg-warn px-4 py-2 \
+                 text-sm",
+            )
+            .attr("role", "alert")
+            .child((
+                p().child(format!(
+                    "This page was opened for {served}, and the server now serves {seen}."
+                )),
+                widget::action(Tone::Plain, "Reload", || {
+                    drop(window().location().reload());
+                }),
             )),
-            button()
-                .attr("type", "button")
-                .class("jp-button")
-                .on(ev::click, |_| drop(window().location().reload()))
-                .child("Reload"),
-        )),
     )
 }
 
 /// A page for a location the UI has none for.
 fn unknown(path: &str) -> impl RenderHtml {
-    main().class("jp-page").child((
-        h1().child("No page here"),
-        p().child(format!("The review UI has no page at {path}.")),
-        a().attr("href", "/").class("jp-link").child("All reviews"),
+    main().class(widget::COLUMN).child((
+        h1().class("text-xl font-semibold").child("No page here"),
+        p().class("my-2")
+            .child(format!("The review UI has no page at {path}.")),
+        a().attr("href", "/")
+            .class(widget::LINK)
+            .child("All reviews"),
     ))
 }

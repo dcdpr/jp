@@ -7,6 +7,8 @@
 //! shown, the way `text::LineMap` carries a range from one version to another,
 //! or mark it outdated there, and render each comment's and reply's body as
 //! HTML.
+//! [`approval`] places an approved passage the same way, and [`read_until`] the
+//! last line read of a file.
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -18,7 +20,8 @@ use crate::{
     id::{CommentRef, ReviewId},
     model::{Comment, Reply, Review, Role, Status, Version},
     pass::{Ended, Pass},
-    text::{self, LineMap, Text, hunks},
+    progress::{Approval, ReadUntil},
+    text::{self, LineMap, Range, Text, hunks},
 };
 
 /// File contents, by the name of the blob holding them.
@@ -73,6 +76,18 @@ pub(crate) fn detail(id: ReviewId, review: &Review, shown: u32, texts: &Texts) -
             .iter()
             .map(|found| comment(id, review, found, shown, texts))
             .collect(),
+        approvals: review
+            .progress
+            .approvals
+            .iter()
+            .map(|found| approval(review, found, shown, texts))
+            .collect(),
+        read_until: review
+            .progress
+            .read_until
+            .iter()
+            .map(|(path, found)| read_until(review, path, found, shown, texts))
+            .collect(),
     }
 }
 
@@ -119,16 +134,6 @@ pub(crate) fn comment(
     texts: &Texts,
 ) -> wire::Comment {
     let content = &found.content;
-    let projected = place(review, &content.anchor, shown, texts);
-    let resolved = projected
-        .is_none()
-        .then(|| last_resolved(review, &content.anchor, shown, texts))
-        .flatten();
-    let (path, range) = match &content.anchor.target {
-        Target::Review => (None, None),
-        Target::File(path) => (Some(path.clone()), None),
-        Target::Range(path, range) => (Some(path.clone()), Some(range.to_string())),
-    };
 
     wire::Comment {
         id: CommentRef {
@@ -140,14 +145,7 @@ pub(crate) fn comment(
         role: found.role,
         author: found.author.clone(),
         created_at: found.created_at,
-        anchor: wire::AnchorView {
-            version: content.anchor.version,
-            path,
-            range,
-            outdated: projected.is_none(),
-            projected,
-            resolved,
-        },
+        anchor: anchor_view(review, &content.anchor, shown, texts),
         excerpt: excerpt(review, &content.anchor, texts).map(ToOwned::to_owned),
         body: content.body.clone(),
         body_html: html(&content.body),
@@ -156,6 +154,93 @@ pub(crate) fn comment(
         draft_reply: found.draft_reply.as_ref().map(reply),
         resolved_at: found.resolved_at,
     }
+}
+
+/// `anchor` as written, and where it falls in version `shown`.
+fn anchor_view(review: &Review, anchor: &Anchor, shown: u32, texts: &Texts) -> wire::AnchorView {
+    let projected = place(review, anchor, shown, texts);
+    let resolved = projected
+        .is_none()
+        .then(|| last_resolved(review, anchor, shown, texts))
+        .flatten();
+    let (path, range) = match &anchor.target {
+        Target::Review => (None, None),
+        Target::File(path) => (Some(path.clone()), None),
+        Target::Range(path, range) => (Some(path.clone()), Some(range.to_string())),
+    };
+
+    wire::AnchorView {
+        version: anchor.version,
+        path,
+        range,
+        outdated: projected.is_none(),
+        projected,
+        resolved,
+    }
+}
+
+/// `found`, an approval in `review`, with its passage placed in version
+/// `shown`.
+///
+/// `texts` holds every blob [`blobs_needed`] names.
+pub(crate) fn approval(
+    review: &Review,
+    found: &Approval,
+    shown: u32,
+    texts: &Texts,
+) -> wire::Approval {
+    wire::Approval {
+        number: found.number,
+        author: found.author.clone(),
+        created_at: found.created_at,
+        anchor: anchor_view(review, &found.anchor, shown, texts),
+        excerpt: excerpt(review, &found.anchor, texts).map(ToOwned::to_owned),
+    }
+}
+
+/// How far `path` was read, as `found` says, with the last line read placed in
+/// version `shown`.
+///
+/// `texts` holds every blob [`blobs_needed`] names.
+pub(crate) fn read_until(
+    review: &Review,
+    path: &str,
+    found: &ReadUntil,
+    shown: u32,
+    texts: &Texts,
+) -> wire::ReadUntil {
+    wire::ReadUntil {
+        path: path.to_owned(),
+        author: found.author.clone(),
+        created_at: found.created_at,
+        version: found.version,
+        line: found.line,
+        projected: read_line(review, path, found, shown, texts),
+    }
+}
+
+/// The last line of `path` read, as version `shown` holds the file; `None` when
+/// the file is absent from a version, or none of the lines read are left.
+fn read_line(
+    review: &Review,
+    path: &str,
+    found: &ReadUntil,
+    shown: u32,
+    texts: &Texts,
+) -> Option<wire::Placed> {
+    let old = Text::new(text_at(review, found.version, path, texts)?);
+    let new = Text::new(text_at(review, shown, path, texts)?);
+    let line = LineMap::new(&old, &new).through(found.line);
+    let bytes = new.bytes(Range::Lines {
+        first: line,
+        last: line,
+    })?;
+
+    Some(wire::Placed {
+        version: shown,
+        range: Some(line.to_string()),
+        bytes: Some([bytes.start, bytes.end]),
+    })
 }
 
 fn reply(reply: &Reply) -> wire::Reply {
@@ -175,20 +260,42 @@ fn html(markdown: &str) -> String {
     md_html::render(markdown).html
 }
 
-/// The blobs [`detail`] reads to place the comments of `review` in version
-/// `shown`.
+/// The blobs [`detail`] reads to place the comments of `review`, and what its
+/// reviewer approved and read, in version `shown`.
 pub(crate) fn blobs_needed(review: &Review, shown: u32) -> BTreeSet<&str> {
     review
         .comments
         .iter()
         .flat_map(|found| blobs_of(review, found, shown))
+        .chain(progress_blobs(review, shown))
         .collect()
 }
 
-/// The blobs [`comment`] reads to place `found` in version `shown`: the file
-/// its range is in, as each version from the anchor's to `shown` holds it.
+/// The blobs [`comment`] reads to place `found` in version `shown`.
 pub(crate) fn blobs_of<'a>(review: &'a Review, found: &Comment, shown: u32) -> Vec<&'a str> {
-    let anchor = &found.content.anchor;
+    anchor_blobs(review, &found.content.anchor, shown)
+}
+
+/// The blobs [`approval`] and [`read_until`] read to place what the reviewer of
+/// `review` approved and read in version `shown`.
+pub(crate) fn progress_blobs(review: &Review, shown: u32) -> Vec<&str> {
+    let progress = &review.progress;
+    let approved = progress
+        .approvals
+        .iter()
+        .flat_map(|found| anchor_blobs(review, &found.anchor, shown));
+    let read = progress.read_until.iter().flat_map(|(path, found)| {
+        [found.version, shown]
+            .into_iter()
+            .filter_map(|version| review.blob(version, path))
+    });
+
+    approved.chain(read).collect()
+}
+
+/// The blobs read to place `anchor` in version `shown`: the file its range is
+/// in, as each version from the anchor's to `shown` holds it.
+fn anchor_blobs<'a>(review: &'a Review, anchor: &Anchor, shown: u32) -> Vec<&'a str> {
     let Target::Range(path, _) = &anchor.target else {
         return vec![];
     };

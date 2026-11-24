@@ -3,15 +3,14 @@ tag = "safari_skill"
 title = "Skill: Safari Browser"
 content = """\
 You have been given the Safari browser skill. You can open pages in a Safari window on the user's \
-Mac and see them as they render: the DOM, computed styles, console output, network requests, and \
-screenshots. The window is an automation window, apart from the user's own browsing data. The \
+Mac and read them as they render: the DOM, computed styles, console output, and network \
+requests. The window is an automation window, apart from the user's own browsing data. The \
 following tools help you with this:
 
 - safari_list_tabs, safari_create_tab, safari_switch_tab, safari_close_tab: Manage the window's \
 tabs.
 - safari_navigate_to_url, safari_wait_for_navigation, safari_page_info: Load a page and read \
 where it ended up.
-- safari_screenshot: See the page as it renders.
 - safari_get_page_content: Read the page's text, as Markdown, HTML, or JSON.
 - safari_evaluate_javascript: Run JavaScript in the page and read the result: query the DOM, read \
 computed styles and bounding rects, or set a text selection with \
@@ -22,7 +21,7 @@ would.
 - safari_list_network_requests, safari_get_network_request: Read the requests the page made, and \
 what the server answered.
 - safari_set_viewport_size, safari_set_emulated_media: Lay the page out at another size or media \
-type.
+type. Resizing needs the user's window to allow it, as said below.
 - safari_browser_dialogs: Answer `alert`, `confirm`, and `prompt` dialogs.
 
 The window loads the user's Safari extensions, and an extension can open a tab of its own on top \
@@ -42,6 +41,93 @@ assistant turn that edits workspace files. Do that only against a scratch review
 task, and never send a pass unless the task is about passes.
 """
 
+[[assistant.system_prompt_sections]]
+tag = "safari_skill"
+title = "Skill: Safari Browser (Measuring a Page)"
+content = """\
+You can't see a page with these tools, only measure it: none of them answers with an image. So \
+looking at a page means reading it with `safari_evaluate_javascript`: `getBoundingClientRect()` \
+for where things are, `getComputedStyle()` for how they are drawn, and `scrollWidth` against \
+`innerWidth` for what overflows. Report what you measured as measurements, and leave what only \
+eyes can judge, such as whether the spacing and the colors look right, to the user.
+
+`safari_evaluate_javascript` runs its expression as the body of an async function:
+
+- `await` works, and a call that runs longer than 30 seconds fails. Wait for something slow, such \
+  as a rebuild, in several short calls.
+- Return one `JSON.stringify(...)` of the numbers you came for, with rectangles rounded and text \
+  truncated.
+- Put `document.hidden` and `innerWidth` in every result. A hidden page, and a viewport other \
+  than the one you asked for, both give numbers that look plausible and mean nothing.
+- Read a rectangle in the same call that uses it. Coordinates from an earlier call are stale once \
+  anything scrolled or opened.
+
+The user can close the automation window between two turns, and its tabs go with it. Check with \
+`safari_list_tabs` before using a handle from an earlier turn, and open a new tab when it is gone.
+
+`safari_set_viewport_size` resizes Safari's window, which a tiling window manager doesn't let it \
+do: the tool answers "Viewport set to 390x844" and the page stays as wide as it was. Measuring a \
+layout at another width rarely needs the window resized. Lay the page out at that width in a \
+frame of the same origin, and measure inside the frame:
+
+```js
+const frame = document.createElement('iframe');
+frame.src = location.pathname + location.search;
+frame.style.cssText =
+    'position:fixed;left:0;top:0;width:390px;height:844px;border:0;z-index:9999;background:white';
+document.body.appendChild(frame);
+await new Promise(done => frame.addEventListener('load', done, { once: true }));
+const w = frame.contentWindow, d = frame.contentDocument;
+// A page rendered on the client draws after `load`, and its data arrives later still: wait for
+// what you came to measure, here a block of a file in JP's review UI.
+for (let tries = 0; tries < 80 && !d.querySelector('.jp-text'); tries++) {
+    await new Promise(done => setTimeout(done, 100));
+}
+// Measure with d.querySelector(...), w.getComputedStyle(...), w.matchMedia(...).
+frame.remove();
+```
+
+- The frame's media queries follow its width, so the page lays out as it does on a phone. \
+  `pointer: coarse` still doesn't match, so styles for a touch screen don't apply.
+- Everything belongs to the frame's window: build events with `new w.MouseEvent(...)`, and read \
+  `w.CSS.highlights`, not the outer page's.
+- It is the same page against the same server. What you save in the frame is saved.
+- Remove the frame in the call that made it when you can, and before you finish otherwise.
+
+When the window itself has to be another size, ask the user first: a window their window manager \
+tiles has to be made floating before it can be resized, which only they can do. Read `innerWidth` \
+after setting a size, since the tool reports success either way.
+
+`safari_set_emulated_media` takes a media type, such as `print`. It can't switch \
+`prefers-color-scheme` or `pointer`, and while a value is set `screen` stops matching, so clear \
+it with an empty string. The page is drawn for the color scheme and the pointer of the user's \
+Mac, which `matchMedia` tells you. Name the other ones among what you didn't check.
+
+Events a script dispatches reach the page's own listeners, so one call can act and then measure:
+
+- A click at a point: `element.dispatchEvent(new MouseEvent('click', { bubbles: true, \
+  cancelable: true, clientX, clientY, view: window }))`.
+- A drag that selects text: a `pointerdown`, `setBaseAndExtent(...)`, then a `pointerup`, each a \
+  `PointerEvent` with `pointerType: 'mouse'` and the coordinates the drag began and ended at.
+- Wait a few hundred milliseconds before measuring what the event caused. A UI may read a \
+  selection only once it settles, and place what it shows in the next animation frame.
+
+A page that isn't JP's may not react to events a script made. Read its source before concluding \
+that it lacks the behaviour.
+
+Text drawn with the CSS Custom Highlight API is no element. `CSS.highlights.get(name)` holds its \
+ranges: `range.toString()` is the text covered, and `range.getClientRects()` the boxes drawn.
+
+The console records failed requests too, your own included: a `fetch` you made to see a 404 or a \
+409 is logged as an error. Read the console before probing, or discount what you caused.
+
+Try a fix on the live page before editing the source: set the style or the class from a script, \
+measure again, and put it back. Several candidates fit in one call, where each would otherwise \
+take a rebuild.
+"""
+
+# `safari_screenshot` stays off: it saves a PNG and answers with its path, and no tool reads an
+# image back.
 [conversation.tools]
 safari_browser_console_messages = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
 safari_browser_dialogs = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
@@ -55,7 +141,6 @@ safari_list_tabs = { enable = true, run = "allow", result = "allow", style.inlin
 safari_navigate_to_url = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
 safari_page_info = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
 safari_page_interactions = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
-safari_screenshot = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
 safari_set_emulated_media = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
 safari_set_viewport_size = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
 safari_switch_tab = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }

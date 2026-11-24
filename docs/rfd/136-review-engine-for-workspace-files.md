@@ -194,7 +194,7 @@ A comment's status is derived from its history and pass state:
 | `open`     | Submitted and under discussion; awaiting a response from the other peer. |
 | `resolved` | Closed by the reviewer.                                                  |
 
-Only the reviewer can resolve a comment.
+Only the reviewer can resolve a comment, or reopen a resolved one.
 A reply written by the reviewer is held as a draft until the next pass is
 submitted.
 A comment carries at most one draft reply, which the reviewer can change or
@@ -220,6 +220,22 @@ when the turn is stopped or aborted, `failed` when the host returns a query
 error, or `interrupted` if the process running the pass exited before recording
 an outcome.
 
+**Progress.** Beside its comments, a review records what the reviewer made of
+the text they did not comment on:
+
+- An **approval** marks a range as read and fine as it stands.
+  It is advisory: the assistant is told to leave the passage as it is unless
+  acting on a comment requires changing it, and to say so when it does.
+  An approval is anchored like a comment and holds only while its anchor
+  carries: once a line of the passage changes, the passage is no longer
+  approved.
+- A **read-until line**, one per file, marks the last line the reviewer has
+  read.
+  The lines after it are unread, so the absence of comments there means nothing
+  yet.
+  It says nothing about the lines before it either: only an approval approves.
+  The line moves with the lines added or removed above it.
+
 ### Store
 
 Each review lives in its own directory named after its ID (`R-` followed by a
@@ -236,7 +252,7 @@ Each review lives in its own directory named after its ID (`R-` followed by a
 ```
 
 `review.json` stores all review metadata: title, tracked file paths, version
-manifests, comments, replies, and passes.
+manifests, comments, replies, passes, and the reviewer's progress.
 Every mutation acquires an exclusive lock on `.lock`, reads `review.json`,
 applies the change, writes the updated state to a temporary file, and atomically
 renames it over `review.json`.
@@ -377,8 +393,16 @@ Line numbers match the files at the start of the turn; once the assistant begins
 editing a file, the quoted excerpt lets the assistant locate the target passage
 even after line numbers shift.
 
-The pass message contains only review data; behavioral instructions live in
-configuration.
+Every pass message also states the reviewer's progress, as the version the pass
+is sent against holds it: how far each file was read, under `## Read so far`,
+and the passages approved, under `## Approved`.
+An approved passage that changed since is left out.
+Each of the two sections opens with a sentence saying what it asks of the
+assistant: `review.toml` belongs to the workspace once it is written, so a
+workspace's copy may say nothing of them.
+
+Apart from those two sentences, the pass message contains only review data;
+behavioral instructions live in configuration.
 
 **Instructions.** All instructions governing how the assistant conducts a review
 live in workspace-owned files rather than inside the plugin binary:
@@ -387,7 +411,8 @@ live in workspace-owned files rather than inside the plugin binary:
   parameter, and verdict variant.
 - A configuration file (`review.toml`) provides the system instructions: reply
   to every comment in the pass, evaluate each comment on its merits rather than
-  treating it as an unconditional command, keep replies concise, and open new
+  treating it as an unconditional command, keep replies concise, leave approved
+  passages as they are, treat unread lines as not yet reviewed, and open new
   comments for issues the reviewer missed.
   It also enables both review tools.
 
@@ -485,6 +510,10 @@ workspace tree), the tools write to it directly.
 | `serve [--bind ADDR] [--port PORT] [--allowed-host NAME]`            | Run the local HTTP server.                                        |
 | `init DIR`                                                           | Generate the default `review.toml` configuration file.            |
 | `tools init DIR`                                                     | Generate the `review_reply` and `review_comment` tool configs.    |
+
+Beside those, `reopen ID|COMMENT` undoes `close` and `resolve`, and `approve`
+and `read-until` record the reviewer's progress (see [Data
+Model](#data-model)), each with an endpoint of its own in the HTTP API.
 
 All commands support structured JSON output via `jp --format json`.
 

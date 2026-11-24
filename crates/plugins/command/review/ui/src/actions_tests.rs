@@ -52,7 +52,7 @@ fn a_card_offers_what_its_comment_allows() {
         Action::WithdrawReply,
         Action::Resolve
     ]);
-    assert_eq!(actions(&resolved), []);
+    assert_eq!(actions(&resolved), [Action::Reopen]);
 }
 
 #[test]

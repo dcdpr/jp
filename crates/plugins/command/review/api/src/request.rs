@@ -23,6 +23,10 @@ pub struct NewReview {
 /// range, on the whole file.
 /// A range is given as `range` or as `bytes`, never both, and needs `path` and
 /// `version`: the file it is in, and the version the caller read it in.
+///
+/// It is also the body of `POST /api/reviews/{id}/approvals`, which approves
+/// the range, and of `PUT /api/reviews/{id}/read`, which says the file was read
+/// through the last line of the range; both need a range.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AnchorRequest {
@@ -153,6 +157,13 @@ pub enum Format {
 
     /// Its source, and the file rendered as HTML.
     Html,
+}
+
+/// The query of `DELETE /api/reviews/{id}/read`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReadQuery {
+    /// The file, as the review tracks it.
+    pub path: String,
 }
 
 /// The query of `GET /api/reviews/{id}/diff`.

@@ -22,15 +22,28 @@ use std::cell::RefCell;
 use js_sys::Reflect;
 use leptos_dom::helpers::request_animation_frame;
 use wasm_bindgen::{JsCast, JsValue, prelude::wasm_bindgen};
-use web_sys::{Element, Range};
+use web_sys::{Element, Node, Range};
 
 use crate::{
     layout::HIGHLIGHTS,
     mapping::{self, Cover, Span},
 };
 
+/// The class of what sits in a file's text without being part of it, such as a
+/// comment shown under its passage, which the stylesheet keeps the text's
+/// styles off.
+pub const PLAIN: &str = "jp-plain";
+
 /// The selector of every span of file text inside a file pane.
-const SPANS: &str = ".jp-text [data-s]";
+///
+/// What sits in the file's text without being part of it ([`PLAIN`]) holds
+/// spans of its own text.
+const SPANS: &str = ".jp-text [data-s]:not(.jp-plain [data-s])";
+
+/// The selector of an element whose text is set in lines together: a paragraph,
+/// a heading, a list item's own text, a table cell, a code block, or a line of
+/// a plain-text file.
+const FLOW: &str = "p, li, h1, h2, h3, h4, h5, h6, td, th, dt, dd, pre, .jp-text";
 
 /// The class of a span a deletion is marked before.
 pub const REMOVED_BEFORE: &str = "jp-removed-before";
@@ -42,7 +55,7 @@ pub const REMOVED_AFTER: &str = "jp-removed-after";
 pub const REPAINT: &str = "jp-repaint";
 
 /// The selector of a block of the file.
-const BLOCK: &str = ".jp-text";
+pub(crate) const BLOCK: &str = ".jp-text";
 
 thread_local! {
     /// The blocks of the file the highlights last drawn cover.
@@ -60,6 +73,11 @@ extern "C" {
 
     #[wasm_bindgen(method)]
     fn add(this: &Highlight, range: &Range);
+
+    /// Where two highlights cover the same text, the one with the higher
+    /// priority is drawn over the other.
+    #[wasm_bindgen(method, setter)]
+    fn set_priority(this: &Highlight, priority: u32);
 
     /// `CSS.highlights`, the highlights the page draws by name.
     type HighlightRegistry;
@@ -105,35 +123,59 @@ pub fn spans(container: &Element) -> Vec<(Element, Span)> {
         .collect()
 }
 
-/// The DOM ranges over the text `spans` show of the bytes `bytes` of `source`,
-/// one per span.
+/// The DOM ranges over the text `spans` show of the bytes `bytes` of `source`.
+///
+/// Spans set in the same lines of text ([`FLOW`]) share one range, which also
+/// covers what lies between them: a line ending of the source, shown as the
+/// space between two words, belongs to no span.
 #[must_use]
 pub fn ranges(spans: &[(Element, Span)], source: &str, bytes: [usize; 2]) -> Vec<Range> {
     let plain: Vec<Span> = spans.iter().map(|(_, span)| *span).collect();
     let Some(document) = web_sys::window().and_then(|window| window.document()) else {
         return vec![];
     };
+    let covers = mapping::covers(&plain, source, bytes);
+    let flow = |span: usize| spans[span].0.closest(FLOW).ok().flatten();
 
-    mapping::covers(&plain, source, bytes)
+    mapping::runs(&covers, |one, other| flow(one) == flow(other))
         .into_iter()
-        .filter_map(|cover| {
+        .filter_map(|[first, end]| {
             let range = document.create_range().ok()?;
-            match cover {
-                Cover::Whole { span } => range.select_node_contents(&spans[span].0).ok()?,
-                Cover::Part { span, from, to } => {
-                    let text = spans[span].0.first_child()?;
-                    range.set_start(&text, from).ok()?;
-                    range.set_end(&text, to).ok()?;
-                }
-            }
+            let (node, offset) = edge(spans, covers[first], false)?;
+            range.set_start(&node, offset).ok()?;
+            let (node, offset) = edge(spans, covers[end - 1], true)?;
+            range.set_end(&node, offset).ok()?;
 
             Some(range)
         })
         .collect()
 }
 
+/// The DOM position `cover` starts at in its span of `spans`, or the one it
+/// ends at for `end`.
+fn edge(spans: &[(Element, Span)], cover: Cover, end: bool) -> Option<(Node, u32)> {
+    match cover {
+        Cover::Part { span, from, to } => {
+            let text = spans[span].0.first_child()?;
+            Some((text, if end { to } else { from }))
+        }
+        Cover::Whole { span } => {
+            let element: &Node = &spans[span].0;
+            let offset = if end {
+                element.child_nodes().length()
+            } else {
+                0
+            };
+            Some((element.clone(), offset))
+        }
+    }
+}
+
 /// Draw `wanted`, each a highlight name and source byte range of `source`, over
 /// the file text in `container`, replacing what was drawn before.
+///
+/// Where two highlights cover the same text, the one later in [`HIGHLIGHTS`] is
+/// drawn over the other.
 pub fn paint(container: &Element, source: &str, wanted: &[(&'static str, [usize; 2])]) {
     let Some(registry) = registry() else {
         return;
@@ -141,7 +183,7 @@ pub fn paint(container: &Element, source: &str, wanted: &[(&'static str, [usize;
     let spans = spans(container);
     let mut drawn = vec![];
 
-    for name in HIGHLIGHTS {
+    for (priority, name) in (0_u32..).zip(HIGHLIGHTS) {
         let ranges: Vec<Range> = wanted
             .iter()
             .filter(|(wanted, _)| *wanted == name)
@@ -162,6 +204,7 @@ pub fn paint(container: &Element, source: &str, wanted: &[(&'static str, [usize;
         for range in &ranges {
             highlight.add(range);
         }
+        highlight.set_priority(priority);
         registry.set(name, &highlight);
     }
 
@@ -176,13 +219,19 @@ pub fn paint(container: &Element, source: &str, wanted: &[(&'static str, [usize;
 
 /// The block of the file `range` is in.
 fn block_of(range: &Range) -> Option<Element> {
-    let node = range.start_container().ok()?;
-    let element = match node.dyn_ref::<Element>() {
-        Some(element) => element.clone(),
-        None => node.parent_element()?,
-    };
+    element_of(&range.start_container().ok()?)?
+        .closest(BLOCK)
+        .ok()?
+}
 
-    element.closest(BLOCK).ok()?
+/// `node` when it is an element, and otherwise the element holding it, as the
+/// one a text node is in.
+#[must_use]
+pub fn element_of(node: &Node) -> Option<Element> {
+    match node.dyn_ref::<Element>() {
+        Some(element) => Some(element.clone()),
+        None => node.parent_element(),
+    }
 }
 
 /// Make Safari draw `blocks` again: each carries [`REPAINT`] for a frame.

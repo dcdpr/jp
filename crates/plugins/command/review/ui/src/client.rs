@@ -84,6 +84,42 @@ pub fn resolve_url(id: &str, number: u32) -> String {
     format!("{}/resolve", comment_url(id, number))
 }
 
+/// `POST /api/reviews/{id}/comments/{number}/reopen`.
+#[must_use]
+pub fn reopen_comment_url(id: &str, number: u32) -> String {
+    format!("{}/reopen", comment_url(id, number))
+}
+
+/// `POST /api/reviews/{id}/approvals`.
+#[must_use]
+pub fn approvals_url(id: &str) -> String {
+    format!("/api/reviews/{}/approvals", encode(id))
+}
+
+/// `DELETE /api/reviews/{id}/approvals/{number}`.
+#[must_use]
+pub fn approval_url(id: &str, number: u32) -> String {
+    format!("{}/{number}", approvals_url(id))
+}
+
+/// `PUT /api/reviews/{id}/read`.
+#[must_use]
+pub fn read_url(id: &str) -> String {
+    format!("/api/reviews/{}/read", encode(id))
+}
+
+/// `DELETE /api/reviews/{id}/read` of the file `path`.
+#[must_use]
+pub fn unread_url(id: &str, path: &str) -> String {
+    format!("{}?path={}", read_url(id), encode(path))
+}
+
+/// `POST /api/reviews/{id}/reopen`.
+#[must_use]
+pub fn reopen_url(id: &str) -> String {
+    format!("/api/reviews/{}/reopen", encode(id))
+}
+
 /// `POST /api/reviews/{id}/passes`.
 #[must_use]
 pub fn passes_url(id: &str) -> String {
@@ -106,6 +142,7 @@ pub fn versions_url(id: &str) -> String {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Method {
     Post,
+    Put,
     Patch,
     Delete,
 }
@@ -114,6 +151,7 @@ impl Method {
     fn as_str(self) -> &'static str {
         match self {
             Self::Post => "POST",
+            Self::Put => "PUT",
             Self::Patch => "PATCH",
             Self::Delete => "DELETE",
         }
@@ -134,6 +172,16 @@ impl Call {
     pub fn post(url: String, body: &impl Serialize) -> Self {
         Self {
             method: Method::Post,
+            url,
+            body: Some(json(body)),
+        }
+    }
+
+    /// A `PUT` of `body`, as JSON, to `url`.
+    #[must_use]
+    pub fn put(url: String, body: &impl Serialize) -> Self {
+        Self {
+            method: Method::Put,
             url,
             body: Some(json(body)),
         }

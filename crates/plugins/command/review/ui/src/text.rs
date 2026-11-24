@@ -3,6 +3,8 @@
 use chrono::{DateTime, Utc};
 use jp_review_api::{Counts, Ended, Pass, Running, Version};
 
+use crate::route::Showing;
+
 /// What a line of a diff is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Line {
@@ -17,15 +19,14 @@ pub enum Line {
 }
 
 impl Line {
-    /// The class a diff line of this kind is styled with.
+    /// The classes a diff line of this kind is styled with.
     #[must_use]
     pub fn class(self) -> &'static str {
         match self {
-            Self::Hunk => "jp-diff-hunk",
-            Self::Added => "jp-diff-added",
-            Self::Removed => "jp-diff-removed",
-            Self::Context => "jp-diff-context",
-            Self::Note => "jp-diff-note",
+            Self::Hunk | Self::Note => "px-3 text-muted",
+            Self::Added => "bg-added/15 px-3 text-added",
+            Self::Removed => "px-3 text-removed",
+            Self::Context => "px-3",
         }
     }
 }
@@ -81,13 +82,79 @@ pub fn counts(counts: &Counts) -> String {
     parts.join(", ")
 }
 
-/// A version as a version picker lists it: `3`, or `1 (base)`.
+/// A version as a picker lists it: `Version 2`, `Version 1 (base)`, or `Version
+/// 3 (latest)` for the `latest` one.
 #[must_use]
-pub fn version(version: &Version) -> String {
-    match &version.label {
-        Some(label) => format!("{} ({label})", version.number),
-        None => version.number.to_string(),
+pub fn version(version: &Version, latest: bool) -> String {
+    let notes: Vec<&str> = [version.label.as_deref(), latest.then_some("latest")]
+        .into_iter()
+        .flatten()
+        .collect();
+    if notes.is_empty() {
+        return format!("Version {}", version.number);
     }
+
+    format!("Version {} ({})", version.number, notes.join(", "))
+}
+
+/// What the page shows of a file, as the header says it, in full and for a
+/// narrow screen: `Version 3` and `v3`, where `latest` is the latest version's
+/// number.
+#[must_use]
+pub fn showing(showing: Showing, latest: u32) -> (String, String) {
+    match showing {
+        Showing::Latest => (format!("Version {latest}"), format!("v{latest}")),
+        Showing::Version(version) => (format!("Version {version}"), format!("v{version}")),
+        Showing::Pass(pass) => (format!("Pass {pass} changes"), format!("Pass {pass}")),
+        Showing::Compare => ("Compare versions".to_owned(), "Compare".to_owned()),
+    }
+}
+
+/// A count of comments: `1 comment`, `3 comments`.
+#[must_use]
+pub fn comments(count: usize) -> String {
+    if count == 1 {
+        return "1 comment".to_owned();
+    }
+
+    format!("{count} comments")
+}
+
+/// The button that sends the `pending` comments to the assistant, in full and
+/// for a narrow screen: `Send 2 comments` and `Send 2`, or `Send` when none
+/// wait, which sends a message alone.
+#[must_use]
+pub fn send(pending: usize) -> (String, String) {
+    if pending == 0 {
+        return ("Send".to_owned(), "Send".to_owned());
+    }
+
+    (
+        format!("Send {}", comments(pending)),
+        format!("Send {pending}"),
+    )
+}
+
+/// A file of the review where the file shown is picked: `docs/a.md`, or
+/// `docs/a.md (2 unresolved)`.
+#[must_use]
+pub fn file(path: &str, unresolved: usize) -> String {
+    if unresolved == 0 {
+        return path.to_owned();
+    }
+
+    format!("{path} ({unresolved} unresolved)")
+}
+
+/// The switch between listing resolved comments and not: `Show 2 resolved`, or
+/// `Hide resolved` while they are `shown`.
+#[must_use]
+pub fn resolved(count: usize, shown: bool) -> String {
+    if shown {
+        return "Hide resolved".to_owned();
+    }
+
+    format!("Show {count} resolved")
 }
 
 /// The pass running on a review, as its header says it.
@@ -124,6 +191,17 @@ pub fn hidden(count: usize) -> String {
     }
 
     format!("{count} changed lines not shown")
+}
+
+/// That `count` passages the reviewer approved changed since: `1 passage
+/// changed since you approved it`.
+#[must_use]
+pub fn changed_since(count: usize) -> String {
+    if count == 1 {
+        return "1 passage changed since you approved it".to_owned();
+    }
+
+    format!("{count} passages changed since you approved them")
 }
 
 #[cfg(test)]

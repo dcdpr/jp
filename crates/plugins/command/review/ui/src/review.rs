@@ -1,18 +1,34 @@
-//! `/reviews/{id}`: one review, a file of it with the comments on it, and what
-//! changed in that file from one version to another.
+//! `/reviews/{id}`: one review, a file of it beside the comments on it, and
+//! what changed in that file from one version to another.
 //!
 //! The page polls the review ([`crate::poll`]), placing its comments in the
 //! version shown, and pairs that answer with the same version's rendered file.
 //! When a pass this page watched ends, the page switches to what that pass
 //! changed, unless the reviewer is commenting on something.
-//! `write` holds what the page asks the server to change.
+//!
+//! - `header` is the top bar: what the page shows, and sending to the
+//!   assistant.
+//! - `outline` is the file's sections, beside the file on a screen wide enough.
+//! - `file` is the file, or what changed in it.
+//! - `thread` is what sits in the file's text under a passage: the thread of
+//!   the comment picked, and the composer while it writes about the passage.
+//! - `progress` is the line across the file's text that says how far it was
+//!   read, and the approvals of passages that changed since.
+//! - `panel` is the comments on the file and the passes, beside the file on a
+//!   wide screen and in a sheet over it on a narrow one.
+//! - `write` is what the page asks the server to change, and what it reads of
+//!   the reader's selections and clicks in the file.
 
+mod file;
+mod header;
+mod outline;
+mod panel;
+mod progress;
+mod thread;
 mod write;
 
-use jp_review_api::{
-    Change, Detail, DetailReply, DiffView, FileDiff, FileReply, Pass, Running, Version,
-};
-use leptos_dom::helpers::{event_target_value, request_animation_frame};
+use jp_review_api::{Change, Detail, DetailReply, DiffView, FileDiff, FileReply, Running};
+use leptos_dom::helpers::request_animation_frame;
 use reactive_graph::{
     computed::Memo,
     effect::Effect,
@@ -22,26 +38,32 @@ use reactive_graph::{
     spawn_local,
 };
 use tachys::{
-    html::{
-        element::{Div, div, h1, header, main, option, p, pre, section, select, span},
-        event as ev,
-    },
+    html::element::{Div, div, main},
     prelude::*,
     reactive_graph::node_ref::NodeRef,
 };
+use web_sys::{Element, HtmlDivElement};
 
 use crate::{
-    blocks::{self, Block},
-    card::{card, line_view},
-    client,
+    actions, card, client,
     compose::{self, Compose},
-    dom::{Nav, keep_polling, link},
+    dom::{self, Nav, keep_polling},
     highlight,
-    layout::{self, CHANGED, PENDING},
+    layout::{self, APPROVED, CHANGED, FOCUS, Inline, PENDING, Site},
     mapping, poll,
     route::{Changes, ReviewView, Route, Span},
-    text,
+    seat::{self, Order},
 };
+
+/// What the file is scrolled to once it is drawn.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Reveal {
+    /// The passage of the comment with this number.
+    Passage(u32),
+
+    /// The heading with this anchor.
+    Heading(String),
+}
 
 /// What every poll says of a review, beside the review itself.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -81,6 +103,24 @@ struct Page {
 
     /// Why the last change asked of the server failed, until dismissed.
     notice: RwSignal<Option<String>>,
+
+    /// The number of the comment picked, whose card and passage are brought
+    /// out.
+    picked: RwSignal<Option<u32>>,
+
+    /// What the file is scrolled to, once the file is drawn.
+    reveal: StoredValue<Option<Reveal>>,
+
+    /// Whether the comments show on a narrow screen, where they are a sheet
+    /// over the file; a wide screen shows them either way.
+    panel: RwSignal<bool>,
+
+    /// The element holding the file's text.
+    pane: NodeRef<Div>,
+
+    /// The element the file's column is laid out in, which the actions for a
+    /// selection are placed in.
+    stage: NodeRef<Div>,
 }
 
 impl Page {
@@ -89,6 +129,23 @@ impl Page {
         self.compose.get_value()
     }
 }
+
+/// The classes of what holds the page's columns, centered together: the file's
+/// and the comments' side by side on a wide screen, and the file's outline
+/// before them on a wider one.
+/// The file's column is as wide as a page of the documentation site.
+const LAYOUT: &str = "lg:grid lg:grid-cols-[minmax(0,43rem)_20rem] lg:justify-center lg:gap-x-8 \
+                      lg:px-4 toc:grid-cols-[13rem_minmax(0,43rem)_20rem]";
+
+/// The classes of the file's column.
+const STAGE: &str =
+    "relative min-w-0 px-4 py-6 lg:col-start-1 lg:row-start-1 lg:px-0 toc:col-start-2";
+
+/// The classes of the file's column while the comments are a sheet over the
+/// bottom of a narrow screen: room under the file to scroll its end out from
+/// under the sheet.
+const STAGE_UNDER_SHEET: &str = "relative min-w-0 px-4 py-6 max-lg:pb-[60dvh] lg:col-start-1 \
+                                 lg:row-start-1 lg:px-0 toc:col-start-2";
 
 /// The page of the review `id`, which notes the workspace each answer names in
 /// `seen`.
@@ -114,28 +171,90 @@ pub(crate) fn page(nav: Nav, id: String, seen: RwSignal<Option<String>>) -> impl
         hidden: RwSignal::new(0),
         compose: StoredValue::new(Compose::new(&id)),
         notice: RwSignal::new(None),
+        picked: RwSignal::new(None),
+        // The heading the address names, as a link to one section does.
+        reveal: StoredValue::new(dom::fragment().map(Reveal::Heading)),
+        panel: RwSignal::new(false),
+        pane: NodeRef::new(),
+        stage: NodeRef::new(),
     };
+    let inline = thread::inline(page);
+    let site = site(page, inline);
 
     follow(page, id.clone(), seen);
     fetch_diff(page, id.clone());
     fetch_file(page, id);
-    let pane = NodeRef::<Div>::new();
-    paint(page, pane);
-    write::follow_selection(page, pane);
+    paint(page);
+    show_card(page);
+    thread::seat(page, inline);
+    write::follow_selection(page);
+    write::follow_keys(page);
     write::drop_selection(page);
 
-    main().class("jp-page jp-review").child((
-        top(page),
-        move || {
-            page.error
-                .get()
-                .map(|error| p().class("jp-error").child(error))
-        },
-        move || write::notice(page),
-        move || body(page, pane),
-        compose::bar(page.compose()),
-        compose::sheet(page.compose()),
+    main().child((header::top(page, site), columns(page, inline, site)))
+}
+
+/// Where the composer is drawn while it is open ([`layout::site`]), `inline`
+/// saying whether it sits in the file's text.
+fn site(page: Page, inline: Memo<Option<Inline>>) -> Memo<Option<Site>> {
+    let kind = compose::kind(page.compose());
+
+    Memo::new(move |_| {
+        let in_file = inline.get().is_some_and(Inline::composing);
+
+        kind.with(|kind| Some(layout::site(kind.as_ref()?, in_file, dom::wide())))
+    })
+}
+
+/// The file's outline; the file's column, with the actions for a selection in
+/// it and the element that sits under a passage, holding what `inline` says;
+/// the comments' column; and the composer while `site` says it is in a sheet.
+fn columns(page: Page, inline: Memo<Option<Inline>>, site: Memo<Option<Site>>) -> impl RenderHtml {
+    div().class(LAYOUT).child((
+        outline::outline(page),
+        div()
+            .class(move || {
+                if page.panel.get() {
+                    STAGE_UNDER_SHEET
+                } else {
+                    STAGE
+                }
+            })
+            .node_ref(page.stage)
+            .child((
+                file::notices(page),
+                move || file::body(page),
+                compose::offer(page.compose(), move |mark| write::mark(page, mark)),
+                thread::host(page, inline, site),
+                progress::read_line(page),
+            )),
+        panel::panel(page, site),
+        compose::at(page.compose(), site, Site::Sheet),
     ))
+}
+
+/// Move `host` under the text the bytes `under`, of the file shown, end in, as
+/// the file is drawn in `pane`, at its place among what else sits there; or out
+/// of the file's text, to the end of `stage`, when `under` is `None`, or none
+/// of the text is drawn.
+fn seat_under(
+    page: Page,
+    host: &Element,
+    pane: Option<HtmlDivElement>,
+    stage: &Element,
+    under: Option<([usize; 2], Order)>,
+) {
+    let seat = under.zip(pane).and_then(|((bytes, order), pane)| {
+        page.file.with_untracked(|file| {
+            let source = &file.as_ref()?.as_ref().ok()?.source;
+            Some((seat::under(&pane, source, bytes)?, order))
+        })
+    });
+
+    match seat {
+        Some((seat, order)) => seat::take(host, &seat, order),
+        None => seat::park(host, stage),
+    }
 }
 
 /// Poll the review for as long as the page shows it, asking again at once when
@@ -324,11 +443,12 @@ fn entry<'a>(diff: &'a DiffView, file: &str) -> Option<&'a FileDiff> {
     diff.files.iter().find(|entry| entry.path == file)
 }
 
-/// Highlight, over the file in `pane`, the comments' ranges in the file view,
-/// and the changed lines in the changes view, each time either changes.
-fn paint(page: Page, pane: NodeRef<Div>) {
+/// Highlight, over the file in the pane, the comments' passages in the file
+/// view, and the changed lines in the changes view, each time either changes;
+/// and scroll the file to what was asked for.
+fn paint(page: Page) {
     Effect::new(move |_| {
-        let element = pane.get();
+        let element = page.pane.get();
         let shown = page.file.with(|file| {
             file.as_ref()
                 .and_then(|file| file.as_ref().ok())
@@ -341,7 +461,8 @@ fn paint(page: Page, pane: NodeRef<Div>) {
             return;
         };
 
-        let (wanted, removed, added) = match page.view.with(|view| view.changes) {
+        let changes = page.view.with(|view| view.changes);
+        let (wanted, removed, added) = match changes {
             Some(changes) if changes.unified => {
                 highlight::clear();
                 return;
@@ -371,19 +492,36 @@ fn paint(page: Page, pane: NodeRef<Div>) {
             highlight::mark_removed(&spans, &removed);
             let plain: Vec<mapping::Span> = spans.iter().map(|(_, span)| *span).collect();
             page.hidden.set(mapping::hidden(&plain, &source, &added));
+            reveal(page, &element, &spans, &source, version);
         }));
     });
     on_cleanup(highlight::clear);
 }
 
-/// What the file view highlights in version `version` of `file`: the comments'
-/// ranges, and the range being commented on.
+/// What the file view highlights in version `version` of `file`: the passages
+/// approved, the comments' passages, the range being commented on, and the
+/// passage of the comment picked.
 fn marks(page: Page, file: &str, version: u32) -> Vec<(&'static str, [usize; 2])> {
     let resolved = page.view.with(|view| view.resolved);
-    let mut wanted = page.review.with(|review| {
-        review
+    let picked = page.picked.get();
+    let (mut wanted, picked) = page.review.with(|review| {
+        let comments = review
             .as_ref()
-            .map_or_default(|review| layout::highlights(&review.comments, file, resolved))
+            .map_or_default(|review| review.comments.as_slice());
+        let approvals = review
+            .as_ref()
+            .map_or_default(|review| review.approvals.as_slice());
+        let picked = comments
+            .iter()
+            .find(|comment| picked.is_some() && actions::number(comment) == picked)
+            .and_then(|comment| layout::passage(comment, file));
+        let mut wanted: Vec<_> = layout::approved(approvals, file)
+            .into_iter()
+            .map(|(_, bytes)| (APPROVED, bytes))
+            .collect();
+        wanted.extend(layout::highlights(comments, file, resolved));
+
+        (wanted, picked)
     });
     if let Some((path, marked, bytes)) = page.compose().marked.get()
         && path == file
@@ -391,487 +529,72 @@ fn marks(page: Page, file: &str, version: u32) -> Vec<(&'static str, [usize; 2])
     {
         wanted.push((PENDING, bytes));
     }
+    wanted.extend(picked.map(|bytes| (FOCUS, bytes)));
 
     wanted
 }
 
-/// The header: the review's title, the version shown, the pass running or the
-/// last one's closing message, the passes' changes, and the file tabs.
-fn top(page: Page) -> impl RenderHtml {
-    header().class("jp-header").child((
-        div().class("jp-bar").child((
-            link(page.nav, Route::List, "jp-home", "jp"),
-            h1().class("jp-title").child(move || {
-                page.review
-                    .with(|review| review.as_ref().map(|review| review.head.title.clone()))
-                    .unwrap_or_default()
-            }),
-            move || {
-                page.status.with(|status| {
-                    status
-                        .as_ref()?
-                        .running
-                        .as_ref()
-                        .map(|running| span().class("jp-running").child(text::running(running)))
-                })
-            },
-            write::controls(page),
-        )),
-        move || closing(page),
-        move || passes(page),
-        move || tabs(page),
-        move || banner(page),
-        move || toolbar(page),
-    ))
-}
-
-/// The last pass's outcome and closing message, once it has ended.
-fn closing(page: Page) -> Option<impl RenderHtml> {
-    let pass = page
-        .review
-        .with(|review| review.as_ref()?.passes.last().cloned())?;
-    let answer = pass.ended.as_ref()?.answer.clone();
-
-    Some(div().class("jp-closing").child((
-        div().class("jp-closing-head").child(text::pass(&pass)),
-        answer.map(|answer| p().class("jp-closing-body").child(answer)),
-    )))
-}
-
-/// A link to what each ended pass changed in the file shown.
-fn passes(page: Page) -> Option<impl RenderHtml> {
-    let passes: Vec<Pass> = page.review.with(|review| {
-        review
-            .as_ref()
-            .map_or_default(|review| review.passes.clone())
-    });
-    let view = page.view.get();
-    let links = passes
-        .iter()
-        .rev()
-        .filter(|pass| {
-            pass.ended
-                .as_ref()
-                .is_some_and(|ended| ended.version.is_some())
-        })
-        .map(|pass| {
-            let span = Span::Pass(pass.number);
-            let current = view.changes.is_some_and(|changes| changes.span == span);
-            let to = Route::Review(ReviewView {
-                changes: Some(Changes {
-                    span,
-                    unified: view.changes.is_some_and(|changes| changes.unified),
-                }),
-                ..view.clone()
-            });
-            let class = if current {
-                "jp-chip jp-chip-active"
-            } else {
-                "jp-chip"
-            };
-            link(page.nav, to, class, text::pass(pass))
-        })
-        .collect::<Vec<_>>();
-    if links.is_empty() {
-        return None;
-    }
-
-    Some(
-        div()
-            .class("jp-passes")
-            .child((span().class("jp-label").child("Changes by pass"), links)),
-    )
-}
-
-/// A tab for each of the review's files, with how many of its comments are not
-/// resolved, and a button for a comment on the file shown.
-fn tabs(page: Page) -> Option<impl RenderHtml> {
-    let view = page.view.get();
-    let shown = page.shown.get();
-    let comment = write::file_comment(page);
-    page.review.with(|review| {
-        let review = review.as_ref()?;
-        let tabs = review
-            .head
-            .files
-            .iter()
-            .map(|path| {
-                let count = layout::unresolved(&review.comments, path);
-                let to = Route::Review(ReviewView {
-                    file: Some(path.clone()),
-                    ..view.clone()
-                });
-                let class = if shown.as_deref() == Some(path.as_str()) {
-                    "jp-tab jp-tab-active"
-                } else {
-                    "jp-tab"
-                };
-                link(
-                    page.nav,
-                    to,
-                    class,
-                    (
-                        path.clone(),
-                        (count > 0).then(|| span().class("jp-count").child(count.to_string())),
-                    ),
-                )
-            })
-            .collect::<Vec<_>>();
-
-        Some(
-            div()
-                .class("jp-tabs")
-                .attr("role", "navigation")
-                .child((tabs, comment)),
-        )
-    })
-}
-
-/// That the files on disk changed since the latest version, while no pass runs,
-/// whose end records them.
-fn banner(page: Page) -> Option<impl RenderHtml> {
-    let changed = page.status.with(|status| {
-        status
-            .as_ref()
-            .is_some_and(|status| status.working_tree_changed && status.running.is_none())
-    });
-    let latest = page
-        .review
-        .with(|review| Some(review.as_ref()?.versions.last()?.number))?;
-
-    changed.then(|| {
-        div().class("jp-banner").child((
-            p().child(format!(
-                "The files on disk changed since version {latest}, which this page shows the \
-                 latest of."
-            )),
-            write::record_button(page),
-        ))
-    })
-}
-
-/// What the file pane shows, and how to show something else: the version or the
-/// two compared, resolved comments, and rendered or unified changes.
-fn toolbar(page: Page) -> Option<AnyView> {
-    let view = page.view.get();
-    let versions: Vec<Version> = page.review.with(|review| {
-        review
-            .as_ref()
-            .map_or_default(|review| review.versions.clone())
-    });
-    let shown = page.review.with(|review| Some(review.as_ref()?.version))?;
-
-    Some(match view.changes {
-        None => file_tools(page.nav, &view, &versions, shown).into_any(),
-        Some(changes) => change_tools(page, &view, &versions, changes).into_any(),
-    })
-}
-
-/// The file view's tools: the version shown, what changed in it, and whether
-/// resolved comments are highlighted.
-fn file_tools(nav: Nav, view: &ReviewView, versions: &[Version], shown: u32) -> impl RenderHtml {
-    let resolved = view.resolved;
-    let changes = ReviewView {
-        changes: Some(Changes {
-            span: Span::Versions {
-                from: None,
-                to: Some(shown),
-            },
-            unified: false,
-        }),
-        ..view.clone()
-    };
-
-    div().class("jp-toolbar").child((
-        picker(nav, versions, shown, "Version", {
-            let view = view.clone();
-            move |version| ReviewView {
-                version: Some(version),
-                ..view.clone()
-            }
-        }),
-        link(nav, Route::Review(changes), "jp-button", "Changes"),
-        link(
-            nav,
-            Route::Review(ReviewView {
-                resolved: !resolved,
-                ..view.clone()
-            }),
-            "jp-button",
-            if resolved {
-                "Hide resolved"
-            } else {
-                "Show resolved"
-            },
-        ),
-    ))
-}
-
-/// The changes view's tools: the versions compared, rendered or unified, and
-/// the way back to the file.
-fn change_tools(
+/// Scroll the file, drawn in `pane` as version `version` of `source`, to what
+/// [`Page::reveal`] names, and forget the asking.
+///
+/// A pane that left the page leaves the asking for the next time the file is
+/// drawn, and so does a passage while the file is drawn for another version
+/// than the one the comments are placed in.
+fn reveal(
     page: Page,
-    view: &ReviewView,
-    versions: &[Version],
-    changes: Changes,
-) -> impl RenderHtml {
-    let nav = page.nav;
-    let compared = page.diff.with(|diff| {
-        let diff = diff.as_ref()?.as_ref().ok()?;
-        Some((diff.from, diff.to))
-    });
-    let span_view = match (changes.span, compared) {
-        (Span::Pass(pass), Some((from, to))) => span()
-            .class("jp-label")
-            .child(format!("Pass {pass}: version {from} to {to}"))
-            .into_any(),
-        (Span::Pass(pass), None) => span()
-            .class("jp-label")
-            .child(format!("Pass {pass}"))
-            .into_any(),
-        (Span::Versions { .. }, Some((from, to))) => (
-            picker(nav, versions, from, "From version", {
-                let view = view.clone();
-                move |from| compare(&view, Some(from), Some(to))
-            }),
-            span().class("jp-label").child("to"),
-            picker(nav, versions, to, "To version", {
-                let view = view.clone();
-                move |to| compare(&view, Some(from), Some(to))
-            }),
-        )
-            .into_any(),
-        (Span::Versions { .. }, None) => ().into_any(),
-    };
-    let unified = changes.unified;
-
-    div().class("jp-toolbar").child((
-        span_view,
-        link(
-            nav,
-            Route::Review(ReviewView {
-                changes: Some(Changes {
-                    unified: !unified,
-                    ..changes
-                }),
-                ..view.clone()
-            }),
-            "jp-button",
-            if unified { "Rendered" } else { "Unified diff" },
-        ),
-        link(
-            nav,
-            Route::Review(ReviewView {
-                changes: None,
-                version: None,
-                ..view.clone()
-            }),
-            "jp-button",
-            "Back to the file",
-        ),
-    ))
-}
-
-/// `view` comparing versions `from` and `to`.
-fn compare(view: &ReviewView, from: Option<u32>, to: Option<u32>) -> ReviewView {
-    ReviewView {
-        changes: Some(Changes {
-            span: Span::Versions { from, to },
-            unified: view.changes.is_some_and(|changes| changes.unified),
-        }),
-        ..view.clone()
+    pane: &Element,
+    spans: &[(Element, mapping::Span)],
+    source: &str,
+    version: u32,
+) {
+    if !pane.is_connected() {
+        return;
     }
-}
-
-/// A list of `versions`, `selected` chosen, that shows the page `to` names for
-/// the version picked.
-fn picker(
-    nav: Nav,
-    versions: &[Version],
-    selected: u32,
-    label: &'static str,
-    to: impl Fn(u32) -> ReviewView + Send + 'static,
-) -> impl RenderHtml {
-    select()
-        .class("jp-select")
-        .attr("aria-label", label)
-        .on(ev::change, move |event| {
-            if let Ok(version) = event_target_value(&event).parse() {
-                nav.go(Route::Review(to(version)));
-            }
-        })
-        .child(
-            versions
-                .iter()
-                .rev()
-                .map(|version| {
-                    option()
-                        .attr("value", version.number.to_string())
-                        .attr("selected", version.number == selected)
-                        .child(text::version(version))
-                })
-                .collect::<Vec<_>>(),
-        )
-}
-
-/// The file pane: the file with its comments, or what changed in it.
-fn body(page: Page, pane: NodeRef<Div>) -> impl RenderHtml {
-    let view = page.view.get();
-    let Some(file) = page.shown.get() else {
-        return p().class("jp-note").child("Loading…").into_any();
-    };
-    if let Some(changes) = view.changes {
-        return changed(page, &file, changes, pane).into_any();
-    }
-
-    match page.file.get() {
-        None => p().class("jp-note").child("Loading…").into_any(),
-        Some(Err(error)) => p().class("jp-error").child(error).into_any(),
-        Some(Ok(reply)) => commented(page, &view, &file, &reply, pane).into_any(),
-    }
-}
-
-/// The file, each comment on a range of it under the block its range starts in,
-/// and the comments on the review, the whole file, and changed text above it.
-fn commented(
-    page: Page,
-    view: &ReviewView,
-    file: &str,
-    reply: &FileReply,
-    pane: NodeRef<Div>,
-) -> impl RenderHtml {
-    let blocks = blocks::blocks(reply.html.as_deref().unwrap_or_default());
-    let comments = page.review.with(|review| {
-        review
-            .as_ref()
-            .map_or_default(|review| review.comments.clone())
-    });
-    let placement = layout::place(&comments, file, &blocks);
-    let act = write::actor(page);
-    let cards = |indices: &[usize]| {
-        indices
-            .iter()
-            .map(|index| card(page.nav, comments[*index].clone(), view, act.clone()))
-            .collect::<Vec<_>>()
-    };
-    let above = (!placement.above.is_empty())
-        .then(|| section().class("jp-above").child(cards(&placement.above)));
-    let rows = blocks
-        .into_iter()
-        .zip(&placement.under)
-        .map(|(block, under)| {
-            div()
-                .class("jp-row")
-                .child((text_of(block), div().class("jp-cards").child(cards(under))))
-        })
-        .collect::<Vec<_>>();
-
-    div()
-        .class("jp-file")
-        .child((above, div().class("jp-pane").node_ref(pane).child(rows)))
-}
-
-/// What changed in the file: the later version rendered with its changed lines
-/// highlighted, or the unified diff.
-fn changed(page: Page, file: &str, changes: Changes, pane: NodeRef<Div>) -> impl RenderHtml {
-    let diff = match page.diff.get() {
-        None => return p().class("jp-note").child("Loading…").into_any(),
-        Some(Err(error)) => return p().class("jp-error").child(error).into_any(),
-        Some(Ok(diff)) => diff,
-    };
-    let view = page.view.get();
-    let entry = entry(&diff, file).cloned();
-    let unified_view = ReviewView {
-        changes: Some(Changes {
-            unified: true,
-            ..changes
-        }),
-        ..view
-    };
-
-    let deleted = entry
-        .as_ref()
-        .is_some_and(|entry| entry.change == Change::Deleted);
-    if let Some(entry) = entry.as_ref().filter(|_| changes.unified || deleted) {
-        return div()
-            .class("jp-file")
-            .child((
-                deleted.then(|| {
-                    p().class("jp-note")
-                        .child(format!("{file} is deleted in version {}.", diff.to))
-                }),
-                unified(&entry.diff),
-            ))
-            .into_any();
-    }
-
-    let unchanged = entry.is_none().then(|| {
-        p().class("jp-note").child(format!(
-            "{file} didn't change from version {} to version {}.",
-            diff.from, diff.to
-        ))
-    });
-    div()
-        .class("jp-file jp-changes")
-        .child((unchanged, hidden(page, unified_view), rendered(page, pane)))
-        .into_any()
-}
-
-/// How many changed lines render to nothing, with a link to `unified`, the
-/// unified diff that shows them; nothing while none do.
-fn hidden(page: Page, unified: ReviewView) -> impl RenderHtml {
-    move || {
-        let count = page.hidden.get();
-        (count > 0).then(|| {
-            p().class("jp-note").child((
-                text::hidden(count),
-                "; ",
-                link(
-                    page.nav,
-                    Route::Review(unified.clone()),
-                    "jp-link",
-                    "see the unified diff",
-                ),
-                ".",
-            ))
-        })
-    }
-}
-
-/// The file as the later version compared holds it, without comments, for the
-/// changed lines to be highlighted over.
-fn rendered(page: Page, pane: NodeRef<Div>) -> AnyView {
-    match page.file.get() {
-        None => p().class("jp-note").child("Loading…").into_any(),
-        Some(Err(error)) => p().class("jp-error").child(error).into_any(),
-        Some(Ok(reply)) => {
-            let rows = blocks::blocks(reply.html.as_deref().unwrap_or_default())
-                .into_iter()
-                .map(|block| div().class("jp-row").child(text_of(block)))
-                .collect::<Vec<_>>();
-            div().class("jp-pane").node_ref(pane).child(rows).into_any()
+    let number = match page.reveal.get_value() {
+        None => return,
+        Some(Reveal::Heading(anchor)) => {
+            page.reveal.set_value(None);
+            return dom::show_heading(pane, &anchor);
         }
+        Some(Reveal::Passage(number)) => number,
+    };
+    let placed = page
+        .review
+        .with_untracked(|review| review.as_ref().map(|review| review.version));
+    if placed != Some(version) {
+        return;
+    }
+    page.reveal.set_value(None);
+
+    let Some(file) = page.shown.get_untracked() else {
+        return;
+    };
+    let passage = page.review.with_untracked(|review| {
+        let comment = review
+            .as_ref()?
+            .comments
+            .iter()
+            .find(|comment| actions::number(comment) == Some(number))?;
+
+        layout::passage(comment, &file)
+    });
+    let range =
+        passage.and_then(|bytes| highlight::ranges(spans, source, bytes).into_iter().next());
+    if let Some(range) = range {
+        dom::scroll_to(&range);
     }
 }
 
-/// A block of a rendered file; a line of a plain-text file keeps its spacing.
-fn text_of(block: Block) -> impl RenderHtml {
-    let class = if block.line {
-        "jp-text jp-line"
-    } else {
-        "jp-text"
-    };
-
-    div().class(class).inner_html(block.html)
-}
-
-/// The unified diff hunks `diff`, each line styled as what it is, wrapping long
-/// lines.
-fn unified(diff: &str) -> impl RenderHtml {
-    pre().class("jp-diff jp-unified").child(
-        text::diff_lines(diff)
-            .into_iter()
-            .map(|(kind, line)| line_view(kind, line.to_owned()))
-            .collect::<Vec<_>>(),
-    )
+/// Scroll the comments to the card of the comment picked, each time one is.
+fn show_card(page: Page) {
+    Effect::new(move |_| {
+        let Some(number) = page.picked.get() else {
+            return;
+        };
+        // Once the comments are drawn, which the effect may run before: on a
+        // narrow screen, picking a passage is what shows them.
+        drop(request_animation_frame(move || {
+            dom::show(&card::id(number));
+        }));
+    });
 }

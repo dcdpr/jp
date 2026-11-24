@@ -1,5 +1,5 @@
-//! Comment and reply CLI commands: `comment`, `reply`, `edit`, `withdraw`, and
-//! `resolve`.
+//! Comment and reply CLI commands: `comment`, `reply`, `edit`, `withdraw`,
+//! `resolve`, and `reopen` for a comment.
 //!
 //! Each command mutates the review via [`Store::update`] under the review's
 //! file lock.
@@ -63,7 +63,7 @@ pub(crate) fn comment(
 /// Resolve `--at` to an [`Anchor`]: the review as a whole in the latest version
 /// when `at` is `None`, or the specified file/range in a current working-tree
 /// snapshot.
-fn anchor_at(
+pub(crate) fn anchor_at(
     ctx: &Context<'_>,
     review: &mut Review,
     blobs: &Blobs,
@@ -208,6 +208,32 @@ pub(crate) fn resolve(
         Some(id) => resolve_accepted(ctx, id),
         None => resolve_named(ctx, named),
     }
+}
+
+/// Open the resolved comment `comment` again.
+pub(crate) fn reopen(ctx: &Context<'_>, comment: CommentRef) -> Result<Output, String> {
+    let reopened = ctx.store.update(comment.review, |review, _| {
+        reopen_in(review, comment.number).map_err(|refusal| refusal.message(comment.review))
+    })?;
+
+    if ctx.format.is_json() {
+        return show(ctx, comment);
+    }
+
+    Ok(if reopened {
+        format!("Reopened {comment}.\n")
+    } else {
+        format!("{comment} is open already.\n")
+    }
+    .into())
+}
+
+/// Open comment `number` of `review` again, returning `false` when it was open
+/// already.
+pub(crate) fn reopen_in(review: &mut Review, number: u32) -> Result<bool, Refusal> {
+    review.writable()?;
+
+    review.comment_mut(number)?.reopen()
 }
 
 /// Resolve each of `named`, or none of them when one can't be.

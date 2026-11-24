@@ -4,7 +4,7 @@
 use chrono::{DateTime, SecondsFormat, Utc};
 use jp_review_api::{
     AnchorView, Change, Comment as CommentView, Counts, Detail, DiffView, Pass as PassView, Placed,
-    Reply as ReplyView, Summary, Version,
+    ReadUntil, Reply as ReplyView, Summary, Version,
 };
 
 use crate::{
@@ -17,6 +17,9 @@ use crate::{
 /// The width the label of a line `jp review submit` prints is padded to: the
 /// longest verdict, `decline`.
 const LABEL_WIDTH: usize = 7;
+
+/// The maximum number of characters [`opening`] quotes of a passage.
+const OPENING_CHARS: usize = 60;
 
 /// A review's line in `jp review ls`.
 pub(crate) fn row(summary: &Summary) -> String {
@@ -72,6 +75,7 @@ pub(crate) fn detail(detail: &Detail) -> String {
     for pass in &detail.passes {
         out.push_str(&closing(pass));
     }
+    out.push_str(&progress(detail));
     for view in &detail.comments {
         out.push('\n');
         out.push_str(&comment(view, detail.version));
@@ -123,6 +127,48 @@ fn closing(pass: &PassView) -> String {
         "\n## Pass {} ({})\n\n{answer}\n",
         pass.number, ended.outcome
     )
+}
+
+/// How far the reviewer has read each file, and the passages they approved,
+/// each under its heading; nothing for a review that says neither.
+fn progress(detail: &Detail) -> String {
+    let mut out = String::new();
+    if !detail.read_until.is_empty() {
+        out.push_str("\n## Read so far\n\n");
+    }
+    for read in &detail.read_until {
+        out.push_str(&format!("- {}\n", read_through(read, detail.version)));
+    }
+    if !detail.approvals.is_empty() {
+        out.push_str("\n## Approved\n\n");
+    }
+    for approval in &detail.approvals {
+        out.push_str(&format!(
+            "- {}: {}\n",
+            approval.number,
+            place(&approval.anchor, detail.version)
+        ));
+    }
+
+    out
+}
+
+/// How far a file was read, as it reads in version `shown`: `docs/a.md through
+/// line 42`.
+///
+/// A version holding none of the lines read names the line as it was counted.
+pub(crate) fn read_through(read: &ReadUntil, shown: u32) -> String {
+    match read
+        .projected
+        .as_ref()
+        .and_then(|placed| placed.range.as_ref())
+    {
+        Some(line) => format!("{} through line {line}", read.path),
+        None => format!(
+            "{} through line {} in version {}, of which version {shown} holds nothing",
+            read.path, read.line, read.version
+        ),
+    }
 }
 
 /// A comment, its anchor placed in version `shown`.
@@ -274,6 +320,19 @@ pub(crate) fn written(anchor: &Anchor) -> String {
         Target::File(path) => path.clone(),
         Target::Range(path, range) => format!("{path}:{range}"),
     }
+}
+
+/// How `text` opens, to tell a passage by: its first line that holds something,
+/// truncated to [`OPENING_CHARS`] characters, with `…` after a truncated one.
+pub(crate) fn opening(text: &str) -> String {
+    let line = first_line(text);
+    if line.chars().count() <= OPENING_CHARS {
+        return line.to_owned();
+    }
+
+    let mut opening: String = line.chars().take(OPENING_CHARS).collect();
+    opening.push('…');
+    opening
 }
 
 /// The first line of `text` that holds something, trimmed.

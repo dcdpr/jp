@@ -68,9 +68,40 @@ fn the_write_endpoints_name_the_review_and_comment() {
         resolve_url("R-1h4k2m9", 3),
         "/api/reviews/R-1h4k2m9/comments/3/resolve"
     );
+    assert_eq!(
+        reopen_comment_url("R-1h4k2m9", 3),
+        "/api/reviews/R-1h4k2m9/comments/3/reopen"
+    );
     assert_eq!(passes_url("R-1h4k2m9"), "/api/reviews/R-1h4k2m9/passes");
     assert_eq!(stop_url("R-1h4k2m9"), "/api/reviews/R-1h4k2m9/stop");
     assert_eq!(versions_url("R-1h4k2m9"), "/api/reviews/R-1h4k2m9/versions");
+}
+
+#[test]
+fn approving_reading_and_reopening_name_the_review() {
+    assert_eq!(
+        approvals_url("R-1h4k2m9"),
+        "/api/reviews/R-1h4k2m9/approvals"
+    );
+    assert_eq!(
+        approval_url("R-1h4k2m9", 2),
+        "/api/reviews/R-1h4k2m9/approvals/2"
+    );
+    assert_eq!(read_url("R-1h4k2m9"), "/api/reviews/R-1h4k2m9/read");
+    assert_eq!(
+        unread_url("R-1h4k2m9", "docs/a b&c.md"),
+        "/api/reviews/R-1h4k2m9/read?path=docs/a%20b%26c.md"
+    );
+    assert_eq!(reopen_url("R-1h4k2m9"), "/api/reviews/R-1h4k2m9/reopen");
+}
+
+#[test]
+fn a_put_carries_its_body_as_json() {
+    assert_eq!(Call::put(read_url("R-1h4k2m9"), &[1, 2]), Call {
+        method: Method::Put,
+        url: "/api/reviews/R-1h4k2m9/read".to_owned(),
+        body: Some("[1,2]".to_owned()),
+    });
 }
 
 #[test]

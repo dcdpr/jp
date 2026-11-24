@@ -1,12 +1,12 @@
-//! A rendered file, split into the blocks comment cards are placed under.
+//! A rendered file, split into the blocks it is drawn as, an element each.
 //!
 //! `md-html` renders Markdown as a sequence of top-level elements (headings,
 //! paragraphs, lists, tables, code blocks) and any other file as one `<pre>`
 //! holding a `<span>` per line.
-//! Each top-level element is a block, and so is each line of a plain-text file,
-//! so a card can sit under the line its comment starts on.
-//! Splitting keeps every `data-s`/`data-e` span intact, so a block maps back to
-//! the source bytes its text came from.
+//! Each top-level element is a block, and so is each line of a plain-text file.
+//! A highlight that changes has the blocks it left or reached drawn again
+//! (`crate::highlight`), and no more of the file than those.
+//! Splitting keeps every `data-s`/`data-e` span intact.
 
 /// Elements without an end tag.
 const VOID: [&str; 6] = ["br", "hr", "img", "input", "col", "wbr"];
@@ -22,10 +22,6 @@ const COMMENT_CLOSE: &[u8] = b"-->";
 pub struct Block {
     /// The block's HTML, as `md-html` wrote it.
     pub html: String,
-
-    /// The start of the first and the end of the last source range the block's
-    /// text came from; `None` for a block with no mapped text, such as a rule.
-    pub bytes: Option<[usize; 2]>,
 
     /// Whether the block is one line of a file rendered as plain text, which is
     /// shown preformatted.
@@ -49,7 +45,6 @@ pub fn blocks(html: &str) -> Vec<Block> {
 fn block(html: &str, line: bool) -> Block {
     Block {
         html: html.to_owned(),
-        bytes: extent(html),
         line,
     }
 }
@@ -190,23 +185,6 @@ fn lines(element: &str) -> Option<impl Iterator<Item = &str>> {
         .strip_suffix("</pre>")?;
 
     Some(inner.split('\n').filter(|line| !line.is_empty()))
-}
-
-/// The smallest `data-s` and largest `data-e` in `html`.
-fn extent(html: &str) -> Option<[usize; 2]> {
-    let start = numbers(html, "data-s=\"").min()?;
-    let end = numbers(html, "data-e=\"").max()?;
-
-    Some([start, end])
-}
-
-/// The number after each `prefix` in `html`.
-fn numbers<'a>(html: &'a str, prefix: &'a str) -> impl Iterator<Item = usize> + 'a {
-    html.match_indices(prefix).filter_map(move |(index, _)| {
-        let rest = &html[index + prefix.len()..];
-        let digits = rest.find('"').map(|end| &rest[..end])?;
-        digits.parse().ok()
-    })
 }
 
 #[cfg(test)]

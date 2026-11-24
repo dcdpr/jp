@@ -21,27 +21,31 @@ use crate::{
     dom::{Nav, keep_polling, link},
     route::{ReviewView, Route},
     text,
+    widget::{self, Tone},
 };
+
+/// The classes of a line of small print under a review's title.
+const META: &str = "mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted wrap-anywhere";
 
 /// The review list, which notes the workspace each answer names in `seen`.
 pub(crate) fn page(nav: Nav, seen: RwSignal<Option<String>>) -> impl RenderHtml {
     let listing = RwSignal::new(None::<Result<Listing, String>>);
     follow(listing, seen);
 
-    main().class("jp-page jp-list").child((
-        header()
-            .class("jp-header")
-            .child(div().class("jp-bar").child((
-                span().class("jp-home").child("jp"),
-                h1().class("jp-title").child(move || {
-                    seen.get()
-                        .map_or_else(|| "Reviews".to_owned(), |name| format!("Reviews of {name}"))
-                }),
-            ))),
-        start(nav),
-        section()
-            .class("jp-reviews")
-            .child(move || listing.with(|listing| reviews(nav, listing.as_ref()))),
+    main().child((
+        header().class(widget::BAR).child((
+            span().class(widget::HOME).child("jp"),
+            h1().class(widget::TITLE).child(move || {
+                seen.get()
+                    .map_or_else(|| "Reviews".to_owned(), |name| format!("Reviews of {name}"))
+            }),
+        )),
+        div().class(widget::COLUMN).child((
+            start(nav),
+            section()
+                .class("mt-6")
+                .child(move || listing.with(|listing| reviews(nav, listing.as_ref()))),
+        )),
     ))
 }
 
@@ -69,13 +73,13 @@ fn follow(listing: RwSignal<Option<Result<Listing, String>>>, seen: RwSignal<Opt
 /// The reviews, newest first, and those that can't be read.
 fn reviews(nav: Nav, listing: Option<&Result<Listing, String>>) -> AnyView {
     let listing = match listing {
-        None => return p().class("jp-note").child("Loading…").into_any(),
-        Some(Err(error)) => return p().class("jp-error").child(error.clone()).into_any(),
+        None => return p().class(widget::NOTE).child("Loading…").into_any(),
+        Some(Err(error)) => return p().class(widget::ERROR).child(error.clone()).into_any(),
         Some(Ok(listing)) => listing,
     };
     if listing.reviews.is_empty() && listing.unreadable.is_empty() {
         return p()
-            .class("jp-note")
+            .class(widget::NOTE)
             .child("No reviews yet. Start one above, or with `jp review start`.")
             .into_any();
     }
@@ -84,7 +88,7 @@ fn reviews(nav: Nav, listing: Option<&Result<Listing, String>>) -> AnyView {
         .unreadable
         .iter()
         .map(|unreadable| {
-            p().class("jp-error").child(format!(
+            p().class(format!("{} mt-2", widget::ERROR)).child(format!(
                 "{} can't be read: {}",
                 unreadable.id, unreadable.error
             ))
@@ -92,7 +96,7 @@ fn reviews(nav: Nav, listing: Option<&Result<Listing, String>>) -> AnyView {
         .collect::<Vec<_>>();
 
     (
-        ul().class("jp-items").child(
+        ul().class("grid gap-2").child(
             listing
                 .reviews
                 .iter()
@@ -108,28 +112,32 @@ fn reviews(nav: Nav, listing: Option<&Result<Listing, String>>) -> AnyView {
 /// A review in the list, newest first.
 fn item(nav: Nav, summary: &Summary) -> impl RenderHtml {
     let head = &summary.head;
+    let class = match head.status {
+        State::Open => "rounded-lg border border-line bg-surface px-3 py-2.5",
+        State::Closed => "rounded-lg border border-line bg-surface px-3 py-2.5 opacity-70",
+    };
 
-    li().class(format!("jp-item jp-item-{}", head.status))
-        .child((
-            link(
-                nav,
-                Route::Review(ReviewView::of(&head.id)),
-                "jp-item-title",
-                head.title.clone(),
-            ),
-            div().class("jp-item-meta").child((
-                span().class("jp-item-id").child(head.id.clone()),
-                span().child(format!("version {}", summary.latest)),
-                span().child(text::counts(&summary.comments)),
-                summary.running.map(|pass| {
-                    span()
-                        .class("jp-running")
-                        .child(format!("Pass {pass} running"))
-                }),
-                (head.status == State::Closed).then(|| span().class("jp-status").child("closed")),
-            )),
-            div().class("jp-item-files").child(head.files.join(", ")),
-        ))
+    li().class(class).child((
+        link(
+            nav,
+            Route::Review(ReviewView::of(&head.id)),
+            "inline-flex items-center font-semibold wrap-anywhere hover:underline \
+             pointer-coarse:min-h-11",
+            head.title.clone(),
+        ),
+        div().class(META).child((
+            span().class("font-mono").child(head.id.clone()),
+            span().child(format!("version {}", summary.latest)),
+            span().child(text::counts(&summary.comments)),
+            summary.running.map(|pass| {
+                span()
+                    .class("font-medium text-accent")
+                    .child(format!("Pass {pass} running"))
+            }),
+            (head.status == State::Closed).then(|| span().child("closed")),
+        )),
+        div().class(META).child(head.files.join(", ")),
+    ))
 }
 
 /// The form that starts a review of workspace files, and opens it.
@@ -153,42 +161,59 @@ fn start(nav: Nav) -> impl RenderHtml {
         send(nav, request, refused, sending);
     };
 
-    section().class("jp-start").child(
-        form().on(ev::submit, submit).child((
-            h2().child("Start a review"),
-            label().class("jp-field").child((
-                span().child("Files, one per line, relative to the workspace root"),
-                textarea()
-                    .attr("rows", "2")
-                    .attr("placeholder", "docs/notes.md")
-                    .attr("autocapitalize", "off")
-                    .attr("spellcheck", "false")
-                    .prop("value", move || files.get())
-                    .on(ev::input, move |event| {
-                        files.set(event_target_value(&event));
-                    }),
+    section().child(
+        form()
+            .class("grid gap-3 rounded-lg border border-line p-3")
+            .on(ev::submit, submit)
+            .child((
+                h2().class("text-sm font-semibold").child("Start a review"),
+                files_field(files),
+                title_field(title),
+                div().child(
+                    button()
+                        .attr("type", "submit")
+                        .class(widget::button_class(Tone::Primary))
+                        .prop("disabled", move || sending.get())
+                        .child("Start"),
+                ),
+                move || {
+                    refused
+                        .get()
+                        .map(|error| p().class(widget::ERROR).child(error))
+                },
             )),
-            label().class("jp-field").child((
-                span().child("Title (its files when left empty)"),
-                input()
-                    .attr("type", "text")
-                    .prop("value", move || title.get())
-                    .on(ev::input, move |event| {
-                        title.set(event_target_value(&event));
-                    }),
-            )),
-            button()
-                .attr("type", "submit")
-                .class("jp-button")
-                .prop("disabled", move || sending.get())
-                .child("Start"),
-            move || {
-                refused
-                    .get()
-                    .map(|error| p().class("jp-error").child(error))
-            },
-        )),
     )
+}
+
+/// The field the files to review are named in, which writes `files`.
+fn files_field(files: RwSignal<String>) -> impl RenderHtml {
+    label().class(widget::FIELD).child((
+        span().child("Files, one per line, relative to the workspace root"),
+        textarea()
+            .class(format!("{} font-mono", widget::INPUT))
+            .attr("rows", "2")
+            .attr("placeholder", "docs/notes.md")
+            .attr("autocapitalize", "off")
+            .attr("spellcheck", "false")
+            .prop("value", move || files.get())
+            .on(ev::input, move |event| {
+                files.set(event_target_value(&event));
+            }),
+    ))
+}
+
+/// The field the review's title is given in, which writes `title`.
+fn title_field(title: RwSignal<String>) -> impl RenderHtml {
+    label().class(widget::FIELD).child((
+        span().child("Title (its files when left empty)"),
+        input()
+            .class(widget::INPUT)
+            .attr("type", "text")
+            .prop("value", move || title.get())
+            .on(ev::input, move |event| {
+                title.set(event_target_value(&event));
+            }),
+    ))
 }
 
 /// Start the review `request` asks for, and open it; why the server refused it

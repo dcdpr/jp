@@ -427,7 +427,7 @@ async fn a_file_is_served_rendered_and_a_diff_of_one_file() {
         file["html"]
             .as_str()
             .unwrap()
-            .starts_with(r#"<h1><span data-s="2" data-e="7">Title</span></h1>"#),
+            .starts_with(r#"<h1 id="title"><span data-s="2" data-e="7">Title</span></h1>"#),
         "{file}"
     );
     assert_eq!(

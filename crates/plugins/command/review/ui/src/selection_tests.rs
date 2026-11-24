@@ -18,12 +18,12 @@ fn rendered() -> [Span; 3] {
 }
 
 #[test]
-fn a_deselection_drops_the_range_when_the_bar_was_never_pressed() {
+fn a_deselection_drops_the_range_when_the_actions_were_never_pressed() {
     assert!(!kept(None, 10_000.0));
 }
 
 #[test]
-fn a_deselection_while_the_bar_is_pressed_keeps_the_range() {
+fn a_deselection_while_the_actions_are_pressed_keeps_the_range() {
     assert!(kept(Some(10_000.0), 10_150.0));
 }
 

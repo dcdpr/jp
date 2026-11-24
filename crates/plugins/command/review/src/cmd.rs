@@ -1,7 +1,8 @@
-//! Review-level CLI commands: `start`, `ls`, `show`, `diff`, `close`, and
-//! `open`.
+//! Review-level CLI commands: `start`, `ls`, `show`, `diff`, `close`, `reopen`,
+//! and `open`.
 //!
-//! Comment and reply commands live in [`crate::comments`].
+//! Comment and reply commands live in [`crate::comments`], and those recording
+//! what the reviewer approved and read in [`crate::reading`].
 
 use std::{collections::BTreeMap, env};
 
@@ -375,6 +376,24 @@ pub(crate) fn changes(
         to,
         files,
     })
+}
+
+/// Open the closed review `id` again.
+pub(crate) fn reopen(ctx: &Context<'_>, id: ReviewId) -> Result<Output, String> {
+    let reopened = ctx
+        .store
+        .update(id, |review, _| Ok::<_, String>(review.reopen()))?;
+
+    if ctx.format.is_json() {
+        return json(&view::summary(id, &ctx.store.read(id)?));
+    }
+
+    Ok(if reopened {
+        format!("Reopened {id}.\n")
+    } else {
+        format!("{id} is open already.\n")
+    }
+    .into())
 }
 
 /// Close review `id`, warning if any comments remain open or in draft.

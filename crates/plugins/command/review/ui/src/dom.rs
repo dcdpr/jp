@@ -1,6 +1,6 @@
 //! What the UI reads from and asks of the browser around it: the location, the
-//! history, whether the page shows, the clock, local storage, and the part of
-//! the page the on-screen keyboard leaves visible.
+//! history, whether the page shows, the clock, local storage, the part of the
+//! page the reader sees, and what the page is scrolled to.
 
 use std::{cell::Cell, future::Future, rc::Rc, time::Duration};
 
@@ -12,9 +12,27 @@ use tachys::{
     prelude::*,
 };
 use wasm_bindgen::{JsCast, JsValue, closure::Closure};
-use web_sys::{Event, HtmlElement, MouseEvent};
+use web_sys::{
+    Element, Event, HtmlElement, MouseEvent, Range, ScrollIntoViewOptions, ScrollLogicalPosition,
+};
 
-use crate::{client, poll, route::Route};
+use crate::{
+    client, layout, poll,
+    popover::Rect,
+    route::{Route, unescape},
+};
+
+/// The media query of a screen wide enough for the comments to sit beside the
+/// file: Tailwind's `lg` breakpoint, which the views' classes switch at.
+const WIDE: &str = "(min-width: 64rem)";
+
+/// How far under the top of the window a passage scrolled to rests, in CSS
+/// pixels: clear of the top bar.
+const REST: f64 = 96.0;
+
+/// How much of the window's height is left over the comments, where they are a
+/// sheet over the bottom of a narrow screen.
+const OVER_SHEET: f64 = 0.42;
 
 /// Moves between the UI's pages without reloading, keeping the location and the
 /// history in step with the page shown.
@@ -66,14 +84,19 @@ where
     a().attr("href", to.href())
         .class(class)
         .on(ev::click, move |event: MouseEvent| {
-            let plain = event.button() == 0
-                && !(event.ctrl_key() || event.meta_key() || event.shift_key() || event.alt_key());
-            if plain {
+            if plain(&event) {
                 event.prevent_default();
                 nav.go(to.clone());
             }
         })
         .child(child)
+}
+
+/// Whether `event` is a plain click: the main button, with no key held that
+/// asks the browser for a new tab or window, or to download.
+pub(crate) fn plain(event: &MouseEvent) -> bool {
+    event.button() == 0
+        && !(event.ctrl_key() || event.meta_key() || event.shift_key() || event.alt_key())
 }
 
 /// Call `listener` with each `name` event fired at the document, until the
@@ -117,6 +140,119 @@ pub(crate) fn store(key: &str, value: Option<&str>) {
 /// Ask the reader `question`, returning whether they agreed.
 pub(crate) fn confirm(question: &str) -> bool {
     window().confirm_with_message(question).unwrap_or(false)
+}
+
+/// Whether the page matches the media query `query`; `false` in a browser that
+/// can't say.
+fn matches(query: &str) -> bool {
+    window()
+        .match_media(query)
+        .ok()
+        .flatten()
+        .is_some_and(|list| list.matches())
+}
+
+/// Whether the comments sit beside the file, and not in a sheet over it.
+pub(crate) fn wide() -> bool {
+    matches(WIDE)
+}
+
+/// The fragment of the page's address, as a link to one heading ends in:
+/// `commenting` of `#commenting`; `None` when the address has none.
+pub(crate) fn fragment() -> Option<String> {
+    let hash = window().location().hash().ok()?;
+    let fragment = hash.trim_start_matches('#');
+
+    (!fragment.is_empty()).then(|| unescape(fragment, false))
+}
+
+/// Make `anchor` the fragment of the page's address, which scrolls the page to
+/// the heading with that anchor, and lets the browser's back button return.
+pub(crate) fn go_to_heading(anchor: &str) {
+    // A browser refusing the address leaves the page where it was.
+    drop(window().location().set_hash(anchor));
+}
+
+/// Scroll the page to the heading with the anchor `anchor` in the file drawn in
+/// `pane`, when it has one.
+///
+/// The heading rests where the stylesheet's `scroll-margin-top` puts it, clear
+/// of the top bar.
+pub(crate) fn show_heading(pane: &Element, anchor: &str) {
+    let heading = document()
+        .get_element_by_id(anchor)
+        .filter(|heading| pane.contains(Some(heading)));
+    if let Some(heading) = heading {
+        heading.scroll_into_view();
+    }
+}
+
+/// Scroll the page to its start.
+pub(crate) fn show_top() {
+    window().scroll_to_with_x_and_y(0.0, 0.0);
+}
+
+/// Open `address` in a tab of its own, which leaves this page as it is and
+/// gives the page opened no handle on it.
+pub(crate) fn open(address: &str) {
+    // A browser that blocks the tab leaves the link unfollowed.
+    drop(window().open_with_url_and_target_and_features(address, "_blank", "noopener"));
+}
+
+/// The size of the window, in CSS pixels.
+fn window_size() -> (f64, f64) {
+    let side = |side: Result<JsValue, JsValue>| {
+        side.ok().and_then(|side| side.as_f64()).unwrap_or_default()
+    };
+
+    (side(window().inner_width()), side(window().inner_height()))
+}
+
+/// The part of the page the reader sees, in the coordinates
+/// `getBoundingClientRect` answers in: the window, less what the on-screen
+/// keyboard covers and what a pinch zoomed out of view.
+pub(crate) fn visible() -> Rect {
+    let Some(viewport) = window().visual_viewport() else {
+        let (width, height) = window_size();
+        return Rect {
+            left: 0.0,
+            top: 0.0,
+            right: width,
+            bottom: height,
+        };
+    };
+
+    Rect {
+        left: viewport.offset_left(),
+        top: viewport.offset_top(),
+        right: viewport.offset_left() + viewport.width(),
+        bottom: viewport.offset_top() + viewport.height(),
+    }
+}
+
+/// Scroll the page so the text `range` covers shows: under the top bar, and
+/// over the comments where they are a sheet over the bottom of the screen.
+///
+/// Text that shows there already stays where it is.
+pub(crate) fn scroll_to(range: &Range) {
+    let (_, height) = window_size();
+    let until = if wide() { height } else { height * OVER_SHEET };
+    let rect = range.get_bounding_client_rect();
+    let by = layout::scroll_for([rect.top(), rect.bottom()], [REST, until]);
+
+    window().scroll_by_with_x_and_y(0.0, by);
+}
+
+/// Scroll what holds the element with the id `id` just far enough for the
+/// element to show.
+pub(crate) fn show(id: &str) {
+    let Some(element) = document().get_element_by_id(id) else {
+        return;
+    };
+    let nearest = ScrollIntoViewOptions::new();
+    nearest.set_block(ScrollLogicalPosition::Nearest);
+
+    element.scroll_into_view_with_scroll_into_view_options(&nearest);
 }
 
 /// Keep `--jp-viewport`, the height of the part of the page the reader sees,

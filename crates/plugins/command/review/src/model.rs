@@ -1,7 +1,8 @@
 //! Core review data model and state transitions (`review.json`).
 //!
 //! [`Review`] represents the serialized state of a review: tracked file paths,
-//! file versions, comments, replies, and passes.
+//! file versions, comments, replies, passes, and what the reviewer approved and
+//! read ([`crate::progress`]).
 //! All mutations validate invariants and return a [`Refusal`] on invalid state
 //! transitions; disk I/O is handled by [`crate::store`] and
 //! [`crate::snapshot`].
@@ -17,6 +18,7 @@ use crate::{
     anchor::{Anchor, Target},
     id::{CommentRef, ReviewId},
     pass::Passes,
+    progress::Progress,
 };
 
 /// Current `review.json` schema version.
@@ -60,6 +62,9 @@ pub struct Review {
 
     #[serde(flatten)]
     pub passes: Passes,
+
+    #[serde(flatten)]
+    pub progress: Progress,
 }
 
 /// Snapshot of the review's tracked files at a point in time.
@@ -187,6 +192,12 @@ pub enum Refusal {
 
     /// The pass with this number has not ended.
     PassRunning(u32),
+
+    /// An approval is of a range of a file, and the anchor names none.
+    ApprovalWithoutRange,
+
+    /// No approval carries this number.
+    Approval(u32),
 }
 
 /// What about a comment stands in the way of a change.
@@ -247,6 +258,10 @@ impl Refusal {
                 "{id} runs its passes in {conversation}; leave out `--id` to continue there."
             ),
             Self::PassRunning(number) => format!("Pass {number} of {id} has not ended."),
+            Self::ApprovalWithoutRange => {
+                "An approval is of a range of a file: lines, or a span within them.".to_owned()
+            }
+            Self::Approval(number) => format!("{id} has no approval {number}."),
         }
     }
 }
@@ -323,6 +338,7 @@ impl Review {
             comments: vec![],
             last_comment: 0,
             passes: Passes::default(),
+            progress: Progress::default(),
         }
     }
 
@@ -379,7 +395,7 @@ impl Review {
     }
 
     pub fn comment(&self, number: u32) -> Result<&Comment, Refusal> {
-        let missing = self.missing(number);
+        let missing = missing(self.last_comment, number);
         self.comments
             .iter()
             .find(|comment| comment.number == number)
@@ -387,23 +403,11 @@ impl Review {
     }
 
     pub(crate) fn comment_mut(&mut self, number: u32) -> Result<&mut Comment, Refusal> {
-        let missing = self.missing(number);
+        let missing = missing(self.last_comment, number);
         self.comments
             .iter_mut()
             .find(|comment| comment.number == number)
             .ok_or(missing)
-    }
-
-    /// Why no comment carries `number`: it was withdrawn when a comment has
-    /// taken it before.
-    fn missing(&self, number: u32) -> Refusal {
-        let why = if (1..=self.last_comment).contains(&number) {
-            Why::Withdrawn
-        } else {
-            Why::Missing
-        };
-
-        Refusal::Comment(number, why)
     }
 
     /// Add a comment, returning the number it takes.
@@ -529,7 +533,7 @@ impl Review {
     /// sent one.
     pub fn withdraw(&mut self, number: u32) -> Result<Draft, Refusal> {
         self.writable()?;
-        let missing = self.missing(number);
+        let missing = missing(self.last_comment, number);
         let index = self
             .comments
             .iter()
@@ -596,6 +600,23 @@ impl Review {
         self.closed_at = Some(at);
         Ok(true)
     }
+
+    /// Open a closed review again, returning `false` when it was open already.
+    pub fn reopen(&mut self) -> bool {
+        self.closed_at.take().is_some()
+    }
+}
+
+/// Why no comment carries `number` in a review whose highest comment number
+/// allocated is `last`: it was withdrawn when a comment has taken it before.
+fn missing(last: u32, number: u32) -> Refusal {
+    let why = if (1..=last).contains(&number) {
+        Why::Withdrawn
+    } else {
+        Why::Missing
+    };
+
+    Refusal::Comment(number, why)
 }
 
 impl Comment {
@@ -615,6 +636,21 @@ impl Comment {
             Status::Open => Ok(()),
             Status::Draft => Err(Refusal::Comment(self.number, Why::Draft)),
             Status::Resolved => Err(Refusal::Comment(self.number, Why::Resolved)),
+        }
+    }
+
+    /// Open a resolved comment again, returning `false` when it was open
+    /// already.
+    ///
+    /// A draft was never sent, so it was never resolved either.
+    pub fn reopen(&mut self) -> Result<bool, Refusal> {
+        match self.status() {
+            Status::Draft => Err(Refusal::Comment(self.number, Why::Draft)),
+            Status::Open => Ok(false),
+            Status::Resolved => {
+                self.resolved_at = None;
+                Ok(true)
+            }
         }
     }
 

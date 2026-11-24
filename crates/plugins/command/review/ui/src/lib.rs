@@ -10,13 +10,18 @@
 //! [`start`] and talks to the server's JSON API, whose types it shares through
 //! `jp-review-api`.
 //!
-//! - `route`, `blocks`, `mapping`, `selection`, `layout`, `actions`,
-//!   `composer`, `poll`, `text`, and the URLs, calls, and answers of `client`
-//!   are pure, and tested on the host.
-//! - `client`, `dom`, `highlight`, `capture`, and the views (`app`, `list`,
-//!   `review`, `card`, `compose`) touch the browser: `highlight` through the
-//!   CSS Custom Highlight API, `capture` through the selection API, and the
-//!   browser tests in `tests/` drive both in a headless browser.
+//! - `route`, `link`, `blocks`, `mapping`, `selection`, `layout`, `popover`,
+//!   `actions`, `composer`, `poll`, `text`, and the URLs, calls, and answers of
+//!   `client` are pure, and tested on the host.
+//! - `client`, `dom`, `highlight`, `capture`, `seat`, and the views (`app`,
+//!   `list`, `review`, `card`, `compose`, `widget`) touch the browser:
+//!   `highlight` through the CSS Custom Highlight API, `capture` through the
+//!   selection API, and `seat` by moving an element; the browser tests in
+//!   `tests/` drive the three in a headless browser.
+//!
+//! The views are styled with Tailwind CSS utility classes, which `just
+//! build-ui` compiles `style.css` for from the class names in these sources;
+//! `widget` says how they are written.
 //!
 //! See `docs/rfd/140-browser-frontend-for-the-review-engine.md`.
 
@@ -31,13 +36,17 @@ pub mod composer;
 mod dom;
 pub mod highlight;
 pub mod layout;
+pub mod link;
 mod list;
 pub mod mapping;
 pub mod poll;
+pub mod popover;
 mod review;
 pub mod route;
+pub mod seat;
 pub mod selection;
 pub mod text;
+mod widget;
 
 use std::mem;
 

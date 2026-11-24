@@ -298,6 +298,45 @@ fn resolving_needs_a_sent_comment_without_a_draft_reply() {
     );
 }
 
+/// The assistant never answered comment 1, so the reviewer wrote in it last.
+#[test]
+fn a_resolved_comment_is_opened_again() {
+    let mut review = review();
+    review.add_comment(on_review("First.")).unwrap();
+    review.add_comment(on_review("Second.")).unwrap();
+    review.comments[0].pass = Some(1);
+    review.resolve(1, at(4)).unwrap();
+
+    assert_eq!(review.comment_mut(1).unwrap().reopen(), Ok(true));
+
+    let reopened = review.comment(1).unwrap();
+    assert_eq!(reopened.status(), Status::Open);
+    assert_eq!(reopened.resolved_at, None);
+    assert!(reopened.awaits_assistant(), "the next pass sends it");
+    assert_eq!(
+        review.reply(1, "Jane".to_owned(), at(5), "Still wrong.".to_owned()),
+        Ok(Replied::Added)
+    );
+}
+
+#[test]
+fn only_a_resolved_comment_is_opened_again() {
+    let mut review = review();
+    review.add_comment(on_review("First.")).unwrap();
+    review.add_comment(on_review("Second.")).unwrap();
+    review.comments[0].pass = Some(1);
+
+    assert_eq!(review.comment_mut(1).unwrap().reopen(), Ok(false));
+    assert_eq!(
+        review.comment_mut(2).unwrap().reopen(),
+        Err(refused(2, Why::Draft))
+    );
+    assert_eq!(
+        review.comment_mut(3).map(|_| ()),
+        Err(refused(3, Why::Missing))
+    );
+}
+
 #[test]
 fn the_assistant_answers_a_reviewer_comment_with_a_verdict() {
     let mut review = review();
@@ -492,6 +531,19 @@ fn a_closed_review_refuses_every_change() {
 }
 
 #[test]
+fn a_reopened_review_takes_changes_again() {
+    let mut review = review();
+    review.close(at(9)).unwrap();
+
+    assert!(review.reopen());
+    assert_eq!(review.state(), State::Open);
+    assert_eq!(review.closed_at, None);
+    assert_eq!(review.add_comment(on_review("More.")), Ok(1));
+
+    assert!(!review.reopen(), "it was open already");
+}
+
+#[test]
 fn versions_count_up_and_the_base_is_found_by_its_label() {
     let mut review = Review::new("t".to_owned(), "Jane".to_owned(), at(0), vec![
         "a.md".to_owned(),
@@ -568,6 +620,14 @@ fn refusals_name_the_comment_in_the_review() {
     assert_eq!(
         Refusal::PassRunning(2).message(id()),
         "Pass 2 of R-1h4k2m9 has not ended."
+    );
+    assert_eq!(
+        Refusal::Approval(3).message(id()),
+        "R-1h4k2m9 has no approval 3."
+    );
+    assert_eq!(
+        Refusal::ApprovalWithoutRange.message(id()),
+        "An approval is of a range of a file: lines, or a span within them."
     );
 }
 
