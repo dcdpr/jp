@@ -4021,11 +4021,7 @@ fn stored_conversation_ids(root: &Utf8Path) -> Vec<ConversationId> {
     test_backend(root).load_conversation_ids(ConversationFilter::default())
 }
 
-/// Assert every conversation directory in the store holds a valid, stored
-/// conversation.
-///
-/// A directory left behind without the conversation's files is not indexed, so
-/// an id assertion alone does not catch it.
+/// Assert that every conversation directory in the store passes validation.
 fn assert_store_holds_only_conversations(root: &Utf8Path) {
     let result = test_backend(root).validate_conversations();
 
@@ -4349,10 +4345,6 @@ fn run_renaming_query_keeps_the_composed_draft() {
     assert_eq!(metadata.title.as_deref(), Some("New"));
 }
 
-// A query draft never sits in a directory without the conversation's own
-// files: the `--new` conversation is stored before the editor writes the draft.
-// The editor here records what its directory holds when it opens, as the
-// request it sends.
 #[test]
 fn run_new_query_stores_the_conversation_before_the_draft() {
     let session = Session {
@@ -4378,8 +4370,6 @@ fn run_new_query_stores_the_conversation_before_the_draft() {
     assert_store_holds_only_conversations(tmp.path());
 }
 
-// Under `--no-persist` nothing is written to storage, the editor's draft
-// included.
 #[test]
 fn run_no_persist_editor_query_writes_no_draft() {
     let session = Session {
@@ -4401,7 +4391,6 @@ fn run_no_persist_editor_query_writes_no_draft() {
     assert_eq!(stored_conversation_ids(tmp.path()), []);
 }
 
-/// `ctx` with its workspace as `load_workspace` opens it for `--no-persist`.
 fn no_persist(mut ctx: Ctx) -> Ctx {
     let workspace = std::mem::replace(&mut ctx.workspace, Workspace::in_memory("/unused"));
     ctx.workspace = workspace.without_persistence();

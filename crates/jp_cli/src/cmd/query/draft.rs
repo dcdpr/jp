@@ -1,8 +1,8 @@
-//! The query draft: the request `jp query` composes, kept in the conversation's
-//! user-local directory until a turn has sent it.
+//! Query draft management (`QUERY_MESSAGE.md`).
 //!
-//! The next `jp query --edit` seeds its buffer from the draft, so a request is
-//! never lost to a run that ends before its turn starts.
+//! Preserves the user's composed query in the conversation's user-local
+//! directory until the turn starts, so an interrupted run can seed the next `jp
+//! query --edit` buffer from the saved draft.
 
 use std::{fs, io};
 
@@ -15,19 +15,14 @@ use tracing::{debug, warn};
 
 use crate::editor;
 
-/// Where the editor composes the query draft for conversation `id`, and the
-/// temporary directory that holds it under `--no-persist`.
+/// Resolve the directory where the query draft for conversation `id` should be
+/// written, plus an optional temp directory guard when `persist` is `false`.
 ///
-/// The draft lives in the conversation's user-local directory, and is never
-/// projected into the committed workspace tree.
-/// The directory is named for where the conversation lives now, not for the
-/// title the run may end with: a write reconciles the ID to a single directory,
-/// renaming the live one into the new name and deleting every other copy, so a
-/// draft composed under the new name would be deleted while the rename carries
-/// one in the live directory across.
-///
-/// Without `persist` nothing is written to storage, so the draft goes in a
-/// temporary directory, removed when the returned guard drops.
+/// When persistence is enabled, the draft is placed in the conversation's
+/// current user-local directory (using `stored_title` rather than any pending
+/// title override so a subsequent title rename carries the draft along).
+/// When `persist` is `false` (`--no-persist`), the draft is placed in a
+/// temporary directory that is deleted when the returned guard drops.
 pub(super) fn draft_dir(
     persist: bool,
     fs_backend: Option<&FsStorageBackend>,
@@ -66,23 +61,21 @@ pub(super) fn preserve_query_message_file(conversation_dir: &Utf8Path, content: 
     }
 }
 
-/// Which stored query drafts a cleanup may remove.
+/// Policy for removing a stored query draft after a turn.
 #[derive(Debug, Clone, Copy)]
 pub(super) enum DraftRemoval<'a> {
-    /// Remove whatever is stored.
+    /// Remove the draft unconditionally.
     Any,
 
-    /// Remove the draft only while it still matches this fingerprint.
+    /// Remove the draft only if its revision fingerprint still matches.
     ///
-    /// `None` means nothing was stored, so anything found now was written by
-    /// someone else and is left alone.
+    /// If `None` (no draft existed when the turn started), any draft now on
+    /// disk was written concurrently and is preserved.
     IfUnchanged(Option<&'a str>),
 }
 
-/// The fingerprint of a conversation's stored query draft, if it has one.
-///
-/// A draft that cannot be read has no fingerprint, which leaves it in place
-/// rather than removing bytes nothing has seen.
+/// Return the revision fingerprint of conversation `id`'s user-local query
+/// draft, or `None` if the draft does not exist or cannot be read.
 pub(super) fn draft_fingerprint(
     fs_backend: Option<&FsStorageBackend>,
     id: &ConversationId,
@@ -94,20 +87,13 @@ pub(super) fn draft_fingerprint(
         .map(|content| editor::draft_revision(&content))
 }
 
-/// Remove the editor's query-message file from a conversation's user-local
-/// storage directory, tolerating its absence.
+/// Remove `QUERY_MESSAGE.md` from conversation `id`'s user-local directory
+/// according to `removal`.
 ///
-/// A title set mid-turn (e.g. from a leading markdown heading) renames the
-/// directory, so the path captured before the turn is stale; re-resolve the
-/// live directory instead.
-/// The draft is written to user-local storage and never projected into the
-/// workspace, so a single root is enough.
-/// Without a filesystem backend or user-local store there is nothing to
-/// resolve.
-///
-/// `removal` decides what may go: a draft replaced since the request was
-/// composed belongs to whoever wrote it, and removing it would discard text
-/// this invocation never saw.
+/// Re-resolves the live user-local directory by ID because the directory may
+/// have been renamed mid-turn when a title was set.
+/// Preserves the file if `removal` is [`DraftRemoval::IfUnchanged`] and the
+/// file's fingerprint has changed since the request was sent.
 pub(super) fn cleanup_query_message_file(
     fs_backend: Option<&FsStorageBackend>,
     id: &ConversationId,
@@ -141,8 +127,8 @@ pub(super) fn cleanup_query_message_file(
     }
 }
 
-/// Whether the locked conversation holds no query draft, and no more turns than
-/// the `turns_before` it started the run with.
+/// Return `true` if the conversation has no saved query draft and its turn
+/// count has not increased from `turns_before`.
 pub(super) fn is_abandoned(
     fs_backend: Option<&FsStorageBackend>,
     lock: &ConversationLock,

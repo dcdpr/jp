@@ -24,7 +24,6 @@ use jp_storage::{
 use super::*;
 use crate::{cli::parse_args, load_failure::LoadFailure, shared::confirm::Answer};
 
-/// Where the filesystem backend keeps conversation `dirname`'s `file`.
 fn file_location(dirname: &str, file: &str) -> StorageLocation {
     StorageLocation::labelled(format!("/ws/.jp/conversations/{dirname}/{file}"), file)
 }
@@ -84,7 +83,6 @@ fn stray(name: &str, kind: StrayKind, location: &str) -> StrayEntry {
     }
 }
 
-/// A report as the user reads it, with the styling stripped.
 fn plain(report: &Report<'_>) -> String {
     strip_ansi_escapes::strip_str(render_text(report))
 }
@@ -100,8 +98,6 @@ fn a_store_without_problems_reports_none() {
     assert_eq!(render_json(&report, false).unwrap(), Vec::<String>::new());
 }
 
-// One row per problem: what it is about, what is wrong, and the command that
-// deals with it.
 #[test]
 fn the_report_lists_each_problem_with_the_command_that_deals_with_it() {
     let missing = missing_metadata("17941219991");
@@ -141,8 +137,6 @@ fn the_report_lists_each_problem_with_the_command_that_deals_with_it() {
     );
 }
 
-// Each row's command fixes one conversation; a fix that covers more than one
-// also gets the command that applies it to all of them.
 #[test]
 fn a_fix_covering_several_conversations_gets_one_command_for_all() {
     let first = missing_metadata("17941219991");
@@ -167,7 +161,6 @@ Run `jp doctor --fix rebuild-metadata` to fix all 2 conversations it covers."
     );
 }
 
-// Two copies of one conversation are one conversation to fix.
 #[test]
 fn copies_of_one_conversation_count_once_toward_the_command_for_all() {
     let missing = missing_metadata("17941219991");
@@ -190,8 +183,6 @@ fn copies_of_one_conversation_count_once_toward_the_command_for_all() {
     );
 }
 
-// Archived conversations are fixed and removed where they are, with the same
-// commands as live ones; the fix-all line counts both.
 #[test]
 fn archived_conversations_that_fail_to_load_have_their_own_section() {
     let missing = missing_metadata("17941219991");
@@ -277,8 +268,6 @@ fn an_unfinished_import_is_its_own_kind_of_problem() {
     );
 }
 
-// A conversation that does not load is red; what the store holds beside its
-// conversations is orange.
 #[test]
 fn the_target_is_coloured_by_how_serious_the_problem_is() {
     let corrupt = corrupt_events("17941219992");
@@ -304,8 +293,6 @@ fn the_target_is_coloured_by_how_serious_the_problem_is() {
     );
 }
 
-// A conversation stored in both roots is one conversation: listed once, by the
-// first copy's failure.
 #[test]
 fn a_conversation_with_two_broken_copies_is_listed_once() {
     let corrupt = corrupt_events("17941219992");
@@ -357,7 +344,6 @@ fn the_json_report_is_one_typed_record_per_problem() {
     ]);
 }
 
-/// A store on disk, and a text printer capturing stdout.
 struct Store {
     _tmp: Utf8TempDir,
     fs: Arc<FsStorageBackend>,
@@ -381,7 +367,6 @@ fn store() -> Store {
     }
 }
 
-/// A conversation directory holding valid events and nothing else.
 fn events_only(store: &Store, dirname: &str) -> Utf8PathBuf {
     let dir = store.conversations.join(dirname);
     fs::create_dir_all(&dir).unwrap();
@@ -403,9 +388,6 @@ fn run(store: &Store, recovery: &dyn RecoveryBackend, args: &[&str], persists: b
     result
 }
 
-/// Run `jp doctor` with `args`, answering its questions with `answers` in
-/// order, and return what it asked: each conversation's ID, and whether `Y` and
-/// `N` were offered for it.
 fn run_answering(
     store: &Store,
     args: &[&str],
@@ -432,9 +414,6 @@ fn a_clean_store_exits_successfully() {
     assert_eq!(s.out.lock().as_str(), "No problems found.\n");
 }
 
-// Status 1 is a run that failed and 2 a mistyped command, so a script tells a
-// report with problems from both. The report is the output; the status adds no
-// message to it.
 #[test]
 fn a_report_with_problems_exits_with_status_3() {
     let s = store();
@@ -448,7 +427,6 @@ fn a_report_with_problems_exits_with_status_3() {
     assert!(s.out.lock().starts_with("# Report\n"));
 }
 
-// The startup scan never reads the archive; the report does.
 #[test]
 fn an_archived_conversation_that_fails_to_load_is_reported() {
     let s = store();
@@ -466,7 +444,6 @@ fn an_archived_conversation_that_fails_to_load_is_reported() {
     );
 }
 
-// The fix writes where the conversation is, so an archived one stays archived.
 #[test]
 fn the_fix_repairs_an_archived_conversation_where_it_is() {
     let s = store();
@@ -494,8 +471,6 @@ fn the_fix_repairs_an_archived_conversation_where_it_is() {
     assert!(!s.conversations.join("17941219991").exists());
 }
 
-// The report reads the store as it is: what the startup scan of any other
-// command would remove stays where it is.
 #[test]
 fn reporting_changes_nothing_on_disk() {
     let s = store();
@@ -554,7 +529,6 @@ fn the_fix_applies_only_to_the_conversations_named() {
     assert!(!other.join("metadata.json").exists());
 }
 
-// A named conversation the fix cannot help is reported, not skipped silently.
 #[test]
 fn a_named_conversation_the_fix_cannot_help_is_reported() {
     let s = store();
@@ -597,7 +571,6 @@ fn naming_a_conversation_needs_a_fix() {
     assert_eq!(error.kind(), ErrorKind::MissingRequiredArgument);
 }
 
-// Writing to the user's conversations is never assumed when nobody can be asked.
 #[test]
 fn the_fix_needs_a_confirmation_when_nobody_can_answer() {
     let s = store();
@@ -628,8 +601,6 @@ fn the_fix_under_no_persist_writes_nothing() {
     assert!(!dir.join("metadata.json").exists());
 }
 
-// The fix asks for each conversation, as `jp conversation rm` does, so one the
-// user does not want changed is left alone.
 #[test]
 fn the_fix_asks_for_each_conversation() {
     let s = store();
@@ -672,7 +643,6 @@ fn yes_to_all_applies_the_fix_to_every_remaining_conversation() {
     assert!(second.join("metadata.json").is_file());
 }
 
-// Declining is an answer, not a failure: the run ends without an error.
 #[test]
 fn no_to_all_leaves_every_remaining_conversation_alone() {
     let s = store();
@@ -688,7 +658,6 @@ fn no_to_all_leaves_every_remaining_conversation_alone() {
     assert!(!second.join("metadata.json").exists());
 }
 
-// With one conversation there is no "remaining" for `Y` and `N` to answer.
 #[test]
 fn one_named_conversation_is_asked_about_alone() {
     let s = store();
@@ -724,12 +693,9 @@ fn a_fix_with_nothing_to_cover_changes_nothing() {
     );
 }
 
-/// The store, with conversation `held`'s lock taken the moment the store has
-/// been diagnosed, as by another process starting on that conversation between
-/// the diagnosis and the fix.
-///
-/// A conversation already held when the store is diagnosed is left out of the
-/// diagnosis, so only this order reaches a held conversation during the fix.
+/// Test [`RecoveryBackend`] wrapper that locks `held` immediately after
+/// [`Self::diagnose`] returns, simulating another process acquiring the
+/// conversation between diagnosis and repair.
 #[derive(Debug)]
 struct LockAfterDiagnosis {
     fs: Arc<FsStorageBackend>,
@@ -774,8 +740,6 @@ impl RecoveryBackend for LockAfterDiagnosis {
     }
 }
 
-// One conversation another process takes during the fix does not stop the
-// rest: it is skipped, and named in the error the run ends with.
 #[test]
 fn the_fix_skips_and_reports_a_conversation_another_process_holds() {
     let s = store();
@@ -804,8 +768,6 @@ fn the_fix_skips_and_reports_a_conversation_another_process_holds() {
     assert!(!held.join("metadata.json").exists());
 }
 
-// clap's message around the list of accepted values carries the usage line,
-// which changes with every flag the command gains; the list is what this pins.
 #[test]
 fn an_unknown_fix_is_rejected_with_the_names_it_accepts() {
     let error = parse_args::<Doctor>(&["--fix", "rebuild"]).unwrap_err();

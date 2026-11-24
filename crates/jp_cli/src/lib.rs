@@ -481,9 +481,9 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
             return output;
         }
 
-        // A root, and the workspace opened read-only: none of the steps below
-        // run, so the report describes the store as it is and only a fix the
-        // user names writes to it.
+        // Resolve the workspace root and open it read-only without running
+        // trash restoration or startup validation, so `jp doctor` sees the
+        // store as-is.
         WorkspaceRequirement::Diagnose => {
             let Commands::Doctor(args) = cli.command else {
                 unreachable!("`Diagnose` is declared by `jp doctor` alone");
@@ -1141,20 +1141,16 @@ pub(crate) enum LoadIntent {
     Inspect,
 }
 
-/// The reports about the conversation store, printed on stderr in field order
-/// when dropped.
+/// End-of-run stderr report guards for the conversation store, dropped in field
+/// order after command output.
 struct StoreReports {
     _trash: Option<deferred_report::DeferredReport>,
     _load_failures: load_failure::LoadFailureNotice,
 }
 
-/// Bring the stored conversations into the state the conversation index loads
-/// from, and return the reports about them, printed when they drop.
-///
-/// With `fs`, the conversations older versions moved to the trash are moved
-/// back, so they are listed or reported like any other; a draft among them is
-/// given the workspace config found from `config_cwd`.
-/// Without it (no storage on disk, or `--no-persist`) nothing on disk changes.
+/// Restore any legacy `.trash/` entries (when `fs` is `Some`), scan for
+/// conversations that fail validation, and return the deferred stderr report
+/// guards.
 fn prepare_conversation_store(
     fs: Option<&FsStorageBackend>,
     recovery: Arc<dyn RecoveryBackend>,

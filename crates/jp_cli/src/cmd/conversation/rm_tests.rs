@@ -296,8 +296,6 @@ fn run(store: &mut Store, rm: Rm) -> Output {
     result
 }
 
-// Typed IDs reach conversations the conversation list leaves out: one whose
-// files are broken and one that was never stored, in either storage root.
 #[test]
 fn removes_conversations_that_fail_to_load_by_id() {
     let mut s = store(true);
@@ -318,8 +316,6 @@ fn removes_conversations_that_fail_to_load_by_id() {
     assert!(!draft.exists());
 }
 
-// The removal deletes a conversation's own directories and nothing else, however
-// close another entry's name is.
 #[test]
 fn removing_by_id_leaves_everything_else_alone() {
     let mut s = store(true);
@@ -352,7 +348,6 @@ fn removing_by_id_leaves_everything_else_alone() {
     assert!(s.workspace.is_dir());
 }
 
-// The conversations `rm` always handled still go the usual way.
 #[test]
 fn removes_a_loading_conversation_by_id() {
     let mut s = store(true);
@@ -386,8 +381,6 @@ fn an_id_with_no_directory_is_not_found() {
     assert_eq!(error.message, expected.message);
 }
 
-// Nobody can be asked whether to keep waiting, so a held conversation fails
-// the run the same way it does for a conversation that loads.
 #[test]
 fn refuses_a_conversation_another_process_holds_when_nobody_can_wait() {
     let mut s = store(true);
@@ -409,13 +402,11 @@ fn refuses_a_conversation_another_process_holds_when_nobody_can_wait() {
     assert!(dir.is_dir());
 }
 
-// With someone there to wait, the run waits for the holder to let go, the same
-// as for a conversation that loads.
 #[test]
 fn waits_for_a_conversation_another_process_holds() {
-    // On a thread of its own, with a deadline: a wait that never sees the lock
-    // free ends at the contention prompt, which blocks on a terminal the test
-    // does not have.
+    // Run on a dedicated thread with a timeout because a failed wait falls
+    // through to the interactive contention prompt, which would block when no
+    // terminal is attached.
     let (done, finished) = mpsc::channel();
     thread::spawn(move || {
         let mut s = store(true);
@@ -446,8 +437,6 @@ fn waits_for_a_conversation_another_process_holds() {
     assert!(!exists);
 }
 
-// An archived conversation is not in the conversation list, so a typed ID is
-// what reaches it.
 #[test]
 fn removes_an_archived_conversation_by_id() {
     let mut s = store(true);
@@ -461,7 +450,6 @@ fn removes_an_archived_conversation_by_id() {
     assert!(!dir.exists());
 }
 
-// Removal cannot be undone, so it is never assumed when nobody can be asked.
 #[test]
 fn asks_before_removing_and_fails_when_nobody_can_answer() {
     let mut s = store(true);

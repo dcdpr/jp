@@ -44,8 +44,8 @@ pub struct ConversationIndexEntry {
 
 /// Reads conversation data and indexes from a backing store.
 pub trait LoadBackend: Send + Sync + Debug {
-    /// Scan conversation index entries — ID plus [`StoragePresence`] — from
-    /// the backing store.
+    /// Scan conversation index entries (ID plus [`StoragePresence`]) from the
+    /// backing store.
     ///
     /// Filesystem backends merge both storage roots and deduplicate by
     /// conversation ID, so a projected conversation (present in both roots)
@@ -86,11 +86,10 @@ pub trait LoadBackend: Send + Sync + Debug {
 
     /// Load a single conversation's event stream.
     ///
-    /// A stored config that cannot be finalized on its own — a required field
-    /// was among the ones recovery had to drop as unreadable — takes the
-    /// missing values from `fallback`.
-    /// Pass [`PartialAppConfig::empty()`] to hold the stored config to standing
-    /// alone.
+    /// If a stored config is missing a required field that was dropped during
+    /// recovery, missing values are filled from `fallback`.
+    /// Pass [`PartialAppConfig::empty()`] to require the stored config to be
+    /// self-contained.
     fn load_conversation_stream(
         &self,
         id: &ConversationId,
@@ -116,10 +115,12 @@ pub trait LoadBackend: Send + Sync + Debug {
     /// In-memory backends check the structs directly.
     fn load_expired_conversation_ids(&self, now: DateTime<Utc>) -> Vec<ConversationId>;
 
-    /// Where the store holds conversation `id`, live or archived.
+    /// Return the storage locations holding conversation `id` (live or
+    /// archived).
     ///
-    /// Empty when the store holds nothing for `id`, and for a store that keeps
-    /// conversations nowhere a user can reach them, such as an in-memory one.
+    /// Returns an empty vector if the conversation is not stored or if the
+    /// backend has no user-addressable locations (such as an in-memory
+    /// backend).
     fn conversation_locations(&self, _id: &ConversationId) -> Vec<StorageLocation> {
         vec![]
     }

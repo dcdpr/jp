@@ -104,9 +104,7 @@ impl PartialEq for LoadErrorInner {
 impl Storage {
     /// Scan conversation index entries from both roots for the given partition.
     ///
-    /// Only conversations that pass validation are listed: a directory that
-    /// holds no managed files, or broken ones, is not a conversation JP can
-    /// load.
+    /// Only conversations that pass validation are included.
     /// IDs are deduplicated across roots, and each entry's [`StoragePresence`]
     /// records which roots hold the conversation.
     /// Entries are sorted by ID.
@@ -155,7 +153,7 @@ impl Storage {
 /// A bare directory scan of the active (non-archived) partition: no workspace
 /// construction, no user-local merge, no registry writes.
 /// `jp w show` uses this to union checkout-only conversations across a
-/// workspace's sibling roots without paying a full workspace load per root —
+/// workspace's sibling roots without paying a full workspace load per root, as
 /// one loaded checkout already contributes every user-local conversation, so
 /// the siblings can only add conversations that live in their projection alone.
 #[must_use]
@@ -165,10 +163,8 @@ pub fn projected_conversation_ids(storage_dir: &Utf8Path) -> Vec<ConversationId>
 
 /// Scan a single conversations directory for IDs.
 ///
-/// Dot-prefixed entries (`.trash/`, leftover `.tmp`/`.staging-`/`.old-` dirs
-/// from older versions) are skipped by [`load_conversation_id_from_entry`].
-/// Directories holding none of the conversation files are skipped too: they
-/// hold no stored conversation.
+/// Dot-prefixed entries (`.trash/`, `.archive/`, and staging directories) and
+/// directories without managed conversation files are skipped.
 fn scan_conversation_ids(path: &Utf8Path) -> Vec<ConversationId> {
     let entries: Vec<_> = dir_entries(path).collect();
     entries

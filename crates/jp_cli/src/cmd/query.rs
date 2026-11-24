@@ -283,9 +283,8 @@ impl Query {
             staged,
         } = self.acquire_lock(ctx, handle, start_new).await?;
 
-        // A conversation this run brought into being (`--new`, or a fork) has
-        // never been written; `run_locked` stores it before any draft is. A
-        // fork arrives holding the turns it inherited.
+        // Track whether this run created the conversation (`--new` or `--fork`)
+        // so an abandoned new conversation can be removed on exit.
         let created = !lock.is_written();
         let turns_before = lock.with_events(ConversationStream::turn_count);
 
@@ -297,10 +296,9 @@ impl Query {
         // the region above returns past every other candidate site.
         let persist_failure = lock.take_persist_failure();
 
-        // A conversation this run created, that ends without a new turn or a
-        // draft to recover, holds nothing the user wrote: an empty query, or an
-        // editor that never opened. Done while the lock is still held, so no
-        // other process is composing in it.
+        // If this run created the conversation and exited without adding a turn
+        // or saving a query draft, remove the empty conversation directory
+        // while we still hold the lock.
         if created && is_abandoned(ctx.fs_backend.as_deref(), &lock, turns_before) {
             ctx.workspace.remove_conversation_with_lock(lock.into_mut());
         }
@@ -403,10 +401,9 @@ impl Query {
 
         let cid = lock.id();
 
-        // A draft never sits in a directory without the conversation's own
-        // files, so a conversation this run created is stored before the editor
-        // or the recovery copy below can write one. `run` removes it again if
-        // the run ends with neither a turn nor a draft.
+        // Persist a newly created conversation before opening the editor or
+        // writing a recovery draft so `QUERY_MESSAGE.md` never sits in a
+        // directory without `metadata.json` and `events.json`.
         if !lock.is_written() {
             setup.store()?;
         }

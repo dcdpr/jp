@@ -6,10 +6,6 @@ use chrono::{DateTime, Utc};
 
 use super::*;
 
-/// A backend with user-local storage and a conversation directory in it,
-/// holding the draft `jp query` would have composed.
-///
-/// The temp dir comes back so the caller keeps it alive.
 fn draft_fixture() -> (FsStorageBackend, ConversationId, Utf8PathBuf, Utf8TempDir) {
     let tmp = camino_tempfile::tempdir().unwrap();
     let fs = FsStorageBackend::new(&tmp.path().join(".jp"))
@@ -29,9 +25,6 @@ fn draft_fixture() -> (FsStorageBackend, ConversationId, Utf8PathBuf, Utf8TempDi
     (fs, id, path, tmp)
 }
 
-/// A draft replaced while the turn ran belongs to whoever wrote it: a plugin
-/// through `write_draft`, or another `jp` process.
-/// A successful turn removes the request it sent, not text it never saw.
 #[test]
 fn cleanup_keeps_a_draft_written_after_the_request() {
     let (fs, id, path, _tmp) = draft_fixture();
@@ -65,8 +58,6 @@ fn cleanup_removes_the_draft_the_turn_sent() {
     assert!(!path.exists(), "the request that was sent is cleaned up");
 }
 
-/// An emptied editor buffer discards the draft it was seeded from, whatever it
-/// now holds.
 #[test]
 fn cleanup_any_removes_a_replaced_draft() {
     let (fs, id, path, _tmp) = draft_fixture();

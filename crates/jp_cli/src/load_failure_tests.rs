@@ -28,7 +28,6 @@ fn archived_failure<'a>(dirname: &str, error: &'a ValidationError) -> LoadFailur
     }
 }
 
-/// Where the filesystem backend keeps a conversation's `file`.
 fn file_location(file: &str) -> StorageLocation {
     StorageLocation::labelled(format!("/ws/.jp/conversations/17941219994/{file}"), file)
 }
@@ -52,7 +51,6 @@ fn corrupt_metadata() -> ValidationError {
     }
 }
 
-/// A report as the user reads it, with the styling stripped.
 fn plain(failures: &[LoadFailure<'_>]) -> Option<String> {
     render_text(failures).map(strip_ansi_escapes::strip_str)
 }
@@ -63,8 +61,6 @@ fn no_failures_renders_nothing() {
     assert_eq!(render_json(&[], false).unwrap(), Vec::<String>::new());
 }
 
-// `jp c ls --archived` reports the archived conversations it cannot list, and
-// says they are archived.
 #[test]
 fn archived_failures_are_reported_as_archived() {
     let error = missing_metadata();
@@ -118,8 +114,6 @@ fn up_to_five_failures_are_listed() {
     assert_eq!(plain(&failures), Some(expected.join("\n")));
 }
 
-// The report follows every command, so past five it is a count, and `jp doctor`
-// lists them with what fixes each.
 #[test]
 fn more_than_five_failures_point_at_doctor() {
     let missing = missing_metadata();
@@ -145,8 +139,6 @@ fn more_than_five_failures_point_at_doctor() {
     );
 }
 
-// The count and each conversation are what the user acts on, so they carry the
-// bold yellow JP uses to point at the thing a notice is about.
 #[test]
 fn the_count_and_conversations_are_highlighted() {
     let error = missing_metadata();
@@ -177,9 +169,6 @@ fn a_missing_part_is_one_record_with_one_cause() {
     )]);
 }
 
-// The chain is split into one cause per step, so a script reads the part, its
-// location, and the parse position as fields instead of parsing them out of
-// prose.
 #[test]
 fn a_malformed_part_lists_the_part_and_the_parse_error_as_causes() {
     let error = corrupt_metadata();
@@ -221,8 +210,6 @@ fn failures(invalid: &[InvalidConversation]) -> Vec<LoadFailure<'_>> {
     invalid.iter().map(LoadFailure::from).collect()
 }
 
-/// A store holding one conversation whose `metadata.json` is not JSON, and the
-/// conversations its scan reports.
 fn scanned_store(root: &Utf8Path) -> (Arc<dyn RecoveryBackend>, Vec<InvalidConversation>) {
     let backend = Arc::new(FsStorageBackend::new(root).unwrap());
     backend
@@ -232,8 +219,6 @@ fn scanned_store(root: &Utf8Path) -> (Arc<dyn RecoveryBackend>, Vec<InvalidConve
     (backend, invalid)
 }
 
-// `--quiet` silences chrome, and a conversation JP cannot load is not chrome:
-// the report is the only sign of it.
 #[test]
 fn the_text_report_prints_when_the_notice_drops_even_under_quiet() {
     let tmp = camino_tempfile::tempdir().unwrap();
@@ -259,8 +244,6 @@ fn the_text_report_prints_when_the_notice_drops_even_under_quiet() {
     );
 }
 
-// The report prints after the command, so a conversation the command removed
-// (`jp c rm`) or fixed is not reported as failing, nor offered for removal.
 #[test]
 fn a_conversation_the_command_dealt_with_is_not_reported() {
     let tmp = camino_tempfile::tempdir().unwrap();
@@ -312,7 +295,6 @@ fn nothing_prints_when_every_conversation_loads() {
     assert_eq!(err.lock().as_str(), "");
 }
 
-// Scripts get every failure, never the human report's summary.
 #[test]
 fn json_lists_every_failure_past_five() {
     let error = missing_metadata();

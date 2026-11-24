@@ -1152,8 +1152,7 @@ impl From<jp_storage::Error> for Error {
     }
 }
 
-/// The error for a conversation moved from `from` onto `existing`, another copy
-/// of it.
+/// Format the CLI error metadata for [`jp_storage::Error::ConversationExists`].
 fn conversation_exists(
     id: ConversationId,
     from: &Utf8Path,

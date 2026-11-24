@@ -30,8 +30,8 @@ second.
 
 > [!NOTE]
 > Cluster status: **Turn**, **Turn Summary**, **Event ID**, **Active
-> Conversation**, **Live Conversation**, **Archived Conversation**, and
-> **Label** are defined below.
+> Conversation**, **Live Conversation**, **Archived Conversation**, **Invalid
+> Conversation**, and **Label** are defined below.
 > The remaining terms are placeholders and will land in subsequent passes.
 > Until then, see the [legacy single-page glossary] for the older definitions of
 > the unfilled terms.
@@ -101,16 +101,17 @@ unarchive`; removal is not).
 
 ### Invalid Conversation
 
-A conversation the store holds whose stored parts (metadata, base config,
-events) fail validation, so it cannot be loaded.
-It stays where it is: it is left out of the conversation index, reported after
-every command, and reached only by its ID.
+A stored conversation whose files (metadata, base config, or events) fail
+structural validation, so it cannot be loaded.
+An invalid conversation is left in place on disk and excluded from the
+conversation index.
 
-**Implementation.** `InvalidConversation` in `jp_storage::validate`, listed by
-`RecoveryBackend::scan`.
+**Implementation.** `InvalidConversation` in `jp_storage::validate`, returned by
+`RecoveryBackend::scan` and `RecoveryBackend::scan_archive`.
 
-**Not the same as.** An **Archived Conversation**: archived is a location and
-the conversation loads; invalid is a state, and the conversation does not.
+**Not the same as.** An **Archived Conversation** (a conversation moved to the
+archive partition; a conversation in either the live or archive partition can be
+invalid).
 
 ### Label
 

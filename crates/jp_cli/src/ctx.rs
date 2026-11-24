@@ -38,8 +38,8 @@ pub(crate) struct Ctx {
     /// `None` when running with an in-memory backend.
     pub(crate) fs_backend: Option<Arc<FsStorageBackend>>,
 
-    /// The stored conversations that do not load, which the workspace leaves
-    /// out; see [`recovery_backend`].
+    /// Backend for inspecting, diagnosing, repairing, and removing
+    /// conversations that fail validation; see [`recovery_backend`].
     pub(crate) recovery: Arc<dyn RecoveryBackend>,
 
     /// Merged file/CLI configuration.
@@ -108,14 +108,11 @@ pub(crate) struct Term {
 
     /// Whether a user is present to answer prompts.
     ///
-    /// Gates tool permission and result prompts, label resolution, title
-    /// selection, lock-timeout handling, plugin approval, and the editor's
-    /// re-open confirmation.
+    /// Gates tool permission and result prompts, conversation confirmations
+    /// (`rm`, `archive`), label resolution, title selection, lock-timeout
+    /// handling, plugin approval, and the editor's re-open confirmation.
     /// Distinct from [`Self::is_tty`], which asks whether output can carry ANSI
     /// escapes ([RFD 048]).
-    ///
-    /// Not every prompt consults it: `conversation rm` and `conversation
-    /// archive` gate their confirmations on `--force` and `--confirm` instead.
     ///
     /// [RFD 048]: https://jp.computer/rfd/048
     pub(crate) interactive: bool,
@@ -340,10 +337,8 @@ impl Drop for Ctx {
     }
 }
 
-/// The recovery backend for a run over `fs`.
-///
-/// Under `--no-persist` (`persist` false) it reads the store and removes
-/// nothing; without storage on disk there is nothing to recover.
+/// Build the [`RecoveryBackend`] for `fs`, wrapping it in [`DryRunRecovery`]
+/// when `persist` is `false` (`--no-persist`).
 pub(crate) fn recovery_backend(
     fs: Option<&Arc<FsStorageBackend>>,
     persist: bool,

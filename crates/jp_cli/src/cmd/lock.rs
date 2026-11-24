@@ -1,13 +1,13 @@
 //! Shared conversation lock acquisition with polling, timeout, and interactive
 //! prompts.
 //!
-//! [`acquire_lock`] takes the lock of a conversation in the conversation list,
-//! and [`wait_until_free`] waits until another process lets go of any
-//! conversation's lock, for a caller that takes the lock itself (an archived
-//! conversation, or one that does not load).
-//! Both poll at 500ms intervals until the lock is free or a timeout is reached.
-//! On timeout (or ctrl-c), interactive terminals get a prompt; non-interactive
-//! environments get `LockTimeout` at once, without waiting.
+//! [`acquire_lock`] acquires the lock for a conversation in the workspace
+//! index, and [`wait_until_free`] waits until another process releases a
+//! conversation's lock when the caller acquires the lock directly (such as for
+//! an archived or invalid conversation).
+//! Both poll at 500ms intervals until the lock is free or the timeout expires.
+//! On timeout (or Ctrl+C), interactive terminals show a contention prompt;
+//! non-interactive runs fail immediately with `LockTimeout`.
 //!
 //! While polling, a status region is shown (controlled by [`LockWaitConfig`])
 //! so the user sees immediate feedback.
@@ -135,15 +135,13 @@ pub(crate) async fn acquire_lock(r: LockRequest<'_>) -> Result<LockOutcome> {
     })
 }
 
-/// Wait until no other process holds conversation `id`'s lock.
+/// Wait until no other process holds the lock for conversation `id`.
 ///
-/// For a conversation outside the conversation list, whose lock the caller
-/// takes itself once this returns.
-/// Another process can take the lock again in between; a caller that then finds
-/// it held waits again.
-/// Behaves as [`acquire_lock`] does: a status region while polling, the
-/// "Continue waiting" or "Cancel" prompt on timeout, and `LockTimeout` at once
-/// when nobody can answer it.
+/// Used for archived or invalid conversations whose lock the caller acquires
+/// directly after this function returns.
+/// Shows the lock-wait status region while polling, prompts on timeout in
+/// interactive terminals, and fails immediately with `LockTimeout` in
+/// non-interactive runs.
 pub(crate) async fn wait_until_free(ctx: &Ctx, id: ConversationId) -> Result<()> {
     let wait = Wait {
         workspace: &ctx.workspace,
@@ -186,7 +184,7 @@ enum Choice {
     Cancel,
 }
 
-/// What waiting for a lock shows and offers.
+/// Shared polling and contention-prompt configuration for lock waits.
 struct Wait<'a> {
     workspace: &'a Workspace,
     interactive: bool,

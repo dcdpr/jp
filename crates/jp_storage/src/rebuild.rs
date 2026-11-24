@@ -1,8 +1,10 @@
-//! Rebuilding a conversation's metadata from what its directory still holds.
+//! Rebuilding `metadata.json` from the remaining state in a conversation
+//! directory.
 //!
-//! [`rebuilt_metadata`] decides the metadata from the [`Remains`] a directory
-//! shows, and does no I/O.
-//! [`rebuild_metadata`] reads those remains from disk and writes the result.
+//! [`rebuilt_metadata`] constructs the [`Conversation`] metadata from
+//! [`Remains`] without performing I/O.
+//! [`rebuild_metadata`] reads the directory state from disk and writes the
+//! rebuilt `metadata.json`.
 
 use std::fs;
 
@@ -14,35 +16,26 @@ use crate::{
     EVENTS_FILE, METADATA_FILE, error::Result, validate::validate_events, value::write_json,
 };
 
-/// What a conversation directory without metadata still shows about the
-/// conversation.
+/// Information recoverable from a conversation directory that is missing
+/// `metadata.json`.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Remains<'a> {
     pub(crate) id: ConversationId,
-
-    /// The directory's name, which carries the title after the ID.
     pub(crate) dirname: &'a str,
-
-    /// When the last event happened; `None` without events.
     pub(crate) last_event_at: Option<DateTime<Utc>>,
-
-    /// When the directory was last modified.
     pub(crate) modified_at: Option<DateTime<Utc>>,
-
-    /// Whether the directory is in the archive.
     pub(crate) archived: bool,
 }
 
-/// The metadata for the conversation `remains` describes.
+/// Reconstruct [`Conversation`] metadata from `remains`.
 ///
-/// The title is the one the directory name carries, with each dash read as a
-/// space, since the name replaced the title's spaces and punctuation with
-/// dashes.
-/// The last activity is the time of the last event, or the conversation's
-/// creation when it has none.
-/// An archived conversation's archive time is the directory's modification
-/// time, since nothing but the metadata records when it was archived.
-/// Every other field takes its default.
+/// - `title`: extracted from the directory slug after the conversation ID,
+///   replacing dashes with spaces.
+/// - `last_activated_at`: the timestamp of the last event, or the conversation
+///   ID creation timestamp if there are no events.
+/// - `archived_at`: the directory's modification time when `archived` is
+///   `true`, or `None` for live conversations.
+/// - All other fields use their [`Conversation::default`] values.
 pub(crate) fn rebuilt_metadata(remains: &Remains<'_>) -> Conversation {
     Conversation {
         title: title_from_dirname(remains.dirname, &remains.id),
@@ -54,19 +47,12 @@ pub(crate) fn rebuilt_metadata(remains: &Remains<'_>) -> Conversation {
     }
 }
 
-/// Write the metadata of conversation `id`, stored in `dir`, from what the rest
-/// of the directory holds; see [`rebuilt_metadata`].
+/// Rebuild and write `metadata.json` for conversation `id` in `dir`; see
+/// [`rebuilt_metadata`].
 ///
-/// `archived` says whether `dir` is in the archive.
-/// Meant for a directory `missing_only_metadata` accepts: an existing
-/// `metadata.json` is overwritten.
-///
-/// # Errors
-///
-/// Fails when the metadata cannot be written.
+/// Overwrites any existing `metadata.json` in `dir`.
 pub(crate) fn rebuild_metadata(dir: &Utf8Path, id: &ConversationId, archived: bool) -> Result<()> {
-    // Read before the write below, which changes the directory's modification
-    // time.
+    // Capture the directory mtime before writing `metadata.json` updates it.
     let modified_at = fs::metadata(dir)
         .and_then(|metadata| metadata.modified())
         .ok()
@@ -85,8 +71,8 @@ pub(crate) fn rebuild_metadata(dir: &Utf8Path, id: &ConversationId, archived: bo
     write_json(&dir.join(METADATA_FILE), &rebuilt_metadata(&remains))
 }
 
-/// The title `dirname` carries after conversation `id`'s timestamp, with dashes
-/// read as spaces.
+/// Extract the title slug after `id`'s timestamp prefix in `dirname`, replacing
+/// dashes with spaces.
 fn title_from_dirname(dirname: &str, id: &ConversationId) -> Option<String> {
     let slug = dirname
         .strip_prefix(&id.to_dirname(None))?

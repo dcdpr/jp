@@ -86,7 +86,6 @@ fn the_capitals_answer_for_every_remaining_conversation() {
     assert_eq!(decide(Ok('N')).unwrap(), Answer::NoToAll);
 }
 
-// A lone conversation has no "remaining" for `Y` and `N` to answer.
 #[test]
 fn yes_and_no_to_all_are_offered_only_when_more_follow() {
     let prompt = ConversationAction::Remove.prompt();
@@ -101,7 +100,6 @@ fn yes_and_no_to_all_are_offered_only_when_more_follow() {
     assert_eq!(keys(false), "yn");
 }
 
-/// An `ask` for a question that must not be asked.
 fn never_asked(_more: bool) -> std::result::Result<Answer, ()> {
     panic!("asked a question the answers already settled")
 }
@@ -148,7 +146,6 @@ fn no_to_all_declines_every_remaining_conversation_without_asking() {
     assert_eq!(answers.rest(), Some(false));
 }
 
-// `--yes` is the same answer, given before the first question.
 #[test]
 fn answers_that_start_at_yes_to_all_never_ask() {
     let mut answers = Answers::yes_to_all();
@@ -305,7 +302,6 @@ fn details_report_an_unpinned_conversation_as_unpinned() {
     );
 }
 
-/// A conversation stored at `/ws/.jp/conversations/10000`.
 fn stored(
     title: Option<&str>,
     state: std::result::Result<(), ValidationError>,
@@ -320,9 +316,6 @@ fn stored(
     }
 }
 
-// A conversation that does not load has no events to show, so the prompt says
-// what it can: its title when one is recorded, why it does not load, and which
-// locations go.
 #[test]
 fn unloaded_details_show_the_title_status_and_every_location() {
     let mut conversation = stored(
@@ -360,8 +353,6 @@ fn unloaded_details_show_the_title_status_and_every_location() {
     );
 }
 
-// The state is read under the conversation's lock, so a conversation another
-// process finished writing after this run's scan has no status to report.
 #[test]
 fn unloaded_details_leave_out_what_is_not_known() {
     let expected = [
@@ -377,7 +368,6 @@ fn unloaded_details_leave_out_what_is_not_known() {
     );
 }
 
-// The prompt widget draws without the printer's filter.
 #[test]
 fn unloaded_details_show_a_title_as_plain_text() {
     let expected = [

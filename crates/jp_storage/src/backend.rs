@@ -3,11 +3,12 @@
 //! Focused traits decouple conversation persistence, loading, locking, session
 //! management, and recovery from the filesystem:
 //!
-//! - [`PersistBackend`] — writes and removes conversation data.
-//! - [`LoadBackend`] — reads conversation data and indexes.
-//! - [`LockBackend`] — conversation-level exclusive locking.
-//! - [`SessionBackend`] — session-to-conversation mapping storage.
-//! - [`RecoveryBackend`] — finds and removes conversations that do not load.
+//! - [`PersistBackend`]: writes and removes conversation data.
+//! - [`LoadBackend`]: reads conversation data and indexes.
+//! - [`LockBackend`]: conversation-level exclusive locking.
+//! - [`SessionBackend`]: session-to-conversation mapping storage.
+//! - [`RecoveryBackend`]: inspects, diagnoses, repairs, and removes
+//!   conversations that fail validation.
 //!
 //! See also: `docs/rfd/073-layered-storage-backend-for-workspaces.md`
 

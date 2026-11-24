@@ -1,15 +1,10 @@
-//! Reports printed on stderr when the run ends.
-//!
-//! A command's own output comes first; what JP has to say about the workspace
-//! the command ran in follows it, whichever way the run ends.
+//! End-of-run reports printed to stderr after command output.
 
 use jp_printer::Printer;
 use tracing::warn;
 
-/// A report printed on stderr when dropped.
-///
-/// The report is printed past `--quiet`: it is about the user's data, not
-/// chrome about the run.
+/// A report printed to stderr when dropped, bypassing `--quiet` so data
+/// warnings are never hidden.
 pub(crate) struct DeferredReport {
     printer: Printer,
     lines: Vec<String>,
@@ -19,13 +14,13 @@ pub(crate) struct DeferredReport {
 }
 
 impl DeferredReport {
-    /// Prepare a report for `printer`'s output format.
+    /// Build a deferred report for `printer`'s output format.
     ///
-    /// Under the text formats the report is what `text` renders, if anything.
-    /// Under the JSON formats it is the records `json` renders, one per line,
-    /// indented when `json` is passed `true`.
-    /// A report that fails to serialize falls back to `text`, which the printer
-    /// wraps in a JSON record, so the stream stays parseable either way.
+    /// In text formats, prints the string returned by `text` (if `Some`).
+    /// In JSON formats, prints each pre-serialized record returned by `json`
+    /// (passing `true` when pretty-printing is enabled).
+    /// If JSON serialization fails, logs a warning and falls back to `text`
+    /// wrapped in the printer's standard JSON message envelope.
     pub(crate) fn new(
         printer: Printer,
         text: impl FnOnce() -> Option<String>,

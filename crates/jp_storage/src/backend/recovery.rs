@@ -1,10 +1,11 @@
-//! Conversations a store holds that do not load.
+//! Inspection, diagnosis, repair, and removal of conversations that fail
+//! validation.
 //!
-//! A conversation that fails validation never enters the conversation index, so
-//! nothing working with loaded conversations can reach it.
-//! [`RecoveryBackend`] is how a client finds and acts on one instead: it lists
-//! them, describes one by ID, and removes or repairs one once the caller has
-//! decided to.
+//! A conversation that fails validation is excluded from the conversation
+//! index, so normal loading cannot reach it.
+//! [`RecoveryBackend`] provides direct access to those conversations: listing
+//! failures, inspecting a conversation by ID, and repairing or removing it
+//! after caller confirmation.
 
 use std::{fmt::Debug, sync::Arc};
 
@@ -15,79 +16,77 @@ use crate::{
     validate::{InvalidConversation, StorageLocation, ValidationError},
 };
 
-/// Access to the conversations a store holds that do not load.
+/// Access to stored conversations that fail validation.
 ///
-/// [`Self::scan`] reads live conversations only, since it runs before every
-/// command; the archive can hold thousands of conversations.
-/// The other methods reach the archive: [`Self::scan_archive`] and
-/// [`Self::diagnose`] read all of it, and a lookup by ID reads it only for a
-/// conversation with no live copy.
+/// [`Self::scan`] checks live conversations only, because it runs before every
+/// command and the archive can hold thousands of conversations.
+/// [`Self::scan_archive`] and [`Self::diagnose`] also check the archive, and
+/// ID-based methods fall back to the archive when a conversation has no live
+/// copy.
 pub trait RecoveryBackend: Debug + Send + Sync {
-    /// Every live conversation that fails validation, sorted by location.
+    /// Return every live conversation that fails validation, sorted by
+    /// location.
     ///
-    /// A conversation another process holds the lock on is left out, because it
-    /// may be partway through a write.
-    /// The store may remove leftovers of its own interrupted writes, but never
+    /// Conversations locked by another process are skipped, because they may be
+    /// mid-write.
+    /// The scan may clean up temporary files from interrupted writes, but never
     /// moves or deletes a conversation.
     fn scan(&self) -> Result<Vec<InvalidConversation>>;
 
-    /// Every archived conversation that fails validation, sorted by location,
-    /// read without changing anything.
+    /// Return every archived conversation that fails validation, sorted by
+    /// location, without modifying the store.
     ///
-    /// For a command that lists the archive.
-    /// A conversation another process holds the lock on is left out, as in
-    /// [`Self::scan`].
+    /// Conversations locked by another process are skipped.
     ///
     /// # Errors
     ///
-    /// Fails when the store cannot be read.
+    /// Returns an error if the store cannot be read.
     fn scan_archive(&self) -> Result<Vec<InvalidConversation>>;
 
-    /// What the store holds for conversation `id`, read without loading it: its
-    /// live copy, or its archived copy when it has no live copy.
+    /// Inspect the stored state of conversation `id` without loading it.
     ///
-    /// `None` when the store holds nothing for `id`.
+    /// Returns the live copy if one exists, or the archived copy otherwise.
+    /// Returns `None` if the store has no entry for `id`.
     fn inspect(&self, id: &ConversationId) -> Option<StoredConversation>;
 
-    /// Remove conversation `id` if `decide` approves of what the store holds
-    /// for it.
+    /// Remove conversation `id` if `decide` returns `true` for its stored
+    /// state.
     ///
-    /// The conversation's lock is held from reading its state until the removal
-    /// is done, so `decide` sees exactly what is removed.
+    /// Holds the conversation lock from inspection through deletion so `decide`
+    /// sees the exact state being removed.
     /// `decide` is not called when another process holds the lock or the store
-    /// holds nothing for `id`.
+    /// has no entry for `id`.
     ///
     /// # Errors
     ///
-    /// Fails when the lock cannot be taken or the removal fails.
+    /// Returns an error if acquiring the lock or deleting the conversation
+    /// fails.
     fn remove(
         &self,
         id: &ConversationId,
         decide: &mut dyn FnMut(&StoredConversation) -> bool,
     ) -> Result<Removal>;
 
-    /// What the store holds that needs the user's attention, live and archived,
-    /// read without changing anything.
+    /// Diagnose live and archived conversations and stray entries without
+    /// modifying the store.
     ///
-    /// A conversation another process holds the lock on is left out, as in
-    /// [`Self::scan`].
+    /// Conversations locked by another process are skipped.
     ///
     /// # Errors
     ///
-    /// Fails when the store cannot be read.
+    /// Returns an error if the store cannot be read.
     fn diagnose(&self) -> Result<Diagnosis>;
 
-    /// Apply `repair` to conversation `id` if it makes the conversation load
-    /// and `decide` approves of what the store holds for it.
+    /// Apply `repair` to conversation `id` if the repair is applicable and
+    /// `decide` returns `true`.
     ///
-    /// The conversation's lock is held from reading its state until the repair
-    /// is done.
+    /// Holds the conversation lock from inspection through repair.
     /// `decide` is not called when another process holds the lock, the store
-    /// holds nothing for `id`, or the repair would not make it load.
+    /// has no entry for `id`, or `repair` does not apply to the conversation.
     ///
     /// # Errors
     ///
-    /// Fails when the lock cannot be taken or the repair cannot be written.
+    /// Returns an error if acquiring the lock or writing the repair fails.
     fn repair(
         &self,
         id: &ConversationId,
@@ -96,19 +95,17 @@ pub trait RecoveryBackend: Debug + Send + Sync {
     ) -> Result<RepairOutcome>;
 }
 
-/// A change the store can make to a conversation that does not load, so that it
-/// does.
+/// A repair operation that can make an invalid conversation loadable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Repair {
-    /// Write the metadata of a conversation missing nothing else, from what the
-    /// rest of the conversation holds.
+    /// Rebuild `metadata.json` for a conversation whose other files are valid.
     RebuildMetadata,
 }
 
 impl Repair {
     pub const ALL: [Self; 1] = [Self::RebuildMetadata];
 
-    /// A stable name for the repair, by which a user asks for it.
+    /// CLI identifier for this repair.
     #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
@@ -116,121 +113,119 @@ impl Repair {
         }
     }
 
-    /// The repair called `name`.
     #[must_use]
     pub fn from_name(name: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|repair| repair.name() == name)
     }
 }
 
-/// What a store holds that needs the user's attention.
+/// Problems found in a conversation store by [`RecoveryBackend::diagnose`].
 #[derive(Debug, Default)]
 pub struct Diagnosis {
     /// Stored conversations that fail validation, sorted by location.
     pub invalid: Vec<DiagnosedConversation>,
 
-    /// What the store holds beside its conversations, sorted by location.
+    /// Non-conversation entries and leftover temporary files in the store,
+    /// sorted by location.
     pub strays: Vec<StrayEntry>,
 }
 
-/// Something the store holds beside its conversations.
+/// A non-conversation entry or leftover temporary file in the conversation
+/// store.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StrayEntry {
-    /// The name the store lists it under: for the filesystem backend, the
-    /// directory in `conversations/` that it is, or that holds it.
+    /// Entry name under `conversations/`, or the parent conversation directory
+    /// name for a leftover temporary file.
     pub name: String,
 
     pub kind: StrayKind,
     pub location: StorageLocation,
 }
 
-/// What a [`StrayEntry`] is.
+/// Classification of a [`StrayEntry`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StrayKind {
-    /// An entry whose name is not a conversation's.
+    /// A directory under `conversations/` whose name is not a conversation ID.
     NotAConversation,
 
-    /// A file an interrupted write left beside a conversation's parts.
+    /// An orphaned `.tmp` file left in a conversation directory by an
+    /// interrupted write.
     ///
-    /// It holds no user data, and the next [`RecoveryBackend::scan`] removes
-    /// it.
+    /// Holds no user data; removed automatically by the next
+    /// [`RecoveryBackend::scan`].
     TempFile,
 
-    /// A copy of a conversation an interrupted import left behind.
+    /// A staging directory left behind by an interrupted conversation import.
     ///
-    /// The conversation it copies is still stored, and the next
-    /// [`RecoveryBackend::scan`] removes it.
+    /// The source conversation remains intact; removed automatically by the
+    /// next [`RecoveryBackend::scan`].
     ImportStaging,
 }
 
-/// A stored conversation that fails validation, and how it can be made to load.
+/// An invalid conversation paired with the repair that can fix it, if any.
 #[derive(Debug)]
 pub struct DiagnosedConversation {
     pub conversation: InvalidConversation,
-
-    /// The repair that makes the conversation load, when one does.
     pub repair: Option<Repair>,
 }
 
-/// The outcome of [`RecoveryBackend::repair`].
+/// Outcome of [`RecoveryBackend::repair`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RepairOutcome {
     Repaired,
 
-    /// `decide` did not approve; the conversation is unchanged.
+    /// `decide` returned `false`; the conversation was not modified.
     Declined,
 
-    /// Another process holds the conversation's lock.
+    /// Another process holds the conversation lock.
     Locked,
 
-    /// The store holds nothing for the ID.
+    /// No conversation with this ID exists in the store.
     NotFound,
 
-    /// The repair would not make the conversation load; it is unchanged.
+    /// The requested repair cannot fix this conversation.
     NotApplicable,
 }
 
-/// A conversation's stored parts, as [`RecoveryBackend::inspect`] found them.
+/// On-disk state of a conversation inspected via [`RecoveryBackend::inspect`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoredConversation {
     pub id: ConversationId,
 
-    /// Where the store holds the conversation; for the filesystem backend, its
-    /// directories, workspace first.
+    /// Storage locations holding the conversation, ordered with workspace
+    /// storage before user-local storage.
     pub locations: Vec<StorageLocation>,
 
-    /// The conversation's parts as validation checks them: the first failure
-    /// when any location fails.
+    /// Validation result across all locations, or the first validation error
+    /// encountered.
     pub state: std::result::Result<(), ValidationError>,
 
-    /// The title stored in the conversation's metadata, when the metadata loads
-    /// and has one.
+    /// Title from `metadata.json`, if the metadata is readable and has a title.
     pub title: Option<String>,
 
-    /// The repair that makes the conversation load, when it does not and one
-    /// does.
+    /// Repair that can make the conversation loadable, if any.
     pub repair: Option<Repair>,
 
-    /// Whether the conversation is in the archive.
     pub archived: bool,
 }
 
-/// The outcome of [`RecoveryBackend::remove`].
+/// Outcome of [`RecoveryBackend::remove`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Removal {
     Removed,
 
-    /// `decide` did not approve; the conversation is unchanged.
+    /// `decide` returned `false`; the conversation was not removed.
     Declined,
 
-    /// Another process holds the conversation's lock.
+    /// Another process holds the conversation lock.
     Locked,
 
-    /// The store holds nothing for the ID.
+    /// No conversation with this ID exists in the store.
     NotFound,
 }
 
-/// A store that holds no conversations, such as an in-memory one.
+/// No-op [`RecoveryBackend`] for stores without persistent recovery (such as
+/// in-memory backends).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct NullRecoveryBackend;
 
@@ -269,11 +264,11 @@ impl RecoveryBackend for NullRecoveryBackend {
     }
 }
 
-/// Reads through to another backend, and changes nothing.
+/// Read-only [`RecoveryBackend`] wrapper for `--no-persist` runs.
 ///
-/// [`RecoveryBackend::remove`] and [`RecoveryBackend::repair`] ask `decide` as
-/// the backend would and report its answer, without taking a lock or changing
-/// the store.
+/// [`RecoveryBackend::remove`] and [`RecoveryBackend::repair`] invoke `decide`
+/// against the inspected state and return the resulting outcome without
+/// acquiring locks or modifying the store.
 #[derive(Debug, Clone)]
 pub struct DryRunRecovery {
     inner: Arc<dyn RecoveryBackend>,

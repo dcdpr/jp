@@ -242,38 +242,18 @@ impl RootOpts {
 pub(crate) struct Globals {
     /// `--cfg` values, in the order given.
     pub(crate) config: Vec<KeyValueOrPath>,
-
-    /// `--no-cfg`.
     pub(crate) no_config: bool,
-
     /// How many times `-v` was given.
     pub(crate) verbose: u8,
-
-    /// `--quiet`.
     pub(crate) quiet: bool,
-
-    /// `--no-interactive`.
     pub(crate) no_interactive: bool,
-
-    /// `--format`.
     pub(crate) format: CliFormat,
-
-    /// Whether to persist changes; `--no-persist` turns it off.
+    /// Whether to persist changes (`false` when `--no-persist` is passed).
     pub(crate) persist: bool,
-
-    /// `--workspace`.
     pub(crate) workspace: Option<WorkspaceTarget>,
-
-    /// `--width`.
     pub(crate) width: Option<u16>,
-
-    /// `--log-format`.
     pub(crate) log_format: LogFormat,
-
-    /// `--log-file`.
     pub(crate) log_file: Option<String>,
-
-    /// `--log`.
     pub(crate) log: Option<String>,
 }
 

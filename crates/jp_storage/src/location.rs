@@ -1,4 +1,4 @@
-//! Where a storage backend holds a conversation.
+//! Storage location identifier for conversations and conversation parts.
 
 use std::{
     cmp::Ordering,
@@ -9,17 +9,14 @@ use std::{
 use camino::Utf8Path;
 use serde::{Serialize, Serializer};
 
-/// Where a backend holds a conversation, or one part of it, in the backend's
-/// own terms.
+/// Opaque location of a stored conversation or conversation part.
 ///
-/// The filesystem backend names a directory or a file by its absolute path; a
-/// database backend could name a table and a row.
-/// Callers show a location and compare it, and never interpret it.
+/// The filesystem backend uses an absolute file or directory path; other
+/// backends can use their own identifier format.
 ///
-/// A location also has a label: the short name a message uses for it, such as a
-/// file name.
-/// Two locations are the same location when their names are equal, whatever
-/// their labels.
+/// A location carries a full `name` and an optional short `label` (such as a
+/// file name) for compact error messages.
+/// Equality, hashing, ordering, and serialization compare `name` only.
 #[derive(Debug, Clone)]
 pub struct StorageLocation {
     name: String,
@@ -27,7 +24,7 @@ pub struct StorageLocation {
 }
 
 impl StorageLocation {
-    /// A location named by `name`, labelled by its name.
+    /// Create a location whose label defaults to `name`.
     #[must_use]
     pub fn new(name: impl Into<String>) -> Self {
         Self {
@@ -36,7 +33,7 @@ impl StorageLocation {
         }
     }
 
-    /// A location named by `name`, which messages call `label`.
+    /// Create a location with full `name` and short display `label`.
     #[must_use]
     pub fn labelled(name: impl Into<String>, label: impl Into<String>) -> Self {
         Self {
@@ -50,13 +47,14 @@ impl StorageLocation {
         &self.name
     }
 
-    /// The short name a message uses for the location.
+    /// Short display name for the location (falls back to [`Self::as_str`]).
     #[must_use]
     pub fn label(&self) -> &str {
         self.label.as_deref().unwrap_or(&self.name)
     }
 
-    /// The location of a filesystem path, labelled by its file name.
+    /// Create a location from a filesystem path, using its file name as the
+    /// label.
     pub(crate) fn of_path(path: &Utf8Path) -> Self {
         match path.file_name() {
             Some(file_name) => Self::labelled(path.as_str(), file_name),

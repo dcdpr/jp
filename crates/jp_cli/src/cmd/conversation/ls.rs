@@ -260,9 +260,8 @@ impl Ls {
                 .collect()
         };
 
-        // After the listing above, whose validation of the archive leaves the
-        // conversations that load in the scan cache, so this re-reads only the
-        // ones that do not. Held until the listing is printed.
+        // Scan for invalid archived conversations after listing valid ones so
+        // the scan cache already holds the valid entries.
         let _archive_failures = if self.archived {
             Some(archive_failure_notice(ctx)?)
         } else {
@@ -485,8 +484,8 @@ fn build_header_row(columns: Columns, marker: Option<SortMarker>) -> Row {
     header
 }
 
-/// The report of the archived conversations the archived listing leaves out
-/// because they do not load, printed when it drops.
+/// Scan for archived conversations that failed validation and return a guard
+/// that reports them to stderr when dropped.
 fn archive_failure_notice(ctx: &Ctx) -> Result<LoadFailureNotice, cmd::Error> {
     let invalid = ctx.recovery.scan_archive()?;
     let failures: Vec<_> = invalid.iter().map(LoadFailure::from).collect();

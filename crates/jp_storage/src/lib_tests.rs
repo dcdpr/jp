@@ -190,8 +190,6 @@ fn load_conversation_index_still_skips_trash() {
     assert!(ids.is_empty(), ".trash should still be invisible to scan");
 }
 
-// A directory holding none of the conversation's files has nothing to list or
-// load, whatever else it holds.
 #[test]
 fn load_conversation_index_skips_directories_without_conversation_files() {
     let tmp = tempdir().unwrap();
@@ -213,9 +211,6 @@ fn load_conversation_index_skips_directories_without_conversation_files() {
     assert_eq!(ids, [stored]);
 }
 
-// The index is where conversations enter the rest of JP, so a directory whose
-// managed files are broken stops here instead of failing wherever it is first
-// loaded.
 #[test]
 fn load_conversation_index_skips_invalid_conversations() {
     let tmp = tempdir().unwrap();
@@ -241,8 +236,6 @@ fn load_conversation_index_skips_invalid_conversations() {
     assert_eq!(ids, [valid]);
 }
 
-// Expiry removes a conversation outright, so it only applies to conversations
-// JP can load. One that fails validation is reported, and left to the user.
 #[test]
 fn expiry_skips_invalid_conversations() {
     let tmp = tempdir().unwrap();
@@ -274,8 +267,6 @@ fn expiry_skips_invalid_conversations() {
     assert_eq!(backend.load_expired_conversation_ids(now), [valid]);
 }
 
-// Removal deletes what this lists, so it names a conversation's own directories
-// and nothing that merely shares a prefix or sits in another partition.
 #[test]
 fn live_conversation_dirs_match_the_id_exactly() {
     let tmp = tempdir().unwrap();
@@ -305,8 +296,6 @@ fn live_conversation_dirs_match_the_id_exactly() {
     ]);
 }
 
-// Writing into one exact directory touches nothing else: not a live directory
-// for the same conversation, and not the other files the directory holds.
 #[test]
 fn conversation_files_are_written_into_exactly_the_given_directory() {
     let tmp = tempdir().unwrap();
@@ -337,8 +326,6 @@ fn conversation_files_are_written_into_exactly_the_given_directory() {
     );
 }
 
-// Where a conversation is stored, live or archived, named the way the backend
-// names them.
 #[test]
 fn conversation_locations_name_the_live_or_archived_directories() {
     let tmp = tempdir().unwrap();
@@ -369,8 +356,6 @@ fn conversation_locations_name_the_live_or_archived_directories() {
     );
 }
 
-// What the store holds for a conversation the index leaves out, as typed
-// state: callers render it, storage only reports it.
 #[test]
 fn inspecting_a_conversation_reports_its_state_title_and_directories() {
     let tmp = tempdir().unwrap();
@@ -1508,15 +1493,12 @@ fn archive_and_unarchive_act_on_every_root() {
     assert!(!archived(&workspace).exists() && !archived(&user_dir).exists());
 }
 
-/// Write a directory holding `content` in `events.json`, and return it.
 fn conv_dir_with(dir: &Utf8Path, content: &str) -> Utf8PathBuf {
     fs::create_dir_all(dir).unwrap();
     fs::write(dir.join(EVENTS_FILE), content).unwrap();
     dir.to_path_buf()
 }
 
-// A copy already in the archive, under any title, is the user's data: archiving
-// refuses rather than replacing it, and names both directories.
 #[test]
 fn archive_refuses_when_the_archive_holds_the_conversation() {
     let tmp = tempdir().unwrap();
@@ -1569,8 +1551,6 @@ fn unarchive_refuses_when_the_conversation_is_live() {
     );
 }
 
-// Every root is checked before anything moves, so a projected conversation is
-// never left archived in one root and live in the other.
 #[test]
 fn a_collision_in_one_root_moves_nothing_in_the_other() {
     let tmp = tempdir().unwrap();
@@ -1600,8 +1580,6 @@ fn a_collision_in_one_root_moves_nothing_in_the_other() {
     );
 }
 
-// A directory whose name only starts with the same digits is another
-// conversation, not this one.
 #[test]
 fn archive_and_unarchive_match_the_conversation_exactly() {
     let tmp = tempdir().unwrap();

@@ -63,7 +63,6 @@ fn a_terminal_shows_the_title_without_its_escapes() {
     assert!(strip_str(&raw).contains("Evil title"), "raw: {raw:?}");
 }
 
-// Where the conversation's files are, so a user or script can read them.
 #[test]
 fn json_lists_where_the_conversation_is_stored() {
     let tmp = tempdir().unwrap();

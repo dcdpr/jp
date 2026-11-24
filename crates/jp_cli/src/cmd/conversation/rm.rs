@@ -29,8 +29,8 @@ pub(crate) struct Rm {
     /// Confirmation prompting: `--confirm`, `--no-confirm`, or `--yes`.
     ///
     /// Removal always prompts by default; `--no-confirm` / `--yes` skips it.
-    /// With no user available to answer — no terminal, or `--no-interactive`
-    /// — removal fails unless `--no-confirm` was passed.
+    /// With no user available to answer (no terminal, or `--no-interactive`),
+    /// removal fails unless `--no-confirm` was passed.
     confirm: ConfirmFlag,
 }
 
@@ -116,10 +116,11 @@ impl Rm {
         }
     }
 
-    /// The targets, when every one is a typed conversation ID.
+    /// Return the target conversation IDs if every positional target is a
+    /// literal ID.
     ///
-    /// Those are resolved by `run` rather than through the conversation index,
-    /// which leaves out conversations that fail to load.
+    /// Literal IDs are resolved in `run` so `rm` can target invalid and
+    /// archived conversations that are absent from the live conversation index.
     fn literal_ids(&self) -> Option<Vec<ConversationId>> {
         let targets = self.target.ids();
         if targets.is_empty() {
@@ -154,21 +155,21 @@ impl Rm {
     }
 }
 
-/// A conversation `rm` is about to remove.
+/// Target conversation for removal.
 enum Removal {
-    /// A conversation in the conversation index.
+    /// A conversation present in the live workspace index.
     Loaded(ConversationHandle),
 
-    /// A conversation the index leaves out, because it fails to load or was
-    /// never stored.
+    /// A conversation absent from the live index (invalid or archived).
     Unloaded(ConversationId),
 }
 
-/// Resolve typed IDs: through the index when the conversation loads, otherwise
-/// as a stored conversation the index leaves out.
+/// Resolve literal conversation IDs against the live workspace index first,
+/// falling back to [`RecoveryBackend::inspect`] for invalid or archived
+/// conversations.
 ///
-/// Every ID is resolved before anything is removed, so one unknown ID fails the
-/// run without touching the others.
+/// Validates all IDs up front so an unknown ID fails before any conversation is
+/// removed.
 fn resolve_literal(ctx: &Ctx, ids: &[ConversationId]) -> Result<Vec<Removal>, cmd::Error> {
     ids.iter()
         .map(|id| match ctx.workspace.acquire_conversation(id) {
@@ -179,14 +180,12 @@ fn resolve_literal(ctx: &Ctx, ids: &[ConversationId]) -> Result<Vec<Removal>, cm
         .collect()
 }
 
-/// Remove a conversation the index leaves out, asking first unless `answers`
-/// already holds the answer.
+/// Remove an invalid or archived conversation via [`RecoveryBackend::remove`],
+/// prompting unless `answers` already holds a sticky decision.
 ///
-/// What the prompt shows is read while the conversation's lock is held, so it
-/// describes exactly what the removal deletes.
-/// While another process holds the lock, waits as for any other conversation.
-/// `more` says whether more conversations follow this one.
-/// Returns whether the conversation was removed.
+/// Waits if another process holds the conversation lock.
+/// Returns `Ok(true)` if the conversation was removed, or `Ok(false)` if the
+/// user declined.
 async fn remove_unloaded(
     ctx: &Ctx,
     id: ConversationId,

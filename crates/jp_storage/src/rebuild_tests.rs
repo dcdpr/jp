@@ -41,8 +41,6 @@ fn a_live_conversation_gets_its_title_and_last_activity_and_no_archive_time() {
     assert_eq!(metadata.archived_at, None);
 }
 
-// Nothing records when a conversation was archived but its metadata, so the
-// directory's modification time stands in for it.
 #[test]
 fn an_archived_conversation_is_dated_by_its_directory() {
     let metadata = rebuilt_metadata(&Remains {
@@ -58,8 +56,6 @@ fn an_archived_conversation_is_dated_by_its_directory() {
     assert_eq!(metadata.archived_at, Some(at(2026, 3, 4, 5)));
 }
 
-// A conversation whose events survive gets its metadata back: the title its
-// directory name still carries, and the time of its last event.
 #[test]
 fn rebuilding_metadata_recovers_the_title_and_the_last_activity() {
     let tmp = tempdir().unwrap();
@@ -80,8 +76,6 @@ fn rebuilding_metadata_recovers_the_title_and_the_last_activity() {
     assert_eq!(validate_conversation_dir(&dir), Ok(()));
 }
 
-// The directory's modification time is read before the metadata is written,
-// since writing it changes that time.
 #[test]
 fn rebuilding_an_archived_conversation_dates_it_by_its_directory() {
     let tmp = tempdir().unwrap();

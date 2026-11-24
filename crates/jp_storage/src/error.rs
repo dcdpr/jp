@@ -64,8 +64,8 @@ pub enum Error {
     #[error("conversation not found: {0}")]
     ConversationNotFound(ConversationId),
 
-    /// Moving conversation `id` from `from` would put a second directory for it
-    /// beside `existing`, so nothing was moved.
+    /// Moving conversation `id` from `from` would collide with `existing` in
+    /// the destination partition.
     #[error("conversation {id} already exists at {existing}; {from} was not moved")]
     ConversationExists {
         id: ConversationId,

@@ -1,16 +1,11 @@
-//! A one-time restore of the conversations older JP versions moved to the
-//! trash.
+//! One-time restoration of conversations moved to `.trash/` by older JP
+//! versions.
 //!
-//! Those versions moved every conversation directory startup validation could
-//! not load into `conversations/.trash/`, with a `TRASHED.md` beside it.
-//! JP no longer has a trash: [`restore_trash`] moves every entry back into
-//! `conversations/`, and the load-failure report and `jp doctor` report what is
-//! still broken, the same as for any other directory there.
-//! [`notice`] reports, after the command's own output, any entry it could not
-//! move.
-//!
-//! Temporary: once users no longer carry a `.trash/`, this module and its call
-//! in `run_inner` are deleted, and nothing else changes.
+//! Older versions moved conversation directories that failed startup validation
+//! into `conversations/.trash/` alongside a `TRASHED.md` file.
+//! [`restore_trash`] moves those directories back into `conversations/` so they
+//! can be loaded or diagnosed by `jp doctor`, and [`notice`] reports any
+//! entries that could not be moved.
 
 use std::{collections::HashSet, fs, io, sync::Arc};
 
@@ -30,10 +25,9 @@ const TRASH_DIR: &str = ".trash";
 const ARCHIVE_DIR: &str = ".archive";
 const TRASHED_FILE: &str = "TRASHED.md";
 
-/// The files a stored conversation's directory holds.
 const CONVERSATION_FILES: [&str; 3] = ["metadata.json", "base_config.json", "events.json"];
 
-/// A trash entry [`restore_trash`] left where it was.
+/// A `.trash/` entry that [`restore_trash`] could not restore.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Leftover {
     pub entry: Utf8PathBuf,
@@ -42,11 +36,11 @@ pub(crate) struct Leftover {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum LeftoverReason {
-    /// A directory of the entry's name exists in `conversations/`, and the name
-    /// is not a conversation ID another one could be given.
+    /// A directory with the same non-ID name already exists in
+    /// `conversations/`.
     NameTaken,
 
-    /// Moving or fixing the entry failed.
+    /// An I/O or config error prevented restoring the entry.
     Failed(String),
 }
 
@@ -66,17 +60,19 @@ impl LeftoverReason {
     }
 }
 
-/// Move every entry of each storage root's `.trash/` back into that root's
-/// `conversations/`, and remove the `.trash/` once it is empty.
+/// Restore every entry from each storage root's `.trash/` directory back into
+/// `conversations/`, and remove `.trash/` once empty.
 ///
-/// Each entry is fixed in the trash first: its `TRASHED.md` is removed, an
-/// entry left empty is deleted, and a query draft without its conversation gets
-/// the files of a conversation with no turns, with `config` as its base config.
-/// `config` is built only when a draft needs it.
-/// An entry whose conversation ID is already live or archived is given the next
-/// free one.
+/// For each entry:
 ///
-/// Returns the entries left in the trash.
+/// - Removes `TRASHED.md`.
+/// - Deletes the directory if it is now empty.
+/// - Initializes valid empty conversation files (using `config`, built lazily)
+///   if the directory contains only a query draft.
+/// - Allocates the next free [`ConversationId`] if the entry's ID is already in
+///   use in the live or archive partition.
+///
+/// Returns any entries that could not be restored.
 pub(crate) fn restore_trash(
     fs: &FsStorageBackend,
     config: impl FnOnce() -> Option<Arc<AppConfig>>,
@@ -122,7 +118,7 @@ fn restore_root(
         }
     }
 
-    // Fails, and keeps the trash, while anything is left in it.
+    // `remove_dir` succeeds only when `.trash/` is empty.
     if fs::remove_dir(&trash).is_ok() {
         debug!(%trash, "Removed the emptied trash.");
     }
@@ -142,7 +138,7 @@ fn restore_entry(
         Err(error) => return Err(failed(error)),
     }
 
-    // Fails while anything is left in it.
+    // If removing `TRASHED.md` left the directory empty, delete it.
     if fs::remove_dir(entry).is_ok() {
         debug!(trash = %entry, "Removed an empty trash entry.");
         return Ok(());
@@ -186,8 +182,8 @@ fn move_entry(entry: &Utf8Path, target: &Utf8Path) -> Result<(), LeftoverReason>
     Ok(())
 }
 
-/// The conversation IDs of the directories in `partitions` (`""` for the live
-/// one) of every root in `roots`.
+/// Collect all conversation IDs present in `partitions` (`""` for live) across
+/// `roots`.
 fn ids_in(roots: &[Utf8PathBuf], partitions: &[&str]) -> HashSet<ConversationId> {
     roots
         .iter()
@@ -199,13 +195,11 @@ fn ids_in(roots: &[Utf8PathBuf], partitions: &[&str]) -> HashSet<ConversationId>
         .collect()
 }
 
-/// The step between two conversation IDs: an ID is a time in tenths of a
-/// second.
+/// Step size between consecutive [`ConversationId`] timestamps (1 decisecond).
 const ID_STEP_MS: i64 = 100;
 
-/// The first ID after `id`, one step at a time, that is not in `used`.
-///
-/// `None` when the IDs run out before a free one is found.
+/// Return the first unused [`ConversationId`] after `id`, stepping by
+/// [`ID_STEP_MS`].
 fn next_free_id(id: ConversationId, used: &HashSet<ConversationId>) -> Option<ConversationId> {
     let mut candidate = id;
     loop {
@@ -217,7 +211,6 @@ fn next_free_id(id: ConversationId, used: &HashSet<ConversationId>) -> Option<Co
     }
 }
 
-/// Return the report of `leftovers`, printed on stderr when it drops.
 pub(crate) fn notice(printer: Printer, leftovers: &[Leftover]) -> DeferredReport {
     DeferredReport::new(
         printer,
@@ -226,7 +219,6 @@ pub(crate) fn notice(printer: Printer, leftovers: &[Leftover]) -> DeferredReport
     )
 }
 
-/// Render the text report, or `None` when nothing was left.
 pub(crate) fn render_text(leftovers: &[Leftover]) -> Option<String> {
     let (subject, pronoun) = match leftovers.len() {
         0 => return None,
@@ -253,7 +245,6 @@ pub(crate) fn render_text(leftovers: &[Leftover]) -> Option<String> {
     ))
 }
 
-/// Render one JSON record per leftover.
 pub(crate) fn render_json(leftovers: &[Leftover], pretty: bool) -> serde_json::Result<Vec<String>> {
     #[derive(Serialize)]
     struct Record<'a> {

@@ -81,8 +81,6 @@ fn write_valid(storage: &camino::Utf8Path, id: &ConversationId) {
     write_json(&dir.join(EVENTS_FILE), &events).unwrap();
 }
 
-// `jp doctor` reports the store as it is, so diagnosing it lists what the
-// startup scan would clean up, and changes nothing on disk.
 #[test]
 fn diagnosing_the_store_changes_nothing_on_disk() {
     let tmp = tempdir().unwrap();
@@ -125,8 +123,6 @@ fn diagnosing_the_store_changes_nothing_on_disk() {
     assert!(!cache.exists());
 }
 
-// Rebuilding the metadata only makes a conversation load when the metadata is
-// all it is missing.
 #[test]
 fn only_a_conversation_missing_nothing_but_its_metadata_can_have_it_rebuilt() {
     let tmp = tempdir().unwrap();
@@ -237,8 +233,6 @@ fn test_valid_conversations_are_collected() {
     assert!(result.invalid.is_empty());
 }
 
-// A directory whose name is not a conversation ID is not a conversation, so it
-// cannot fail to load as one.
 #[test]
 fn a_directory_not_named_for_a_conversation_is_unrecognized() {
     let tmp = tempdir().unwrap();
@@ -310,8 +304,6 @@ fn test_corrupt_metadata_is_detected() {
     );
 }
 
-// A backend names the format its parts are in; one whose parts have no named
-// format still says what is wrong.
 #[test]
 fn a_malformed_part_is_named_by_its_format() {
     assert_eq!(malformed(Some("JSON")), "invalid JSON");
@@ -367,9 +359,6 @@ fn test_corrupt_events_is_detected() {
     );
 }
 
-// A conversation is stored before anything else is written into its directory,
-// so a directory without the conversation's files is missing them, whatever
-// else it holds.
 #[test]
 fn a_directory_without_conversation_files_is_invalid() {
     let tmp = tempdir().unwrap();
@@ -398,8 +387,6 @@ fn a_directory_without_conversation_files_is_invalid() {
     ]);
 }
 
-// One directory, wherever it lives, gets the checks a directory under
-// `conversations/` gets at startup.
 #[test]
 fn a_single_directory_is_validated_outside_the_conversations_dir() {
     let tmp = tempdir().unwrap();
@@ -420,7 +407,6 @@ fn a_single_directory_is_validated_outside_the_conversations_dir() {
         })
     ));
 
-    // The checks are on the files alone, whatever the directory is named.
     let missing_metadata = tmp.path().join("renamed");
     fs::create_dir_all(&missing_metadata).unwrap();
     fs::write(missing_metadata.join(EVENTS_FILE), "[]").unwrap();

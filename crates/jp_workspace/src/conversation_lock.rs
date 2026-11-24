@@ -528,11 +528,11 @@ impl ConversationMut {
         Ok(())
     }
 
-    /// Write the conversation now, whether or not this scope changed anything.
+    /// Persist the conversation immediately, even if no mutations were made in
+    /// this scope.
     ///
-    /// For a conversation that must exist in storage before something else is
-    /// written into its directory.
-    /// Errors as [`Self::flush`] does.
+    /// Used to materialize a new conversation directory on disk before writing
+    /// auxiliary files (such as a query draft) into it.
     pub fn store(&mut self) -> crate::error::Result<()> {
         self.dirty.store(true, Ordering::Relaxed);
         self.flush()

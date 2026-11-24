@@ -98,7 +98,7 @@ impl Unarchive {
     }
 }
 
-/// Unarchive conversation `id`, waiting while another process holds it.
+/// Unarchive conversation `id`, waiting if another process holds its lock.
 pub(crate) async fn unarchive_waiting(
     ctx: &mut Ctx,
     id: ConversationId,

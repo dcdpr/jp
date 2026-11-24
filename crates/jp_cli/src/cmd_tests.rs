@@ -143,8 +143,6 @@ fn rename_failure_renders_both_paths_and_the_os_error() {
     );
 }
 
-// The conversation is what the user acts on, so the message names it; the two
-// paths say which copies collided.
 #[test]
 fn a_conversation_in_the_way_names_it_and_both_copies() {
     let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();

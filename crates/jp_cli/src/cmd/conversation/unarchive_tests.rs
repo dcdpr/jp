@@ -54,12 +54,11 @@ fn unarchive(ctx: &mut Ctx) -> Output {
     Runtime::new().unwrap().block_on(cmd.run(ctx))
 }
 
-// With someone there to wait, the run waits for the holder to let go.
 #[test]
 fn waits_for_a_conversation_another_process_holds() {
-    // On a thread of its own, with a deadline: a wait that never sees the lock
-    // free ends at the contention prompt, which blocks on a terminal the test
-    // does not have.
+    // Run on a dedicated thread with a timeout because a failed wait falls
+    // through to the interactive contention prompt, which would block when no
+    // terminal is attached.
     let (done, finished) = mpsc::channel();
     thread::spawn(move || {
         let (_tmp, mut ctx, fs) = archived(true);

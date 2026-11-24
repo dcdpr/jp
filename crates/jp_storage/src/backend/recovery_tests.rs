@@ -46,8 +46,6 @@ fn a_store_of_valid_conversations_scans_clean() {
     assert!(fs.scan().unwrap().is_empty());
 }
 
-// JP reports a broken conversation and leaves its files where they are: moving
-// a user's data is the user's decision.
 #[test]
 fn invalid_conversations_are_reported_and_left_in_place() {
     let (_tmp, fs, conversations) = setup();
@@ -79,8 +77,8 @@ fn a_store_without_conversations_scans_clean() {
     assert!(fs.scan().unwrap().is_empty());
 }
 
-// A conversation another process holds may be between the writes of its files,
-// so its state says nothing yet.
+// A locked conversation may be mid-write, so scan skips it until the lock is
+// released.
 #[test]
 fn a_locked_conversation_is_not_reported_until_released() {
     let (_tmp, fs, conversations) = setup();
@@ -146,8 +144,6 @@ fn a_declined_removal_keeps_the_conversation() {
     assert!(dir.is_dir());
 }
 
-// The decision is never asked for while another process holds the
-// conversation, so nothing it shows can change before the removal.
 #[test]
 fn a_conversation_another_process_holds_is_not_removed() {
     let (_tmp, fs, conversations) = setup();
@@ -173,8 +169,6 @@ fn removing_an_id_without_a_directory_finds_nothing() {
     assert_eq!(outcome, Removal::NotFound);
 }
 
-// A dry run asks the same question and reports the same answer, and changes
-// nothing on disk.
 #[test]
 fn a_dry_run_asks_and_removes_nothing() {
     let (_tmp, fs, conversations) = setup();
@@ -217,7 +211,6 @@ fn the_null_backend_holds_nothing() {
     );
 }
 
-/// A conversation directory holding valid events and nothing else.
 fn events_only(conversations: &Utf8PathBuf, dirname: &str) -> Utf8PathBuf {
     let dir = conversations.join(dirname);
     fs::create_dir_all(&dir).unwrap();
@@ -229,8 +222,6 @@ fn events_only(conversations: &Utf8PathBuf, dirname: &str) -> Utf8PathBuf {
     dir
 }
 
-// The diagnosis names the repair that makes a conversation load, and only where
-// one does.
 #[test]
 fn the_diagnosis_offers_rebuilding_metadata_where_the_events_survive() {
     let (_tmp, fs, conversations) = setup();
@@ -250,8 +241,8 @@ fn the_diagnosis_offers_rebuilding_metadata_where_the_events_survive() {
     ]);
 }
 
-// Each stray entry is named for the directory in the store a user finds it
-// under: a leftover file by the conversation directory it is in.
+// A leftover `.tmp` file is reported under its parent conversation directory
+// name.
 #[test]
 fn the_diagnosis_lists_what_the_store_holds_beside_its_conversations() {
     let (_tmp, fs, conversations) = setup();
@@ -284,8 +275,6 @@ fn the_diagnosis_lists_what_the_store_holds_beside_its_conversations() {
     assert!(leftover.is_file());
 }
 
-// The startup scan never reads the archive, so the diagnosis is the only place
-// an archived conversation that stopped loading shows up.
 #[test]
 fn the_diagnosis_covers_the_archive() {
     let (_tmp, fs, conversations) = setup();
@@ -315,8 +304,8 @@ fn the_diagnosis_covers_the_archive() {
     assert_eq!(scanned_paths(&fs), [live]);
 }
 
-// A conversation with a live copy and an archived copy has two copies that
-// disagree, which no repair settles; the live copy is repaired on its own.
+// When both live and archived copies exist, only the live copy is offered a
+// repair.
 #[test]
 fn an_archived_copy_beside_a_live_copy_gets_no_repair() {
     let (_tmp, fs, conversations) = setup();
@@ -336,8 +325,6 @@ fn an_archived_copy_beside_a_live_copy_gets_no_repair() {
     ]);
 }
 
-// The archive's counterpart of `scan`, for a command that lists the archive:
-// archived conversations only, and none another process holds.
 #[test]
 fn scanning_the_archive_finds_only_archived_conversations_that_fail_to_load() {
     let (_tmp, fs, conversations) = setup();
@@ -360,7 +347,6 @@ fn scanning_the_archive_finds_only_archived_conversations_that_fail_to_load() {
     assert!(held.join("metadata.json").is_file());
 }
 
-// A conversation with no live copy is looked for in the archive.
 #[test]
 fn inspect_finds_an_archived_conversation() {
     let (_tmp, fs, conversations) = setup();
@@ -373,7 +359,6 @@ fn inspect_finds_an_archived_conversation() {
     assert_eq!(found.repair, Some(Repair::RebuildMetadata));
 }
 
-// The repair writes the metadata where the conversation is, so it stays archived.
 #[test]
 fn rebuilding_metadata_repairs_an_archived_conversation_in_place() {
     let (_tmp, fs, conversations) = setup();
@@ -388,8 +373,8 @@ fn rebuilding_metadata_repairs_an_archived_conversation_in_place() {
     assert!(!conversations.join("17941219991-old-work").exists());
     assert!(fs.diagnose().unwrap().invalid.is_empty());
 
-    // The archive time is a guess, but there is one, so the conversation does
-    // not sort last among the archived.
+    // Rebuilt metadata for an archived conversation uses the directory mtime as
+    // `archived_at`.
     let metadata: Conversation =
         serde_json::from_str(&fs::read_to_string(dir.join("metadata.json")).unwrap()).unwrap();
     assert!(metadata.archived_at.is_some());
@@ -414,8 +399,6 @@ fn removal_deletes_an_archived_conversation() {
     assert!(!dir.exists());
 }
 
-// The archive is read only for a conversation with no live copy: a live copy is
-// what the store holds for the ID, whatever the archive also has.
 #[test]
 fn inspect_prefers_the_live_copy() {
     let (_tmp, fs, conversations) = setup();
@@ -458,9 +441,8 @@ fn rebuilding_metadata_makes_the_conversation_load() {
     );
 }
 
-// A conversation with one copy that loads and one that does not has two copies
-// that disagree: rebuilding the broken copy's metadata would make it load with
-// metadata the other copy contradicts.
+// Rebuilding metadata requires every copy of the conversation in the partition
+// to be missing only `metadata.json`.
 #[test]
 fn metadata_is_not_rebuilt_beside_a_copy_that_loads() {
     let tmp = tempdir().unwrap();
@@ -495,8 +477,6 @@ fn metadata_is_not_rebuilt_beside_a_copy_that_loads() {
     assert!(!user_copy.join("metadata.json").exists());
 }
 
-// A repair that would not make the conversation load is refused before anyone
-// is asked, and writes nothing.
 #[test]
 fn a_repair_that_does_not_apply_changes_nothing() {
     let (_tmp, fs, conversations) = setup();
@@ -563,8 +543,6 @@ fn a_dry_run_asks_and_repairs_nothing() {
     assert!(!dir.join("metadata.json").exists());
 }
 
-// A conversation named for a repair that does not apply to it is reported as
-// such, the same as the backend would, without anyone being asked.
 #[test]
 fn a_dry_run_reports_a_repair_that_does_not_apply() {
     let (_tmp, fs, conversations) = setup();

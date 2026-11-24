@@ -13,8 +13,6 @@ use jp_storage::{
 
 use super::*;
 
-/// The `TRASHED.md` startup validation wrote beside every conversation it moved
-/// to the trash.
 const AUTO_TRASHED_MD: &str = "# Trashed Conversation
 
 This conversation was moved here because it failed workspace sanitization.
@@ -30,7 +28,6 @@ fn setup() -> (Utf8TempDir, FsStorageBackend, Utf8PathBuf) {
     (tmp, backend, conversations)
 }
 
-/// Write a trash entry as startup validation left it, holding `files`.
 fn trashed(conversations: &Utf8Path, dirname: &str, files: &[(&str, &str)]) -> Utf8PathBuf {
     let dir = conversations.join(".trash").join(dirname);
     fs::create_dir_all(&dir).unwrap();
@@ -66,8 +63,6 @@ fn listed(conversations: &Utf8Path) -> Vec<String> {
     names
 }
 
-// Whatever an entry holds, it goes back: what fails to load is reported by the
-// load-failure report, and what is not a conversation by `jp doctor`.
 #[test]
 fn moves_every_entry_back() {
     let (_tmp, backend, conversations) = setup();
@@ -101,8 +96,6 @@ fn moves_every_entry_back() {
     assert!(!conversations.join(".trash").exists());
 }
 
-// A draft older versions left without its conversation comes back as a
-// conversation with no turns, created when its ID says, holding the draft.
 #[test]
 fn a_draft_comes_back_as_a_conversation_with_no_turns() {
     let (_tmp, backend, conversations) = setup();
@@ -129,7 +122,6 @@ fn a_draft_comes_back_as_a_conversation_with_no_turns() {
     assert_eq!(stream.turn_count(), 0);
 }
 
-// An entry holding nothing but its `TRASHED.md` holds nothing of the user's.
 #[test]
 fn an_empty_entry_is_removed() {
     let (_tmp, backend, conversations) = setup();
@@ -140,9 +132,6 @@ fn an_empty_entry_is_removed() {
     assert_eq!(listed(&conversations), Vec::<String>::new());
 }
 
-// A conversation that is live, or archived, already has the ID, so the entry
-// comes back as a conversation of its own, the next free tenth of a second
-// later, and the live one is untouched.
 #[test]
 fn an_entry_whose_id_is_taken_comes_back_under_the_next_free_id() {
     let (_tmp, backend, conversations) = setup();
@@ -175,7 +164,6 @@ fn an_entry_whose_id_is_taken_comes_back_under_the_next_free_id() {
     );
 }
 
-// Older versions named a second entry for one ID `<id>-1`; both come back.
 #[test]
 fn two_entries_for_one_id_both_come_back() {
     let (_tmp, backend, conversations) = setup();
@@ -197,8 +185,6 @@ fn two_entries_for_one_id_both_come_back() {
     );
 }
 
-// A directory that is not a conversation is moved back under its own name, so
-// an existing directory of that name keeps it in the trash.
 #[test]
 fn an_entry_whose_name_is_taken_is_left_and_reported() {
     let (_tmp, backend, conversations) = setup();
@@ -225,7 +211,6 @@ fn a_root_without_a_trash_is_left_alone() {
     assert_eq!(listed(&conversations), Vec::<String>::new());
 }
 
-// The config is only built when a draft needs one.
 #[test]
 fn no_config_is_built_without_a_draft() {
     let (_tmp, backend, conversations) = setup();
@@ -235,7 +220,6 @@ fn no_config_is_built_without_a_draft() {
     ]);
 }
 
-// User-local storage has a trash of its own.
 #[test]
 fn restores_the_trash_of_every_storage_root() {
     let tmp = tempdir().unwrap();

@@ -1,11 +1,9 @@
-//! The report of conversations that failed to load.
+//! End-of-run reporting for conversations that fail validation.
 //!
-//! The scan at startup finds the stored conversations JP cannot load and leaves
-//! them where they are.
-//! [`notice`] prints the report on stderr after the command's own output:
-//! [`render_text`] for the text formats, [`render_json`] for the JSON formats.
-//! Each conversation is checked again when the report prints, so one the
-//! command removed or fixed is left out.
+//! Startup validation leaves invalid conversations in place.
+//! [`notice`] returns a [`LoadFailureNotice`] that re-checks each failed
+//! conversation on drop (omitting any that the command repaired or removed) and
+//! prints the remaining failures to stderr.
 
 use std::sync::Arc;
 
@@ -21,19 +19,16 @@ use tracing::warn;
 
 use crate::deferred_report::DeferredReport;
 
-/// A conversation directory that failed to load, as the report shows it.
+/// A conversation that failed validation, formatted for end-of-run reporting.
 #[derive(Debug)]
 pub(crate) struct LoadFailure<'a> {
     pub id: ConversationId,
     pub location: StorageLocation,
     pub error: &'a ValidationError,
-
-    /// Whether the conversation is in the archive.
     pub archived: bool,
 }
 
 impl LoadFailure<'_> {
-    /// Log the failure as one warning.
     fn log(&self) {
         warn!(
             code = "conversation_load_failed",
@@ -46,10 +41,8 @@ impl LoadFailure<'_> {
     }
 }
 
-/// Log each failure, and return the report printed on stderr when it drops.
-///
-/// `recovery` checks each conversation again when the report prints.
-/// Under the JSON output formats the report is one record per failure.
+/// Log each failure and return a guard that prints the load-failure report to
+/// stderr when dropped.
 pub(crate) fn notice(
     printer: Printer,
     recovery: Arc<dyn RecoveryBackend>,
@@ -73,17 +66,14 @@ pub(crate) fn notice(
     }
 }
 
-/// The load-failure report, printed on stderr when dropped.
-///
-/// Holds the conversations that failed to load, and reports those the store
-/// still holds and that still fail when it drops.
+/// Guard that re-checks failed conversations on drop and prints any that still
+/// fail to stderr.
 pub(crate) struct LoadFailureNotice {
     printer: Printer,
     recovery: Arc<dyn RecoveryBackend>,
     failed: Vec<Failed>,
 }
 
-/// A conversation that failed to load, checked again when the report prints.
 struct Failed {
     id: ConversationId,
     location: StorageLocation,
@@ -130,15 +120,15 @@ impl<'a> From<&'a InvalidConversation> for LoadFailure<'a> {
     }
 }
 
-/// The most failures the text report lists; past it, the report is a count
-/// pointing at `jp doctor`.
+/// Maximum number of individual failures listed in the text report before
+/// collapsing to a summary count.
 const MAX_LISTED: usize = 5;
 
-/// Render the text report, or `None` when nothing failed to load.
+/// Render the text report, or `None` if `failures` is empty.
 ///
-/// Up to [`MAX_LISTED`] failures are listed with their ID and error, followed
-/// by a pointer to `jp doctor`, which names the fix or removal for each.
-/// More than that is reported as a count, and `jp doctor` lists them.
+/// Lists up to [`MAX_LISTED`] failures with their ID and error, or a summary
+/// count when more than [`MAX_LISTED`] conversations failed, followed by a hint
+/// to run `jp doctor`.
 pub(crate) fn render_text(failures: &[LoadFailure<'_>]) -> Option<String> {
     let count = failures.len();
     let noun = match count {
@@ -179,9 +169,7 @@ pub(crate) fn render_text(failures: &[LoadFailure<'_>]) -> Option<String> {
     ))
 }
 
-/// Render one JSON record per failure.
-///
-/// With `pretty`, each record is indented across several lines.
+/// Serialize one JSON record per failure.
 pub(crate) fn render_json(
     failures: &[LoadFailure<'_>],
     pretty: bool,
@@ -192,10 +180,8 @@ pub(crate) fn render_json(
         .collect()
 }
 
-/// Render one failure as a JSON record, naming `fix` when a `jp doctor` fix
-/// makes the conversation load.
-///
-/// With `pretty`, the record is indented across several lines.
+/// Serialize a single failure as a JSON record, including `fix` when a `jp
+/// doctor --fix` repair is available.
 pub(crate) fn render_record(
     failure: &LoadFailure<'_>,
     fix: Option<&'static str>,
@@ -213,10 +199,10 @@ pub(crate) fn render_record(
     }
 }
 
-/// One failure as a JSON record.
+/// JSON representation of a conversation load failure.
 ///
-/// `code` fields are the typed part a script matches on; `message` fields are
-/// prose that may be reworded.
+/// `code` fields are stable machine-readable identifiers; `message` fields are
+/// human-readable descriptions.
 #[derive(Serialize)]
 struct Record<'a> {
     level: &'static str,
@@ -225,7 +211,7 @@ struct Record<'a> {
     context: Context<'a>,
     causes: Vec<Cause<'a>>,
 
-    /// The name of the `jp doctor --fix` fix that makes the conversation load.
+    /// `jp doctor --fix` repair name, if an automatic repair is available.
     #[serde(skip_serializing_if = "Option::is_none")]
     fix: Option<&'static str>,
 }
@@ -244,7 +230,7 @@ struct ConversationContext<'a> {
     archived: bool,
 }
 
-/// One step of the error chain, outermost first.
+/// One entry in the validation error cause chain, outermost first.
 #[derive(Serialize)]
 struct Cause<'a> {
     code: &'static str,
@@ -294,8 +280,8 @@ impl<'a> From<&'a LoadFailure<'a>> for Record<'a> {
     }
 }
 
-/// Why a conversation does not load, as the typed record the load-failure
-/// report emits, without the report's context.
+/// Serialize a [`ValidationError`] into the `{code, message, causes}` JSON
+/// object used by `jp conversation show`.
 pub(crate) fn failure_json(error: &ValidationError) -> serde_json::Value {
     #[derive(Serialize)]
     struct Failure<'a> {
@@ -315,7 +301,6 @@ pub(crate) fn failure_json(error: &ValidationError) -> serde_json::Value {
 const FAILURE_CODE: &str = "conversation_load_failed";
 const FAILURE_MESSAGE: &str = "conversation failed to load";
 
-/// The error chain of a validation failure, outermost first.
 fn causes(error: &ValidationError) -> Vec<Cause<'_>> {
     match error {
         ValidationError::Missing { part, location } => vec![Cause {

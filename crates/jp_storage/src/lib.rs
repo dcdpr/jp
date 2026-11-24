@@ -1113,7 +1113,7 @@ fn build_conversation_dir_prefix(root: &Utf8Path, id: &ConversationId) -> Utf8Pa
     root.join(CONVERSATIONS_DIR).join(id.to_dirname(None))
 }
 
-/// The part of a `conversations/` directory a conversation is kept in.
+/// Storage partition within a `conversations/` directory.
 #[derive(Debug, Clone, Copy)]
 enum Partition {
     Live,
@@ -1129,14 +1129,15 @@ impl Partition {
     }
 }
 
-/// Write a conversation's files into exactly `conv_dir`, creating it if needed.
+/// Write `metadata.json`, `base_config.json`, and `events.json` into
+/// `conv_dir`, creating the directory if needed.
 ///
-/// Nothing is renamed or removed: other directories for the same conversation,
-/// and the other files `conv_dir` holds, are left as they are.
+/// Does not rename or remove sibling directories for the same conversation ID,
+/// and preserves any non-managed files in `conv_dir`.
 ///
 /// # Errors
 ///
-/// Fails when a file cannot be written.
+/// Returns an error if any file cannot be written.
 pub fn write_conversation_files(
     conv_dir: &Utf8Path,
     metadata: &Conversation,
@@ -1164,10 +1165,7 @@ pub fn write_conversation_files(
     Ok(())
 }
 
-/// Whether a conversation directory holds any of the managed files.
-///
-/// A directory without them has never been written as a conversation, whatever
-/// else it contains.
+/// Return `true` if `dir` contains at least one managed conversation file.
 pub(crate) fn holds_managed_files(dir: &Utf8Path) -> bool {
     MANAGED_FILES.iter().any(|name| dir.join(name).exists())
 }

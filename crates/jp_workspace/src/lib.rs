@@ -97,7 +97,7 @@ pub struct Workspace {
     /// The filesystem backend, for workspaces opened from disk.
     fs: Option<Arc<FsStorageBackend>>,
 
-    /// Whether what the run changes is written to the store; see
+    /// Whether mutations are persisted to the backing store; see
     /// [`Self::without_persistence`].
     persists: bool,
 
@@ -347,12 +347,11 @@ impl Workspace {
             .with_sessions(backend)
     }
 
-    /// The workspace, writing nothing to the store.
+    /// Disable persistence, locking, and session writes for this workspace.
     ///
-    /// Writes are discarded, locks are never taken, so a conversation another
-    /// process holds can still be read, and session records are read but not
-    /// written.
-    /// [`Self::persists`] reports `false` from then on.
+    /// Conversation writes are discarded, locks always succeed without blocking
+    /// on other processes, and session mappings are read-only.
+    /// [`Self::persists`] returns `false` after this call.
     #[must_use]
     pub fn without_persistence(mut self) -> Self {
         self.disable_persistence();
@@ -361,10 +360,9 @@ impl Workspace {
         self
     }
 
-    /// Stop writing conversations to the store, for the rest of the run.
+    /// Replace the persist backend with [`NullPersistBackend`] for the rest of
+    /// the run.
     ///
-    /// Swaps the persist backend to [`NullPersistBackend`], which silently
-    /// discards all writes.
     /// Already-created `ConversationMut` instances hold their own `Arc` clone
     /// of the original backend and continue to persist.
     pub fn disable_persistence(&mut self) {
@@ -372,7 +370,7 @@ impl Workspace {
         self.persists = false;
     }
 
-    /// Whether what changes is written to the store.
+    /// Whether workspace changes are persisted to the backing store.
     ///
     /// `false` for a workspace built with [`Self::without_persistence`], or
     /// once [`Self::disable_persistence`] is called.
@@ -384,9 +382,9 @@ impl Workspace {
     /// Scan conversation IDs from the backing store and populate the workspace
     /// index.
     ///
-    /// All entries are lazily initialized — metadata and events are loaded on
-    /// first access via [`metadata`], [`events`], etc. A stored conversation
-    /// that fails validation is left out.
+    /// All entries are lazily initialized: metadata and events are loaded on
+    /// first access via [`metadata`], [`events`], etc. Stored conversations
+    /// that fail validation are excluded.
     ///
     /// [`events`]: Self::events
     /// [`metadata`]: Self::metadata
@@ -825,10 +823,11 @@ impl Workspace {
         self.state.presence.get(id).copied()
     }
 
-    /// Where the store holds the conversation, live or archived.
+    /// Return the storage locations holding the conversation (live or
+    /// archived).
     ///
-    /// Empty for a conversation not yet written, and for a store that keeps
-    /// conversations nowhere a user can reach them, such as an in-memory one.
+    /// Returns an empty vector if the conversation has not been persisted or if
+    /// the backing store has no user-addressable locations.
     #[must_use]
     pub fn conversation_locations(&self, h: &ConversationHandle) -> Vec<StorageLocation> {
         self.loader.conversation_locations(&h.id())
@@ -1001,8 +1000,9 @@ impl Workspace {
     /// the in-memory index.
     /// Returns a handle for the restored conversation.
     ///
-    /// The conversation's lock is held across the move and the metadata write;
-    /// [`Error::LockFailed`] when another process holds it, with nothing moved.
+    /// Holds the conversation lock across the move and the metadata update.
+    /// Returns [`Error::LockFailed`] without moving anything if another process
+    /// holds the lock.
     pub fn unarchive_conversation(&mut self, id: &ConversationId) -> Result<ConversationHandle> {
         let Some(_guard) = self.locker.try_lock(&id.to_string(), None)? else {
             return Err(Error::LockFailed(id.to_string()));
@@ -1144,16 +1144,14 @@ impl Workspace {
         Ok(())
     }
 
-    /// Whether no other holder has conversation `id`'s lock right now.
+    /// Check whether conversation `id`'s lock is currently free by acquiring
+    /// and immediately releasing it.
     ///
-    /// Takes the lock and releases it again to find out, so another process can
-    /// take it a moment later.
-    /// A workspace without persistence takes no locks, and reports every one as
-    /// free.
+    /// Always returns `Ok(true)` when persistence is disabled.
     ///
     /// # Errors
     ///
-    /// Fails when the lock cannot be tried.
+    /// Returns an error if the lock check fails.
     pub fn conversation_lock_is_free(&self, id: &ConversationId) -> Result<bool> {
         Ok(self.locker.try_lock(&id.to_string(), None)?.is_some())
     }

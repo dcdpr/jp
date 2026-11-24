@@ -1,18 +1,10 @@
-//! Shared confirmation for mutating conversation commands.
+//! Shared confirmation flags and prompts for mutating conversation commands.
 //!
-//! [`ConfirmFlag`] exposes `--confirm`, `--no-confirm`, and the `--yes` / `-y`
-//! alias.
-//! With no flag, the decision is left to the command's own default.
-//!
-//! [`confirm_conversation_action`] is the prompt itself: a heading naming the
-//! action, the conversation's details, and a single-key question.
-//! It reads the conversation through a held [`ConversationLock`], so the
-//! details describe the state the answer acts on and no other process can
-//! change that state while the question is open.
-//!
-//! A run over several conversations asks for each, and keeps an [`Answers`]:
-//! `Y` and `N` answer every conversation that remains, and `--yes` is the same
-//! answer given before the first question.
+//! [`ConfirmFlag`] provides `--confirm` and `--no-confirm` (`--yes` / `-y`).
+//! [`confirm_conversation_action`] renders a heading, the conversation's
+//! details (read under a held [`ConversationLock`]), and a single-key prompt.
+//! [`Answers`] tracks multi-conversation confirmation state so `Y` (yes to all)
+//! and `N` (no to all) apply to every remaining conversation in the run.
 
 use std::borrow::Cow;
 
@@ -94,8 +86,8 @@ impl ConfirmFlag {
         }
     }
 
-    /// The answers a run that asks before each change starts with: every
-    /// conversation accepted under `--no-confirm`, none settled otherwise.
+    /// Initial [`Answers`] state for a command that prompts by default:
+    /// pre-accepts all conversations when `--no-confirm` / `--yes` was passed.
     pub(crate) fn answers(self) -> Answers {
         if self.preference() == Some(false) {
             Answers::yes_to_all()
@@ -105,19 +97,19 @@ impl ConfirmFlag {
     }
 }
 
-/// The user's answer to one confirmation in a run.
+/// User response to a single confirmation prompt.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Answer {
-    /// `y`: this conversation.
+    /// `y`: accept for this conversation.
     Yes,
 
-    /// `Y`: this conversation and every one that remains.
+    /// `Y`: accept for this conversation and all remaining conversations.
     YesToAll,
 
-    /// `n` or Esc: not this conversation.
+    /// `n` or `Esc`: decline for this conversation.
     No,
 
-    /// `N`: not this conversation, nor any that remains.
+    /// `N`: decline for this conversation and all remaining conversations.
     NoToAll,
 }
 
@@ -127,37 +119,35 @@ impl Answer {
     }
 }
 
-/// The answers given so far in a run that confirms each conversation.
+/// Multi-conversation confirmation state for a command run.
 ///
-/// Holds the answer `Y` or `N` gave for every remaining conversation, if one
-/// was given.
+/// Records a sticky `Y` (`Some(true)`) or `N` (`Some(false)`) decision that
+/// applies to all remaining conversations without prompting again.
 #[derive(Debug, Default)]
 pub(crate) struct Answers {
     rest: Option<bool>,
 }
 
 impl Answers {
-    /// Answers that accept every conversation without asking, as `--yes` does.
+    /// Pre-accept all conversations without prompting (`--yes`).
     pub(crate) const fn yes_to_all() -> Self {
         Self { rest: Some(true) }
     }
 
-    /// The answer given for every remaining conversation, if one was.
-    ///
-    /// `Some(false)` means the rest are declined, so a run can stop.
+    /// Return the sticky decision for remaining conversations, if set.
     pub(crate) const fn rest(&self) -> Option<bool> {
         self.rest
     }
 
-    /// Whether the next conversation is accepted: the answer given for every
-    /// remaining one, or else the one `ask` returns.
+    /// Return whether to proceed on the current conversation, using the sticky
+    /// decision if set or calling `ask(more)` otherwise.
     ///
-    /// `more` says whether more conversations follow this one; it is passed to
-    /// `ask`, which offers `Y` and `N` only when it is true.
+    /// When `more` is `true`, `ask` offers `Y` and `N` in addition to `y` and
+    /// `n`.
     ///
     /// # Errors
     ///
-    /// Returns `ask`'s error.
+    /// Propagates any error returned by `ask`.
     pub(crate) fn decide<E>(
         &mut self,
         more: bool,
@@ -176,13 +166,8 @@ impl Answers {
         Ok(answer.accepts())
     }
 
-    /// Whether `action` goes ahead on the locked conversation: the answer given
-    /// for every remaining conversation, or else the one
-    /// [`confirm_conversation_action`] asks for.
-    ///
-    /// # Errors
-    ///
-    /// Fails in the cases [`confirm_conversation_action`] does.
+    /// Confirm `action` on `lock`, using the sticky decision if set or
+    /// prompting via [`confirm_conversation_action`].
     pub(crate) fn confirm_action(
         &mut self,
         ctx: &Ctx,
@@ -197,24 +182,14 @@ impl Answers {
     }
 }
 
-/// The wording of a confirmation prompt.
+/// Wording for a confirmation prompt.
 #[derive(Debug, Clone)]
 pub(crate) struct Prompt {
     pub question: Cow<'static, str>,
-
-    /// What `y` does.
     pub accept: &'static str,
-
-    /// What `Y` does.
     pub accept_rest: &'static str,
-
-    /// What `n` does.
     pub decline: &'static str,
-
-    /// What `N` does.
     pub decline_rest: &'static str,
-
-    /// Shown beneath the question for as long as it is open.
     pub caution: Option<&'static str>,
 }
 
@@ -323,12 +298,11 @@ pub(crate) fn confirm_conversation_action(
     ask(&ctx.printer, &action.prompt(), &details.to_string(), more)
 }
 
-/// Ask the user to confirm removing a conversation that is not in the
-/// conversation list.
+/// Prompt the user to confirm removing a conversation that is not in the live
+/// conversation index (an invalid or archived conversation).
 ///
-/// The prompt names the conversation, its title when one is recorded, why it
-/// does not load when it does not, and every location the removal deletes.
-/// Errors in the same cases as [`confirm_conversation_action`].
+/// Displays the conversation ID, its title (if readable), any validation error,
+/// and the storage locations that will be deleted.
 pub(crate) fn confirm_unloaded_removal(
     ctx: &Ctx,
     stored: &StoredConversation,
@@ -342,7 +316,6 @@ pub(crate) fn confirm_unloaded_removal(
     ask(&ctx.printer, &action.prompt(), &details.to_string(), more)
 }
 
-/// Fail when nobody is available to answer the question for `action` on `id`.
 fn ensure_answerable(ctx: &Ctx, action: ConversationAction, id: ConversationId) -> Result<()> {
     if ctx.term.interactive {
         return Ok(());
@@ -357,7 +330,6 @@ fn ensure_answerable(ctx: &Ctx, action: ConversationAction, id: ConversationId) 
     .into())
 }
 
-/// The line above a prompt's details, e.g. `Removing conversation jp-c…`.
 pub(crate) fn heading(verb: &str, id: ConversationId, pretty: bool) -> String {
     let id_label = if pretty {
         id.to_string().bold().yellow().to_string()
@@ -368,9 +340,9 @@ pub(crate) fn heading(verb: &str, id: ConversationId, pretty: bool) -> String {
     format!("{verb} conversation {id_label}")
 }
 
-/// Show `details` and ask `prompt`'s single-key question.
+/// Display `details` and prompt with `prompt`'s single-key options.
 ///
-/// `more` offers `Y` and `N`, which answer every conversation that remains.
+/// When `more` is `true`, includes `Y` (yes to all) and `N` (no to all).
 pub(crate) fn ask(printer: &Printer, prompt: &Prompt, details: &str, more: bool) -> Result<Answer> {
     // `InlineSelect` splits at the last newline, printing everything before it
     // as a preamble and handing inquire the single line it can redraw.
@@ -384,7 +356,6 @@ pub(crate) fn ask(printer: &Printer, prompt: &Prompt, details: &str, more: bool)
     decide(select.prompt(&mut printer.prompt_writer()))
 }
 
-/// The keys a prompt offers: `Y` and `N` only when more conversations follow.
 fn options(prompt: &Prompt, more: bool) -> Vec<InlineOption> {
     let mut options = vec![InlineOption::new('y', prompt.accept)];
     if more {
@@ -419,8 +390,6 @@ fn decide(answer: std::result::Result<char, InquireError>) -> Result<Answer> {
     }
 }
 
-/// Build the details block shown above the prompt for removing a conversation
-/// that is not in the conversation list.
 fn unloaded_details(stored: &StoredConversation, pretty: bool) -> DetailsFmt {
     stored_details(stored, pretty).with_heading(heading(
         ConversationAction::Remove.progressive(),
@@ -429,11 +398,10 @@ fn unloaded_details(stored: &StoredConversation, pretty: bool) -> DetailsFmt {
     ))
 }
 
-/// Build the details of a conversation read from the store without loading it:
-/// its title when one is recorded, why it does not load, and its locations.
+/// Build a [`DetailsFmt`] for a conversation inspected without loading.
 ///
-/// The block is a prompt's preamble, which the prompt widget writes itself, so
-/// a title keeps no control character there.
+/// Strips control characters from the title because the prompt widget renders
+/// the preamble without passing through the printer's sanitizer.
 pub(crate) fn stored_details(stored: &StoredConversation, pretty: bool) -> DetailsFmt {
     DetailsFmt::new(stored.id)
         .with_title(

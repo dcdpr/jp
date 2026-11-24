@@ -1,6 +1,6 @@
 //! Filesystem-backed storage backend.
 //!
-//! [`FsStorageBackend`] wraps [`Storage`] and implements all four backend
+//! [`FsStorageBackend`] wraps [`Storage`] and implements all five backend
 //! traits.
 //! The `Storage` struct remains as an internal implementation detail; external
 //! code interacts through the traits.
@@ -39,7 +39,7 @@ use crate::{
 
 /// Filesystem-backed storage that delegates to `Storage`.
 ///
-/// Implements all four backend traits.
+/// Implements all five backend traits.
 /// Also exposes filesystem-specific methods (path accessors, etc.) that are not
 /// part of the trait surface.
 #[derive(Debug, Clone)]
@@ -201,10 +201,10 @@ impl FsStorageBackend {
         self.storage.conversation_base_config_path(id)
     }
 
-    /// The live `conversations/` directory of each storage root, workspace
-    /// first.
+    /// Return the live `conversations/` directory for each configured storage
+    /// root, ordered with workspace storage before user-local storage.
     ///
-    /// The directories need not exist.
+    /// The returned paths may not exist on disk.
     #[must_use]
     pub fn conversations_dirs(&self) -> Vec<Utf8PathBuf> {
         [Some(self.storage.path()), self.storage.user_storage_path()]
@@ -214,12 +214,13 @@ impl FsStorageBackend {
             .collect()
     }
 
-    /// Every directory of conversation `id` among the live conversations of
-    /// each storage root, workspace first, whether or not it loads.
+    /// Return every directory matching conversation `id` in the live
+    /// `conversations/` roots, workspace first, regardless of whether it passes
+    /// validation.
     ///
-    /// Lists only `<id>` and `<id>-<title>` directly inside a `conversations/`
-    /// directory: never the archive, other hidden entries, or a directory whose
-    /// name merely starts with the same digits.
+    /// Matches only `<id>` and `<id>-<title>` directly under `conversations/`,
+    /// excluding `.archive/`, hidden directories, and directories that merely
+    /// share a numeric prefix.
     #[must_use]
     pub fn live_conversation_dirs(&self, id: &ConversationId) -> Vec<Utf8PathBuf> {
         let prefix = id.to_dirname(None);
@@ -229,10 +230,8 @@ impl FsStorageBackend {
             .collect()
     }
 
-    /// Check every conversation directory in both roots without moving any.
-    ///
-    /// Sorts each directory into valid or invalid.
-    /// See [`Storage::validate_conversations`] for the checks.
+    /// Validate all conversation directories across both storage roots without
+    /// modifying them; see [`Storage::validate_conversations`].
     #[must_use]
     pub fn validate_conversations(&self) -> ValidationResult {
         self.storage.validate_conversations()
@@ -326,8 +325,8 @@ impl LoadBackend for FsStorageBackend {
         for root in roots {
             let path = root.join(CONVERSATIONS_DIR);
 
-            // Expiry deletes a conversation, which is only JP's to do for one
-            // that loads.
+            // Only expire conversations that pass validation; invalid
+            // conversations are left untouched for the user to inspect.
             let valid: HashSet<_> = storage.valid_conversation_ids(&path).into_iter().collect();
             let ids: Vec<_> = dir_entries(&path)
                 .collect::<Vec<_>>()
@@ -356,8 +355,7 @@ impl RecoveryBackend for FsStorageBackend {
     fn scan(&self) -> Result<Vec<InvalidConversation>> {
         let validation = self.storage.validate_conversations();
 
-        // A conversation another process holds may be between the writes of
-        // its managed files, so its state says nothing yet.
+        // Skip locked conversations, which may be mid-write in another process.
         let unlocked = |id: &ConversationId| {
             let locked = self.storage.is_conversation_locked(&id.to_string());
             if locked {
@@ -397,9 +395,8 @@ impl RecoveryBackend for FsStorageBackend {
         id: &ConversationId,
         decide: &mut dyn FnMut(&StoredConversation) -> bool,
     ) -> Result<Removal> {
-        // Held until the directories are gone: a process creating this
-        // conversation is between the writes of its files, and its partial
-        // state would otherwise be deleted.
+        // Hold the conversation lock until removal completes so we never delete
+        // an in-flight write from another process.
         let Some(_guard) = self.storage.try_lock_conversation(&id.to_string(), None)? else {
             return Ok(Removal::Locked);
         };
@@ -425,8 +422,8 @@ impl RecoveryBackend for FsStorageBackend {
             .into_iter()
             .filter(|entry| !self.storage.is_conversation_locked(&entry.id.to_string()))
             .map(|conversation| {
-                // An archived copy beside a live copy disagrees with it, and no
-                // repair settles that; the live copy is repaired on its own.
+                // When both live and archived copies exist, only the live copy
+                // is offered a repair.
                 let (dirs, archived) = self.stored_dirs(&conversation.id);
                 let repair = if archived == conversation.archived {
                     applicable_repair(&dirs)
@@ -494,8 +491,8 @@ impl RecoveryBackend for FsStorageBackend {
 }
 
 impl FsStorageBackend {
-    /// Every directory of conversation `id` in the archive of each storage
-    /// root, workspace first.
+    /// Return every directory matching conversation `id` in each storage root's
+    /// archive, workspace first.
     fn archived_conversation_dirs(&self, id: &ConversationId) -> Vec<Utf8PathBuf> {
         let prefix = id.to_dirname(None);
         self.conversations_dirs()
@@ -504,12 +501,11 @@ impl FsStorageBackend {
             .collect()
     }
 
-    /// The directories conversation `id` is stored in, and whether they are in
-    /// the archive: its live directories, or its archived ones when it has no
-    /// live copy.
+    /// Return the directories holding conversation `id` and whether they are in
+    /// the archive.
     ///
-    /// The archive is read only in the second case, so looking up a live
-    /// conversation costs the same however large the archive is.
+    /// Prefers live directories; checks the archive only when no live directory
+    /// exists for `id`.
     fn stored_dirs(&self, id: &ConversationId) -> (Vec<Utf8PathBuf>, bool) {
         let live = self.live_conversation_dirs(id);
         if !live.is_empty() {
@@ -518,8 +514,7 @@ impl FsStorageBackend {
         (self.archived_conversation_dirs(id), true)
     }
 
-    /// What the store holds for conversation `id`, and the directories it is
-    /// in.
+    /// Inspect the on-disk state and directories for conversation `id`.
     fn stored(&self, id: &ConversationId) -> Option<(StoredConversation, Vec<Utf8PathBuf>)> {
         let (dirs, archived) = self.stored_dirs(id);
         if dirs.is_empty() {
@@ -551,18 +546,18 @@ impl FsStorageBackend {
     }
 }
 
-/// The repair that makes the conversation in `dirs`, the directories of one
-/// partition, load: one every directory needs.
+/// Return the repair that can fix `dirs`, if every directory in the slice
+/// requires the same repair.
 ///
-/// A conversation with one directory that loads and one that does not has two
-/// copies that disagree, which no repair settles.
+/// If one copy is valid and another is broken, the copies disagree and no
+/// automatic repair applies.
 fn applicable_repair(dirs: &[Utf8PathBuf]) -> Option<Repair> {
     let rebuildable = !dirs.is_empty() && dirs.iter().all(|dir| missing_only_metadata(dir));
     rebuildable.then_some(Repair::RebuildMetadata)
 }
 
-/// The stray entry at `path`, named for the directory in `conversations/` that
-/// it is or, for a file, that holds it.
+/// Build a [`StrayEntry`] for `path`, named after its entry in `conversations/`
+/// (or the parent conversation directory for a `.tmp` file).
 fn stray_entry(path: &Utf8Path, kind: StrayKind) -> StrayEntry {
     let named = match kind {
         StrayKind::TempFile => path.parent(),

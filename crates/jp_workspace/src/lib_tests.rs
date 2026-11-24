@@ -514,8 +514,6 @@ fn test_a_workspace_persists_unless_told_otherwise() {
     assert!(!workspace.without_persistence().persists());
 }
 
-// Writes, locks, and session records are all switched off together, so nothing
-// a run does without persistence reaches the store.
 #[test]
 fn test_a_workspace_without_persistence_writes_nothing() {
     let tmp = tempdir().unwrap();
@@ -541,9 +539,6 @@ fn test_a_workspace_without_persistence_writes_nothing() {
     );
 }
 
-// The index keeps a broken conversation out on its own, so a reader that never
-// scans for broken conversations, such as the macOS app, does not hand one on
-// to be loaded either.
 #[test]
 fn test_load_index_leaves_out_invalid_conversations() {
     let tmp = tempdir().unwrap();
@@ -1401,8 +1396,6 @@ fn test_archived_keyword_resolves_most_recently_archived() {
     assert_eq!(most_recent, id2);
 }
 
-// Another process holding the conversation may be writing it, so it is not
-// moved under that process.
 #[test]
 fn test_unarchive_refuses_a_conversation_another_process_holds() {
     let tmp = tempdir().unwrap();
@@ -1436,8 +1429,6 @@ fn test_unarchive_refuses_a_conversation_another_process_holds() {
     assert!(ws.acquire_conversation(&id).is_ok());
 }
 
-// The probe reports the lock as another process sees it, and holds nothing
-// after it returns.
 #[test]
 fn test_a_conversation_lock_is_free_unless_another_holder_has_it() {
     let tmp = tempdir().unwrap();
@@ -1454,7 +1445,6 @@ fn test_a_conversation_lock_is_free_unless_another_holder_has_it() {
     assert!(ws.conversation_lock_is_free(&id).unwrap());
 }
 
-// Without persistence no lock is ever taken, so none is ever waited for.
 #[test]
 fn test_a_workspace_without_persistence_sees_every_lock_as_free() {
     let tmp = tempdir().unwrap();

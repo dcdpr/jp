@@ -60,8 +60,6 @@ fn details_show_the_status_beneath_the_title_and_the_locations_last() {
     assert_eq!(details.to_string(), expected.join("\n"));
 }
 
-// A conversation `jp c show` describes loads, so its status is `null`; the
-// locations are where to find its files.
 #[test]
 fn json_lists_the_locations_and_a_null_status_for_a_conversation_that_loads() {
     let details = DetailsFmt::new(make_id(1000))
@@ -73,7 +71,6 @@ fn json_lists_the_locations_and_a_null_status_for_a_conversation_that_loads() {
     assert_eq!(json["status"], serde_json::Value::Null);
 }
 
-// The status is typed: the same code and causes the load-failure report emits.
 #[test]
 fn json_describes_why_a_conversation_does_not_load() {
     let details = DetailsFmt::new(make_id(1000)).with_status(Some(missing_events()));

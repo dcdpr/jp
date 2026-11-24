@@ -760,9 +760,6 @@ fn test_load_cli_cfg_args_global_only_when_workspace_has_no_match() {
     assert_eq!(result.assistant.name.as_deref(), Some("from-global"));
 }
 
-// `jp doctor` skips every step before the command except selecting the
-// workspace, so `--workspace` picks the workspace it reports on, from a
-// directory that is in no workspace.
 #[test]
 #[serial(env_vars)]
 fn doctor_reports_on_the_workspace_the_flag_names() {

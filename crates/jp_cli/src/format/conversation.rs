@@ -65,10 +65,10 @@ pub struct DetailsFmt {
     /// Compactions applied to the conversation.
     pub compactions: Vec<DetailItem>,
 
-    /// Why the conversation does not load, for one that does not.
+    /// Validation error when the conversation cannot be loaded.
     pub status: Option<ValidationError>,
 
-    /// Where the store holds the conversation.
+    /// Storage locations holding the conversation.
     pub locations: Vec<StorageLocation>,
 
     /// Pretty-print the output.

@@ -53,8 +53,6 @@ fn ls() -> Ls {
     }
 }
 
-// The archive index leaves out an archived conversation that fails to load, so
-// the listing reports it, the way every command reports a live one.
 #[test]
 fn an_archived_conversation_that_fails_to_load_is_reported() {
     let tmp = tempdir().unwrap();
@@ -106,7 +104,6 @@ fn an_archived_conversation_that_fails_to_load_is_reported() {
     );
 }
 
-// Reading the archive is the archived listing's business alone.
 #[test]
 fn the_live_listing_does_not_report_the_archive() {
     let tmp = tempdir().unwrap();
