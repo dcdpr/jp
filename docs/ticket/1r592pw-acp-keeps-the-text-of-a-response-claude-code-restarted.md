@@ -47,33 +47,75 @@ continues from where it stopped (`handle_stream_error` in
 
 ## Fix
 
-Have JP handle connection recovery on the ACP route the same way it does on the
-API-key route: let Claude Code report the failure, and let JP commit the partial
-response and restart the request from committed history.
+Remove the blocks Claude Code abandoned from the conversation, so JP's record
+matches what Claude Code kept in its own context.
 
-Verify which settings control Claude Code's retry and resume behavior using the
-`Scenario` harness in `cut_off_tests.rs` before changing production code:
+Claude Code names those blocks.
+The SDK message that carries the interrupted response's `message_stop` has an
+`abandoned_blocks` field, holding the ID of the API message and the index of the
+first block Claude Code discarded:
 
-- [ ] Check whether `CLAUDE_CODE_MAX_RETRIES=0` is respected, whether it
-      disables the mid-stream retry in `cut_off_text.jsonl`, and what error
-      Claude Code reports instead.
-- [ ] Check whether any setting disables the synthetic resume prompt in
-      `cut_off_reasoned_text.jsonl` (Claude Code's error reference documents up
-      to three consecutive resume prompts in non-interactive sessions without
-      naming a toggle).
-- [ ] Check how the `server_error` path in `cut_off.jsonl` behaves under those
-      settings, since JP holds `server_error` until the final SDK result.
-- [ ] Configure the verified settings in `options::environment` and map the
-      resulting Claude Code error to a retryable `StreamError`.
-- [ ] Update the two `keeps_the_text_of_both_attempts` tests to assert that only
-      a single copy of the answer is committed.
+| Recording                         | `from_block_index` | Abandoned        | Kept                               |
+| --------------------------------- | ------------------ | ---------------- | ---------------------------------- |
+| `cut_off_text.jsonl:92`           | `0`                | the text block   | nothing                            |
+| `cut_off_reasoned_text.jsonl:114` | `1`                | the text block   | the thinking block                 |
+| `cut_off.jsonl:51`                | `2`                | the `store` call | a text block and the `lookup` call |
 
-If the synthetic resume prompt cannot be disabled, retract the partial block on
-that path instead: treat a `message_stop` with no preceding stop reason as an
-abandoned response and revoke the last committed block (similar to how
-`FinishReason::Refused` revokes content).
-This keeps the conversation history clean, though the partial text has already
-been printed to the terminal.
+The third recording is the `server_error` path, so the field is not specific to
+text.
+In all three, no other `message_stop` carries the field.
+JP discards it today: `SdkMessage::StreamEvent` in
+`crates/jp_llm/src/provider/anthropic/acp/protocol.rs` decodes only `event` and
+`parent_tool_use_id`.
+
+- [ ] Decode `abandoned_blocks` from the `stream_event` envelope.
+- [ ] On a `message_stop` that carries it, emit a stream event that tells the
+      turn loop which blocks of the response Claude Code abandoned.
+- [ ] In the turn loop, remove the chat responses committed for those blocks and
+      persist the removal, the way `FinishReason::Refused` revokes content.
+- [ ] Replace the two `keeps_the_text_of_both_attempts` tests with tests that
+      assert a single copy of the answer is committed.
+
+Only chat responses are removed.
+A tool call JP has committed was dispatched and may have run, so it stays even
+if Claude Code lists it as abandoned.
+In `cut_off.jsonl` the abandoned `store` call was never committed, because JP
+holds a tool call back until Claude Code asks permission for it.
+
+Without the field, nothing is removed.
+Claude Code closes an interrupted text block with `content_block_stop`, so
+nothing else in the stream separates an abandoned block from a complete one.
+Inferring abandonment from the missing stop reason would remove a complete block
+in `cut_off.jsonl`, where the last block committed before `message_stop` is the
+`lookup` call.
+The type the Agent SDK reference gives for this message
+(`SDKPartialAssistantMessage`) does not list the field.
+Its presence is pinned by the three recordings, taken on the adapter and Claude
+Code versions JP qualifies.
+
+## Follow-up
+
+Removing the abandoned blocks corrects the conversation but not the terminal,
+which has already printed the abandoned text and then prints the answer from the
+start.
+
+To fix that as well, have JP handle connection recovery on the ACP route the
+same way it does on the API-key route: let Claude Code report the failure, and
+let JP commit the partial response and restart the request from committed
+history.
+None of the Claude Code settings this depends on is verified.
+Check each with the `Scenario` harness in `cut_off_tests.rs` before changing
+production code:
+
+- Whether `CLAUDE_CODE_MAX_RETRIES=0` is respected, whether it disables the
+  mid-stream retry in `cut_off_text.jsonl`, and what error Claude Code reports
+  instead.
+- Whether any setting disables the synthetic resume prompt in
+  `cut_off_reasoned_text.jsonl` (Claude Code's error reference documents up to
+  three consecutive resume prompts in non-interactive sessions without naming a
+  toggle).
+- How the `server_error` path in `cut_off.jsonl` behaves under those settings,
+  since JP holds `server_error` until the final SDK result.
 
 Note that each JP retry on the ACP route spawns a new adapter process and
 reloads the transcript, so retries are heavier than on the API-key route.

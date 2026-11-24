@@ -392,6 +392,12 @@ impl State {
             .collect()
     }
 
+    /// Take the `server_error` Claude Code reported for this turn, as the
+    /// retryable failure of a turn it did not go on to finish.
+    pub(super) fn take_server_error(&mut self) -> Option<StreamError> {
+        self.server_error.take().map(StreamError::transient)
+    }
+
     pub(super) fn usage_snapshot(&self) -> Value {
         self.session
             .as_ref()
@@ -601,8 +607,8 @@ impl State {
                     // Claude Code aborted the turn after the API failed
                     // mid-response; the same request can succeed once the
                     // connection or the server recovers.
-                    if let Some(detail) = self.server_error.take() {
-                        return Err(StreamError::transient(detail));
+                    if let Some(error) = self.take_server_error() {
+                        return Err(error);
                     }
                     let detail = errors.join("\n");
                     return Err(StreamError::other(if detail.is_empty() {

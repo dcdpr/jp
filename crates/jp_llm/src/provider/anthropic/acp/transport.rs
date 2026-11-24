@@ -516,11 +516,21 @@ pub(super) async fn drive(
                 return Err(Error::Stream(Box::new(error)));
             }
             result = &mut result => {
-                debug!(usage = %state.lock().unwrap_or_else(PoisonError::into_inner).usage_snapshot(), "Claude ACP usage snapshot");
-                if let Some(error) = state.lock().unwrap_or_else(PoisonError::into_inner).failure.take() {
+                let mut state = state.lock().unwrap_or_else(PoisonError::into_inner);
+                debug!(usage = %state.usage_snapshot(), "Claude ACP usage snapshot");
+                if let Some(error) = state.failure.take() {
                     return Err(Error::Stream(Box::new(error)));
                 }
-                return result.map_err(Error::Protocol);
+                return result.map_err(|error| {
+                    // The adapter can fail the prompt without the SDK result
+                    // that reads a held `server_error`. The report is then the
+                    // reason the turn did not finish.
+                    let Some(reported) = state.take_server_error() else {
+                        return Error::Protocol(error);
+                    };
+                    warn!(%error, "Claude ACP connection failed after a server_error.");
+                    Error::Stream(Box::new(reported))
+                });
             },
             _ = tick.tick() => {
                 // Anthropic can buffer an entire argument value. Keep the same

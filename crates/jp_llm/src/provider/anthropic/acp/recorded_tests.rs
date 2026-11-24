@@ -19,6 +19,7 @@
 //! the JP MCP Host.
 
 use std::{
+    collections::BTreeMap,
     env, fmt,
     sync::{Arc, Mutex},
     time::Duration,
@@ -162,19 +163,34 @@ pub(super) fn context() -> QueryContext {
     }
 }
 
+/// The arguments of one `transport::drive` call that differ between a live run
+/// and a replay.
+struct Connection {
+    /// The transcript the session resumes from.
+    artifact: NativeArtifact,
+
+    /// The environment the session options are built from.
+    environment: BTreeMap<String, String>,
+
+    transport: Box<dyn Transport>,
+}
+
 /// Run one conversation and return the usage the runtime reported.
 ///
-/// Everything above the transport is shared by both modes: the same request,
+/// Everything above the connection is shared by both modes: the same request,
 /// the same driver, the same assertions on what came back.
 async fn conversation(
     policy: CachePolicy,
     tag: &str,
-    prepare: impl FnOnce(&PreparedRequest) -> (NativeArtifact, Box<dyn Transport>),
+    prepare: impl FnOnce(&PreparedRequest) -> Connection,
 ) -> Value {
     let model = model_details(&"claude-opus-5".parse().unwrap());
     let prepared = PreparedRequest::new(&model, query(policy, tag)).unwrap();
-    let (artifact, transport) = prepare(&prepared);
-    let environment = options::environment(&prepared, policy);
+    let Connection {
+        artifact,
+        environment,
+        transport,
+    } = prepare(&prepared);
 
     let capture = UsageCapture::default();
     let subscriber = registry().with(capture.clone());
@@ -219,21 +235,25 @@ async fn conversation(
 }
 
 /// Reach the installed adapter under `login`, writing the transcript it resumes
-/// from and recording every message it exchanges.
+/// from and recording every message it exchanges into `fixture`.
 fn live(
+    fixture: &'static str,
     policy: CachePolicy,
     login: Option<Utf8PathBuf>,
-) -> impl FnOnce(&PreparedRequest) -> (NativeArtifact, Box<dyn Transport>) {
+) -> impl FnOnce(&PreparedRequest) -> Connection {
     move |prepared| {
         let launch = transport::launch(prepared, &context(), policy, login.as_deref())
             .expect("a prepared launch");
-        (
-            launch.artifact,
-            Box::new(transport::Spawned {
+        Connection {
+            artifact: launch.artifact,
+            // The launch adds the storage settings of `login`, which a
+            // production request sends in its session options too.
+            environment: launch.environment,
+            transport: Box::new(transport::Spawned {
                 command: launch.command,
-                tap: cassette::tap("live"),
+                tap: cassette::tap(fixture),
             }),
-        )
+        }
     }
 }
 
@@ -259,17 +279,20 @@ fn recorded_session(script: &[Framed]) -> Option<Uuid> {
 ///
 /// A recording with no `session/load` had no history to resume, and leaving the
 /// id unset is what makes the replay open with `session/new` as it did.
+///
+/// The environment holds no login: a replay reads none, and the recording
+/// answers by method whatever the session options carry.
 fn replayed(
     script: Vec<Framed>,
-) -> impl FnOnce(&PreparedRequest) -> (NativeArtifact, Box<dyn Transport>) {
-    move |_| {
-        (
-            NativeArtifact {
-                session: recorded_session(&script),
-                path: None,
-            },
-            Box::new(Recorded(script)),
-        )
+    policy: CachePolicy,
+) -> impl FnOnce(&PreparedRequest) -> Connection {
+    move |prepared| Connection {
+        artifact: NativeArtifact {
+            session: recorded_session(&script),
+            path: None,
+        },
+        environment: options::environment(prepared, policy),
+        transport: Box::new(Recorded(script)),
     }
 }
 
@@ -310,8 +333,15 @@ async fn attempt(
     login: Option<&Utf8Path>,
 ) -> Value {
     match script {
-        Some(script) => conversation(policy, tag, replayed(script)).await,
-        None => conversation(policy, tag, live(policy, login.map(Utf8Path::to_owned))).await,
+        Some(script) => conversation(policy, tag, replayed(script, policy)).await,
+        None => {
+            conversation(
+                policy,
+                tag,
+                live("live", policy, login.map(Utf8Path::to_owned)),
+            )
+            .await
+        }
     }
 }
 
@@ -470,20 +500,15 @@ async fn unknown_model_is_refused_as_unknown() {
 
     let model = model_details(&"foobarbaz".parse().unwrap());
     let prepared = PreparedRequest::new(&model, short_query("foobarbaz")).unwrap();
-    let (artifact, transport): (NativeArtifact, Box<dyn Transport>) = if recording {
-        let launch = transport::launch(&prepared, &context(), CachePolicy::Off, login.as_deref())
-            .expect("a prepared launch");
-        (
-            launch.artifact,
-            Box::new(transport::Spawned {
-                command: launch.command,
-                tap: cassette::tap("unknown_model"),
-            }),
-        )
+    let Connection {
+        artifact,
+        environment,
+        transport,
+    } = if recording {
+        live("unknown_model", CachePolicy::Off, login)(&prepared)
     } else {
-        replayed(only_connection("unknown_model"))(&prepared)
+        replayed(only_connection("unknown_model"), CachePolicy::Off)(&prepared)
     };
-    let environment = options::environment(&prepared, CachePolicy::Off);
 
     let (sender, mut receiver) = mpsc::channel(64);
     let driver = transport::drive(
