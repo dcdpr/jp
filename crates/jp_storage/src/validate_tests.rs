@@ -108,7 +108,7 @@ fn diagnosing_the_store_changes_nothing_on_disk() {
     let notes = conversations.join("notes");
     fs::create_dir_all(&notes).unwrap();
 
-    let diagnosis = storage.diagnose_conversations();
+    let diagnosis = storage.diagnose_conversations().unwrap();
 
     let invalid: Vec<_> = diagnosis
         .invalid

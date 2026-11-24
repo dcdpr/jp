@@ -10,6 +10,7 @@ pub use crate::location::StorageLocation;
 use crate::{
     ARCHIVE_DIR, BASE_CONFIG_FILE, CONVERSATIONS_DIR, EVENTS_FILE, IMPORT_STAGING_PREFIX,
     METADATA_FILE, Storage, dir_entries,
+    error::Error,
     scan::{DirStamps, EventsSummary, SCAN_CACHE_FILE, ScanCache, ScannedDir},
     value::{cleanup_tmp_files, has_tmp_files, tmp_files},
 };
@@ -289,7 +290,12 @@ impl Storage {
     /// conversations, returns orphaned `.tmp` files and import staging
     /// directories instead of deleting them, and reads the scan cache without
     /// updating it on disk.
-    pub(crate) fn diagnose_conversations(&self) -> ConversationsDiagnosis {
+    ///
+    /// # Errors
+    ///
+    /// Fails when a conversations or archive directory exists but cannot be
+    /// listed, rather than reporting it as holding no problems.
+    pub(crate) fn diagnose_conversations(&self) -> Result<ConversationsDiagnosis, Error> {
         trace!("Diagnosing conversations.");
         self.load_scan_cache();
 
@@ -297,7 +303,7 @@ impl Storage {
         let mut leftovers = vec![];
         for root in [Some(&self.root), self.user.as_ref()].into_iter().flatten() {
             let conversations_dir = root.join(CONVERSATIONS_DIR);
-            if !conversations_dir.is_dir() {
+            if !listable(&conversations_dir)? {
                 continue;
             }
 
@@ -306,32 +312,36 @@ impl Storage {
         }
 
         let mut invalid = validation.invalid;
-        invalid.extend(self.validate_archive());
+        invalid.extend(self.validate_archive()?);
         invalid.sort_by_key(InvalidConversation::path);
         let mut unrecognized = validation.unrecognized;
         unrecognized.sort();
         leftovers.sort();
 
-        ConversationsDiagnosis {
+        Ok(ConversationsDiagnosis {
             invalid,
             unrecognized,
             leftovers,
-        }
+        })
     }
 
     /// Validate archived conversation directories without modifying the store.
     ///
     /// Reads the scan cache without writing to it.
-    pub(crate) fn validate_archive(&self) -> Vec<InvalidConversation> {
+    ///
+    /// # Errors
+    ///
+    /// Fails when an archive directory exists but cannot be listed.
+    pub(crate) fn validate_archive(&self) -> Result<Vec<InvalidConversation>, Error> {
         let mut archive = ValidationResult::default();
         for root in [Some(&self.root), self.user.as_ref()].into_iter().flatten() {
             let archive_dir = root.join(CONVERSATIONS_DIR).join(ARCHIVE_DIR);
-            if archive_dir.is_dir() {
+            if listable(&archive_dir)? {
                 validate_root(&archive_dir, &self.scan, &mut archive, &mut vec![]);
             }
         }
 
-        archive.invalid
+        Ok(archive.invalid)
     }
 
     /// Return the IDs of conversations under `conversations_dir` that pass
@@ -466,6 +476,22 @@ fn leftovers_in(conversations_dir: &Utf8Path) -> Vec<Utf8PathBuf> {
     }
 
     leftovers
+}
+
+/// Whether `dir` is there to be listed: `false` when it does not exist.
+///
+/// # Errors
+///
+/// Fails when `dir` exists but cannot be listed.
+fn listable(dir: &Utf8Path) -> Result<bool, Error> {
+    match dir.read_dir_utf8() {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(source) => Err(Error::ReadFailed {
+            path: dir.to_owned(),
+            source,
+        }),
+    }
 }
 
 /// Validate every conversation directory under `conversations_dir`.

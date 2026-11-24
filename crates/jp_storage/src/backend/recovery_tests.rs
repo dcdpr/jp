@@ -1,6 +1,6 @@
 use std::{fs, slice, sync::Arc};
 
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::{Utf8TempDir, tempdir};
 use jp_conversation::{Conversation, ConversationId};
 use test_log::test;
@@ -8,6 +8,7 @@ use test_log::test;
 use super::*;
 use crate::{
     backend::{FsStorageBackend, LockBackend as _},
+    error::Error,
     validate::{ConversationPart, StorageLocation, ValidationError},
 };
 
@@ -21,6 +22,27 @@ fn setup() -> (Utf8TempDir, Arc<FsStorageBackend>, Utf8PathBuf) {
 
 fn id(dirname: &str) -> ConversationId {
     ConversationId::try_from_dirname(dirname).unwrap()
+}
+
+/// Make `dir` impossible to list, and return whether this process is held to
+/// that: one running as root is not, and gets `dir` back as it was.
+#[cfg(unix)]
+fn deny_listing(dir: &Utf8Path) -> bool {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    fs::set_permissions(dir, fs::Permissions::from_mode(0o000)).unwrap();
+    let denied = fs::read_dir(dir).is_err();
+    if !denied {
+        allow_listing(dir);
+    }
+    denied
+}
+
+#[cfg(unix)]
+fn allow_listing(dir: &Utf8Path) {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    fs::set_permissions(dir, fs::Permissions::from_mode(0o755)).unwrap();
 }
 
 fn broken(conversations: &Utf8PathBuf, dirname: &str) -> Utf8PathBuf {
@@ -353,6 +375,62 @@ fn an_archived_copy_beside_a_live_copy_that_loads_is_shadowed() {
         })
         .collect();
     assert_eq!(found, vec![(archived, None, true)]);
+}
+
+// A store the diagnosis cannot read is not a store without problems.
+#[cfg(unix)]
+#[test]
+fn the_diagnosis_fails_on_a_store_it_cannot_list() {
+    let (_tmp, fs, conversations) = setup();
+    broken(&conversations, "17941219991");
+    if !deny_listing(&conversations) {
+        return;
+    }
+
+    let result = fs.diagnose();
+    allow_listing(&conversations);
+
+    let error = result.unwrap_err();
+    assert!(
+        matches!(&error, Error::ReadFailed { path, .. } if *path == conversations),
+        "{error:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn scanning_an_archive_it_cannot_list_fails() {
+    let (_tmp, fs, conversations) = setup();
+    let archive = conversations.join(".archive");
+    broken(&archive, "17941219991");
+    if !deny_listing(&archive) {
+        return;
+    }
+
+    let diagnosed = fs.diagnose();
+    let scanned = fs.scan_archive();
+    allow_listing(&archive);
+
+    for error in [diagnosed.unwrap_err(), scanned.unwrap_err()] {
+        assert!(
+            matches!(&error, Error::ReadFailed { path, .. } if *path == archive),
+            "{error:?}"
+        );
+    }
+}
+
+// A store with no conversations directory has nothing to report.
+#[test]
+fn the_diagnosis_of_a_store_without_conversations_is_empty() {
+    let (_tmp, fs, conversations) = setup();
+    if conversations.exists() {
+        fs::remove_dir_all(&conversations).unwrap();
+    }
+
+    let diagnosis = fs.diagnose().unwrap();
+
+    assert!(diagnosis.invalid.is_empty());
+    assert!(diagnosis.strays.is_empty());
 }
 
 #[test]

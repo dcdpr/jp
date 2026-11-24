@@ -129,6 +129,20 @@ fn write_failure_renders_the_path_and_the_os_error() {
 }
 
 #[test]
+fn read_failure_renders_the_path_and_the_os_error() {
+    let error = Error::from(jp_storage::Error::ReadFailed {
+        path: Utf8Path::new("/ws/.jp/conversations").into(),
+        source: io::Error::from(io::ErrorKind::PermissionDenied),
+    });
+
+    assert_eq!(
+        rendered(&error),
+        "Failed to read\npath=/ws/.jp/conversations\nerror=permission denied"
+    );
+    assert_eq!(error.code.get(), 1);
+}
+
+#[test]
 fn rename_failure_renders_both_paths_and_the_os_error() {
     let error = Error::from(jp_storage::Error::rename_failed(
         Utf8Path::new("/data/conv/events.json.tmp"),

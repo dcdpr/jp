@@ -388,7 +388,7 @@ impl RecoveryBackend for FsStorageBackend {
     fn scan_archive(&self) -> Result<Vec<InvalidConversation>> {
         let mut invalid: Vec<_> = self
             .storage
-            .validate_archive()
+            .validate_archive()?
             .into_iter()
             .filter(|entry| !self.storage.is_conversation_locked(&entry.id.to_string()))
             .collect();
@@ -426,7 +426,7 @@ impl RecoveryBackend for FsStorageBackend {
     }
 
     fn diagnose(&self) -> Result<Diagnosis> {
-        let found = self.storage.diagnose_conversations();
+        let found = self.storage.diagnose_conversations()?;
 
         let invalid = found
             .invalid

@@ -1131,6 +1131,12 @@ impl From<jp_storage::Error> for Error {
                 ("error", source.to_string().into()),
             ]
             .into(),
+            Error::ReadFailed { path, source } => [
+                ("message", "Failed to read".into()),
+                ("path", path.to_string().into()),
+                ("error", source.to_string().into()),
+            ]
+            .into(),
             Error::RenameFailed { from, to, source } => [
                 ("message", "Failed to move file into place".into()),
                 ("from", from.to_string().into()),

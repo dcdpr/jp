@@ -30,6 +30,16 @@ pub enum Error {
         source: io::Error,
     },
 
+    /// Reading `path` failed.
+    ///
+    /// Carries the path for the same reason as [`Error::WriteFailed`].
+    #[error("failed to read {path}")]
+    ReadFailed {
+        path: Utf8PathBuf,
+        #[source]
+        source: io::Error,
+    },
+
     /// Renaming `from` to `to` failed.
     ///
     /// Carries both paths because `source` can refer to either: for example,

@@ -463,6 +463,30 @@ fn a_clean_store_exits_successfully() {
     assert_eq!(s.out.lock().as_str(), "No problems found.\n");
 }
 
+// A store doctor cannot read is a failed run, not a clean report.
+#[cfg(unix)]
+#[test]
+fn a_store_it_cannot_read_fails_the_run() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let s = store();
+    events_only(&s, "17941219991");
+    fs::set_permissions(&s.conversations, fs::Permissions::from_mode(0o000)).unwrap();
+    let denied = fs::read_dir(&s.conversations).is_err();
+
+    let result = run(&s, s.fs.as_ref(), &[], true);
+    fs::set_permissions(&s.conversations, fs::Permissions::from_mode(0o755)).unwrap();
+    // A process running as root reads the directory anyway.
+    if !denied {
+        return;
+    }
+
+    let error = result.unwrap_err();
+    assert_eq!(error.code.get(), 1);
+    assert_eq!(error.message.as_deref(), Some("Failed to read"));
+    assert_eq!(s.out.lock().as_str(), "");
+}
+
 #[test]
 fn a_report_with_problems_exits_with_status_3() {
     let s = store();
