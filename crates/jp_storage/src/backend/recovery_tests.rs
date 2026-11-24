@@ -24,8 +24,8 @@ fn id(dirname: &str) -> ConversationId {
     ConversationId::try_from_dirname(dirname).unwrap()
 }
 
-/// Make `dir` impossible to list, and return whether this process is held to
-/// that: one running as root is not, and gets `dir` back as it was.
+/// Remove all permissions on `dir`, and return `false` (restoring them) if the
+/// process can still list it, as when running as root.
 #[cfg(unix)]
 fn deny_listing(dir: &Utf8Path) -> bool {
     use std::os::unix::fs::PermissionsExt as _;
@@ -353,8 +353,6 @@ fn an_archived_copy_beside_a_live_copy_gets_no_repair() {
     ]);
 }
 
-// A lookup by ID reaches the live copy, so a command naming the ID would act
-// on the live conversation, not on the broken archived copy.
 #[test]
 fn an_archived_copy_beside_a_live_copy_that_loads_is_shadowed() {
     let (_tmp, fs, conversations) = setup();
@@ -377,7 +375,6 @@ fn an_archived_copy_beside_a_live_copy_that_loads_is_shadowed() {
     assert_eq!(found, vec![(archived, None, true)]);
 }
 
-// A store the diagnosis cannot read is not a store without problems.
 #[cfg(unix)]
 #[test]
 fn the_diagnosis_fails_on_a_store_it_cannot_list() {
@@ -419,7 +416,6 @@ fn scanning_an_archive_it_cannot_list_fails() {
     }
 }
 
-// A store with no conversations directory has nothing to report.
 #[test]
 fn the_diagnosis_of_a_store_without_conversations_is_empty() {
     let (_tmp, fs, conversations) = setup();

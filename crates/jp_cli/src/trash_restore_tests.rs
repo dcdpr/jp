@@ -68,9 +68,6 @@ fn listed(conversations: &Utf8Path) -> Vec<String> {
     names
 }
 
-// Two processes starting at once must not both fix and move the same entry, so
-// a restore waits for one already running, and reads the trash only after it
-// finishes.
 #[test]
 fn a_restore_waits_for_one_already_running() {
     let (_tmp, backend, conversations) = setup();
@@ -81,7 +78,7 @@ fn a_restore_waits_for_one_already_running() {
     let waiting = backend.clone();
     thread::spawn(move || done.send(restore(&waiting)).unwrap());
 
-    // Generous: a restore that does not wait moves the entry in milliseconds.
+    // Without the lock, the restore moves the entry within milliseconds.
     thread::sleep(Duration::from_millis(300));
     assert!(entry.is_dir(), "restored while another restore was running");
     assert!(!conversations.join("17941219991").exists());

@@ -4391,10 +4391,6 @@ fn run_no_persist_editor_query_writes_no_draft() {
     assert_eq!(stored_conversation_ids(tmp.path()), []);
 }
 
-/// Store a conversation with one turn, and a saved query draft holding `draft`
-/// in its user-local directory, as an interrupted `jp query` leaves it.
-///
-/// Returns the conversation and the draft's path.
 fn conversation_with_saved_draft(ctx: &mut Ctx, draft: &str) -> (ConversationId, Utf8PathBuf) {
     let id = make_id(1_700_000_000);
     ctx.workspace.create_conversation_with_id(
@@ -4420,8 +4416,6 @@ fn conversation_with_saved_draft(ctx: &mut Ctx, draft: &str) -> (ConversationId,
     (id, path)
 }
 
-// `--no-persist` composes in a temporary directory, so an empty editor buffer
-// there says nothing about the draft saved in the conversation's directory.
 #[test]
 fn run_no_persist_empty_editor_query_keeps_the_saved_draft() {
     let session = Session {
@@ -4444,8 +4438,6 @@ fn run_no_persist_empty_editor_query_keeps_the_saved_draft() {
     assert_eq!(std::fs::read_to_string(&draft).unwrap(), "saved request\n");
 }
 
-// The editor shows the saved draft under `--no-persist` too, and the saved
-// draft stays where it is.
 #[test]
 fn run_no_persist_editor_query_starts_from_the_saved_draft() {
     let session = Session {
@@ -4454,7 +4446,7 @@ fn run_no_persist_editor_query_starts_from_the_saved_draft() {
     };
     let seen_dir = camino_tempfile::tempdir().unwrap();
     let seen = seen_dir.path().join("seen");
-    // An editor that copies what it was given and changes nothing.
+    // Copies the draft file it is given, unchanged.
     let (mut ctx, _out, _err, _tmp) =
         editor_ctx(&session, &format!(r#"sh -c 'cp "$1" "$0"' {seen}"#));
     let (id, draft) = conversation_with_saved_draft(&mut ctx, "saved request\n");
@@ -4468,8 +4460,8 @@ fn run_no_persist_editor_query_starts_from_the_saved_draft() {
         .unwrap_err();
     assert_eq!(error.message.as_deref(), Some("Stream error"));
 
-    // The editor's file also holds the sections JP writes around the request,
-    // whose content depends on the config, so only the request is checked.
+    // The draft file also holds config-dependent sections after the request,
+    // so only its start is checked.
     let shown = std::fs::read_to_string(&seen).unwrap();
     assert!(shown.starts_with("saved request\n"), "{shown}");
     assert_eq!(std::fs::read_to_string(&draft).unwrap(), "saved request\n");

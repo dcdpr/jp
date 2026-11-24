@@ -32,7 +32,7 @@ pub enum Error {
 
     /// Reading `path` failed.
     ///
-    /// Carries the path for the same reason as [`Error::WriteFailed`].
+    /// Carries `path` because `std::io::Error` does not.
     #[error("failed to read {path}")]
     ReadFailed {
         path: Utf8PathBuf,

@@ -123,12 +123,12 @@ impl FsStorageBackend {
         self.storage.user_or_root_with_path(path)
     }
 
-    /// Block until this process holds the store-wide lock named `resource`; see
-    /// [`Storage::lock_store`].
+    /// Acquire the store-wide lock named `resource`, blocking until it is free;
+    /// see [`Storage::lock_store`].
     ///
     /// # Errors
     ///
-    /// Fails when the lock file cannot be created or locked.
+    /// Returns an error if the lock file cannot be created or locked.
     pub fn lock_store(&self, resource: &str) -> Result<Box<dyn ResourceGuard>> {
         self.storage.lock_store(resource)
     }
@@ -433,9 +433,8 @@ impl RecoveryBackend for FsStorageBackend {
             .into_iter()
             .filter(|entry| !self.storage.is_conversation_locked(&entry.id.to_string()))
             .map(|conversation| {
-                // A lookup by ID prefers the live copy, so when both a live and
-                // an archived copy exist, only the live one can be repaired or
-                // removed by ID.
+                // ID lookups resolve to the live copy, so an archived copy
+                // beside one is shadowed and gets no repair.
                 let (dirs, archived) = self.stored_dirs(&conversation.id);
                 let shadowed = archived != conversation.archived;
                 let repair = if shadowed {

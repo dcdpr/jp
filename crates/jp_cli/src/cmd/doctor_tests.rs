@@ -77,7 +77,6 @@ fn archived_failure<'a>(
     }
 }
 
-/// An archived copy at `location` of a conversation that also has a live copy.
 fn shadowed_failure<'a>(dirname: &str, error: &'a ValidationError, location: &str) -> Finding<'a> {
     Finding {
         failure: LoadFailure {
@@ -249,8 +248,6 @@ fn a_report_of_only_archived_problems_has_only_their_section() {
     );
 }
 
-// `jp c rm <id>` reaches the live copy, so an archived copy beside one is
-// removed by its path, and each copy gets a row of its own.
 #[test]
 fn an_archived_copy_beside_a_live_one_is_removed_by_its_path() {
     let corrupt = corrupt_events("17941219992");
@@ -463,7 +460,6 @@ fn a_clean_store_exits_successfully() {
     assert_eq!(s.out.lock().as_str(), "No problems found.\n");
 }
 
-// A store doctor cannot read is a failed run, not a clean report.
 #[cfg(unix)]
 #[test]
 fn a_store_it_cannot_read_fails_the_run() {
@@ -476,7 +472,7 @@ fn a_store_it_cannot_read_fails_the_run() {
 
     let result = run(&s, s.fs.as_ref(), &[], true);
     fs::set_permissions(&s.conversations, fs::Permissions::from_mode(0o755)).unwrap();
-    // A process running as root reads the directory anyway.
+    // Root ignores directory permissions.
     if !denied {
         return;
     }
@@ -517,8 +513,6 @@ fn an_archived_conversation_that_fails_to_load_is_reported() {
     );
 }
 
-// Running the suggested command must leave the live conversation, which loads,
-// where it is.
 #[test]
 fn an_archived_copy_beside_a_live_conversation_is_not_removed_by_id() {
     let s = store();

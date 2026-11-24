@@ -164,8 +164,8 @@ pub(crate) struct Finding<'a> {
     pub failure: LoadFailure<'a>,
     pub fix: Option<Repair>,
 
-    /// Whether a command naming the conversation's ID reaches another copy of
-    /// it, so this copy is dealt with by its location.
+    /// `true` if ID-based commands resolve to another copy of the conversation,
+    /// so this copy must be removed by path.
     pub shadowed: bool,
 }
 
@@ -311,8 +311,8 @@ fn table(rows: &[Row]) -> String {
 /// Build one table row per unique conversation ID in the given partition
 /// (`archived`), using the first failing copy's error.
 ///
-/// A shadowed copy gets a row of its own, whose command removes it by its
-/// location: a command naming the ID would act on the other copy.
+/// Each shadowed copy gets its own row with an `rm -r <path>` command, because
+/// an ID-based command would act on the live copy.
 fn conversation_rows<'a>(
     findings: &'a [Finding<'_>],
     archived: bool,

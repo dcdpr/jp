@@ -293,8 +293,8 @@ impl Storage {
     ///
     /// # Errors
     ///
-    /// Fails when a conversations or archive directory exists but cannot be
-    /// listed, rather than reporting it as holding no problems.
+    /// Returns an error if a conversations or archive directory exists but
+    /// cannot be listed.
     pub(crate) fn diagnose_conversations(&self) -> Result<ConversationsDiagnosis, Error> {
         trace!("Diagnosing conversations.");
         self.load_scan_cache();
@@ -331,7 +331,7 @@ impl Storage {
     ///
     /// # Errors
     ///
-    /// Fails when an archive directory exists but cannot be listed.
+    /// Returns an error if an archive directory exists but cannot be listed.
     pub(crate) fn validate_archive(&self) -> Result<Vec<InvalidConversation>, Error> {
         let mut archive = ValidationResult::default();
         for root in [Some(&self.root), self.user.as_ref()].into_iter().flatten() {
@@ -478,11 +478,12 @@ fn leftovers_in(conversations_dir: &Utf8Path) -> Vec<Utf8PathBuf> {
     leftovers
 }
 
-/// Whether `dir` is there to be listed: `false` when it does not exist.
+/// Return `true` if `dir` exists and can be listed, or `false` if it does not
+/// exist.
 ///
 /// # Errors
 ///
-/// Fails when `dir` exists but cannot be listed.
+/// Returns [`Error::ReadFailed`] if `dir` exists but cannot be listed.
 fn listable(dir: &Utf8Path) -> Result<bool, Error> {
     match dir.read_dir_utf8() {
         Ok(_) => Ok(true),

@@ -15,12 +15,11 @@ use tracing::{debug, warn};
 
 use crate::{ctx::Ctx, editor};
 
-/// The store holding conversations' saved query drafts, or `None` when the run
-/// writes nothing (`--no-persist`).
+/// Return the storage backend used to read and remove saved query drafts, or
+/// `None` under `--no-persist`.
 ///
-/// Every read for cleanup and every removal of a saved draft goes through this,
-/// so a `--no-persist` run, which composes in a temporary directory, never
-/// removes the draft a persisting run saved.
+/// A `--no-persist` run composes in a temporary directory, so it must never
+/// read or remove the saved draft in user-local storage.
 pub(super) fn draft_store(ctx: &Ctx) -> Option<&FsStorageBackend> {
     ctx.fs_backend
         .as_deref()
@@ -35,12 +34,12 @@ pub(super) fn draft_store(ctx: &Ctx) -> Option<&FsStorageBackend> {
 /// title override so a subsequent title rename carries the draft along).
 /// When `persist` is `false` (`--no-persist`), the draft is placed in a
 /// temporary directory that is deleted when the returned guard drops, seeded
-/// with a copy of the conversation's saved draft so the editor shows it.
+/// with a copy of the conversation's saved draft, if any.
 ///
 /// # Errors
 ///
-/// Fails when the temporary directory cannot be created, or the saved draft
-/// cannot be copied into it.
+/// Returns an error if the temporary directory cannot be created or the saved
+/// draft cannot be copied into it.
 pub(super) fn draft_dir(
     persist: bool,
     fs_backend: Option<&FsStorageBackend>,

@@ -25,7 +25,7 @@ const TRASH_DIR: &str = ".trash";
 const ARCHIVE_DIR: &str = ".archive";
 const TRASHED_FILE: &str = "TRASHED.md";
 
-/// The store-wide lock a restore holds from start to finish.
+/// Name of the store-wide lock held for the duration of [`restore_trash`].
 const RESTORE_LOCK: &str = "trash-restore";
 
 const CONVERSATION_FILES: [&str; 3] = ["metadata.json", "base_config.json", "events.json"];
@@ -75,10 +75,10 @@ impl LeftoverReason {
 /// - Allocates the next free [`ConversationId`] if the entry's ID is already in
 ///   use in the live or archive partition.
 ///
-/// Holds a store-wide lock from start to finish, waiting for a restore another
-/// process is running, so two processes never fix or move the same entry.
-/// The trash is read only once the lock is held.
-/// When the lock cannot be taken, nothing is restored this run.
+/// Holds a store-wide lock for the whole restore, blocking while another
+/// process restores, so two processes never modify the same entry.
+/// Reads `.trash/` only after acquiring the lock.
+/// Skips the restore and logs a warning if the lock cannot be acquired.
 ///
 /// Returns any entries that could not be restored.
 pub(crate) fn restore_trash(

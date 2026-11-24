@@ -168,12 +168,11 @@ pub struct DiagnosedConversation {
     pub conversation: InvalidConversation,
     pub repair: Option<Repair>,
 
-    /// Whether another copy of the conversation is what a lookup by its ID
-    /// reaches: an archived copy beside a live one.
+    /// `true` for an archived copy of a conversation that also has a live copy.
     ///
     /// [`RecoveryBackend::inspect`], [`RecoveryBackend::remove`], and
-    /// [`RecoveryBackend::repair`] act on that other copy, so none of them can
-    /// reach this one.
+    /// [`RecoveryBackend::repair`] resolve the ID to the live copy, so they
+    /// cannot act on this one.
     pub shadowed: bool,
 }
 
