@@ -31,9 +31,9 @@ use crate::{
     load_conversation_id_from_entry,
     location::StorageLocation,
     lock::LockInfo,
+    rebuild::rebuild_metadata,
     validate::{
-        InvalidConversation, ValidationResult, missing_only_metadata, rebuild_metadata,
-        validate_conversation_dir,
+        InvalidConversation, ValidationResult, missing_only_metadata, validate_conversation_dir,
     },
 };
 
@@ -472,7 +472,7 @@ impl RecoveryBackend for FsStorageBackend {
         match repair {
             Repair::RebuildMetadata => {
                 for dir in &dirs {
-                    rebuild_metadata(dir, id)?;
+                    rebuild_metadata(dir, id, stored.archived)?;
                 }
             }
         }

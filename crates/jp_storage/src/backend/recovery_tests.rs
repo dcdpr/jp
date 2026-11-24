@@ -362,6 +362,12 @@ fn rebuilding_metadata_repairs_an_archived_conversation_in_place() {
     assert!(dir.join("metadata.json").is_file());
     assert!(!conversations.join("17941219991-old-work").exists());
     assert!(fs.diagnose().unwrap().invalid.is_empty());
+
+    // The archive time is a guess, but there is one, so the conversation does
+    // not sort last among the archived.
+    let metadata: Conversation =
+        serde_json::from_str(&fs::read_to_string(dir.join("metadata.json")).unwrap()).unwrap();
+    assert!(metadata.archived_at.is_some());
 }
 
 #[test]

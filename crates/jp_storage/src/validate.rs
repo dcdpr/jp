@@ -1,7 +1,7 @@
 use std::{fmt, fs, io, time::SystemTime};
 
 use camino::{Utf8Path, Utf8PathBuf};
-use jp_conversation::{Conversation, ConversationId};
+use jp_conversation::ConversationId;
 use rayon::prelude::*;
 use serde::de::IgnoredAny;
 use tracing::{debug, trace};
@@ -11,7 +11,7 @@ use crate::{
     ARCHIVE_DIR, BASE_CONFIG_FILE, CONVERSATIONS_DIR, EVENTS_FILE, IMPORT_STAGING_PREFIX,
     METADATA_FILE, Storage, dir_entries,
     scan::{DirStamps, EventsSummary, SCAN_CACHE_FILE, ScanCache, ScannedDir},
-    value::{cleanup_tmp_files, has_tmp_files, tmp_files, write_json},
+    value::{cleanup_tmp_files, has_tmp_files, tmp_files},
 };
 
 /// Result of validating all conversation directories across storage roots.
@@ -557,47 +557,6 @@ pub(crate) fn missing_only_metadata(dir: &Utf8Path) -> bool {
     !dir.join(METADATA_FILE).exists() && check_contents(dir).is_ok()
 }
 
-/// Write the metadata of conversation `id`, stored in `dir`, from what the rest
-/// of the directory holds.
-///
-/// The title is the one the directory name carries, with each dash read as a
-/// space, since the name replaced the title's spaces and punctuation with
-/// dashes.
-/// The last activity is the time of the last event, or the conversation's
-/// creation when it has none.
-/// Every other field takes its default.
-/// Meant for a directory [`missing_only_metadata`] accepts: an existing
-/// `metadata.json` is overwritten.
-///
-/// # Errors
-///
-/// Fails when the metadata cannot be written.
-pub(crate) fn rebuild_metadata(dir: &Utf8Path, id: &ConversationId) -> crate::error::Result<()> {
-    let last_event_at = validate_events(&dir.join(EVENTS_FILE))
-        .ok()
-        .and_then(|summary| summary.last_event_at);
-
-    let metadata = Conversation {
-        title: title_from_dirname(dir, id),
-        last_activated_at: last_event_at.unwrap_or_else(|| id.timestamp()),
-        ..Conversation::default()
-    };
-
-    write_json(&dir.join(METADATA_FILE), &metadata)
-}
-
-/// The title the name of `dir` carries after conversation `id`'s timestamp,
-/// with dashes read as spaces.
-fn title_from_dirname(dir: &Utf8Path, id: &ConversationId) -> Option<String> {
-    let slug = dir
-        .file_name()?
-        .strip_prefix(&id.to_dirname(None))?
-        .strip_prefix('-')?;
-
-    let title = slug.replace('-', " ");
-    (!title.trim().is_empty()).then_some(title)
-}
-
 /// Validate a single conversation directory entry named for `id`.
 fn validate_entry(
     conversations_dir: &Utf8Path,
@@ -707,7 +666,7 @@ fn validate_json_file(path: &Utf8Path) -> Result<(), ReadError> {
 /// `type` is the tag for the flattened `EventKind` enum on events, and an
 /// explicit `"config_delta"` tag on config deltas.
 /// This confirms the structural shape without materializing any event data.
-fn validate_events(path: &Utf8Path) -> Result<EventsSummary, ReadError> {
+pub(crate) fn validate_events(path: &Utf8Path) -> Result<EventsSummary, ReadError> {
     let buf = fs::read(path)?;
     Ok(EventsSummary::parse(&buf)?)
 }

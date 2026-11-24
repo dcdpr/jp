@@ -125,47 +125,6 @@ fn diagnosing_the_store_changes_nothing_on_disk() {
     assert!(!cache.exists());
 }
 
-// A conversation whose events survive gets its metadata back: the title its
-// directory name still carries, and the time of its last event.
-#[test]
-fn rebuilding_metadata_recovers_the_title_and_the_last_activity() {
-    let tmp = tempdir().unwrap();
-    let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
-    let dir = tmp.path().join("17636257526-fix-the-loader");
-    fs::create_dir_all(&dir).unwrap();
-    fs::write(dir.join(EVENTS_FILE), TWO_EVENTS).unwrap();
-
-    assert!(missing_only_metadata(&dir));
-    rebuild_metadata(&dir, &id).unwrap();
-
-    let metadata: Conversation =
-        serde_json::from_str(&fs::read_to_string(dir.join(METADATA_FILE)).unwrap()).unwrap();
-    assert_eq!(metadata.title.as_deref(), Some("fix the loader"));
-    assert_eq!(
-        metadata.last_activated_at,
-        Utc.with_ymd_and_hms(2026, 1, 2, 11, 30, 0).unwrap()
-    );
-    assert_eq!(validate_conversation_dir(&dir), Ok(()));
-}
-
-// Without a title in the directory name or an event to date it by, the
-// conversation keeps no title and is dated by its ID.
-#[test]
-fn rebuilding_metadata_without_a_title_or_events_dates_it_by_its_id() {
-    let tmp = tempdir().unwrap();
-    let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
-    let dir = tmp.path().join("17636257526");
-    fs::create_dir_all(&dir).unwrap();
-    fs::write(dir.join(EVENTS_FILE), "[]").unwrap();
-
-    rebuild_metadata(&dir, &id).unwrap();
-
-    let metadata: Conversation =
-        serde_json::from_str(&fs::read_to_string(dir.join(METADATA_FILE)).unwrap()).unwrap();
-    assert_eq!(metadata.title, None);
-    assert_eq!(metadata.last_activated_at, id.timestamp());
-}
-
 // Rebuilding the metadata only makes a conversation load when the metadata is
 // all it is missing.
 #[test]

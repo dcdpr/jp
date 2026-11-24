@@ -8,6 +8,7 @@ pub mod value;
 
 pub mod load;
 mod location;
+mod rebuild;
 mod scan;
 pub mod validate;
 
