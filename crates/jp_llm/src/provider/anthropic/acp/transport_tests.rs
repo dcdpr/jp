@@ -187,6 +187,21 @@ fn an_unspecified_output_limit_does_not_inherit_the_http_fallback() {
 }
 
 #[test]
+fn the_runtime_sends_no_telemetry() {
+    let environment = options::environment(&prepared(), CachePolicy::Short);
+    assert_eq!(
+        environment.get("DISABLE_TELEMETRY").map(String::as_str),
+        Some("1")
+    );
+    assert_eq!(
+        environment
+            .get("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC")
+            .map(String::as_str),
+        Some("1")
+    );
+}
+
+#[test]
 fn an_explicit_output_limit_is_forwarded() {
     let prepared = prepared_with_limit(Some(8192));
     let environment = options::environment(&prepared, CachePolicy::Short);

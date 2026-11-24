@@ -29,9 +29,11 @@ expression: "params[\"_meta\"]"
       "env": {
         "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
         "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1",
+        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
         "CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS": "0",
         "CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT": "0",
         "DISABLE_AUTO_COMPACT": "1",
+        "DISABLE_TELEMETRY": "1",
         "ENABLE_TOOL_SEARCH": "false",
         "MAX_MCP_OUTPUT_TOKENS": "100000",
         "MCP_TOOL_TIMEOUT": "2147483647"

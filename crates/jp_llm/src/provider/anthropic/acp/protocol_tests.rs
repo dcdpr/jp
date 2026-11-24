@@ -400,6 +400,43 @@ fn synthetic_error_reports_the_reason_not_a_model_mismatch() {
     );
 }
 
+/// Claude Code continues a turn after losing the API, so the report alone fails
+/// nothing; only a turn it gave up on is retried.
+#[test]
+fn lost_connection_the_runtime_gave_up_on_is_retryable() {
+    let mut state = state();
+    let report = state.sdk(notification(json!({"type":"assistant","error":"server_error","message":{"model":"<synthetic>","content":[{"type":"text","text":"API Error: Your computer went to sleep mid-response. The response above may be incomplete."}]}})));
+    assert_eq!(report.unwrap(), vec![]);
+
+    let error = state
+        .sdk(notification(
+            json!({"type":"result","subtype":"error_during_execution","is_error":true,"errors":[]}),
+        ))
+        .unwrap_err();
+    assert_eq!(error.kind, StreamErrorKind::Transient);
+    assert_eq!(
+        error.message(),
+        "Claude Code server_error: API Error: Your computer went to sleep mid-response. The \
+         response above may be incomplete."
+    );
+}
+
+/// A turn that recovered from a lost connection and then failed for another
+/// reason reports that reason, not the connection it recovered from.
+#[test]
+fn recovered_connection_does_not_explain_a_later_failure() {
+    let mut state = state();
+    state.sdk(notification(json!({"type":"assistant","error":"server_error","message":{"model":"<synthetic>","content":[{"type":"text","text":"API Error: Connection lost mid-response."}]}}))).unwrap();
+    state.sdk(notification(json!({"type":"assistant","message":{"id":"msg-fixed","model":"claude-opus-5","content":[{"type":"text","text":"Continuing."}],"usage":{"input_tokens":1,"output_tokens":1}}}))).unwrap();
+
+    let error = state.sdk(notification(json!({"type":"result","subtype":"error_during_execution","is_error":true,"errors":["Adapter disconnected."]}))).unwrap_err();
+    assert_eq!(error.kind, StreamErrorKind::Other);
+    assert_eq!(
+        error.message(),
+        "Claude Code request failed (error_during_execution): Adapter disconnected."
+    );
+}
+
 #[test]
 fn runtime_can_resolve_a_model_alias() {
     let mut state = state();

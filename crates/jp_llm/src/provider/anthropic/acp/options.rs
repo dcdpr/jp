@@ -179,6 +179,13 @@ pub(super) fn environment(
         ("CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS".into(), "0".into()),
         ("ENABLE_TOOL_SEARCH".into(), "false".into()),
         ("MAX_MCP_OUTPUT_TOKENS".into(), "100000".into()),
+        // Without these, Claude Code reports usage telemetry and error logs to
+        // third-party hosts during a JP request.
+        ("DISABLE_TELEMETRY".into(), "1".into()),
+        (
+            "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC".into(),
+            "1".into(),
+        ),
         // A JP tool call stays silent while its approval prompt is open, and
         // the adapter's two per-call timers measure wall-clock time whether or
         // not JP is running: a closed laptop looks exactly like a hung server.

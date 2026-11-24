@@ -246,6 +246,13 @@ pub(super) struct State {
     pending_previews: IndexSet<String>,
     /// Held until quota metadata or the final SDK result disambiguates it.
     rate_limit_error: Option<String>,
+
+    /// A lost connection to the API that Claude Code reported mid-turn.
+    ///
+    /// Claude Code keeps the blocks completed before the loss, runs the tool
+    /// calls among them, and continues the turn by itself, so the report only
+    /// fails the request if the final SDK result does.
+    server_error: Option<String>,
 }
 
 struct MessageIdentity {
@@ -277,6 +284,7 @@ impl State {
             open_tool_blocks: HashSet::new(),
             pending_previews: IndexSet::new(),
             rate_limit_error: None,
+            server_error: None,
         }
     }
 
@@ -498,6 +506,10 @@ impl State {
                         self.rate_limit_error = Some(format!("Claude Code rate_limit: {detail}"));
                         return Ok(vec![]);
                     }
+                    if error == "server_error" {
+                        self.server_error = Some(format!("Claude Code {error}: {detail}"));
+                        return Ok(vec![]);
+                    }
                     let rejection = match error.as_str() {
                         "max_output_tokens" => {
                             return Err(StreamError::new(
@@ -537,6 +549,7 @@ impl State {
                     );
                 }
                 self.rate_limit_error = None;
+                self.server_error = None;
                 self.usage.observe(&message);
                 Ok(vec![])
             }
@@ -582,6 +595,11 @@ impl State {
                 } else if is_error || subtype != "success" {
                     if let Some(detail) = self.rate_limit_error.take() {
                         return Err(StreamError::other(detail));
+                    }
+                    // Claude Code gave up on the turn after losing the API:
+                    // the same request can succeed once the connection is back.
+                    if let Some(detail) = self.server_error.take() {
+                        return Err(StreamError::transient(detail));
                     }
                     let detail = errors.join("\n");
                     return Err(StreamError::other(if detail.is_empty() {

@@ -15,8 +15,9 @@
 //! What it does not cover is a tool host, so it carries no
 //! `session/request_permission` and no tool-call session update — the two
 //! messages whose fields are most hand-written.
-//! Capturing those needs a run with tools available, which today means a real
-//! `RECORD=1 jp query`.
+//! Capturing those needs a run with tools available: `cut_off_tests` records
+//! one against a stub tool server, and a real `RECORD=1 jp query` records one
+//! against JP's own.
 
 use std::{
     env, fmt,
@@ -32,6 +33,7 @@ use jp_conversation::{
     event::{ChatRequest, ChatResponse, ConversationEvent},
     thread::ThreadBuilder,
 };
+use jp_credentials::{CATEGORY_LLM, CredentialSecret, CredentialStore, PROVIDER_ANTHROPIC};
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use tracing::{
@@ -60,6 +62,26 @@ use crate::{
     event::{Event, EventPart, FinishReason},
     query::{ChatQuery, QueryContext},
 };
+
+/// The Claude Code login a recording runs against.
+///
+/// The lowest-named subscription registered with `jp provider llm auth login
+/// anthropic`, which is the login a JP query uses when its `auth` chain names
+/// it, so two runs land on the same account without one being named.
+/// `None` when none is registered, which leaves Claude Code on its own active
+/// login.
+pub(super) fn recording_login() -> Option<Utf8PathBuf> {
+    let document = CredentialStore::file_default().ok()?.load().ok()?;
+    document
+        .profiles(CATEGORY_LLM, PROVIDER_ANTHROPIC)?
+        .iter()
+        .filter_map(|(name, credential)| match &credential.secret {
+            CredentialSecret::External { directory } => Some((name, directory)),
+            _ => None,
+        })
+        .min_by_key(|(name, _)| *name)
+        .map(|(_, directory)| directory.clone())
+}
 
 /// Test-only observer of the production diagnostic event, never conversation
 /// metadata.
@@ -134,7 +156,7 @@ fn query(policy: CachePolicy, tag: &str) -> ChatQuery {
         .into()
 }
 
-fn context() -> QueryContext {
+pub(super) fn context() -> QueryContext {
     QueryContext {
         root: Utf8PathBuf::from_path_buf(env::current_dir().unwrap()).unwrap(),
         mcp_endpoint: None,
@@ -373,7 +395,7 @@ async fn cache_reconstruction() {
     assert_eq!(tokens(&off, "cache_creation_input_tokens"), 0);
 }
 
-fn only_connection(name: &str) -> Vec<Framed> {
+pub(super) fn only_connection(name: &str) -> Vec<Framed> {
     let read = cassette::read(name).unwrap_or_else(|error| panic!("{error}"));
     let mut scripts = cassette::connections(read);
     assert_eq!(scripts.len(), 1, "`{name}` should hold one connection");
