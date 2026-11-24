@@ -4391,6 +4391,90 @@ fn run_no_persist_editor_query_writes_no_draft() {
     assert_eq!(stored_conversation_ids(tmp.path()), []);
 }
 
+/// Store a conversation with one turn, and a saved query draft holding `draft`
+/// in its user-local directory, as an interrupted `jp query` leaves it.
+///
+/// Returns the conversation and the draft's path.
+fn conversation_with_saved_draft(ctx: &mut Ctx, draft: &str) -> (ConversationId, Utf8PathBuf) {
+    let id = make_id(1_700_000_000);
+    ctx.workspace.create_conversation_with_id(
+        id,
+        Conversation::default().with_last_activated_at(ctx.now()),
+        ctx.config(),
+    );
+    let handle = ctx.workspace.acquire_conversation(&id).unwrap();
+    let lock = ctx.workspace.test_lock(handle);
+    lock.as_mut()
+        .update_events(|events| events.start_turn(ChatRequest::from("seeded question")));
+    drop(lock);
+
+    let path = ctx
+        .fs_backend
+        .as_deref()
+        .unwrap()
+        .find_user_local_conversation_dir(&id)
+        .expect("the stored conversation has a user-local directory")
+        .join(editor::QUERY_FILENAME);
+    std::fs::write(&path, draft).unwrap();
+
+    (id, path)
+}
+
+// `--no-persist` composes in a temporary directory, so an empty editor buffer
+// there says nothing about the draft saved in the conversation's directory.
+#[test]
+fn run_no_persist_empty_editor_query_keeps_the_saved_draft() {
+    let session = Session {
+        id: SessionId::new("jp-cli-no-persist-empty-draft-test").unwrap(),
+        source: SessionSource::env("JP_SESSION"),
+    };
+    let (mut ctx, out, _err, _tmp) = editor_ctx(&session, r#"sh -c ': > "$1"' jp-editor"#);
+    let (id, draft) = conversation_with_saved_draft(&mut ctx, "saved request\n");
+    let mut ctx = no_persist(ctx);
+
+    let source = ctx.workspace.acquire_conversation(&id).unwrap();
+    let query = query_from(&["--edit"]).unwrap();
+    Runtime::new()
+        .unwrap()
+        .block_on(query.run(&mut ctx, Some(source), false))
+        .unwrap();
+    ctx.printer.flush();
+
+    assert_eq!(out.lock().as_str(), "Query is empty, ignoring.\n");
+    assert_eq!(std::fs::read_to_string(&draft).unwrap(), "saved request\n");
+}
+
+// The editor shows the saved draft under `--no-persist` too, and the saved
+// draft stays where it is.
+#[test]
+fn run_no_persist_editor_query_starts_from_the_saved_draft() {
+    let session = Session {
+        id: SessionId::new("jp-cli-no-persist-seeded-draft-test").unwrap(),
+        source: SessionSource::env("JP_SESSION"),
+    };
+    let seen_dir = camino_tempfile::tempdir().unwrap();
+    let seen = seen_dir.path().join("seen");
+    // An editor that copies what it was given and changes nothing.
+    let (mut ctx, _out, _err, _tmp) =
+        editor_ctx(&session, &format!(r#"sh -c 'cp "$1" "$0"' {seen}"#));
+    let (id, draft) = conversation_with_saved_draft(&mut ctx, "saved request\n");
+    let mut ctx = no_persist(ctx);
+
+    let source = ctx.workspace.acquire_conversation(&id).unwrap();
+    let query = query_from(&["--edit"]).unwrap();
+    let error = Runtime::new()
+        .unwrap()
+        .block_on(query.run(&mut ctx, Some(source), false))
+        .unwrap_err();
+    assert_eq!(error.message.as_deref(), Some("Stream error"));
+
+    // The editor's file also holds the sections JP writes around the request,
+    // whose content depends on the config, so only the request is checked.
+    let shown = std::fs::read_to_string(&seen).unwrap();
+    assert!(shown.starts_with("saved request\n"), "{shown}");
+    assert_eq!(std::fs::read_to_string(&draft).unwrap(), "saved request\n");
+}
+
 fn no_persist(mut ctx: Ctx) -> Ctx {
     let workspace = std::mem::replace(&mut ctx.workspace, Workspace::in_memory("/unused"));
     ctx.workspace = workspace.without_persistence();

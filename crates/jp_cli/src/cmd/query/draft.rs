@@ -13,7 +13,19 @@ use jp_storage::backend::FsStorageBackend;
 use jp_workspace::ConversationLock;
 use tracing::{debug, warn};
 
-use crate::editor;
+use crate::{ctx::Ctx, editor};
+
+/// The store holding conversations' saved query drafts, or `None` when the run
+/// writes nothing (`--no-persist`).
+///
+/// Every read for cleanup and every removal of a saved draft goes through this,
+/// so a `--no-persist` run, which composes in a temporary directory, never
+/// removes the draft a persisting run saved.
+pub(super) fn draft_store(ctx: &Ctx) -> Option<&FsStorageBackend> {
+    ctx.fs_backend
+        .as_deref()
+        .filter(|_| ctx.workspace.persists())
+}
 
 /// Resolve the directory where the query draft for conversation `id` should be
 /// written, plus an optional temp directory guard when `persist` is `false`.
@@ -22,7 +34,13 @@ use crate::editor;
 /// current user-local directory (using `stored_title` rather than any pending
 /// title override so a subsequent title rename carries the draft along).
 /// When `persist` is `false` (`--no-persist`), the draft is placed in a
-/// temporary directory that is deleted when the returned guard drops.
+/// temporary directory that is deleted when the returned guard drops, seeded
+/// with a copy of the conversation's saved draft so the editor shows it.
+///
+/// # Errors
+///
+/// Fails when the temporary directory cannot be created, or the saved draft
+/// cannot be copied into it.
 pub(super) fn draft_dir(
     persist: bool,
     fs_backend: Option<&FsStorageBackend>,
@@ -32,6 +50,13 @@ pub(super) fn draft_dir(
 ) -> io::Result<(Utf8PathBuf, Option<Utf8TempDir>)> {
     if !persist {
         let scratch = camino_tempfile::tempdir()?;
+        let saved = fs_backend
+            .and_then(|fs| fs.find_user_local_conversation_dir(id))
+            .map(|dir| dir.join(editor::QUERY_FILENAME))
+            .filter(|path| path.is_file());
+        if let Some(saved) = saved {
+            fs::copy(&saved, scratch.path().join(editor::QUERY_FILENAME))?;
+        }
         return Ok((scratch.path().to_owned(), Some(scratch)));
     }
 

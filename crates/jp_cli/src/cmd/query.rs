@@ -69,8 +69,8 @@ use args::{QueryText, ToolFlags, ToolUse};
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, Utc};
 use draft::{
-    DraftRemoval, cleanup_query_message_file, draft_dir, draft_fingerprint, is_abandoned,
-    preserve_query_message_file,
+    DraftRemoval, cleanup_query_message_file, draft_dir, draft_fingerprint, draft_store,
+    is_abandoned, preserve_query_message_file,
 };
 use indexmap::IndexMap;
 use interrupt::{InterruptAction, TurnInterrupts};
@@ -299,7 +299,7 @@ impl Query {
         // If this run created the conversation and exited without adding a turn
         // or saving a query draft, remove the empty conversation directory
         // while we still hold the lock.
-        if created && is_abandoned(ctx.fs_backend.as_deref(), &lock, turns_before) {
+        if created && is_abandoned(draft_store(ctx), &lock, turns_before) {
             ctx.workspace.remove_conversation_with_lock(lock.into_mut());
         }
 
@@ -449,7 +449,7 @@ impl Query {
             // conversation is untouched, even for `--replay`. One this run
             // created is removed by `run`, which finds no draft and no new turn.
             if query_source == QuerySource::Editor {
-                cleanup_query_message_file(ctx.fs_backend.as_deref(), &cid, DraftRemoval::Any);
+                cleanup_query_message_file(draft_store(ctx), &cid, DraftRemoval::Any);
             }
             ctx.printer.println("Query is empty, ignoring.");
             return Ok(());
@@ -518,7 +518,7 @@ impl Query {
         // not the same text: an editor-composed draft keeps its configuration
         // and history sections, and `--template` renders the request after the
         // file was written.
-        let draft_at_send = draft_fingerprint(ctx.fs_backend.as_deref(), &cid);
+        let draft_at_send = draft_fingerprint(draft_store(ctx), &cid);
 
         // Echo the request back through the same role-aware rendering
         // machinery used by replay and live streaming — a labeled user header
@@ -723,7 +723,7 @@ impl Query {
         // turn ran.
         if turn_result.is_ok() && lock.with_events(last_request_id) != before {
             cleanup_query_message_file(
-                ctx.fs_backend.as_deref(),
+                draft_store(ctx),
                 &cid,
                 DraftRemoval::IfUnchanged(draft_at_send.as_deref()),
             );
