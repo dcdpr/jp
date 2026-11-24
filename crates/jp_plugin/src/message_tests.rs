@@ -704,6 +704,7 @@ fn a_null_answer_survives_the_round_trip() {
         conversation: "123".to_owned(),
         outcome: QueryOutcome::Finished,
         data: Some(Value::Null),
+        answer: None,
     });
 
     let json = serde_json::to_string(&msg).unwrap();
@@ -723,6 +724,7 @@ fn a_null_answer_survives_the_round_trip() {
             conversation: "123".to_owned(),
             outcome: QueryOutcome::Finished,
             data: None,
+            answer: None,
         })
     );
 }
@@ -734,12 +736,14 @@ fn query_complete_carries_data_only_when_there_is_some() {
         conversation: "123".to_owned(),
         outcome: QueryOutcome::Finished,
         data: None,
+        answer: None,
     });
     let with = HostToPlugin::QueryComplete(QueryCompleteResponse {
         id: None,
         conversation: "123".to_owned(),
         outcome: QueryOutcome::Finished,
         data: Some(json!({"summary": "short"})),
+        answer: None,
     });
 
     assert_eq!(
@@ -759,12 +763,14 @@ fn query_complete_names_how_the_turn_ended() {
         conversation: "123".to_owned(),
         outcome: QueryOutcome::Stopped,
         data: None,
+        answer: None,
     });
     let aborted = HostToPlugin::QueryComplete(QueryCompleteResponse {
         id: Some("q1".to_owned()),
         conversation: "123".to_owned(),
         outcome: QueryOutcome::Aborted,
         data: None,
+        answer: None,
     });
 
     assert_eq!(
@@ -778,6 +784,25 @@ fn query_complete_names_how_the_turn_ended() {
 }
 
 #[test]
+fn query_complete_carries_the_answer_when_there_is_one() {
+    let answered = HostToPlugin::QueryComplete(QueryCompleteResponse {
+        id: Some("q1".to_owned()),
+        conversation: "123".to_owned(),
+        outcome: QueryOutcome::Finished,
+        data: None,
+        answer: Some("Done.".to_owned()),
+    });
+
+    let json = serde_json::to_string(&answered).unwrap();
+
+    assert_eq!(
+        json,
+        r#"{"type":"query_complete","id":"q1","conversation":"123","outcome":"finished","answer":"Done."}"#
+    );
+    assert_eq!(from_str::<HostToPlugin>(&json).unwrap(), answered);
+}
+
+#[test]
 fn query_complete_from_an_older_host_reads_as_finished() {
     assert_eq!(
         from_str::<HostToPlugin>(r#"{"type":"query_complete","conversation":"123"}"#).unwrap(),
@@ -786,6 +811,7 @@ fn query_complete_from_an_older_host_reads_as_finished() {
             conversation: "123".to_owned(),
             outcome: QueryOutcome::Finished,
             data: None,
+            answer: None,
         })
     );
 }

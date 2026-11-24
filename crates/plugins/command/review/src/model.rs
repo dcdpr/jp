@@ -6,9 +6,11 @@
 //! transitions; disk I/O is handled by [`crate::store`] and
 //! [`crate::snapshot`].
 
-use std::{collections::BTreeMap, fmt};
+use std::collections::BTreeMap;
 
 use chrono::{DateTime, Utc};
+// `review.json` stores these as the HTTP API writes them.
+pub use jp_review_api::{Draft, Resolution, Role, State, Status, Verdict};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -135,50 +137,6 @@ pub struct Reply {
     pub pass: Option<u32>,
 }
 
-/// Which side of a review wrote something.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Role {
-    Reviewer,
-    Assistant,
-}
-
-/// The assistant's disposition on a reviewer's comment.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Verdict {
-    /// Agrees, and makes the requested change.
-    Accept,
-    /// Agrees with the issue, and makes a different change.
-    Amend,
-    /// Makes no change, and says why.
-    Decline,
-    /// Agrees, but leaves the point for later, saying where it was tracked.
-    Defer,
-    /// Asks a question before changing anything.
-    Ask,
-}
-
-/// Where a comment stands, derived from its history.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Status {
-    /// Written by the reviewer, and not yet sent to the assistant.
-    Draft,
-    /// Sent, and waiting on one side or the other.
-    Open,
-    /// Closed by the reviewer.
-    Resolved,
-}
-
-/// Whether a review takes changes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum State {
-    Open,
-    Closed,
-}
-
 /// A comment to add to a review.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewComment {
@@ -201,23 +159,6 @@ pub struct Edit {
 pub enum Replied {
     Added,
     Replaced,
-}
-
-/// What an edit or a withdrawal applied to: a draft comment, or a comment's
-/// draft reply.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Draft {
-    Comment,
-    Reply,
-}
-
-/// What resolving a comment did.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Resolution {
-    Resolved,
-    AlreadyResolved,
 }
 
 /// Why a review refused a change.
@@ -723,37 +664,6 @@ impl Content {
             body: edit.body.unwrap_or_else(|| self.body.clone()),
             suggestion: edit.suggestion.or_else(|| self.suggestion.clone()),
         }
-    }
-}
-
-impl fmt::Display for Status {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.pad(match self {
-            Self::Draft => "draft",
-            Self::Open => "open",
-            Self::Resolved => "resolved",
-        })
-    }
-}
-
-impl fmt::Display for State {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.pad(match self {
-            Self::Open => "open",
-            Self::Closed => "closed",
-        })
-    }
-}
-
-impl fmt::Display for Verdict {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.pad(match self {
-            Self::Accept => "accept",
-            Self::Amend => "amend",
-            Self::Decline => "decline",
-            Self::Defer => "defer",
-            Self::Ask => "ask",
-        })
     }
 }
 

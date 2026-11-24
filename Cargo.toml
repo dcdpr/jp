@@ -5,6 +5,8 @@ members = [
     "crates/internal/*",
     "crates/jp_*",
     "crates/plugins/command/*",
+    "crates/plugins/command/*/api",
+    "crates/plugins/command/*/ui",
 ]
 resolver = "3"
 
@@ -45,6 +47,7 @@ jp_workspace = { path = "crates/jp_workspace" }
 comfort = { path = "crates/contrib/comfort", default-features = false }
 async-anthropic = { path = "crates/contrib/async-anthropic" }
 doc = { path = "crates/internal/doc" }
+jp-review-api = { path = "crates/plugins/command/review/api" }
 grizzly = { path = "crates/contrib/grizzly", default-features = false }
 md-html = { path = "crates/internal/md-html" }
 overwrite = { path = "crates/internal/overwrite" }
@@ -56,6 +59,8 @@ xct2cli = { path = "crates/contrib/xct2cli" }
 
 addr2line = { version = "0.27" }
 ahash = { version = "0.8", default-features = false, features = ["runtime-rng", "std", "serde"] }
+# Browser UIs only; see `leptos_dom` below.
+any_spawner = { version = "0.3", default-features = false }
 assert_matches = { version = "1", default-features = false }
 async-stream = { version = "0.3", default-features = false }
 axum = { version = "0.8", default-features = false }
@@ -103,7 +108,16 @@ indoc = { version = "2", default-features = false }
 infer = { version = "0.19", default-features = false }
 inquire = { git = "https://github.com/JeanMertz/inquire", branch = "merged", default-features = false } # <https://github.com/mikaelmello/inquire/pull/321>
 insta = { version = "1", default-features = false }
+js-sys = { version = "0.3", default-features = false }
 json-strip-comments = { version = "3", default-features = false }
+# Leptos, for the browser UIs (`docs/rfd/139-browser-uis-in-rust-with-leptos.md`),
+# pinned to the release candidate RFD 139 adopts until 0.9.0 is out. The UIs
+# depend on its renderer (`tachys`), reactivity (`reactive_graph`), task
+# spawner (`any_spawner`), and DOM helpers (`leptos_dom`), not on the `leptos`
+# crate: that one also compiles server functions, config-file loading, and the
+# `view!` macro into every build, none of which a client-rendered UI written in
+# builder syntax uses.
+leptos_dom = { version = "=0.9.0-rc1", default-features = false }
 libc = { version = "0.2", default-features = false }
 linkme = { version = "0.3", default-features = false }
 maud = { version = "0.27", default-features = false }
@@ -128,6 +142,8 @@ quote = { version = "1", default-features = false }
 ra-ap-rustc_lexer = { version = "0.167", default-features = false }
 rand = { version = "0.9", default-features = false }
 rayon = { version = "1", default-features = false }
+# Browser UIs only; see `leptos_dom` above.
+reactive_graph = { version = "=0.3.0-rc1", default-features = false }
 reedline = { git = "https://github.com/JeanMertz/reedline", branch = "changes", default-features = false } # fork: adds `Reedline::with_output` + `/dev/tty` cursor/escape routing (RFD 088)
 reflink-copy = { version = "0.1", default-features = false }
 regex = { version = "1", default-features = false }
@@ -143,6 +159,9 @@ schemars = { version = "1", default-features = false }
 scraper = { version = "0.25", default-features = false }
 secrecy = { version = "0.10", default-features = false }
 semver = { version = "1", default-features = false }
+# Browser UIs only: holds a JavaScript value in a reactive cleanup, which must
+# be `Send`. Already in the tree through `reactive_graph`.
+send_wrapper = { version = "0.6", default-features = false }
 serde = { version = "1", default-features = false }
 serde-content = { version = "0.1", default-features = false }
 serde-saphyr = { version = "2", default-features = false }
@@ -159,6 +178,8 @@ sse-stream = { version = "0.2", default-features = false }
 strip-ansi-escapes = { version = "0.2", default-features = false }
 syn = { version = "2", default-features = false }
 syntect = { version = "5.3", default-features = false }
+# Browser UIs only; see `leptos_dom` above.
+tachys = { version = "=0.3.0-rc1", default-features = false }
 test-log = { version = "0.2", default-features = false, features = ["trace"] }
 textwrap = { version = "0.16", default-features = false }
 thiserror = { version = "2", default-features = false }
@@ -179,6 +200,10 @@ url = { version = "2", default-features = false }
 uuid = { version = "1", default-features = false }
 vt100 = { version = "0.16", default-features = false }
 vte = { version = "0.14", default-features = false }
+wasm-bindgen = { version = "0.2", default-features = false }
+wasm-bindgen-futures = { version = "0.4", default-features = false }
+wasm-bindgen-test = { version = "0.3", default-features = false }
+web-sys = { version = "0.3", default-features = false }
 which = { version = "8", default-features = false }
 windows-sys = { version = "0.61", default-features = false }
 zip = { version = "9", default-features = false }
@@ -243,6 +268,20 @@ inherits = "dev"
 inherits = "dev"
 
 [profile.docs]
+inherits = "dev"
+
+# The WebAssembly bundles `just build-ui` builds for the browser UIs, optimized
+# for size: the browser downloads the whole module before it runs any of it.
+[profile.wasm-release]
+inherits = "release"
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+
+# The browser UI bundles `just review-ui-watch` rebuilds on every change: quick
+# to compile, several times larger, and with debug assertions on.
+[profile.wasm-dev]
 inherits = "dev"
 
 [profile.nextest]

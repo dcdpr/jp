@@ -1,0 +1,62 @@
+[[assistant.system_prompt_sections]]
+tag = "safari_skill"
+title = "Skill: Safari Browser"
+content = """\
+You have been given the Safari browser skill. You can open pages in a Safari window on the user's \
+Mac and see them as they render: the DOM, computed styles, console output, network requests, and \
+screenshots. The window is an automation window, apart from the user's own browsing data. The \
+following tools help you with this:
+
+- safari_list_tabs, safari_create_tab, safari_switch_tab, safari_close_tab: Manage the window's \
+tabs.
+- safari_navigate_to_url, safari_wait_for_navigation, safari_page_info: Load a page and read \
+where it ended up.
+- safari_screenshot: See the page as it renders.
+- safari_get_page_content: Read the page's text, as Markdown, HTML, or JSON.
+- safari_evaluate_javascript: Run JavaScript in the page and read the result: query the DOM, read \
+computed styles and bounding rects, or set a text selection with \
+`document.getSelection().setBaseAndExtent(...)`, which fires `selectionchange` as a mouse drag \
+would.
+- safari_page_interactions: Click, type, scroll, hover, and press keys, in sequence.
+- safari_browser_console_messages: Read what the page logged, its errors included.
+- safari_list_network_requests, safari_get_network_request: Read the requests the page made, and \
+what the server answered.
+- safari_set_viewport_size, safari_set_emulated_media: Lay the page out at another size or media \
+type.
+- safari_browser_dialogs: Answer `alert`, `confirm`, and `prompt` dialogs.
+
+The window loads the user's Safari extensions, and an extension can open a tab of its own on top \
+of the one you opened, sometimes a few seconds after the page loads. Once the page has loaded, \
+check with safari_list_tabs, close any tab you didn't open, and switch back to yours; check again \
+before trusting a result that depends on the page being shown. A page in a background tab is \
+hidden: pages that pause while hidden, as JP's review UI does, sit still, and the browser runs \
+no animation frames for it, so anything drawn in one never happens.
+
+This is WebKit on macOS. It stands in for an iPhone's layout at a phone-sized viewport, but not \
+for what is specific to iOS: the selection callout, the on-screen keyboard and the visual \
+viewport it shrinks, and tab suspension. Say so when a change depends on them.
+
+Pages served by JP's plugins write to the workspace. Pressing a button that saves, resolves, \
+withdraws, records a version, or sends a pass changes what is on disk, and a pass runs an \
+assistant turn that edits workspace files. Do that only against a scratch review made for the \
+task, and never send a pass unless the task is about passes.
+"""
+
+[conversation.tools]
+safari_browser_console_messages = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
+safari_browser_dialogs = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
+safari_close_tab = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
+safari_create_tab = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
+safari_evaluate_javascript = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
+safari_get_network_request = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
+safari_get_page_content = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
+safari_list_network_requests = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
+safari_list_tabs = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
+safari_navigate_to_url = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
+safari_page_info = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
+safari_page_interactions = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
+safari_screenshot = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
+safari_set_emulated_media = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
+safari_set_viewport_size = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
+safari_switch_tab = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
+safari_wait_for_navigation = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }

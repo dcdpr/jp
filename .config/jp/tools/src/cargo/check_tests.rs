@@ -528,6 +528,7 @@ const WIKI: Checks = Checks {
     docs_mergeable_info: false,
     qual: false,
     site: false,
+    wasm: false,
 };
 
 /// A clean wiki adds nothing: the run reads as it would without the check.
@@ -617,6 +618,7 @@ const QUAL: Checks = Checks {
     docs_mergeable_info: false,
     qual: true,
     site: false,
+    wasm: false,
 };
 
 /// A failing verdict as `qual diff --format json` prints it.
@@ -1024,7 +1026,125 @@ const SITE: Checks = Checks {
     docs_mergeable_info: false,
     qual: false,
     site: true,
+    wasm: false,
 };
+
+const WASM: Checks = Checks {
+    checksum_freshness: false,
+    wiki: false,
+    docs: false,
+    docs_mergeable_info: false,
+    qual: false,
+    site: false,
+    wasm: true,
+};
+
+/// `cargo metadata` for a workspace holding the host crate `a` and the browser
+/// crate `a-ui`.
+const BROWSER_METADATA: &str = r#"{
+  "workspace_root": "/ws",
+  "packages": [
+    { "name": "a", "manifest_path": "/ws/a/Cargo.toml", "metadata": null },
+    { "name": "a-ui", "manifest_path": "/ws/a/ui/Cargo.toml", "metadata": { "jp": { "wasm": true } } }
+  ]
+}"#;
+
+const WASM_CLIPPY: &[&str] = &[
+    "clippy",
+    "--color=never",
+    "--quiet",
+    "--keep-going",
+    "--all-targets",
+    "--target",
+    "wasm32-unknown-unknown",
+    "--package=a-ui",
+];
+
+/// The browser crates build clean for the browser too: nothing is added.
+#[test]
+fn a_clean_browser_build_adds_nothing() {
+    let (_dir, ctx) = ctx();
+
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns_success("")
+        .expect("comfort")
+        .returns_success("")
+        .expect("cargo")
+        .args(&["metadata", "--no-deps", "--format-version=1"])
+        .returns_success(BROWSER_METADATA)
+        .expect("cargo")
+        .args(WASM_CLIPPY)
+        .returns_success("");
+
+    let result = cargo_check_impl(&ctx.root, "-W warnings", None, &[], WASM, &runner).unwrap();
+
+    assert_eq!(
+        result.into_content().unwrap(),
+        "Check succeeded. No warnings or errors found."
+    );
+}
+
+#[test]
+fn what_only_the_browser_build_finds_is_reported() {
+    let (_dir, ctx) = ctx();
+
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns_success("")
+        .expect("comfort")
+        .returns_success("")
+        .expect("cargo")
+        .returns_success(BROWSER_METADATA)
+        .expect("cargo")
+        .args(WASM_CLIPPY)
+        .returns(ProcessOutput {
+            stdout: String::new(),
+            stderr: "warning: unused import: `Element`\n".to_owned(),
+            status: ExitCode::success(),
+        });
+
+    let result = cargo_check_impl(&ctx.root, "-W warnings", None, &[], WASM, &runner).unwrap();
+
+    assert_eq!(result.into_content().unwrap(), indoc::indoc! {"
+            `cargo clippy` found no warnings or errors.
+
+            `cargo clippy --target wasm32-unknown-unknown` found, in the browser crates:
+            ```
+            warning: unused import: `Element`
+            ```"});
+}
+
+/// Checking packages none of which is a browser crate builds nothing for the
+/// browser.
+#[test]
+fn packages_without_a_browser_crate_build_nothing_for_it() {
+    let (_dir, ctx) = ctx();
+
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns_success("")
+        .expect("comfort")
+        .returns_success("")
+        .expect("cargo")
+        .returns_success(BROWSER_METADATA);
+
+    let result = cargo_check_impl(
+        &ctx.root,
+        "-W warnings",
+        None,
+        &["a".to_owned()],
+        WASM,
+        &runner,
+    )
+    .unwrap();
+
+    assert_eq!(
+        result.into_content().unwrap(),
+        "Check succeeded. No warnings or errors found."
+    );
+    assert_eq!(runner.calls().len(), 3);
+}
 
 const SITE_TEST_ARGS: &[&str] = &[
     "test",
@@ -1221,6 +1341,7 @@ const DOCS: Checks = Checks {
     docs_mergeable_info: false,
     qual: false,
     site: false,
+    wasm: false,
 };
 
 const DOC_ARGS: &[&str] = &[

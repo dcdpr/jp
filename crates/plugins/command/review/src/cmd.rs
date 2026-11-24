@@ -1,4 +1,5 @@
-//! Review-level CLI commands: `start`, `ls`, `show`, `diff`, and `close`.
+//! Review-level CLI commands: `start`, `ls`, `show`, `diff`, `close`, and
+//! `open`.
 //!
 //! Comment and reply commands live in [`crate::comments`].
 
@@ -7,11 +8,13 @@ use std::{collections::BTreeMap, env};
 use camino::{Utf8Path, Utf8PathBuf};
 use doc::author;
 use jp_plugin::message::{InitMessage, OutputFormat};
+use jp_review_api::DiffView;
 use serde::Serialize;
 use serde_json::Value;
 
 use crate::{
     Output,
+    browser::Browser,
     id::ReviewId,
     model::{BASE_LABEL, Review, Status},
     options::Options,
@@ -20,7 +23,7 @@ use crate::{
     render::{self, counted},
     snapshot,
     store::{self, Blobs, Store, now},
-    view::{self, DiffView, Texts},
+    view::{self, Texts},
 };
 
 /// Execution context for `jp review` CLI commands.
@@ -84,18 +87,19 @@ pub(crate) fn to_json(value: &impl Serialize) -> Result<String, String> {
 }
 
 /// Start a new review of `files`, snapshotting the working tree (and the
-/// optional `base` command output as version 1).
+/// optional `base` command output as version 1), returning its id and what the
+/// command prints.
 pub(crate) fn start(
     ctx: &Context<'_>,
     files: &[String],
     title: Option<&str>,
     base: Option<&[String]>,
-) -> Result<Output, String> {
+) -> Result<(ReviewId, Output), String> {
     let paths = resolve_files(ctx, files)?;
     let (id, review) = create(ctx, paths, title, base)?;
 
     if ctx.format.is_json() {
-        return json(&view::summary(id, &review));
+        return Ok((id, json(&view::summary(id, &review))?));
     }
 
     let files = counted(review.paths.len(), "file", "files");
@@ -103,7 +107,49 @@ pub(crate) fn start(
     let base = review
         .base()
         .map_or_else(String::new, |base| format!(" (version {base} is the base)"));
-    Ok(format!("{id}: {files}, version {latest}{base}\n").into())
+    Ok((
+        id,
+        format!("{id}: {files}, version {latest}{base}\n").into(),
+    ))
+}
+
+/// Open the review list, or the review `id`, in `browser`, as the running `jp
+/// review serve` serves it, returning the URL opened.
+///
+/// Refused when no server runs for the store, saying how to start one.
+pub(crate) fn open(
+    ctx: &Context<'_>,
+    id: Option<ReviewId>,
+    browser: &dyn Browser,
+) -> Result<String, String> {
+    if let Some(id) = id
+        && !ctx.store.exists(id)
+    {
+        return Err(format!("No review {id}."));
+    }
+    let base = match ctx.store.server()? {
+        None => {
+            return Err(
+                "No `jp review serve` runs for this workspace's reviews. Start one with `jp \
+                 review serve --open`."
+                    .to_owned(),
+            );
+        }
+        Some(base) if base.is_empty() => {
+            return Err(
+                "`jp review serve` is starting, and hasn't said where it listens yet; try again."
+                    .to_owned(),
+            );
+        }
+        Some(base) => base,
+    };
+    let url = match id {
+        Some(id) => format!("{base}/reviews/{id}"),
+        None => format!("{base}/"),
+    };
+
+    browser.open(&url)?;
+    Ok(url)
 }
 
 /// Create and persist a new review of workspace-relative `paths`, recording the
@@ -303,13 +349,13 @@ pub(crate) fn before(to: u32) -> u32 {
 
 /// Compute the [`DiffView`] for `paths` in `review` between versions `from` and
 /// `to`.
-pub(crate) fn changes<'a>(
+pub(crate) fn changes(
     blobs: &Blobs,
     id: ReviewId,
     review: &Review,
-    paths: &'a [String],
+    paths: &[String],
     [from, to]: [u32; 2],
-) -> Result<DiffView<'a>, String> {
+) -> Result<DiffView, String> {
     let mut files = vec![];
     for path in paths {
         let old = review
@@ -324,7 +370,7 @@ pub(crate) fn changes<'a>(
     }
 
     Ok(DiffView {
-        review: id,
+        review: id.to_string(),
         from,
         to,
         files,

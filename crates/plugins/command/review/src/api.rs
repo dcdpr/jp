@@ -2,6 +2,8 @@
 //!
 //! Each endpoint function takes a parsed request and returns a [`Reply`] or an
 //! [`ApiError`] with an HTTP status code and `{"error": "..."}` body.
+//! Requests and answers are `jp_review_api`'s types, which a browser client
+//! shares.
 //! Where an endpoint corresponds to a CLI command, the response matches the
 //! JSON emitted by `jp -F json review`.
 //! All handlers perform synchronous store I/O and are run on blocking threads
@@ -15,21 +17,27 @@ use axum::http::StatusCode;
 use camino::{Utf8Path, Utf8PathBuf};
 use doc::author;
 use jp_plugin::message::OutputFormat;
-use serde::{Deserialize, Serialize};
+use jp_review_api::{
+    AnchorRequest, DetailQuery, DetailReply, DiffQuery, EditRequest, ErrorBody, FileQuery,
+    FileReply, Format, Listing, NewCommentRequest, NewReview, PassRequest, Recorded, ReplyRequest,
+    Resolved, Running, Unreadable, Withdrawal,
+};
+use serde::Serialize;
 use serde_json::Value;
 
 use crate::{
     anchor::{Anchor, Target},
     cmd::{self, Context, load, to_json},
-    comments::{self, Resolved, Withdrawal},
+    comments,
     id::{CommentRef, Conversation, ReviewId},
     model::{Content, Edit, Failure, NewComment, Refusal, Review, Role, Why},
     options::Options,
     pass::{PassRef, Unspanned},
+    snapshot,
     store::{Blobs, Store, now},
-    submit::Request,
+    submit::{self, Request},
     text::{Range, Text},
-    view::{self, Detail, Summary, Texts},
+    view::{self, Texts},
 };
 
 /// Shared workspace state for HTTP API handlers.
@@ -41,6 +49,12 @@ pub(crate) struct Workspace {
 }
 
 impl Workspace {
+    /// The workspace's name: its root directory's, or the whole root when that
+    /// has none.
+    pub(crate) fn name(&self) -> &str {
+        self.root.file_name().unwrap_or(self.root.as_str())
+    }
+
     /// Build a command [`Context`] rooted at the workspace root with JSON
     /// output.
     pub(crate) fn context(&self) -> Context<'_> {
@@ -126,7 +140,11 @@ impl ApiError {
 
     /// Serialize the error as `{"error": "..."}`.
     pub(crate) fn body(&self) -> String {
-        serde_json::json!({ "error": self.message }).to_string()
+        // A struct of one string always serializes.
+        serde_json::to_string(&ErrorBody {
+            error: self.message.clone(),
+        })
+        .unwrap_or_default()
     }
 }
 
@@ -145,145 +163,25 @@ impl From<Failure> for ApiError {
     }
 }
 
-/// Request body for `POST /api/reviews`.
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct NewReview {
-    /// Files to review, relative to the workspace root.
-    pub files: Vec<String>,
-
-    pub title: Option<String>,
-}
-
-/// Comment anchor in an HTTP request.
-#[derive(Debug, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct AnchorRequest {
-    /// Version in which `path` and `range`/`bytes` are resolved; defaults to
-    /// the latest version when `range` and `bytes` are both omitted.
-    pub version: Option<u32>,
-
-    pub path: Option<String>,
-
-    /// Line or character range (`42`, `42-45`, or `42:5-43:18`).
-    pub range: Option<String>,
-
-    /// Half-open UTF-8 byte range `[start, end)` within the file.
-    pub bytes: Option<[usize; 2]>,
-}
-
-/// Request body for `POST /api/reviews/{id}/comments`.
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct NewCommentRequest {
-    /// Target anchor; defaults to the review as a whole when omitted.
-    pub anchor: Option<AnchorRequest>,
-
-    #[serde(default)]
-    pub body: String,
-
-    /// Replacement text for the anchored range, or `""` to suggest deleting it.
-    pub suggestion: Option<String>,
-}
-
-/// Request body for `PATCH /api/reviews/{id}/comments/{n}`; omitted fields are
-/// left unchanged.
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct EditRequest {
-    pub anchor: Option<AnchorRequest>,
-    pub body: Option<String>,
-    pub suggestion: Option<String>,
-}
-
-/// Request body for `POST /api/reviews/{id}/comments/{n}/replies`.
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct ReplyRequest {
-    pub body: String,
-}
-
-/// Request body for `POST /api/reviews/{id}/passes`.
+/// The pass `request` asks for on the review `id`.
 ///
-/// Passes submitted over HTTP always use the workspace's configured
-/// `plugins.command.review.options.cfg` and cannot supply arbitrary `--cfg`
-/// overrides.
-#[derive(Debug, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct PassRequest {
-    /// Comment numbers to include; if empty, sends all comments awaiting the
-    /// assistant.
-    #[serde(default)]
-    pub only: Vec<u32>,
+/// A pass submitted over HTTP runs under the configured
+/// `plugins.command.review.options.cfg` alone: a request naming configurations
+/// would run whatever any caller reaching the port asked for.
+pub(crate) fn pass_request(id: ReviewId, request: PassRequest) -> Result<Request, ApiError> {
+    let conversation = request
+        .conversation
+        .map(|conversation| conversation.parse::<Conversation>())
+        .transpose()
+        .map_err(ApiError::invalid)?;
 
-    /// Optional message from the reviewer to accompany the pass.
-    pub message: Option<String>,
-
-    /// Conversation ID (`jp-c17629384710`) to run the pass in; defaults to the
-    /// review's bound conversation, or creates a new conversation on the first
-    /// pass.
-    pub conversation: Option<String>,
-}
-
-impl PassRequest {
-    pub(crate) fn request(self, id: ReviewId) -> Result<Request, ApiError> {
-        let conversation = self
-            .conversation
-            .map(|conversation| conversation.parse::<Conversation>())
-            .transpose()
-            .map_err(ApiError::invalid)?;
-
-        Ok(Request::new(
-            id,
-            self.only,
-            self.message,
-            conversation,
-            vec![],
-        ))
-    }
-}
-
-/// Query parameters for `GET /api/reviews/{id}`.
-#[derive(Debug, Default, Deserialize)]
-pub(crate) struct DetailQuery {
-    /// Last revision seen by the caller; omits `review` from the response when
-    /// the review has not changed since `revision`.
-    pub revision: Option<u64>,
-
-    /// Version to project comment anchors into; defaults to the latest version.
-    pub version: Option<u32>,
-}
-
-/// Query parameters for `GET /api/reviews/{id}/versions/{n}/file`.
-#[derive(Debug, Deserialize)]
-pub(crate) struct FileQuery {
-    pub path: String,
-
-    #[serde(default)]
-    pub format: Format,
-}
-
-/// Output format for the file endpoint.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum Format {
-    #[default]
-    Text,
-    Html,
-}
-
-/// Query parameters for `GET /api/reviews/{id}/diff`.
-#[derive(Debug, Default, Deserialize)]
-pub(crate) struct DiffQuery {
-    pub from: Option<u32>,
-    pub to: Option<u32>,
-
-    /// Pass number whose pre-pass and post-pass versions should be compared
-    /// (mutually exclusive with `from` and `to`).
-    pub pass: Option<u32>,
-
-    /// Single tracked file path to diff; diffs all tracked files when omitted.
-    pub path: Option<String>,
+    Ok(Request::new(
+        id,
+        request.only,
+        request.message,
+        conversation,
+        vec![],
+    ))
 }
 
 /// The review a request path names: `R-1h4k2m9`, `R1h4k2m9`, or the bare body.
@@ -349,42 +247,24 @@ fn tracked<'a>(id: ReviewId, review: &'a Review, path: &str) -> Result<&'a str, 
         })
 }
 
-/// The reviews, and those that couldn't be read.
-#[derive(Serialize)]
-struct Listing<'a> {
-    reviews: Vec<Summary<'a>>,
-
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    unreadable: Vec<Unreadable>,
-}
-
-/// A review the store holds and can't read, and why.
-#[derive(Serialize)]
-struct Unreadable {
-    id: ReviewId,
-    error: String,
-}
-
 /// `GET /api/reviews`: every review, oldest first, and every one that can't be
 /// read with the reason.
-pub(crate) fn list(store: &Store) -> Result<Reply, ApiError> {
+pub(crate) fn list(workspace: &Workspace) -> Result<Reply, ApiError> {
     let mut reviews = vec![];
     let mut unreadable = vec![];
-    for entry in store.list()? {
+    for entry in workspace.store.list()? {
         match entry.review {
-            Ok(review) => reviews.push((entry.id, review)),
+            Ok(review) => reviews.push(view::summary(entry.id, &review)),
             Err(error) => unreadable.push(Unreadable {
-                id: entry.id,
+                id: entry.id.to_string(),
                 error,
             }),
         }
     }
 
     Reply::new(StatusCode::OK, &Listing {
-        reviews: reviews
-            .iter()
-            .map(|(id, review)| view::summary(*id, review))
-            .collect(),
+        workspace: workspace.name().to_owned(),
+        reviews,
         unreadable,
     })
 }
@@ -407,41 +287,18 @@ pub(crate) fn create(ctx: &Context<'_>, request: &NewReview) -> Result<Reply, Ap
     Reply::new(StatusCode::CREATED, &view::summary(id, &review))
 }
 
-/// The pass running on a review, if one is.
-#[derive(Debug, Serialize)]
-struct Running<'a> {
-    number: u32,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    conversation: Option<&'a str>,
-
-    /// Whether this server runs it, which is what lets `POST
-    /// /api/reviews/{id}/stop` stop it.
-    stoppable: bool,
-}
-
-/// What `GET /api/reviews/{id}` answers.
-#[derive(Debug, Serialize)]
-struct DetailReply<'a> {
-    revision: u64,
-    running: Option<Running<'a>>,
-
-    /// Omitted when the caller already holds `revision`.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    review: Option<Detail<'a>>,
-}
-
-/// `GET /api/reviews/{id}`: return the running pass and (unless
-/// `query.revision` is current) the review with its comments projected into
-/// `query.version`.
+/// `GET /api/reviews/{id}`: return the running pass, whether the working tree
+/// changed since the latest version, and (unless `query.revision` is current)
+/// the review with its comments projected into `query.version`.
 ///
 /// `here` is the number of the pass running on this server for `id`, if any.
 pub(crate) fn detail(
-    store: &Store,
+    workspace: &Workspace,
     id: ReviewId,
     query: &DetailQuery,
     here: Option<u32>,
 ) -> Result<Reply, ApiError> {
+    let store = &workspace.store;
     let review = read(store, id)?;
     let shown = version(id, &review, query.version)?;
     let changed = query.revision.is_none_or(|seen| review.revision > seen);
@@ -450,31 +307,23 @@ pub(crate) fn detail(
     } else {
         Texts::default()
     };
+    let running = review.passes.running();
+    // A running pass records the files when it ends, and a file that can't be
+    // read can't be what a version holds.
+    let working_tree_changed =
+        running.is_none() && snapshot::changed(&workspace.root, &review).unwrap_or(true);
 
     Reply::new(StatusCode::OK, &DetailReply {
+        workspace: workspace.name().to_owned(),
         revision: review.revision,
-        running: review.passes.running().map(|pass| Running {
+        running: running.map(|pass| Running {
             number: pass.number,
-            conversation: pass.conversation.as_deref(),
+            conversation: pass.conversation.clone(),
             stoppable: here == Some(pass.number),
         }),
+        working_tree_changed,
         review: changed.then(|| view::detail(id, &review, shown, &texts)),
     })
-}
-
-/// What the file endpoint answers.
-#[derive(Debug, Serialize)]
-struct FileReply<'a> {
-    review: ReviewId,
-    version: u32,
-    path: &'a str,
-    source: &'a str,
-
-    /// The file rendered, when asked for: Markdown as Markdown, and any other
-    /// file as preformatted text, with every run of text carrying the byte
-    /// range of the source it came from.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    html: Option<String>,
 }
 
 /// `GET /api/reviews/{id}/versions/{n}/file`: the file `query.path` as version
@@ -494,11 +343,11 @@ pub(crate) fn file(
     let source = store.blobs(id).get(name)?;
 
     Reply::new(StatusCode::OK, &FileReply {
-        review: id,
+        review: id.to_string(),
         version: number,
-        path,
-        source: &source,
+        path: path.to_owned(),
         html: (query.format == Format::Html).then(|| rendered(path, &source)),
+        source,
     })
 }
 
@@ -640,7 +489,7 @@ pub(crate) fn withdraw(store: &Store, comment: CommentRef) -> Result<Reply, ApiE
     })?;
 
     Reply::new(StatusCode::OK, &Withdrawal {
-        id: comment,
+        id: comment.to_string(),
         withdrawn,
     })
 }
@@ -682,8 +531,49 @@ pub(crate) fn resolve(store: &Store, comment: CommentRef) -> Result<Reply, ApiEr
     })?;
 
     Reply::new(StatusCode::OK, &Resolved {
-        id: comment,
+        id: comment.to_string(),
         outcome,
+    })
+}
+
+/// `POST /api/reviews/{id}/versions`: record what the working tree holds of the
+/// review's files as a new version, when it differs from the latest.
+///
+/// Refused while a pass runs, in this process or another: the version recorded
+/// when the pass ends is the one holding the files.
+/// A pass left without an outcome by a process that is gone is recorded as
+/// interrupted first.
+pub(crate) fn record(ctx: &Context<'_>, id: ReviewId) -> Result<Reply, ApiError> {
+    exists(&ctx.store, id)?;
+    let _pass = ctx
+        .store
+        .lock_pass(id)?
+        .ok_or_else(|| ApiError::conflict(submit::held(id)))?;
+    let at = now();
+
+    let (version, recorded) = ctx.store.update(id, |review, blobs| {
+        review
+            .writable()
+            .map_err(|refusal| ApiError::refused(id, &refusal))?;
+        // Holding `.pass` keeps `update` from settling such a pass itself.
+        review.passes.interrupt(at);
+        let latest = review.latest().map(|latest| latest.number);
+        let version = snapshot::record(&ctx.root, review, blobs, at).map_err(|error| {
+            ApiError::conflict(format!("The working tree can't be recorded: {error}"))
+        })?;
+
+        Ok::<_, ApiError>((version, latest != Some(version)))
+    })?;
+
+    let status = if recorded {
+        StatusCode::CREATED
+    } else {
+        StatusCode::OK
+    };
+    Reply::new(status, &Recorded {
+        review: id.to_string(),
+        version,
+        recorded,
     })
 }
 

@@ -8,17 +8,18 @@ use std::{
 use camino_tempfile::Utf8TempDir;
 use jp_plugin::message::{ConfigResponse, ErrorResponse, InterruptAction, QueryOutcome};
 use pretty_assertions::assert_eq;
+use serde_json::json;
 
 use super::*;
-use crate::test_support::{CONVERSATION, Host, Written, eventually, http};
+use crate::test_support::{CONVERSATION, Host, Written, eventually, http, http_text};
 
 /// What a page of the server's own sends.
 const SAME_ORIGIN: [(&str, &str); 1] = [("Sec-Fetch-Site", "same-origin")];
 
-/// A server for a workspace holding `docs/a.md`, listening on a loopback port,
-/// whose host the test plays.
+/// A server for a workspace named `notes` holding `docs/a.md`, listening on a
+/// loopback port, whose host the test plays.
 struct Served {
-    _root: Utf8TempDir,
+    tmp: Utf8TempDir,
     address: SocketAddr,
     server: Arc<Server>,
     client: Client,
@@ -28,14 +29,30 @@ struct Served {
 }
 
 async fn served() -> Served {
-    let root = Utf8TempDir::new().unwrap();
-    fs::create_dir_all(root.path().join("docs")).unwrap();
-    fs::write(root.path().join("docs/a.md"), "# Title\n\nFirst line.\n").unwrap();
+    serve_in(Utf8TempDir::new().unwrap(), Overrides::default()).await
+}
+
+/// A server as `served` starts, serving the UI from `ui/` in its temporary
+/// directory, as `--ui-dir` asks.
+async fn served_from_ui_dir() -> Served {
+    let tmp = Utf8TempDir::new().unwrap();
+    let overrides = Overrides {
+        ui: Some(tmp.path().join("ui")),
+        ..Overrides::default()
+    };
+
+    serve_in(tmp, overrides).await
+}
+
+async fn serve_in(tmp: Utf8TempDir, overrides: Overrides) -> Served {
+    let root = tmp.path().join("notes");
+    fs::create_dir_all(root.join("docs")).unwrap();
+    fs::write(root.join("docs/a.md"), "# Title\n\nFirst line.\n").unwrap();
     let workspace = Workspace {
-        root: root.path().to_owned(),
+        store: Store::new(root.join(".user/review")),
+        root,
         config: json!({ "user": { "name": "Jane Doe <jane@example.com>" } }),
         options: Options::default(),
-        store: Store::new(root.path().join(".user/review")),
     };
 
     let written = Written::default();
@@ -49,14 +66,14 @@ async fn served() -> Served {
         workspace: RwLock::new(Arc::new(workspace)),
         passes: Arc::new(Passes::new(client.clone())),
         client: client.clone(),
-        overrides: Overrides::default(),
+        overrides,
         listening: address.ip(),
     });
     let serving = Arc::clone(&server);
     tokio::spawn(async move { axum::serve(listener, router(serving)).await });
 
     Served {
-        _root: root,
+        tmp,
         address,
         server,
         client,
@@ -102,7 +119,10 @@ async fn a_request_for_a_name_the_server_does_not_answer_to_is_refused() {
             })
         )
     );
-    assert_eq!(read_as("localhost:3001"), (200, json!({ "reviews": [] })));
+    assert_eq!(
+        read_as("localhost:3001"),
+        (200, json!({ "workspace": "notes", "reviews": [] }))
+    );
 
     // The names allowed follow the configuration as it is read again.
     let mut options = Options::default();
@@ -113,7 +133,7 @@ async fn a_request_for_a_name_the_server_does_not_answer_to_is_refused() {
     );
     assert_eq!(
         read_as("box.tail1234.ts.net:3001"),
-        (200, json!({ "reviews": [] }))
+        (200, json!({ "workspace": "notes", "reviews": [] }))
     );
 
     let refusals: Vec<Value> = served
@@ -134,10 +154,112 @@ async fn a_request_for_a_name_the_server_does_not_answer_to_is_refused() {
     ]);
 }
 
+/// Both pages a browser opens are the one page, naming the workspace, and the
+/// manifest a phone installs from is there whether the UI is built in or not.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_pages_and_the_ui_files_are_served() {
+    let served = served().await;
+    let get = |path: &str| http_text(served.address, "GET", path, &[], "");
+
+    let (list, list_type, list_page) = get("/");
+    let (review, _, review_page) = get("/reviews/R-1h4k2m9");
+    let (manifest, manifest_type, _) = get("/ui/manifest.webmanifest");
+    let (icon, icon_type, _) = get("/ui/icon.svg");
+    let missing = get("/ui/nope.js");
+
+    assert_eq!(
+        (list, list_type.as_str()),
+        (200, "text/html; charset=utf-8")
+    );
+    assert_eq!(review, 200);
+    assert_eq!(list_page, review_page);
+    assert_eq!(
+        list_page,
+        ui::page("notes", BUNDLE.as_ref()),
+        "the page names the workspace"
+    );
+    assert_eq!(
+        (manifest, manifest_type.as_str()),
+        (200, "application/manifest+json")
+    );
+    assert_eq!((icon, icon_type.as_str()), (200, "image/svg+xml"));
+    assert_eq!(
+        (missing.0, missing.2.as_str()),
+        (404, r#"{"error":"No file /ui/nope.js."}"#)
+    );
+}
+
+/// With `--ui-dir`, the page names the build the directory holds, the bundle's
+/// files are read as they are now, and nothing else in the directory is.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_ui_is_served_from_a_bundle_directory_as_it_is_rebuilt() {
+    let served = served_from_ui_dir().await;
+    let ui = served.tmp.path().join("ui");
+    let get = |path: &str| http_text(served.address, "GET", path, &[], "");
+
+    // Before the first build: no build named, and no files to load.
+    assert_eq!(
+        get("/ui/build"),
+        (200, "application/json".to_owned(), r#""""#.to_owned())
+    );
+    // The message carries the system's own reason, which varies by platform.
+    assert_eq!(get("/ui/style.css").0, 404);
+
+    fs::create_dir_all(&ui).unwrap();
+    fs::write(ui.join("style.css"), "body { margin: 0; }\n").unwrap();
+    fs::write(ui.join("build"), "1834927105\n").unwrap();
+    assert_eq!(get("/").2, ui::watched_page("notes", "1834927105"));
+    assert_eq!(
+        get("/ui/style.css"),
+        (
+            200,
+            "text/css".to_owned(),
+            "body { margin: 0; }\n".to_owned()
+        )
+    );
+
+    fs::write(ui.join("style.css"), "body { margin: 1rem; }\n").unwrap();
+    fs::write(ui.join("build"), "2290315521\n").unwrap();
+    assert_eq!(
+        get("/ui/build"),
+        (
+            200,
+            "application/json".to_owned(),
+            r#""2290315521""#.to_owned()
+        )
+    );
+    assert_eq!(get("/ui/style.css").2, "body { margin: 1rem; }\n");
+
+    fs::write(ui.join("notes.txt"), "not the UI's").unwrap();
+    assert_eq!(
+        get("/ui/notes.txt"),
+        (
+            404,
+            "application/json".to_owned(),
+            r#"{"error":"No file /ui/notes.txt."}"#.to_owned()
+        )
+    );
+    assert_eq!(get("/ui/manifest.webmanifest").0, 200);
+}
+
+/// The pages are reads, and the name a request asks for still decides whether
+/// the server answers it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_page_for_a_name_the_server_does_not_answer_to_is_refused() {
+    let served = served().await;
+
+    let (status, _, _) = http_text(served.address, "GET", "/", &[("Host", "evil.example")], "");
+
+    assert_eq!(status, 403);
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_review_is_started_and_listed() {
     let served = served().await;
-    assert_eq!(served.get("/api/reviews"), (200, json!({ "reviews": [] })));
+    assert_eq!(
+        served.get("/api/reviews"),
+        (200, json!({ "workspace": "notes", "reviews": [] }))
+    );
 
     let id = served.start();
 
@@ -190,7 +312,7 @@ async fn a_write_from_another_site_is_refused() {
     );
     assert_eq!(cross_site, refused);
     assert_eq!(other_origin, refused);
-    assert_eq!(read, (200, json!({ "reviews": [] })));
+    assert_eq!(read, (200, json!({ "workspace": "notes", "reviews": [] })));
     assert_eq!(own_origin.0, 201);
     let refusals: Vec<Value> = served
         .written
@@ -339,7 +461,9 @@ async fn a_pass_is_started_watched_and_stopped() {
     let (submitted, pass) = submitting.join().unwrap();
 
     let (_, watched) = served.get(&format!("/api/reviews/{id}"));
-    let stopping = served.send("POST", &format!("/api/reviews/{id}/stop"), "");
+    let stopping_another = served.send("POST", &format!("/api/reviews/{id}/stop"), r#"{"pass":2}"#);
+    let interrupts_before = served.written.interrupts().len();
+    let stopping = served.send("POST", &format!("/api/reviews/{id}/stop"), r#"{"pass":1}"#);
     let interrupt = served.written.interrupts().remove(0);
     served.host.completed(&query, QueryOutcome::Stopped);
     let detail = format!("/api/reviews/{id}");
@@ -356,6 +480,18 @@ async fn a_pass_is_started_watched_and_stopped() {
         json!({ "number": 1, "conversation": CONVERSATION, "stoppable": true })
     );
     assert_eq!(
+        (stopping_another, interrupts_before),
+        (
+            (
+                409,
+                json!({
+                    "error": format!("Pass 1 of {id} is running, not pass 2; nothing was stopped.")
+                })
+            ),
+            0
+        )
+    );
+    assert_eq!(
         stopping,
         (202, json!({ "review": id, "number": 1, "stopping": true }))
     );
@@ -364,6 +500,36 @@ async fn a_pass_is_started_watched_and_stopped() {
         (CONVERSATION, InterruptAction::Stop)
     );
     assert_eq!(ended["review"]["passes"][0]["ended"]["outcome"], "stopped");
+}
+
+/// A file edited outside the review shows on the next poll, and the banner's
+/// request records it.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_working_tree_is_reported_and_recorded() {
+    let served = served().await;
+    let id = served.start();
+    fs::write(
+        served.tmp.path().join("notes/docs/a.md"),
+        "# Title\n\nEdited.\n",
+    )
+    .unwrap();
+
+    let (_, polled) = served.get(&format!("/api/reviews/{id}?revision=1"));
+    let recorded = served.send("POST", &format!("/api/reviews/{id}/versions"), "");
+    let (_, after) = served.get(&format!("/api/reviews/{id}"));
+
+    assert_eq!(polled["working_tree_changed"], true);
+    assert_eq!(
+        recorded,
+        (201, json!({ "review": id, "version": 2, "recorded": true }))
+    );
+    assert_eq!(
+        (
+            after["working_tree_changed"].clone(),
+            after["review"]["version"].clone()
+        ),
+        (json!(false), json!(2))
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]

@@ -5,7 +5,7 @@ use pretty_assertions::assert_eq;
 
 use super::*;
 use crate::{
-    anchor::Anchor,
+    anchor::{Anchor, Target},
     model::{Content, Files, NewComment, Reply, Verdict},
     pass::{Ended, NewPass, Outcome},
     text::Range,
@@ -149,6 +149,7 @@ fn second_pass() -> Review {
         at: at(4),
         version: Some(1),
         error: None,
+        answer: None,
     });
 
     review.record(version("second"), None, at(5));
@@ -299,6 +300,7 @@ fn a_pass_with_only_a_message_carries_only_the_message() {
         at: at(4),
         version: Some(1),
         error: None,
+        answer: None,
     });
     review.submit(new_pass(1, Some("Carry on."))).unwrap();
 

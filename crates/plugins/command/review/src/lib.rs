@@ -25,13 +25,16 @@
 //!   tool calls, and `definitions` writes `review.toml` and the tool
 //!   definitions.
 //! - `server`, `api`, and `running` implement `jp review serve`, exposing the
-//!   JSON HTTP API and managing background pass turns.
+//!   JSON HTTP API, whose types live in the `jp-review-api` crate, and managing
+//!   background pass turns; `ui` holds the pages and files the browser UI is
+//!   served from, and `browser` opens them.
 //! - `options` parses `plugins.command.review.options`.
 //!
 //! See: `docs/rfd/136-review-engine-for-workspace-files.md`
 
 mod anchor;
 mod api;
+mod browser;
 mod cmd;
 mod comments;
 mod definitions;
@@ -51,6 +54,7 @@ mod submit;
 mod test_support;
 mod text;
 mod tool;
+mod ui;
 mod view;
 
 use std::{
@@ -68,8 +72,10 @@ use jp_plugin::{
     server::{Listen, parse_bind},
     stdio::{self, print_json, print_to, send_exit},
 };
+use serde_json::json;
 
 use crate::{
+    browser::{Browser, SystemBrowser},
     cmd::Context,
     id::{CommentRef, Conversation, ReviewId},
     options::{Options, Overrides},
@@ -267,6 +273,13 @@ enum Command {
         /// The review: `R-1h4k2m9`.
         id: ReviewId,
     },
+
+    /// Open the review list, or a review, in the browser, as the running `jp
+    /// review serve` serves it.
+    Open {
+        /// The review: `R-1h4k2m9`; the review list when not given.
+        id: Option<ReviewId>,
+    },
 }
 
 #[derive(Debug, clap::Args)]
@@ -289,18 +302,35 @@ struct StartArgs {
     /// Record no base, whatever `plugins.command.review.options.base` says.
     #[arg(long)]
     no_base: bool,
+
+    /// Open the review in the browser, as the running `jp review serve` serves
+    /// it.
+    #[arg(long)]
+    open: bool,
 }
 
 impl StartArgs {
-    /// Start the review these arguments ask for.
-    fn run(self, ctx: &Context<'_>) -> Result<Output, String> {
+    /// Start the review these arguments ask for, and open it in `browser` when
+    /// they say to.
+    ///
+    /// The review is started whether or not it can be opened.
+    fn run(self, ctx: &Context<'_>, browser: &dyn Browser) -> Result<Output, String> {
         let base = match (self.base, self.no_base) {
             (_, true) => None,
             (Some(Words(command)), false) => Some(command),
             (None, false) => ctx.options.base.clone(),
         };
 
-        cmd::start(ctx, &self.files, self.title.as_deref(), base.as_deref())
+        let (id, mut output) =
+            cmd::start(ctx, &self.files, self.title.as_deref(), base.as_deref())?;
+        if self.open {
+            match cmd::open(ctx, Some(id), browser) {
+                Ok(url) => output.notes.push(format!("Opened {url}.")),
+                Err(error) => output.warnings.push(error),
+            }
+        }
+
+        Ok(output)
     }
 }
 
@@ -405,6 +435,19 @@ struct ServeArgs {
     /// it too.
     #[arg(long = "allowed-host", value_name = "NAME", value_parser = parse_host)]
     allowed_hosts: Vec<String>,
+
+    /// Open the review list in the browser once the server listens.
+    #[arg(long)]
+    open: bool,
+
+    /// Serve the browser UI from DIR, as `just build-ui review` writes it,
+    /// instead of the one built in; for developing the UI.
+    ///
+    /// DIR is read on every request, and an open page reloads itself when `just
+    /// build-ui` writes a new build there.
+    /// A relative DIR is relative to the workspace root.
+    #[arg(long, value_name = "DIR")]
+    ui_dir: Option<Utf8PathBuf>,
 }
 
 impl ServeArgs {
@@ -530,9 +573,19 @@ pub static MANIFEST: &str = jp_plugin::manifest!(
 ///
 /// A `describe` is answered and ends the session; an `init` runs the command
 /// its arguments name.
+/// A command that opens a page does so in the user's default browser.
 pub fn run(
+    stdin: impl BufRead + Send + 'static,
+    stdout: impl Write + Send + 'static,
+) -> Result<(), String> {
+    run_with(stdin, stdout, &SystemBrowser)
+}
+
+/// [`run`], opening pages in `browser`.
+fn run_with(
     mut stdin: impl BufRead + Send + 'static,
     mut stdout: impl Write + Send + 'static,
+    browser: &dyn Browser,
 ) -> Result<(), String> {
     match stdio::read(&mut stdin, BINARY)? {
         HostToPlugin::Describe => stdio::describe(
@@ -550,7 +603,7 @@ pub fn run(
 
             match &init.tool {
                 Some(call) => answer_tool_call(&init, call, &mut stdout),
-                None => handle_command(&init, stdin, stdout),
+                None => handle_command(&init, stdin, stdout, browser),
             }
         }
         other => Err(format!("expected init or describe, got: {other:?}")),
@@ -585,6 +638,7 @@ fn handle_command(
     init: &InitMessage,
     mut stdin: impl BufRead + Send + 'static,
     mut stdout: impl Write + Send + 'static,
+    browser: &dyn Browser,
 ) -> Result<(), String> {
     let parsed = Args::try_parse_from(iter::once("jp review".to_owned()).chain(init.args.clone()));
     let args = match parsed {
@@ -599,19 +653,24 @@ fn handle_command(
 
     let mut overrides = Overrides {
         dir: args.dir.map(|StoreDir(dir)| dir),
-        listen: Listen::default(),
+        ..Overrides::default()
     };
     let result = match args.command {
         Commands::Setup(setup) => setup.run(&init.workspace.root),
         Commands::Review(command) => read_options(init, &overrides)
-            .and_then(|options| execute(&Context::new(init, &options)?, command)),
+            .and_then(|options| execute(&Context::new(init, &options)?, command, browser)),
         Commands::Submit(submit) => read_options(init, &overrides).and_then(|options| {
             let ctx = Context::new(init, &options)?;
             submit::submit(&ctx, &submit.request(), &mut stdin, &mut stdout)
         }),
         Commands::Serve(serve) => {
+            let open = serve.open.then_some(browser);
+            overrides.ui = serve
+                .ui_dir
+                .as_deref()
+                .map(|dir| init.workspace.root.join(dir));
             overrides.listen = serve.listen();
-            return server::run(init, &overrides, stdin, stdout);
+            return server::run(init, &overrides, open, stdin, stdout);
         }
     };
 
@@ -627,9 +686,9 @@ fn read_options(init: &InitMessage, overrides: &Overrides) -> Result<Options, St
     Options::read(&init.options).map(|options| options.with(overrides))
 }
 
-fn execute(ctx: &Context<'_>, command: Command) -> Result<Output, String> {
+fn execute(ctx: &Context<'_>, command: Command, browser: &dyn Browser) -> Result<Output, String> {
     match command {
-        Command::Start(start) => start.run(ctx),
+        Command::Start(start) => start.run(ctx, browser),
         Command::Ls => cmd::list(ctx),
         Command::Show { id, version } => cmd::show(ctx, id, version),
         Command::Diff { id, from, to, pass } => match pass {
@@ -652,6 +711,14 @@ fn execute(ctx: &Context<'_>, command: Command) -> Result<Output, String> {
         Command::Withdraw { comment } => comments::withdraw(ctx, comment),
         Command::Resolve { comments, accepted } => comments::resolve(ctx, &comments, accepted),
         Command::Close { id } => cmd::close(ctx, id),
+        Command::Open { id } => {
+            let url = cmd::open(ctx, id, browser)?;
+            if ctx.format.is_json() {
+                return cmd::json(&json!({ "url": url }));
+            }
+
+            Ok(format!("{url}\n").into())
+        }
     }
 }
 

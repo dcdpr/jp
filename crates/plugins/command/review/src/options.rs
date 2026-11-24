@@ -75,6 +75,10 @@ pub(crate) struct Overrides {
 
     /// `jp review serve`'s `--bind`, `--port`, and `--allowed-host`.
     pub listen: Listen,
+
+    /// `jp review serve`'s `--ui-dir`, made absolute: the directory to serve
+    /// the browser UI from in place of the one built in.
+    pub ui: Option<Utf8PathBuf>,
 }
 
 impl Default for Options {

@@ -19,14 +19,15 @@
 
 use std::collections::BTreeSet;
 
+use jp_review_api::{Comment as CommentView, DiffView};
+
 use crate::{
-    anchor::Target,
     id::ReviewId,
     model::{Comment, Review, Role},
     pass::{Carry, Pass},
     render,
     text::Text,
-    view::{self, CommentView, DiffView, Texts},
+    view::{self, Texts},
 };
 
 /// What a pass message is made of.
@@ -147,7 +148,7 @@ fn changes(prompt: &Prompt<'_>, since: u32, from: u32) -> String {
     }
 
     let diff = render::diff(&DiffView {
-        review: prompt.id,
+        review: prompt.id.to_string(),
         from,
         to,
         files,
@@ -180,10 +181,11 @@ fn comment(prompt: &Prompt<'_>, found: &Comment) -> String {
 }
 
 /// A comment's heading: `R-1h4k2m9#2 at docs/a.md:60-64, suggestion`.
-fn heading(view: &CommentView<'_>, shown: u32) -> String {
-    let on = match view.anchor.anchor.target {
-        Target::Range(..) => "at",
-        Target::Review | Target::File(_) => "on",
+fn heading(view: &CommentView, shown: u32) -> String {
+    let on = if view.anchor.range.is_some() {
+        "at"
+    } else {
+        "on"
     };
     let mut heading = format!("{} {on} {}", view.id, render::place(&view.anchor, shown));
     if view.suggestion.is_some() {

@@ -71,6 +71,14 @@ div().child((
 Builder syntax is standard Rust: `rustfmt` formats it, `rust-analyzer` completes
 it, and `clippy` lints it without macro-expansion indirection or `leptosfmt`.
 
+UI crates depend on the Leptos crates that client-side rendering in builder
+syntax uses, not on the `leptos` crate itself: `tachys` for the renderer and
+builder API, `reactive_graph` for signals and effects, `any_spawner` for task
+spawning, and `leptos_dom` for DOM helpers.
+The `leptos` crate always compiles server functions, configuration-file
+loading, and the `view!` macro with its parser, which account for more than
+half of the code it adds to the dependency tree.
+
 The repository contains no JavaScript source files for these UIs.
 At build time, `wasm-bindgen` generates the JS glue module, and the HTML shell
 loads it with a one-line `<script type="module">`.

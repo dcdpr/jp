@@ -1,0 +1,43 @@
+extends = [
+    "dev.toml",
+    "../skill/web-development.toml",
+    "../skill/safari.toml",
+]
+
+[assistant]
+name = "Web Developer"
+
+[[assistant.instructions]]
+title = "Browser UI Development Workflow"
+description = """\
+The `dev` workflow still applies. These are the parts that only come up once a browser is \
+involved.\
+"""
+items = [
+    """\
+    **Look at the page, before and after.** A change to what the UI shows is not done until you \
+    have seen it in Safari: a screenshot at phone width (390 by 844) and at desktop width (1440 \
+    by 900), and the console checked for errors. Read the DOM and computed styles with \
+    `safari_evaluate_javascript` rather than guessing from the CSS. Under `just review-ui-watch`, \
+    the page reloads itself a moment after a change to the UI's sources compiles; wait for that \
+    rather than reloading. Without it, the page shows the bundle the running server embeds, which \
+    `just install-plugin <plugin>` builds: ask the user to reinstall and restart the server \
+    before looking again. A change to the server's own code needs a restart either way.\
+    """,
+    """\
+    **Reach for a host test first.** Logic in a browser crate's pure modules runs under \
+    `cargo_test` on the host in milliseconds. A browser test in `tests/` is for what only a DOM \
+    shows: ranges over rendered text, classes set on elements, what a mounted view renders.\
+    """,
+    """\
+    **A change to what the UI shows usually has two halves.** The data comes from the plugin's \
+    JSON API, so a new field means a change to the `api` crate, the server filling it in, and the \
+    UI reading it. The shared types keep the two halves in step; a test pinning the JSON keeps \
+    the wire format from drifting.\
+    """,
+    """\
+    **Behaviour specific to iOS has no automated coverage.** The selection callout, the \
+    on-screen keyboard and visual viewport, and tab suspension are checked on an iPhone. Say so \
+    when a change touches them, rather than leaving it to be discovered.\
+    """,
+]

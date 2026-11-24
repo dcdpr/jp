@@ -1,7 +1,28 @@
 use camino_tempfile::Utf8TempDir;
+use chrono::TimeZone as _;
 use pretty_assertions::assert_eq;
 
 use super::*;
+use crate::store::Store;
+
+#[test]
+fn the_working_tree_changed_once_a_tracked_file_differs_from_the_latest_version() {
+    let root = Utf8TempDir::new().unwrap();
+    fs::write(root.path().join("a.md"), "one\n").unwrap();
+    let at = Utc.with_ymd_and_hms(2026, 11, 17, 10, 0, 0).unwrap();
+    let mut review = Review::new("t".to_owned(), "Jane".to_owned(), at, vec![
+        "a.md".to_owned(),
+        "b.md".to_owned(),
+    ]);
+    assert_eq!(changed(root.path(), &review), Ok(true));
+
+    let blobs = Store::new(root.path().join("store")).blobs("R-1h4k2m9".parse().unwrap());
+    record(root.path(), &mut review, &blobs, at).unwrap();
+    assert_eq!(changed(root.path(), &review), Ok(false));
+
+    fs::write(root.path().join("b.md"), "new\n").unwrap();
+    assert_eq!(changed(root.path(), &review), Ok(true));
+}
 
 #[test]
 fn the_working_tree_records_a_missing_file_as_absent() {

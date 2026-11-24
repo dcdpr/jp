@@ -1,12 +1,32 @@
+use std::env;
+
 use camino::Utf8Path;
 use jp_process::{ProcessOutput, ProcessRunner, SystemProcessRunner};
+use jp_tool::Outcome;
 use serde_json::{Value, from_str};
 
-use super::{MAX_DIAGNOSTIC_BYTES, cargo_scope};
+use super::{MAX_DIAGNOSTIC_BYTES, WASM_TARGET, browser_crates, cargo_scope};
 use crate::{
     to_simple_xml_with_root,
     util::{ToolResult, truncate},
 };
+
+/// What runs a browser crate's tests in a headless browser, as the cargo runner
+/// of [`WASM_TARGET`].
+const WASM_RUNNER: &str = "wasm-bindgen-test-runner";
+
+/// The variables through which [`WASM_RUNNER`] is told which browser to drive,
+/// and with which driver.
+const DRIVER_VARIABLES: [&str; 8] = [
+    "CHROMEDRIVER",
+    "GECKODRIVER",
+    "SAFARIDRIVER",
+    "MSEDGEDRIVER",
+    "CHROMEDRIVER_REMOTE",
+    "GECKODRIVER_REMOTE",
+    "SAFARIDRIVER_REMOTE",
+    "MSEDGEDRIVER_REMOTE",
+];
 
 /// Cap for a single failing test's captured output.
 ///
@@ -48,6 +68,9 @@ struct TestFailure {
     output: Option<String>,
 }
 
+/// Run the tests of `packages`, or of the whole workspace, through nextest;
+/// with `wasm`, run the browser crates' browser tests as well, and report them
+/// in a note.
 pub(crate) async fn cargo_test(
     root: &Utf8Path,
     rustflags: &str,
@@ -56,8 +79,10 @@ pub(crate) async fn cargo_test(
     testname: Option<String>,
     backtrace: Option<bool>,
     checksum_freshness: bool,
+    wasm: bool,
 ) -> ToolResult {
-    cargo_test_impl(
+    let browser = wasm.then(|| testname.clone());
+    let outcome = cargo_test_impl(
         root,
         rustflags,
         profile,
@@ -66,7 +91,156 @@ pub(crate) async fn cargo_test(
         backtrace.unwrap_or(false),
         checksum_freshness,
         &SystemProcessRunner,
-    )
+    );
+    let Some(testname) = browser else {
+        return outcome;
+    };
+
+    let chromedriver = which::which("chromedriver")
+        .ok()
+        .and_then(|path| path.into_os_string().into_string().ok());
+    let chromedriver = chromedriver_for(|name| env::var_os(name).is_some(), chromedriver);
+    let note = wasm_test(
+        root,
+        rustflags,
+        profile,
+        packages,
+        testname.as_deref(),
+        chromedriver.as_deref(),
+        &SystemProcessRunner,
+    );
+    with_note(outcome, note)
+}
+
+/// The `CHROMEDRIVER` to hand [`WASM_RUNNER`]: `found`, the `chromedriver` on
+/// the `PATH`, unless one of [`DRIVER_VARIABLES`] is `set`.
+///
+/// Chrome is what CI runs the browser tests in.
+/// Without a variable, the runner takes the first of `geckodriver`,
+/// `safaridriver`, and `chromedriver` it finds on the `PATH`, so a machine with
+/// Firefox installed runs them there.
+fn chromedriver_for(set: impl Fn(&str) -> bool, found: Option<String>) -> Option<String> {
+    if DRIVER_VARIABLES.iter().any(|name| set(name)) {
+        return None;
+    }
+
+    found
+}
+
+/// `outcome`, with `note` after what it says.
+fn with_note(outcome: ToolResult, note: Option<String>) -> ToolResult {
+    let Some(note) = note else {
+        return outcome;
+    };
+
+    match outcome {
+        Ok(Outcome::Success { content }) => Ok(Outcome::Success {
+            content: format!("{content}\n{note}\n"),
+        }),
+        Ok(Outcome::Error {
+            message,
+            trace,
+            transient,
+        }) => Ok(Outcome::Error {
+            message: format!("{message}\n\n{note}"),
+            trace,
+            transient,
+        }),
+        Err(error) => Err(format!("{error}\n\n{note}").into()),
+        other => other,
+    }
+}
+
+/// Run the browser tests of the browser crates among `packages`, or of every
+/// browser crate when `packages` is empty, in a headless browser through
+/// [`WASM_RUNNER`], returning how they went as a note; `None` when there is no
+/// browser crate to test.
+///
+/// Only the integration tests in `tests/` run there: the unit tests of a
+/// browser crate are plain logic, which the host run covers.
+/// `cargo test` drives the runner directly, since nextest can't.
+/// With `chromedriver`, the tests run in Chrome through it.
+fn wasm_test<R: ProcessRunner>(
+    root: &Utf8Path,
+    rustflags: &str,
+    profile: Option<&str>,
+    packages: &[String],
+    testname: Option<&str>,
+    chromedriver: Option<&str>,
+    runner: &R,
+) -> Option<String> {
+    let crates = match browser_crates(root, packages, runner) {
+        Ok(crates) if crates.is_empty() => return None,
+        Ok(crates) => crates,
+        Err(reason) => return Some(format!("The browser tests weren't run: {reason}")),
+    };
+
+    let scope = cargo_scope(&crates, "--workspace");
+    let profile = profile.map(|name| format!("--profile={name}"));
+    // No `--quiet`: cargo hands it on to the test runner, and
+    // `wasm-bindgen-test-runner` takes no flags.
+    let mut args = vec!["test", "--target", WASM_TARGET, "--test", "*"];
+    args.extend(scope.iter().map(String::as_str));
+    args.extend(profile.as_deref());
+    if let Some(name) = testname {
+        args.extend(["--", name]);
+    }
+    let mut env = vec![
+        ("RUSTFLAGS", rustflags),
+        ("CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER", WASM_RUNNER),
+    ];
+    if let Some(path) = chromedriver {
+        env.push(("CHROMEDRIVER", path));
+    }
+
+    let output = match runner.run_with_env("cargo", &args, root, &env) {
+        Ok(output) => output,
+        Err(error) => {
+            return Some(format!(
+                "The browser tests weren't run: `cargo` couldn't be run: {error}"
+            ));
+        }
+    };
+    let (passed, failed) = browser_summary(&output.stdout);
+    if output.status.is_success() {
+        return Some(format!(
+            "Browser tests: {passed} passed, in {}.",
+            crates.join(", ")
+        ));
+    }
+
+    let log = truncate(
+        format!("{}\n{}", output.stdout.trim(), output.stderr.trim()).trim(),
+        MAX_DIAGNOSTIC_BYTES,
+    );
+    Some(format!(
+        "Browser tests: {passed} passed, {failed} failed, in {}. Running them needs \
+         `{WASM_RUNNER}` (`just _install-wasm-bindgen`) and a WebDriver: `chromedriver` on the \
+         `PATH`, or the one `CHROMEDRIVER`, `GECKODRIVER`, or `SAFARIDRIVER` names. The log says \
+         which browser ran.\n```\n{log}\n```",
+        crates.join(", ")
+    ))
+}
+
+/// How many tests passed and failed, summed over each `test result:` line
+/// `stdout` holds.
+fn browser_summary(stdout: &str) -> (usize, usize) {
+    let count = |line: &str, word: &str| {
+        line.split(';')
+            .find_map(|part| part.trim().strip_suffix(word))
+            .and_then(|number| number.trim().rsplit(' ').next()?.parse::<usize>().ok())
+            .unwrap_or(0)
+    };
+
+    stdout
+        .lines()
+        .filter(|line| line.starts_with("test result:"))
+        .fold((0, 0), |(passed, failed), line| {
+            (
+                passed + count(line, "passed"),
+                failed + count(line, "failed"),
+            )
+        })
 }
 
 fn cargo_test_impl<R: ProcessRunner>(

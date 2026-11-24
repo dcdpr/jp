@@ -166,6 +166,7 @@ async fn starting_a_conversation_returns_its_id_and_then_its_turns_end() {
             conversation: "jp-c1".to_owned(),
             outcome: QueryOutcome::Finished,
             data: None,
+            answer: None,
         })),
     ]);
 

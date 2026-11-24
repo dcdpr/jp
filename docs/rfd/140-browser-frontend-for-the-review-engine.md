@@ -1,6 +1,6 @@
 # RFD 140: Browser Frontend for the Review Engine
 
-- **Status**: Discussion
+- **Status**: Accepted
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-11-18

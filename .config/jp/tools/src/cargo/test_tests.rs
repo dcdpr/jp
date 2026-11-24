@@ -1,8 +1,192 @@
 use camino_tempfile::tempdir;
 use jp_process::{ExitCode, MockProcessRunner};
 use jp_tool::{Action, Context};
+use pretty_assertions::assert_eq;
 
 use super::*;
+
+/// `cargo metadata` for a workspace holding the browser crate `a-ui`.
+const BROWSER_METADATA: &str =
+    r#"{ "packages": [{ "name": "a-ui", "metadata": { "jp": { "wasm": true } } }] }"#;
+
+const BROWSER_TEST: &[&str] = &[
+    "test",
+    "--target",
+    "wasm32-unknown-unknown",
+    "--test",
+    "*",
+    "--package=a-ui",
+];
+
+#[test]
+fn passing_browser_tests_are_counted() {
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns_success(BROWSER_METADATA)
+        .expect("cargo")
+        .args(BROWSER_TEST)
+        .returns_success(
+            "running 3 tests\ntest result: ok. 3 passed; 0 failed; 0 ignored; 0 filtered out\n",
+        );
+
+    let note = wasm_test(
+        Utf8Path::new("/work"),
+        "-W warnings",
+        None,
+        &[],
+        None,
+        None,
+        &runner,
+    );
+
+    assert_eq!(note.as_deref(), Some("Browser tests: 3 passed, in a-ui."));
+    let call = &runner.calls()[1];
+    assert!(
+        call.env.iter().any(
+            |(key, value)| key == "CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER"
+                && value == "wasm-bindgen-test-runner"
+        ),
+        "the browser runs them: {:?}",
+        call.env
+    );
+    assert!(
+        !call.env.iter().any(|(key, _)| key == "CHROMEDRIVER"),
+        "without a chromedriver, the runner picks the browser: {:?}",
+        call.env
+    );
+}
+
+#[test]
+fn a_chromedriver_found_runs_the_browser_tests_in_chrome() {
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns_success(BROWSER_METADATA)
+        .expect("cargo")
+        .returns_success("test result: ok. 1 passed; 0 failed; 0 ignored\n");
+
+    wasm_test(
+        Utf8Path::new("/work"),
+        "-W warnings",
+        None,
+        &[],
+        None,
+        Some("/opt/homebrew/bin/chromedriver"),
+        &runner,
+    );
+
+    let call = &runner.calls()[1];
+    assert!(
+        call.env
+            .iter()
+            .any(|(key, value)| key == "CHROMEDRIVER" && value == "/opt/homebrew/bin/chromedriver"),
+        "{:?}",
+        call.env
+    );
+}
+
+/// Chrome is preferred only while nothing names a browser: a `*DRIVER`
+/// variable, local or remote, is left to pick it.
+#[test]
+fn chrome_is_used_unless_a_driver_variable_names_a_browser() {
+    let found = || Some("/usr/local/bin/chromedriver".to_owned());
+
+    assert_eq!(
+        chromedriver_for(|_| false, found()).as_deref(),
+        Some("/usr/local/bin/chromedriver")
+    );
+    assert_eq!(chromedriver_for(|_| false, None), None, "none on the PATH");
+    assert_eq!(
+        chromedriver_for(|name| name == "SAFARIDRIVER", found()),
+        None
+    );
+    assert_eq!(
+        chromedriver_for(|name| name == "GECKODRIVER_REMOTE", found()),
+        None
+    );
+}
+
+#[test]
+fn failing_browser_tests_say_what_running_them_needs() {
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns_success(BROWSER_METADATA)
+        .expect("cargo")
+        .returns(ProcessOutput {
+            stdout: "test result: FAILED. 1 passed; 2 failed; 0 ignored\n".to_owned(),
+            stderr: "error: test failed, to rerun pass `--test highlight`\n".to_owned(),
+            status: ExitCode::from_code(101),
+        });
+
+    let note = wasm_test(
+        Utf8Path::new("/work"),
+        "-W warnings",
+        None,
+        &[],
+        Some("deletion"),
+        None,
+        &runner,
+    )
+    .unwrap();
+
+    assert!(
+        note.starts_with(
+            "Browser tests: 1 passed, 2 failed, in a-ui. Running them needs \
+             `wasm-bindgen-test-runner`"
+        ),
+        "{note}"
+    );
+    assert!(note.contains("--test highlight"), "{note}");
+    assert_eq!(
+        runner.calls()[1].args.last().map(String::as_str),
+        Some("deletion"),
+        "the name filter reaches the runner"
+    );
+}
+
+/// The packages tested have no browser crate, so nothing runs in a browser.
+#[test]
+fn packages_without_a_browser_crate_run_no_browser_tests() {
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns_success(BROWSER_METADATA);
+
+    let note = wasm_test(
+        Utf8Path::new("/work"),
+        "-W warnings",
+        None,
+        &["a".to_owned()],
+        None,
+        None,
+        &runner,
+    );
+
+    assert_eq!(note, None);
+    assert_eq!(runner.calls().len(), 1);
+}
+
+#[test]
+fn the_browser_summary_sums_every_result_line() {
+    let stdout = "test result: ok. 2 passed; 0 failed; 0 ignored\nnoise\ntest result: FAILED. 1 \
+                  passed; 1 failed; 0 ignored\n";
+
+    assert_eq!(browser_summary(stdout), (3, 1));
+    assert_eq!(browser_summary(""), (0, 0));
+}
+
+#[test]
+fn a_note_follows_what_the_run_says() {
+    let passed: ToolResult = Ok("Ran 1/1 tests, of which 0 failed.\n".to_owned().into());
+
+    let noted = with_note(passed, Some("Browser tests: 3 passed, in a-ui.".to_owned()))
+        .unwrap()
+        .into_content()
+        .unwrap();
+
+    assert_eq!(
+        noted,
+        "Ran 1/1 tests, of which 0 failed.\n\nBrowser tests: 3 passed, in a-ui.\n"
+    );
+}
 
 #[test]
 fn test_cargo_test_success() {

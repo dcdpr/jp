@@ -2,6 +2,8 @@
 //!
 //! Serves the JSON API in [`crate::api`] on a local port and manages background
 //! pass turns via [`crate::running::Passes`].
+//! `/` and `/reviews/{id}` answer with the page the browser UI starts in, and
+//! `/ui/...` with the files it loads ([`crate::ui`]).
 //! Rejects cross-origin state-changing requests ([`origin::same_origin`]) and,
 //! when bound to loopback, requests with unrecognized `Host` headers
 //! ([`origin::answers`]).
@@ -15,8 +17,13 @@
 //! When the host sends `shutdown` or closes stdin, the server stops accepting
 //! requests, sends `stop` interrupts to all active passes, waits for their
 //! outcomes to be recorded, and exits.
+//!
+//! A review store has at most one server: the server holds the store's server
+//! lock while it runs, and writes the address it serves at into the store for
+//! `jp review open` to find.
 
 use std::{
+    fs::{self, File},
     io::{BufRead, Write},
     net::{IpAddr, TcpListener},
     sync::{Arc, Mutex, PoisonError, RwLock},
@@ -32,26 +39,30 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, patch, post},
 };
+use camino::Utf8Path;
 use jp_plugin::{
     client::Client,
     log::{Level, Log, fields},
     message::{ExitMessage, HostToPlugin, InitMessage, PluginToHost, ReadConfigRequest},
     origin, server,
-    stdio::send_exit,
+    stdio::{print_to, send_exit},
+};
+use jp_review_api::{
+    DetailQuery, DiffQuery, EditRequest, FileQuery, NewCommentRequest, NewReview, PassRequest,
+    ReplyRequest, StopRequest, Stopping,
 };
 use serde::de::DeserializeOwned;
-use serde_json::{Map, Value, json};
+use serde_json::{Map, Value};
 use tokio::{sync::watch, time};
 
 use crate::{
-    api::{
-        self, ApiError, DetailQuery, DiffQuery, EditRequest, FileQuery, NewCommentRequest,
-        NewReview, PassRequest, Reply, ReplyRequest, Workspace,
-    },
+    api::{self, ApiError, Reply, Workspace},
+    browser::Browser,
     id::CommentRef,
     options::{Options, Overrides},
-    running::{self, Passes},
-    store::Store,
+    running::{self, Passes, Stop},
+    store::{Serving, Store},
+    ui::{self, BUNDLE},
 };
 
 /// What the server is described as serving, when it starts.
@@ -89,16 +100,20 @@ struct Server {
 /// Serve the reviews until the host asks the plugin to stop, or goes away.
 ///
 /// The server listens where `overrides` say, then where the options say
-/// ([`Options::listen_on`]).
+/// ([`Options::listen_on`]), and opens the review list in `open` once it
+/// listens, when given.
 /// The host's messages arrive on `stdin`, and this plugin's, its log included,
 /// go out on `stdout`.
 pub(crate) fn run(
     init: &InitMessage,
     overrides: &Overrides,
+    open: Option<&dyn Browser>,
     stdin: impl BufRead + Send + 'static,
     mut stdout: impl Write + Send + 'static,
 ) -> Result<(), String> {
-    let (workspace, listener) = match prepare(init, overrides) {
+    // Held until the plugin exits, which is what tells another `jp review
+    // serve` and `jp review open` that this one runs.
+    let (workspace, listener, _serving) = match prepare(init, overrides) {
         Ok(prepared) => prepared,
         Err(message) => return send_exit(&mut stdout, 1, Some(&message)),
     };
@@ -106,6 +121,11 @@ pub(crate) fn run(
         .local_addr()
         .map_err(|error| format!("Failed to read the address listened on: {error}"))?;
     server::announce(&mut stdout, SERVING, address, REACH)?;
+    if let Some(browser) = open
+        && let Err(error) = browser.open(&format!("{}/", server::url(address)))
+    {
+        print_to(&mut stdout, &format!("Warning: {error}\n"), "chrome")?;
+    }
 
     let client = Client::new(Arc::new(Mutex::new(Box::new(stdout))));
     let served = client
@@ -140,12 +160,35 @@ pub(crate) fn run(
     Ok(())
 }
 
-/// Read the options, and listen where `overrides` and the options say.
-fn prepare(init: &InitMessage, overrides: &Overrides) -> Result<(Workspace, TcpListener), String> {
+/// Read the options, claim the store's server lock, listen where `overrides`
+/// and the options say, and write the address listened on into the store.
+///
+/// Refused while another `jp review serve` serves the store, naming the address
+/// it serves at.
+fn prepare(
+    init: &InitMessage,
+    overrides: &Overrides,
+) -> Result<(Workspace, TcpListener, File), String> {
     let options = Options::read(&init.options)?.with(overrides);
     let root = init.workspace.root.clone();
     let store = Store::new(options.store_dir(&root, init.paths.user_workspace.as_deref())?);
+    let serving = match store.claim_server()? {
+        Serving::Claimed(lock) => lock,
+        Serving::Running(address) if address.is_empty() => {
+            return Err("Another `jp review serve` is starting for these reviews.".to_owned());
+        }
+        Serving::Running(address) => {
+            return Err(format!(
+                "`jp review serve` serves these reviews already, at {address}. Open it with `jp \
+                 review open`."
+            ));
+        }
+    };
     let listener = server::listen(options.listen_on(&overrides.listen))?;
+    let address = listener
+        .local_addr()
+        .map_err(|error| format!("Failed to read the address listened on: {error}"))?;
+    store.serving_at(&server::url(address))?;
 
     let workspace = Workspace {
         root,
@@ -154,7 +197,7 @@ fn prepare(init: &InitMessage, overrides: &Overrides) -> Result<(Workspace, TcpL
         store,
     };
 
-    Ok((workspace, listener))
+    Ok((workspace, listener, serving))
 }
 
 /// Serve until `shutdown` turns, reading the configuration again as it goes;
@@ -256,8 +299,12 @@ fn options_of(config: &Value) -> Result<Map<String, Value>, String> {
 /// a name it doesn't answer to, and a write from another site.
 fn router(server: Arc<Server>) -> Router {
     Router::new()
+        .route("/", get(page))
+        .route("/reviews/{id}", get(page))
+        .route("/ui/{name}", get(asset))
         .route("/api/reviews", get(list).post(create))
         .route("/api/reviews/{id}", get(detail))
+        .route("/api/reviews/{id}/versions", post(record))
         .route("/api/reviews/{id}/versions/{number}/file", get(file))
         .route("/api/reviews/{id}/diff", get(diff))
         .route("/api/reviews/{id}/comments", post(comment))
@@ -480,8 +527,64 @@ async fn method_not_allowed(request: Request) -> Response {
     ))
 }
 
+/// The page the browser UI starts in, which routes to the review list or a
+/// review itself; the placeholder when the binary carries no UI.
+async fn page(State(server): State<Arc<Server>>) -> Response {
+    let workspace = server.workspace();
+    let html = match &server.overrides.ui {
+        Some(dir) => ui::watched_page(workspace.name(), &build_in(dir)),
+        None => ui::page(workspace.name(), BUNDLE.as_ref()),
+    };
+
+    fresh("text/html; charset=utf-8", html)
+}
+
+/// A file the browser UI loads: from the bundle directory `--ui-dir` names, or
+/// the one built in.
+async fn asset(State(server): State<Arc<Server>>, Path(name): Path<String>) -> Response {
+    if let Some(dir) = &server.overrides.ui {
+        if name == ui::BUILD {
+            return fresh("application/json", Value::String(build_in(dir)).to_string());
+        }
+        if let Some(content_type) = ui::bundle_file(&name) {
+            return match fs::read(dir.join(&name)) {
+                Ok(body) => fresh(content_type, body),
+                Err(error) => refuse(&ApiError::not_found(format!(
+                    "{dir}/{name} can't be read ({error}); `just build-ui review` writes it."
+                ))),
+            };
+        }
+    }
+
+    let Some(asset) = ui::asset(&name, BUNDLE.as_ref()) else {
+        return refuse(&ApiError::not_found(format!("No file /ui/{name}.")));
+    };
+
+    fresh(asset.content_type, asset.body)
+}
+
+/// The build the bundle directory `dir` holds; empty while it names none, as
+/// while `just build-ui` writes it.
+fn build_in(dir: &Utf8Path) -> String {
+    fs::read_to_string(dir.join(ui::BUILD)).map_or_default(|build| build.trim().to_owned())
+}
+
+/// An answer of `content_type` holding `body`, which the browser asks for again
+/// rather than reusing.
+fn fresh(content_type: &'static str, body: impl IntoResponse) -> Response {
+    (
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, content_type),
+            (header::CACHE_CONTROL, "no-cache"),
+        ],
+        body,
+    )
+        .into_response()
+}
+
 async fn list(State(server): State<Arc<Server>>) -> Response {
-    server.respond(server.work(|workspace| api::list(&workspace.store)).await)
+    server.respond(server.work(api::list).await)
 }
 
 async fn create(State(server): State<Arc<Server>>, body: Bytes) -> Response {
@@ -505,7 +608,7 @@ async fn detail(
         let asked = query(asked)?;
         let here = server.passes.running(id);
         server
-            .work(move |workspace| api::detail(&workspace.store, id, &asked, here))
+            .work(move |workspace| api::detail(workspace, id, &asked, here))
             .await
     };
 
@@ -539,6 +642,17 @@ async fn diff(
         let asked = query(asked)?;
         server
             .work(move |workspace| api::diff(&workspace.store, id, &asked))
+            .await
+    };
+
+    server.respond(answer.await)
+}
+
+async fn record(State(server): State<Arc<Server>>, Path(id): Path<String>) -> Response {
+    let answer = async {
+        let id = api::review_id(&id)?;
+        server
+            .work(move |workspace| api::record(&workspace.context(), id))
             .await
     };
 
@@ -631,26 +745,27 @@ async fn submit(
         let request: PassRequest = optional_body(&body)?;
         server
             .passes
-            .start(server.workspace(), request.request(id)?)
+            .start(server.workspace(), api::pass_request(id, request)?)
             .await
     };
 
     server.respond(answer.await)
 }
 
-async fn stop(State(server): State<Arc<Server>>, Path(id): Path<String>) -> Response {
+async fn stop(State(server): State<Arc<Server>>, Path(id): Path<String>, body: Bytes) -> Response {
     let answer = async {
         let id = api::review_id(&id)?;
-        match server.passes.stop(id)? {
-            Some(number) => Reply::new(
-                StatusCode::ACCEPTED,
-                &json!({
-                    "review": id.to_string(),
-                    "number": number,
-                    "stopping": true,
-                }),
-            ),
-            None => {
+        let request: StopRequest = optional_body(&body)?;
+        match server.passes.stop(id, request.pass)? {
+            Stop::Stopping(number) => Reply::new(StatusCode::ACCEPTED, &Stopping {
+                review: id.to_string(),
+                number,
+                stopping: true,
+            }),
+            Stop::Other { running, asked } => Err(ApiError::conflict(format!(
+                "Pass {running} of {id} is running, not pass {asked}; nothing was stopped."
+            ))),
+            Stop::None => {
                 server
                     .work(move |workspace| api::unstoppable(&workspace.store, id))
                     .await

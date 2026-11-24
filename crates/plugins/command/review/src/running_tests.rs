@@ -5,15 +5,16 @@ use std::{
 
 use camino_tempfile::Utf8TempDir;
 use jp_plugin::message::{
-    ErrorResponse, InterruptAction, InterruptRequest, QueryOutcome, QueryRequest,
+    ErrorResponse, InterruptAction, InterruptRequest, QueryCompleteResponse, QueryOutcome,
+    QueryRequest,
 };
+use jp_review_api::{NewCommentRequest, NewReview};
 use pretty_assertions::assert_eq;
 use serde_json::{Value, json};
 use tokio::sync::watch;
 
 use super::*;
 use crate::{
-    api::{NewCommentRequest, NewReview},
     model::{Reply as Answered, Role, Verdict},
     options::Options,
     pass::{Ended, Outcome, Pass},
@@ -178,7 +179,7 @@ async fn a_pass_in_a_known_conversation_is_stopped_where_it_runs() {
     assert_eq!(query.conversation, CONVERSATION);
     assert_eq!(body(&reply)["conversation"], CONVERSATION);
 
-    assert_eq!(f.passes.stop(f.id), Ok(Some(1)));
+    assert_eq!(f.passes.stop(f.id, None), Ok(Stop::Stopping(1)));
     let interrupts = f.written.interrupts();
     assert_eq!(
         (interrupts[0].conversation.as_str(), interrupts[0].action),
@@ -197,7 +198,7 @@ async fn a_stop_before_the_conversation_exists_waits_for_it() {
     let starting = f.start(None);
     let query = f.written.first_query().await;
 
-    assert_eq!(f.passes.stop(f.id), Ok(Some(1)));
+    assert_eq!(f.passes.stop(f.id, Some(1)), Ok(Stop::Stopping(1)));
     assert_eq!(f.written.interrupts(), [] as [InterruptRequest; 0]);
 
     f.host.created(&query);
@@ -347,6 +348,49 @@ async fn a_pass_whose_host_goes_away_is_interrupted() {
 fn a_review_without_a_pass_here_has_none_to_stop() {
     let f = fixture();
 
-    assert_eq!(f.passes.stop(f.id), Ok(None));
+    assert_eq!(f.passes.stop(f.id, None), Ok(Stop::None));
     assert_eq!(f.passes.running(f.id), None);
+}
+
+/// A page that missed the end of pass 1 asks to stop it, while pass 2 runs.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stop_naming_another_pass_stops_nothing() {
+    let mut f = fixture();
+    within(f.start(Some(CONVERSATION))).await.unwrap().unwrap();
+    let query = f.written.first_query().await;
+
+    assert_eq!(
+        f.passes.stop(f.id, Some(2)),
+        Ok(Stop::Other {
+            running: 1,
+            asked: 2,
+        })
+    );
+    assert_eq!(f.written.interrupts(), [] as [InterruptRequest; 0]);
+
+    f.host.completed(&query, QueryOutcome::Finished);
+    assert_eq!(within(f.ended()).await.outcome, Outcome::Completed);
+}
+
+/// The host reports the last thing the assistant said, and the pass keeps it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_pass_records_the_closing_message_of_its_turn() {
+    let mut f = fixture();
+    within(f.start(Some(CONVERSATION))).await.unwrap().unwrap();
+    let query = f.written.first_query().await;
+
+    f.host
+        .answer(&HostToPlugin::QueryComplete(QueryCompleteResponse {
+            id: query.id.clone(),
+            conversation: CONVERSATION.to_owned(),
+            outcome: QueryOutcome::Finished,
+            data: None,
+            answer: Some("Shortened the title.".to_owned()),
+        }));
+
+    let ended = within(f.ended()).await;
+    assert_eq!(
+        (ended.outcome, ended.answer.as_deref()),
+        (Outcome::Completed, Some("Shortened the title."))
+    );
 }

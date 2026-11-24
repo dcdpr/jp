@@ -354,6 +354,55 @@ fn kept(op: &DiffOp, first: usize, last: usize) -> Option<usize> {
     Some(new_index + (start - old_index) + 1)
 }
 
+/// Where one version of a file differs from an earlier one, by line, in byte
+/// offsets into the later version.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Changes {
+    /// Each line added or modified, without its line ending, as its half-open
+    /// byte range `[start, end)`.
+    pub added: Vec<[usize; 2]>,
+
+    /// Where each run of removed lines was: the start of the line after it, or
+    /// the end of the text.
+    pub removed: Vec<usize>,
+}
+
+/// Where `new` differs from `old`, compared line by line as [`hunks`] compares
+/// them: a line whose line ending changed is modified.
+///
+/// Lines that replace removed ones count as modified, and only a run of removed
+/// lines with nothing in its place counts as removed.
+pub fn changes(old: &str, new: &str) -> Changes {
+    let (before, after) = (Text::new(old), Text::new(new));
+    // `DiffOp` counts lines from 0, and `Lines` from 1.
+    let start = |index: usize| {
+        after
+            .lines
+            .line_range(index + 1)
+            .map_or(new.len(), |line| line.start)
+    };
+
+    let mut changes = Changes::default();
+    for op in capture_diff_slices(ALGORITHM, &before.shown(), &after.shown()) {
+        match op {
+            DiffOp::Equal { .. } => {}
+            DiffOp::Delete { new_index, .. } => changes.removed.push(start(new_index)),
+            DiffOp::Insert {
+                new_index, new_len, ..
+            }
+            | DiffOp::Replace {
+                new_index, new_len, ..
+            } => changes.added.extend(
+                (new_index + 1..=new_index + new_len)
+                    .filter_map(|number| after.lines.line_range(number))
+                    .map(|line| [line.start, line.end]),
+            ),
+        }
+    }
+
+    changes
+}
+
 /// The unified diff hunks from `old` to `new`, with three lines of context.
 ///
 /// Empty when the two hold the same lines.

@@ -1,0 +1,86 @@
+[package]
+name = "jp-review-ui"
+description = "The browser UI `jp review serve` serves, for reviewing workspace files with the assistant."
+
+authors.workspace = true
+documentation.workspace = true
+edition.workspace = true
+license-file.workspace = true
+publish.workspace = true
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
+
+# A browser crate: `wasm_check`, `wasm_test`, `just build-ui`, and the `web` CI
+# workflow find it by this.
+[package.metadata.jp]
+wasm = true
+
+[dependencies]
+jp-review-api = { workspace = true }
+
+# Leptos's renderer, reactivity, and executor, without the `leptos` crate (see
+# `leptos_dom` in the workspace `Cargo.toml`). `effects` is what makes an
+# `Effect` run at all; `reactive_graph` on `tachys` is what lets a signal or a
+# closure be a view's child; `wasm-bindgen` spawns tasks on the browser's event
+# loop.
+any_spawner = { workspace = true, features = ["wasm-bindgen"] }
+chrono = { workspace = true }
+js-sys = { workspace = true, features = ["std"] }
+leptos_dom = { workspace = true }
+reactive_graph = { workspace = true, features = ["effects"] }
+send_wrapper = { workspace = true }
+serde = { workspace = true, features = ["std", "derive"] }
+serde_json = { workspace = true, features = ["std"] }
+tachys = { workspace = true, features = ["reactive_graph"] }
+wasm-bindgen = { workspace = true, features = ["std"] }
+wasm-bindgen-futures = { workspace = true, features = ["std"] }
+web-sys = { workspace = true, features = [
+    "std",
+    "CssStyleDeclaration",
+    "Document",
+    "DomTokenList",
+    "Element",
+    "Event",
+    "Headers",
+    "History",
+    "HtmlDivElement",
+    "HtmlElement",
+    "HtmlInputElement",
+    "HtmlMetaElement",
+    "HtmlSelectElement",
+    "HtmlTextAreaElement",
+    "Location",
+    "MouseEvent",
+    "Node",
+    "NodeList",
+    "PointerEvent",
+    "Range",
+    "Request",
+    "RequestInit",
+    "Response",
+    "Selection",
+    "Storage",
+    "Text",
+    "VisualViewport",
+    "Window",
+] }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true, features = ["std"] }
+
+# The browser tests in `tests/` run in a headless browser, through
+# `wasm-bindgen-test-runner`; the host has nothing to run them in.
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test = { workspace = true, features = ["std"] }
+
+[lints]
+workspace = true
+
+[lib]
+name = "jp_review_ui"
+path = "src/lib.rs"
+doctest = false
+# `cdylib` is the `.wasm` module `just build-ui` hands to `wasm-bindgen`;
+# `rlib` is what the browser tests in `tests/` link against.
+crate-type = ["cdylib", "rlib"]

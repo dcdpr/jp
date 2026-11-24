@@ -9,7 +9,7 @@
 
 use chrono::{DateTime, Utc};
 use doc::author;
-use serde::Serialize;
+use jp_review_api::{Resolved, Withdrawal};
 
 use crate::{
     Output, anchor,
@@ -175,13 +175,6 @@ pub(crate) fn edit(
     .into())
 }
 
-/// What `jp -F json review withdraw` prints.
-#[derive(Serialize)]
-pub(crate) struct Withdrawal {
-    pub id: CommentRef,
-    pub withdrawn: Draft,
-}
-
 /// Withdraw the draft comment `comment`, or the draft reply on it.
 pub(crate) fn withdraw(ctx: &Context<'_>, comment: CommentRef) -> Result<Output, String> {
     let withdrawn = ctx.store.update(comment.review, |review, _| {
@@ -192,7 +185,7 @@ pub(crate) fn withdraw(ctx: &Context<'_>, comment: CommentRef) -> Result<Output,
 
     if ctx.format.is_json() {
         return json(&Withdrawal {
-            id: comment,
+            id: comment.to_string(),
             withdrawn,
         });
     }
@@ -202,13 +195,6 @@ pub(crate) fn withdraw(ctx: &Context<'_>, comment: CommentRef) -> Result<Output,
         Draft::Reply => format!("Withdrew the draft reply to {comment}.\n"),
     }
     .into())
-}
-
-/// What resolving one comment did, as `jp -F json review resolve` prints it.
-#[derive(Serialize)]
-pub(crate) struct Resolved {
-    pub id: CommentRef,
-    pub outcome: Resolution,
 }
 
 /// Resolve the `named` comments, or, with `accepted`, every open comment in
@@ -241,18 +227,16 @@ fn resolve_named(ctx: &Context<'_>, named: &[CommentRef]) -> Result<Output, Stri
         let outcomes = ctx.store.update(*id, |review, _| {
             resolve_all(review, numbers, at).map_err(|refusal| refusal.message(*id))
         })?;
-        resolved.extend(
-            numbers
-                .iter()
-                .zip(outcomes)
-                .map(|(number, outcome)| Resolved {
-                    id: CommentRef {
-                        review: *id,
-                        number: *number,
-                    },
-                    outcome,
-                }),
-        );
+        resolved.extend(numbers.iter().zip(outcomes).map(|(number, outcome)| {
+            Resolved {
+                id: CommentRef {
+                    review: *id,
+                    number: *number,
+                }
+                .to_string(),
+                outcome,
+            }
+        }));
     }
 
     report(ctx, &resolved)
@@ -269,7 +253,7 @@ fn resolve_accepted(ctx: &Context<'_>, id: ReviewId) -> Result<Output, String> {
                 .into_iter()
                 .zip(outcomes)
                 .map(|(number, outcome)| Resolved {
-                    id: CommentRef { review: id, number },
+                    id: CommentRef { review: id, number }.to_string(),
                     outcome,
                 })
                 .collect::<Vec<_>>(),

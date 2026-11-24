@@ -304,6 +304,65 @@ fn hunks_show_the_changed_lines_with_context() {
 }
 
 #[test]
+fn changes_place_added_and_modified_lines_in_the_new_text() {
+    // Line 2 changed, and line 4 is new: `B` at 2..3 and `d` at 6..7.
+    assert_eq!(changes("a\nb\nc\n", "a\nB\nc\nd\n"), Changes {
+        added: vec![[2, 3], [6, 7]],
+        removed: vec![],
+    });
+    assert_eq!(changes("a\nb\n", "a\nb\n"), Changes::default());
+}
+
+/// A removed run is marked where the line after it starts, and at the end of
+/// the text when nothing follows it.
+#[test]
+fn changes_mark_where_removed_lines_were() {
+    assert_eq!(changes("a\nb\nc\n", "a\nc\n"), Changes {
+        added: vec![],
+        removed: vec![2],
+    });
+    assert_eq!(changes("a\nb\nc\n", "a\n"), Changes {
+        added: vec![],
+        removed: vec![2],
+    });
+    assert_eq!(changes("a\nb", "a\n"), Changes {
+        added: vec![],
+        removed: vec![2],
+    });
+}
+
+/// Lines put in place of removed ones are modified, and the removal leaves no
+/// mark of its own.
+#[test]
+fn changes_count_a_replaced_run_as_modified() {
+    assert_eq!(changes("a\nb\nc\nd\n", "a\nX\nd\n"), Changes {
+        added: vec![[2, 3]],
+        removed: vec![],
+    });
+}
+
+/// The unified diff shows the line as changed, so the highlight agrees.
+#[test]
+fn changes_take_a_changed_line_ending_as_a_modified_line() {
+    assert_eq!(changes("a\nb", "a\nb\n"), Changes {
+        added: vec![[2, 3]],
+        removed: vec![],
+    });
+    assert_eq!(changes("a\r\nb\n", "a\nb\n"), Changes {
+        added: vec![[0, 1]],
+        removed: vec![],
+    });
+}
+
+#[test]
+fn changes_in_a_new_file_add_every_line() {
+    assert_eq!(changes("", "a\n\nb"), Changes {
+        added: vec![[0, 1], [2, 2], [3, 4]],
+        removed: vec![],
+    });
+}
+
+#[test]
 fn hunks_mark_a_last_line_without_a_line_ending() {
     assert_eq!(
         hunks("a\n", "a"),

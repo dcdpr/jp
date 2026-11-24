@@ -19,6 +19,7 @@ version.workspace = true
 [dependencies]
 doc = { workspace = true }
 jp_id = { workspace = true }
+jp-review-api = { workspace = true }
 jp_plugin = { workspace = true, features = ["client"] }
 jp_tool = { workspace = true }
 md-html = { workspace = true }

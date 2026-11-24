@@ -3,6 +3,7 @@ set fallback
 # see: <https://github.com/cargo-bins/cargo-quickinstall/releases>
 bacon_version        := "3.25.0"
 binstall_version     := "1.22.0"
+cargo_watch_version  := "8.5.3"
 cbindgen_version     := "0.29.4"
 deny_version         := "0.20.2"
 expand_version       := "1.0.126"
@@ -2236,6 +2237,10 @@ plugin-build-local: _install-jp (plugin-build "")
 # The `_install-*` recipes skip their rebuild whenever the binary is already on
 # `$PATH`, so a plugin built before a source change keeps running until this
 # replaces it.
+#
+# A plugin with a browser UI (a `ui` crate) has the UI built first, with
+# `build-ui`, and embedded through `JP_<PLUGIN>_UI`; a plain `cargo install`
+# serves a placeholder page in its place.
 [group('plugins')]
 install-plugin PLUGIN:
     #!/usr/bin/env sh
@@ -2248,7 +2253,119 @@ install-plugin PLUGIN:
         exit 1
     fi
 
+    if [ -f "${dir}/ui/Cargo.toml" ]; then
+        just build-ui "{{PLUGIN}}"
+        target=$(cargo metadata --no-deps --format-version=1 | jq -r .target_directory)
+        variable="JP_$(echo "{{PLUGIN}}" | tr 'a-z-' 'A-Z_')_UI"
+        env "${variable}=${target}/ui/{{PLUGIN}}" \
+            cargo install {{quiet_flag}} --locked --path "$dir" --debug
+        exit 0
+    fi
+
     cargo install {{quiet_flag}} --locked --path "$dir" --debug
+
+# Serve the review UI to work on it: the page reloads itself a moment after a
+# change to the UI's sources is saved.
+#
+# Installs `jp-review` as `install-plugin` does, then serves the UI from a
+# `wasm-dev` build (`jp review serve --ui-dir`) that `cargo watch` rebuilds on
+# every change to the `ui` and `api` crates. A change that doesn't compile
+# leaves the page as it was, with the error here.
+#
+# A change to the server itself, under `src/`, needs this started again:
+# stopping the server stops the passes it runs.
+#
+# Takes `jp review serve`'s own flags, such as `--open` or `--port`. Ctrl-C
+# stops both.
+[group('plugins')]
+[positional-arguments]
+review-ui-watch *ARGS: (_install "cargo-watch@" + cargo_watch_version)
+    #!/usr/bin/env sh
+    set -eu
+
+    just install-plugin review
+    just build-ui review wasm-dev
+    target=$(cargo metadata --no-deps --format-version=1 | jq -r .target_directory)
+
+    # `--postpone`: the UI was just built. `--why`: name the files that
+    # started each build.
+    cargo watch --postpone --why --delay 1 \
+        --watch crates/plugins/command/review/ui \
+        --watch crates/plugins/command/review/api \
+        --shell "just build-ui review wasm-dev" &
+    watcher=$!
+    trap 'kill "$watcher" 2>/dev/null || true' EXIT TERM
+    # Ctrl-C is for `jp`, which stops the server; this script then exits, and
+    # the trap above stops the watcher.
+    trap '' INT
+
+    # Every rebuild of the plugin changes its checksum, which an approval is
+    # pinned to.
+    cargo run {{quiet_flag}} --package jp_cli -- \
+        --cfg plugins.command.review.run=allow \
+        review serve --ui-dir "${target}/ui/review.wasm-dev" "$@"
+
+# Build the browser UI of a command plugin into `<target>/ui/<plugin>/`, in
+# cargo's target directory.
+#
+# Compiles the plugin's `ui` crate to WebAssembly under the size-optimized
+# `wasm-release` profile, runs `wasm-bindgen --target web` over it, and copies
+# the UI's stylesheet beside. Installs the `wasm-bindgen` CLI at the version
+# `Cargo.lock` pins for the `wasm-bindgen` crate, since the CLI refuses a module
+# compiled against another. See `docs/rfd/139-browser-uis-in-rust-with-leptos.md`.
+#
+# Another PROFILE, such as `wasm-dev`, builds into `<target>/ui/<plugin>.<profile>/`
+# instead, leaving the bundle `install-plugin` embeds alone.
+#
+# The file `build`, written last, names the build by its contents: a page served
+# from the directory (`jp review serve --ui-dir`) reloads once it names another.
+# A change that doesn't compile leaves the last build in place.
+[group('plugins')]
+build-ui PLUGIN PROFILE="wasm-release": (_rustup_target "wasm32-unknown-unknown")
+    #!/usr/bin/env sh
+    set -eu
+
+    dir="crates/plugins/command/{{PLUGIN}}/ui"
+    if [ ! -f "${dir}/Cargo.toml" ]; then
+        echo "The command plugin '{{PLUGIN}}' has no browser UI (no ${dir})." >&2
+        exit 1
+    fi
+    package=$(sed -n 's/^name = "\(.*\)"$/\1/p' "${dir}/Cargo.toml" | head -n 1)
+    library=$(echo "$package" | tr '-' '_')
+
+    target=$(cargo metadata --no-deps --format-version=1 | jq -r .target_directory)
+
+    just _install-wasm-bindgen
+    cargo build {{quiet_flag}} --locked --package "$package" --lib \
+        --target wasm32-unknown-unknown --profile "{{PROFILE}}"
+
+    case "{{PROFILE}}" in
+        wasm-release) out="${target}/ui/{{PLUGIN}}" ;;
+        *) out="${target}/ui/{{PLUGIN}}.{{PROFILE}}" ;;
+    esac
+    rm -rf "$out"
+    mkdir -p "$out"
+    wasm-bindgen --target web --no-typescript --out-dir "$out" \
+        "${target}/wasm32-unknown-unknown/{{PROFILE}}/${library}.wasm"
+    cp "${dir}/style.css" "${out}/style.css"
+    cat "$out"/*.js "$out"/*.wasm "$out/style.css" | cksum | cut -d ' ' -f 1 > "$out/build.tmp"
+    mv "$out/build.tmp" "$out/build"
+    echo "Built the browser UI of jp-{{PLUGIN}} into ${out}."
+
+# Install the `wasm-bindgen` CLI, `wasm-bindgen-test-runner` included, at the
+# version `Cargo.lock` pins for the `wasm-bindgen` crate, unless that version
+# is installed already.
+_install-wasm-bindgen:
+    #!/usr/bin/env sh
+    set -eu
+    version=$(awk '$0 == "name = \"wasm-bindgen\"" { getline; gsub(/"/, "", $3); print $3; exit }' Cargo.lock)
+    installed=$(wasm-bindgen --version 2>/dev/null | cut -d ' ' -f 2 || true)
+    if [ "$installed" != "$version" ]; then
+        cargo install {{quiet_flag}} --locked wasm-bindgen-cli --version "$version"
+    fi
+
+@_rustup_target +TARGETS:
+    rustup target add {{TARGETS}}
 
 # Run all formatting-related tasks
 fmt: (_rustup_component "rustfmt") _install-comfort
@@ -2595,6 +2712,61 @@ shear-ci SCOPE="expand": (_install "cargo-expand@" + expand_version)
 [group('ci')]
 vet-ci: (_install "cargo-vet@" + vet_version)
     cargo vet --locked
+
+# Lint the browser crates for `wasm32-unknown-unknown` on CI.
+#
+# A browser crate sets `[package.metadata.jp] wasm = true`. `lint-ci` lints the
+# same crates for the host.
+[group('ci')]
+lint-web-ci: (_rustup_target "wasm32-unknown-unknown") _install_ci_matchers
+    #!/usr/bin/env sh
+    set -eu
+    packages=$(just _browser-crates | sed 's/^/--package=/' | tr '\n' ' ')
+    if [ -z "$packages" ]; then
+        echo "No browser crates to lint."
+        exit 0
+    fi
+    cargo clippy --locked --target wasm32-unknown-unknown --all-targets $packages -- --deny warnings
+
+# Run the browser crates' browser tests in a headless browser on CI.
+#
+# `wasm-bindgen-test-runner` drives the browser whose WebDriver a variable
+# names: `CHROMEDRIVER`, `GECKODRIVER`, `SAFARIDRIVER`, or `MSEDGEDRIVER`
+# (or its `_REMOTE` form). Without one, this uses Chrome, which CI runs, when
+# `chromedriver` is on the `PATH`; otherwise the runner takes the first of
+# `geckodriver`, `safaridriver`, and `chromedriver` it finds on the `PATH`.
+[group('ci')]
+test-web-ci: (_rustup_target "wasm32-unknown-unknown") _install-wasm-bindgen
+    #!/usr/bin/env sh
+    set -eu
+    packages=$(just _browser-crates | sed 's/^/--package=/' | tr '\n' ' ')
+    if [ -z "$packages" ]; then
+        echo "No browser crates to test."
+        exit 0
+    fi
+    named=$(env | grep -E '^(GECKO|SAFARI|CHROME|MSEDGE)DRIVER(_REMOTE)?=' || true)
+    if [ -z "$named" ] && command -v chromedriver >/dev/null 2>&1; then
+        CHROMEDRIVER=$(command -v chromedriver)
+        export CHROMEDRIVER
+    fi
+    CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner \
+        cargo test --locked --target wasm32-unknown-unknown --test '*' $packages
+
+# Build every browser UI bundle on CI.
+[group('ci')]
+build-web-ci:
+    #!/usr/bin/env sh
+    set -eu
+    for manifest in crates/plugins/command/*/ui/Cargo.toml; do
+        [ -f "$manifest" ] || continue
+        just build-ui "$(basename "$(dirname "$(dirname "$manifest")")")"
+    done
+
+# The workspace's browser crates, one per line: those whose `Cargo.toml` sets
+# `[package.metadata.jp] wasm = true`.
+_browser-crates:
+    @cargo metadata --locked --no-deps --format-version=1 \
+        | jq -r '.packages[] | select(.metadata.jp.wasm == true) | .name'
 
 @_install_ci_matchers:
     echo "::add-matcher::.github/matchers.json"
