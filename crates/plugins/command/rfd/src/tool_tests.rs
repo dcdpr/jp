@@ -479,6 +479,37 @@ fn draft_needs_a_title_unless_it_has_a_ticket() {
     );
 }
 
+/// Allocating a draft slot scans all tickets for cited draft IDs, so `draft`
+/// requires read access to the ticket directory even when not seeding from a
+/// ticket.
+#[test]
+fn draft_has_to_be_allowed_to_read_the_tickets() {
+    let root = workspace();
+    with_template(&root);
+    let rules = vec![FsRule::new("docs/rfd").with_read(true).with_write(true)];
+
+    let message = error_message(run(
+        &init(&root, by_jane()),
+        &with_policy(
+            "draft",
+            json!({ "category": "design", "title": "Tool Limits" }),
+            rules,
+        ),
+        &Options::default(),
+    ));
+
+    assert!(
+        message.starts_with("`draft` can't reach the ticket directory: access denied: read on"),
+        "{message}"
+    );
+    assert!(
+        !root
+            .path()
+            .join("docs/rfd/drafts/D01-tool-limits.md")
+            .exists()
+    );
+}
+
 #[test]
 fn draft_from_a_ticket_has_to_be_allowed_to_write_it() {
     let root = workspace();

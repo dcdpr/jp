@@ -157,6 +157,55 @@ fn without_a_target_the_next_free_id_is_taken() {
     );
 }
 
+#[test]
+fn without_a_target_a_draft_skips_a_slot_another_document_still_cites() {
+    let workspace = workspace();
+    workspace.write("docs/ticket/03xx0aa-old.md", "See [RFD D01].\n");
+
+    let output = renumber(&workspace.paths, &Links::default(), "D06", None, true).unwrap();
+
+    assert!(
+        output
+            .text
+            .contains("D06-other.md -> docs/rfd/drafts/D02-other.md (D06 -> D02)\n"),
+        "{}",
+        output.text
+    );
+    assert!(
+        output.warnings.contains(
+            &"Warning: draft ids cited with no draft file to match; their slots are skipped until \
+              the citations are fixed:\n  D01 in docs/ticket/03xx0aa-old.md"
+                .to_owned()
+        ),
+        "{:?}",
+        output.warnings
+    );
+}
+
+/// Renumbering a draft to an explicitly named slot that is still cited is
+/// allowed (to recover a stale citation), but warns about the existing
+/// citations.
+#[test]
+fn a_named_target_that_is_still_cited_is_reported() {
+    let workspace = workspace();
+    workspace.write("docs/ticket/03xx0aa-old.md", "See [RFD D01].\n");
+
+    let output = renumber(
+        &workspace.paths,
+        &Links::default(),
+        "D06",
+        Some("D01"),
+        true,
+    )
+    .unwrap();
+
+    assert!(workspace.exists("docs/rfd/drafts/D01-other.md"));
+    assert_eq!(output.warnings, ["Warning: these files cite D01 from \
+                                  before this draft took it; check that \
+                                  they mean it:\n  \
+                                  docs/ticket/03xx0aa-old.md"]);
+}
+
 /// A ticket names a published RFD by its bare number in a link label, so the
 /// label follows the RFD where a bare `042` in prose doesn't.
 #[test]
