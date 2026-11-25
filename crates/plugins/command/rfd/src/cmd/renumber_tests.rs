@@ -157,6 +157,31 @@ fn without_a_target_the_next_free_id_is_taken() {
     );
 }
 
+#[test]
+fn without_a_target_a_draft_skips_a_slot_another_document_still_cites() {
+    let workspace = workspace();
+    workspace.write("docs/ticket/03xx0aa-old.md", "See [RFD D01].\n");
+
+    let output = renumber(&workspace.paths, &Links::default(), "D06", None, true).unwrap();
+
+    assert!(
+        output
+            .text
+            .contains("D06-other.md -> docs/rfd/drafts/D02-other.md (D06 -> D02)\n"),
+        "{}",
+        output.text
+    );
+    assert!(
+        output.warnings.contains(
+            &"Warning: draft ids cited with no draft file to match; their slots are skipped until \
+              the citations are fixed:\n  D01 in docs/ticket/03xx0aa-old.md"
+                .to_owned()
+        ),
+        "{:?}",
+        output.warnings
+    );
+}
+
 /// A ticket names a published RFD by its bare number in a link label, so the
 /// label follows the RFD where a bare `042` in prose doesn't.
 #[test]

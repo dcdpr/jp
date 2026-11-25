@@ -18,7 +18,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use doc::references::{self, Rule, markdown_files};
 use ticket::render;
 
-use super::{Leftovers, listed, stem};
+use super::{Leftovers, listed, stem, uncited_draft_slot};
 use crate::{
     Output,
     document::{Document, Header},
@@ -60,10 +60,10 @@ pub(crate) fn renumber(
         })
         .collect();
 
-    let new = match target {
-        Some(text) => parse_target(old, text)?,
-        None if matches!(old, RfdId::Draft(_)) => id::next_draft_slot(&paths.rfds)?,
-        None => id::next_number(&paths.rfds)?,
+    let (new, cited) = match target {
+        Some(text) => (parse_target(old, text)?, None),
+        None if matches!(old, RfdId::Draft(_)) => uncited_draft_slot(paths, None)?,
+        None => (id::next_number(&paths.rfds)?, None),
     };
     if new == old {
         return Err(format!("RFD {old} already has that id; nothing to do."));
@@ -101,6 +101,7 @@ pub(crate) fn renumber(
     }
 
     let mut output = Output::default();
+    output.warnings.extend(cited);
     let updated = rewrite_references(
         paths,
         links,

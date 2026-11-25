@@ -1,6 +1,6 @@
 # A reused draft slot inherits stale citations
 
-- **Status**: Todo
+- **Status**: Done
 - **Authors**: jp
 - **Date**: 2026-11-19
 - **Label**: domain=tooling
@@ -29,8 +29,36 @@ Cause:
   `Dnn` citation and token across all RFDs, drafts, and tickets without
   verifying which draft the citation referred to.
 
-- [ ] Skip any draft slot in `jp rfd draft` that is still cited by an RFD,
+- [x] Skip any draft slot in `jp rfd draft` that is still cited by an RFD,
       draft, or ticket.
 
-- [ ] Report dangling draft citations (draft IDs with no matching file in
+- [x] Report dangling draft citations (draft IDs with no matching file in
       `drafts/`) so they can be fixed before a slot is reused.
+
+## Comments
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-25T06:14:39Z
+
+Happened again on 2026-11-24.
+This ticket cites `D38`, the slot was free, and `rfd_draft` handed it out for
+"Stored Conversation Format Compatibility".
+Promoting that draft to RFD 144 rewrote all five `D38` mentions in this ticket's
+description to `144`.
+The description was restored by hand.
+
+Until this is fixed, a draft allocated to `D38` and promoted will rewrite this
+description again.
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-25T10:11:48Z
+
+Third occurrence, on 2026-11-25.
+The slot named in this ticket was handed out again, for "Access Grants for
+Built-in Tools", and promoting that draft to RFD 146 rewrote all eight mentions
+in the description and the comment above.
+Both were restored by hand.

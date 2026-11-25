@@ -1,4 +1,4 @@
-use std::fs;
+use std::{collections::BTreeSet, fs};
 
 use camino_tempfile::Utf8TempDir;
 
@@ -177,7 +177,10 @@ fn resolve_refuses_an_id_two_files_share() {
 #[test]
 fn the_next_draft_slot_is_the_first_one_free() {
     let dir = Utf8TempDir::new().unwrap();
-    assert_eq!(next_draft_slot(dir.path()), Ok(RfdId::Draft(1)));
+    assert_eq!(
+        next_draft_slot(dir.path(), &BTreeSet::new()),
+        Ok(RfdId::Draft(1))
+    );
 
     fs::create_dir_all(dir.path().join("drafts")).unwrap();
     for name in ["D01-a.md", "D02-b.md", "D04-d.md", "D03-notes.txt"] {
@@ -186,7 +189,20 @@ fn the_next_draft_slot_is_the_first_one_free() {
     // A draft misplaced among the published RFDs doesn't take a slot.
     fs::write(dir.path().join("D03-misplaced.md"), "").unwrap();
 
-    assert_eq!(next_draft_slot(dir.path()), Ok(RfdId::Draft(3)));
+    assert_eq!(
+        next_draft_slot(dir.path(), &BTreeSet::new()),
+        Ok(RfdId::Draft(3))
+    );
+}
+
+#[test]
+fn the_next_draft_slot_passes_over_reserved_slots() {
+    let dir = Utf8TempDir::new().unwrap();
+    fs::create_dir_all(dir.path().join("drafts")).unwrap();
+    fs::write(dir.path().join("drafts/D01-a.md"), "").unwrap();
+    let reserved = BTreeSet::from([RfdId::Draft(2), RfdId::Draft(3), RfdId::Published(4)]);
+
+    assert_eq!(next_draft_slot(dir.path(), &reserved), Ok(RfdId::Draft(4)));
 }
 
 #[test]
@@ -198,8 +214,8 @@ fn every_draft_slot_taken_is_an_error() {
     }
 
     assert_eq!(
-        next_draft_slot(dir.path()),
-        Err("No draft slots available (D01-D99 all in use).".to_owned())
+        next_draft_slot(dir.path(), &BTreeSet::new()),
+        Err("No draft slots available (D01-D99 all in use or cited).".to_owned())
     );
 }
 

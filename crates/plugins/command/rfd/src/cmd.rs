@@ -18,13 +18,24 @@ pub(crate) mod rename;
 pub(crate) mod renumber;
 pub(crate) mod track;
 
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs, io,
+    sync::LazyLock,
+};
+
 use camino::{Utf8Path, Utf8PathBuf};
-use doc::references;
+use doc::references::{self, markdown_files};
+use regex::Regex;
 
 use crate::{
-    id::{self, RfdId},
+    id::{self, ResolveError, RfdId},
     paths::Paths,
 };
+
+/// A draft id, which counts as a mention only standing alone.
+static DRAFT_TOKEN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"D[0-9]{2}").expect("valid regex"));
 
 /// Whether `id` names a draft.
 fn is_draft(id: &str) -> bool {
@@ -63,6 +74,82 @@ fn capitalized(category: &str) -> String {
         Some(first) => first.to_ascii_uppercase().to_string() + chars.as_str(),
         None => String::new(),
     }
+}
+
+/// The draft ids `text` mentions standing alone.
+fn draft_tokens(text: &str) -> Vec<String> {
+    let word = |c: char| c.is_ascii_alphanumeric() || c == '_';
+
+    DRAFT_TOKEN
+        .find_iter(text)
+        .filter(|found| {
+            let before = text[..found.start()].chars().next_back();
+            let after = text[found.end()..].chars().next();
+            !before.is_some_and(word) && !after.is_some_and(word)
+        })
+        .map(|found| found.as_str().to_owned())
+        .collect()
+}
+
+/// The first draft slot that no draft file holds and no RFD, draft, or ticket
+/// mentions, with a warning naming the draft ids that are mentioned but have no
+/// draft file, if there are any.
+///
+/// Promoting a draft rewrites every mention of its id, so a draft given a slot
+/// that is still mentioned would take over the mentions of the draft that held
+/// it before.
+/// Mentions in `unreported` still reserve their slots, but are left out of the
+/// warning.
+fn uncited_draft_slot(
+    paths: &Paths,
+    unreported: Option<&Utf8Path>,
+) -> Result<(RfdId, Option<String>), String> {
+    let mut mentions: BTreeMap<RfdId, Vec<Utf8PathBuf>> = BTreeMap::new();
+    for dir in [paths.rfds.clone(), paths.drafts(), paths.tickets.clone()] {
+        for file in markdown_files(&dir)? {
+            let text = match fs::read_to_string(&file) {
+                Ok(text) => text,
+                Err(error) if error.kind() == io::ErrorKind::InvalidData => continue,
+                Err(error) => return Err(format!("{file}: {error}")),
+            };
+            let ids: BTreeSet<RfdId> = draft_tokens(&text)
+                .iter()
+                .filter_map(|token| parse(token))
+                .collect();
+            for id in ids {
+                mentions.entry(id).or_default().push(file.clone());
+            }
+        }
+    }
+
+    let reserved = mentions.keys().copied().collect();
+    let slot = id::next_draft_slot(&paths.rfds, &reserved)?;
+
+    let dangling: Vec<String> = mentions
+        .into_iter()
+        .filter(|(id, _)| {
+            matches!(
+                id::resolve(&paths.rfds, *id),
+                Err(ResolveError::NotFound(_))
+            )
+        })
+        .flat_map(|(id, files)| {
+            files
+                .into_iter()
+                .filter(|file| Some(file.as_path()) != unreported)
+                .map(move |file| format!("\n  {id} in {}", paths.show(&file)))
+        })
+        .collect();
+
+    let warning = (!dangling.is_empty()).then(|| {
+        format!(
+            "Warning: draft ids cited with no draft file to match; their slots are skipped until \
+             the citations are fixed:{}",
+            dangling.concat()
+        )
+    });
+
+    Ok((slot, warning))
 }
 
 /// A warning naming files, one per line under `heading`.

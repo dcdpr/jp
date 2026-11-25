@@ -97,6 +97,31 @@ fn a_draft_takes_the_first_free_slot() {
     assert_eq!(output.text, "Created docs/rfd/drafts/D02-next.md\n");
 }
 
+/// A slot another document still cites is skipped: promoting a draft rewrites
+/// every citation of its id, so a draft in that slot would take over the
+/// citation of the draft that held it before.
+#[test]
+fn a_draft_skips_a_slot_another_document_still_cites() {
+    let workspace = workspace();
+    workspace.write("docs/rfd/drafts/D01-taken.md", "# RFD D01: Taken\n");
+    workspace.write(
+        "docs/ticket/02wt0kx-old.md",
+        "See [RFD D02] and [the sketch](../rfd/drafts/D03-sketch.md).\n\nNot D056, xD04, or \
+         D04_x.\n",
+    );
+    workspace.write("docs/rfd/042-published.md", "Built on RFD D02.\n");
+
+    let output = draft(&workspace.paths, &categories(), &request("design", "Next")).unwrap();
+
+    assert_eq!(output.text, "Created docs/rfd/drafts/D04-next.md\n");
+    assert_eq!(output.warnings, ["Warning: draft ids cited with no draft \
+                                  file to match; their slots are skipped \
+                                  until the citations are fixed:\n  D02 \
+                                  in docs/rfd/042-published.md\n  D02 in \
+                                  docs/ticket/02wt0kx-old.md\n  D03 in \
+                                  docs/ticket/02wt0kx-old.md"]);
+}
+
 /// The category is written as the metadata spells it, whatever the template
 /// says, and a category typed in capitals still names one.
 #[test]
