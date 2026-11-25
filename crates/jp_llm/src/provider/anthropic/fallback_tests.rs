@@ -190,8 +190,6 @@ async fn acp_stream_advances_before_requesting_a_host_rebuild() {
     assert!(matches!(next.route, Route::Http(Credential::ApiKey(_))));
 }
 
-/// A login refused for one model, such as Claude Code rejecting the model
-/// switch with a 429, hands that model to the next credential only.
 #[tokio::test]
 async fn acp_stream_moves_only_the_exhausted_model_to_the_next_credential() {
     let (provider, model, store) = provider(&["sub:sub", "sub:sub2"]);
@@ -231,11 +229,11 @@ async fn acp_stream_moves_only_the_exhausted_model_to_the_next_credential() {
     );
 }
 
-/// The API's model listing gives every model a display name, so credential
-/// routing has to key on the model ID for a model-scoped cooldown to apply.
 #[tokio::test]
 async fn a_model_scoped_refusal_switches_a_model_with_a_display_name() {
     let (provider, mut model, _) = provider(&["sub:sub", "api_key"]);
+    // The API's model listing sets `display_name`; credential routing must key
+    // on `model.id.name` so model-scoped cooldowns still match.
     model.display_name = Some("Claude Sonnet 5".into());
     let attempt = provider.resolve(&model.id.name).await.unwrap();
     let events = provider

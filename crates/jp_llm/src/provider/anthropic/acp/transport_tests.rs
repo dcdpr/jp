@@ -746,10 +746,6 @@ async fn runtime_model_rejection_preserves_its_classification() {
     assert!(receiver.recv().await.is_none());
 }
 
-/// Claude Code probes the model when it is selected, so an account whose
-/// allowance for that model is spent refuses the switch with the API's 429,
-/// before any prompt is sent.
-/// Another credential may still serve the model.
 #[tokio::test]
 async fn a_rate_limited_model_selection_exhausts_the_subscription_for_that_model() {
     let agent = scripted(|method, params, _notifier| async move {
@@ -823,8 +819,8 @@ fn a_429_in_the_error_data_is_a_rate_limited_model() {
     }));
     assert!(refuses_rate_limited_model(&refused));
 
-    // A per-minute limit clears on its own; it is not the account refusing the
-    // model.
+    // Per-minute token limits clear quickly and do not indicate an account-level
+    // model refusal.
     let burst = RpcError::internal_error().data(json!({
         "details": "API error: 429 This request would exceed the rate limit for your \
                     organization of 30,000 input tokens per minute.",

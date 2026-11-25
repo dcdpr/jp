@@ -539,20 +539,21 @@ pub(super) async fn drive(
     }
 }
 
-/// How long a login stays out of use for a model it refused to select.
+/// Cooldown duration for a login after Claude Code refuses to select a model.
 ///
-/// The refusal reports no reset, and its text does not tell a spent allowance
-/// from a short-lived rate limit, so the cooldown is kept short: a login
-/// skipped too briefly is refused once more, while one skipped too long may
-/// send the model to paid API access.
+/// The refusal reports no reset timestamp, and the error text does not
+/// distinguish an exhausted quota from a short-lived rate limit.
+/// Keep the cooldown short: a brief cooldown risks one extra retry against a
+/// still-limited login, whereas a long cooldown can route the model to a paid
+/// API key in the fallback chain.
 pub(super) const MODEL_REFUSAL_COOLDOWN: TimeDelta = TimeDelta::minutes(5);
 
 /// Classify Claude Code's refusal to select `model`.
 ///
-/// A rate-limit refusal is a subscription exhaustion scoped to exactly `model`:
-/// it says nothing about the login's other models, and another credential in
-/// the chain may still serve this one.
-/// It lasts [`MODEL_REFUSAL_COOLDOWN`].
+/// A rate-limit refusal is treated as a subscription exhaustion scoped to
+/// `model` for [`MODEL_REFUSAL_COOLDOWN`]: the login remains available for
+/// other models, while another credential in the fallback chain can serve
+/// `model`.
 fn model_selection_failure(model: &Name, source: RpcError) -> StreamError {
     let unknown = refuses_unknown_model(&source);
     let rate_limited = refuses_rate_limited_model(&source);
@@ -587,13 +588,13 @@ pub(super) fn refuses_unknown_model(error: &RpcError) -> bool {
         .is_some_and(|details| details.starts_with("Model '") && details.ends_with("' not found"))
 }
 
-/// Check whether a `model` config-option RPC error is the API refusing the
-/// model for the account's rate limit.
+/// Check whether a `model` config-option RPC error indicates an account rate
+/// limit for the selected model.
 ///
-/// Claude Code probes the model when it is selected and reports the API's
-/// response as `data.details`, e.g. `"API error: 429 This request would exceed
-/// your account's rate limit. ..."`.
-/// Any other 429, such as a per-minute token limit, does not match.
+/// Claude Code probes the model on selection and surfaces the API error in
+/// `data.details` (for example, `"API error: 429 This request would exceed your
+/// account's rate limit. ..."`).
+/// Other 429 responses, such as per-minute token limits, do not match.
 pub(super) fn refuses_rate_limited_model(error: &RpcError) -> bool {
     error
         .data

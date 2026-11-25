@@ -51,10 +51,10 @@ pub const SCOPE_ACCOUNT: &str = "account";
 /// The prefix of a cooldown scope that covers exactly one model ID.
 const MODEL_SCOPE_PREFIX: &str = "model:";
 
-/// The cooldown scope covering only the model with ID `model`.
+/// Return the cooldown scope that matches only the exact model ID `model`.
 ///
-/// It does not cover other models whose ID contains this one, such as
-/// `claude-sonnet-5-5` for `claude-sonnet-5`.
+/// Does not match other models whose ID contains `model` as a substring (for
+/// example, `claude-sonnet-5` does not match `claude-sonnet-5-5`).
 #[must_use]
 pub fn model_scope(model: &str) -> String {
     format!("{MODEL_SCOPE_PREFIX}{model}")
