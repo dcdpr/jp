@@ -1,12 +1,12 @@
 //! What the reviewer has approved and read of a review's files, which a pass
 //! tells the assistant beside the comments.
 //!
-//! An [`Approval`] says a passage is fine as it stands.
-//! It holds while the lines of the passage read as they did when it was
-//! approved: while one of them reads otherwise, the anchor doesn't carry to the
-//! version shown, and the passage is not approved there.
-//! An approval's number is never given to another, so taking one back by a
-//! number read earlier can't take back a later one.
+//! An [`Approval`] marks a passage as acceptable as-is.
+//! It remains active while the lines of the passage match the approved version;
+//! in any version where a line in the range differs, the anchor does not
+//! project and the passage is not considered approved.
+//! Approval numbers are monotonically allocated and never reused, so revoking
+//! an approval by an older number cannot revoke a newer approval.
 //!
 //! A [`ReadUntil`] says how far down a file the reviewer has read.
 //! The lines after it are unread, so that they carry no comment says nothing
@@ -53,8 +53,7 @@ pub struct Progress {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub approvals: Vec<Approval>,
 
-    /// The highest number an approval has taken, including approvals since
-    /// taken back.
+    /// Highest approval number allocated so far, including revoked approvals.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub last_approval: u32,
 
@@ -103,8 +102,8 @@ impl Progress {
             return Ok(standing.number);
         }
 
-        // A review written before `last_approval` was stored has only its
-        // approvals to go by.
+        // Fall back to the max existing approval number for reviews persisted
+        // before `last_approval` was introduced.
         let highest = self.approvals.iter().map(|found| found.number).max();
         let number = highest.unwrap_or(0).max(self.last_approval) + 1;
         self.last_approval = number;

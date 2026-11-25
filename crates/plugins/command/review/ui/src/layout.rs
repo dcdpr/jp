@@ -172,19 +172,18 @@ pub fn changed_since<'a>(approvals: &'a [Approval], file: &str, shown: u32) -> V
         .collect()
 }
 
-/// The last line of a file the reviewer read, in the version shown.
+/// Projected read-until marker for a file in the displayed version.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReadLine {
-    /// The line's number: `42`.
+    /// 1-based line number (e.g. `"42"`).
     pub line: String,
 
-    /// The line's bytes, without its line ending.
+    /// Half-open UTF-8 byte range of the line, excluding its line ending.
     pub bytes: [usize; 2],
 }
 
-/// The last line of `file` the reviewer read, in the version shown; `None` when
-/// they didn't say how far they read it, or that version holds none of the
-/// lines read.
+/// Return the projected read-until line for `file` in the displayed version, or
+/// `None` if no marker is set or the marker does not project onto that version.
 #[must_use]
 pub fn read_line(read: &[ReadUntil], file: &str) -> Option<ReadLine> {
     let placed = read

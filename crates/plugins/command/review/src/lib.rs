@@ -270,12 +270,12 @@ enum Command {
         accepted: Option<ReviewId>,
     },
 
-    /// Approve a passage of one of a review's files, as it stands.
+    /// Approve a passage in one of a review's files.
     ///
-    /// Each pass tells the assistant which passages are approved.
-    /// An approval holds while its passage reads as it did when it was
-    /// approved: a version that changes a line of it doesn't count it, and one
-    /// that restores the text counts it again.
+    /// Each pass informs the assistant which passages are approved.
+    /// An approval remains in effect while its passage matches the approved
+    /// version: a version that modifies a line in the range marks the approval
+    /// outdated, and a version that restores the text makes it active again.
     Approve {
         /// The review: `R-1h4k2m9`.
         id: ReviewId,

@@ -147,8 +147,6 @@ fn a_time_is_shown_to_the_minute() {
     );
 }
 
-/// A marker under a block that runs past the line read says so, since the lines
-/// under it in that block were not read.
 #[test]
 fn the_read_marker_names_its_line() {
     assert_eq!(read_until("42", false), "Read until line 42");

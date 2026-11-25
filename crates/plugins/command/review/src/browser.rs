@@ -9,11 +9,12 @@ use std::{
     time::Duration,
 };
 
-/// How long opening a page waits for the program opening it to exit, to report
-/// a failure.
+/// Maximum time to wait for the browser opener command to exit before assuming
+/// it succeeded.
 ///
-/// `xdg-open` runs a browser that isn't running yet in the foreground, and only
-/// exits once the browser does: one still running by then is left to run.
+/// On Linux, `xdg-open` runs a newly launched browser in the foreground and
+/// only exits when the browser closes; if the process is still running after
+/// this grace period, it is left running in the background.
 const GRACE: Duration = Duration::from_secs(2);
 
 /// Opens a URL in a browser.
@@ -26,9 +27,9 @@ pub trait Browser {
 pub struct SystemBrowser;
 
 impl Browser for SystemBrowser {
-    /// The command runs with its output discarded: this process's stdout is its
-    /// connection to the host.
-    /// Returns once the command exits, or after [`GRACE`] while it still runs.
+    /// Spawns the platform opener with stdio redirected to `/dev/null`
+    /// (preserving stdout for the host plugin protocol) and waits up to
+    /// [`GRACE`] for it to exit.
     fn open(&self, url: &str) -> Result<(), String> {
         let (program, args) = opener(env::consts::OS, url).ok_or_else(|| {
             format!(
@@ -51,15 +52,15 @@ impl Browser for SystemBrowser {
     }
 }
 
-/// Wait up to `grace` for `child` to exit, returning how it exited when it
-/// failed.
+/// Wait up to `grace` for `child` to exit, returning an error if it exits
+/// non-zero within that window.
 ///
-/// A child still running after `grace` is waited for on a thread of its own, so
-/// it doesn't linger as a zombie, and counts as a success.
+/// If `child` is still running after `grace`, a background thread reaps it when
+/// it eventually exits so it does not become a zombie process.
 fn settle(mut child: Child, grace: Duration) -> Result<(), String> {
     let (sender, exited) = mpsc::channel();
     thread::spawn(move || {
-        // Nobody listens once `grace` has passed.
+        // Receiver is dropped if `grace` expires first.
         drop(sender.send(child.wait()));
     });
 

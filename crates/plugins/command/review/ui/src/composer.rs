@@ -1,10 +1,9 @@
 //! What the composer holds: a comment, an edit, a reply, or a pass message
 //! being written, and the request that saves it.
 //!
-//! A draft names everything its request needs (the file, the version, the
-//! bytes, the comment) from the moment the composer opens, so one restored from
-//! the tab's session storage after iOS reloads it saves against what it was
-//! written for.
+//! A draft records its full request context (file, version, byte range, or
+//! comment number) when the composer opens, so a draft restored from the tab's
+//! `sessionStorage` after a reload submits against the original target.
 
 use jp_review_api::{
     AnchorRequest, Comment, Draft as Drafted, EditRequest, NewCommentRequest, PassRequest,
@@ -224,8 +223,9 @@ pub fn call(id: &str, draft: &Draft) -> Call {
                 suggestion,
             })
         }
-        // A draft restored after the comment was sent is refused, not saved over
-        // the reply the comment holds since.
+        // Constrain the edit to a draft comment so a draft restored after the
+        // comment was submitted is rejected rather than overwriting a draft
+        // reply.
         Kind::Edit { number, .. } => Call::patch(client::comment_url(id, *number), &EditRequest {
             anchor: None,
             body: Some(body),
@@ -267,20 +267,20 @@ fn anchor(on: &Target) -> Option<AnchorRequest> {
     }
 }
 
-/// Where the composer of the review `id` is kept in the tab's storage.
+/// Return the `sessionStorage` key for review `id`'s composer draft.
 #[must_use]
 pub fn key(id: &str) -> String {
     format!("jp-review:composer:{id}")
 }
 
-/// `draft` as the tab's storage keeps it.
+/// Serialize `draft` as JSON for `sessionStorage`.
 #[must_use]
 pub fn encode(draft: &Draft) -> String {
     serde_json::to_string(draft).unwrap_or_default()
 }
 
-/// The draft the tab's storage kept as `text`; `None` for text no draft reads
-/// from, such as one an older UI wrote.
+/// Deserialize a [`Draft`] from `sessionStorage`, returning `None` if `text` is
+/// invalid or comes from an incompatible schema.
 #[must_use]
 pub fn decode(text: &str) -> Option<Draft> {
     serde_json::from_str(text).ok()

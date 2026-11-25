@@ -193,9 +193,9 @@ pub fn hidden(count: usize) -> String {
     format!("{count} changed lines not shown")
 }
 
-/// The marker of how far a file was read, through `line`: `Read until line 42`,
-/// and `Read until line 42, within the block above` when it sits `within` a
-/// block, under the lines after the one read.
+/// Format the read-until divider label for `line`: `"Read until line 42"`, or
+/// `"Read until line 42, within the block above"` when `within` is `true`
+/// (indicating the block above extends past `line`).
 #[must_use]
 pub fn read_until(line: &str, within: bool) -> String {
     if within {

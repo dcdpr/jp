@@ -28,9 +28,9 @@ const LINE: &str = "my-4 flex cursor-auto items-center gap-2 font-sans text-xs l
 /// The classes of either half of the line, beside what it says.
 const STROKE: &str = "h-px flex-1 bg-accent/40";
 
-/// The last line read of the file shown; `None` when the reviewer didn't say
-/// how far they read it, and while the page shows what changed in the file, or
-/// another version than the one the review's marks are placed in.
+/// Return the projected read-until line for the displayed file, or `None` if no
+/// marker is set, if the changes view is active, or if the displayed version
+/// differs from the version the review's projections target.
 fn read_to(page: Page) -> Option<ReadLine> {
     if page.view.with(|view| view.changes.is_some()) {
         return None;
@@ -61,8 +61,9 @@ fn read_to(page: Page) -> Option<ReadLine> {
 pub(super) fn read_line(page: Page) -> impl RenderHtml {
     let host = NodeRef::<Div>::new();
     let line = Memo::new(move |_| read_to(page).map(|read| read.line));
-    // Whether the element sits in the file's text, and if so whether the block
-    // over it runs past the line read.
+    // `Some(true)` when seated under a block that extends past the read-until
+    // line, `Some(false)` when seated at the end of the block, or `None` when
+    // not seated in the document.
     let seated = RwSignal::new(None::<bool>);
     seat(page, host, seated);
 
@@ -87,13 +88,13 @@ pub(super) fn read_line(page: Page) -> impl RenderHtml {
     })
 }
 
-/// Keep the element `host` holds under the last block read of the file shown,
-/// and out of the file's text while there is none, saying in `seated` which,
-/// and whether that block runs past the line read.
+/// Position `host` below the last rendered block up to the read-until line, or
+/// park it outside the document when no marker applies, updating `seated` with
+/// whether the block extends past the read-until line.
 ///
-/// The last line read may render as nothing, as a blank line does, so the
-/// element goes under the last text rendered from the file up to the end of
-/// that line.
+/// Because the read-until line itself may produce no rendered DOM nodes (for
+/// example, a blank line), the divider is placed after the last rendered span
+/// whose byte range ends at or before the end of that line.
 fn seat(page: Page, host: NodeRef<Div>, seated: RwSignal<Option<bool>>) {
     let bytes = Memo::new(move |_| read_to(page).map(|read| read.bytes));
 

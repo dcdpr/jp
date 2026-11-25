@@ -902,8 +902,8 @@ fn an_approval_is_outdated_once_a_line_of_its_passage_changes() {
     );
 }
 
-/// An approval is of the text, not of the versions in between: once the text
-/// reads as it did, it is approved again.
+/// An approval is anchored to the passage text: if a later version restores the
+/// modified lines, the approval resolves again.
 #[test]
 fn an_approval_holds_again_once_its_passage_is_restored() {
     let (_tmp, workspace) = workspace();

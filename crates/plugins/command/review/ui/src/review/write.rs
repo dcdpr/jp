@@ -94,8 +94,8 @@ fn act(page: Page, action: Action, comment: &Comment) {
                 format!("Withdraw your draft reply to #{number}?")
             };
             if dom::confirm(&question) {
-                // The draft the question named, which the server refuses to
-                // withdraw once the comment holds the other.
+                // Pass the expected draft kind so the server rejects the
+                // withdrawal if the comment changed state in the meantime.
                 let draft = if action == Action::Withdraw {
                     Drafted::Comment
                 } else {
@@ -541,14 +541,14 @@ pub(super) fn show_file(page: Page, path: String, heading: Option<String>) {
     }
 }
 
-/// Scroll to the heading the address names when Back or Forward lands on an
-/// entry with one, once the file it is in is drawn.
+/// Scroll to the `#fragment` heading anchor on `popstate` (browser Back or
+/// Forward) once the target file is rendered.
 ///
-/// A file drawn already is not drawn again, so its heading is scrolled to at
-/// once.
+/// If the target file is already rendered in the pane, scrolls immediately;
+/// otherwise schedules a reveal for when the file finishes rendering.
 pub(super) fn follow_history(page: Page) {
-    // Added after the listener of `Nav`, which has set the route by the time
-    // this runs.
+    // Registered after `Nav`'s `popstate` listener, so `page.view` already
+    // reflects the new route when this handler runs.
     let listening = window_event_listener_untyped("popstate", move |_| {
         let Some(anchor) = dom::fragment().filter(|_| !page.gone()) else {
             return;

@@ -12,11 +12,11 @@
 //! bar's, which sends a pass, or the comments', which adds a comment.
 //! [`layout::site`] says which, and [`at`] draws the composer there.
 //!
-//! The composer's draft is kept in the tab's session storage as it is written,
-//! so a tab iOS reloads opens with it, and saves against the file, version, and
-//! bytes it was written for.
-//! Each tab keeps its own: one tab saving or discarding leaves another's draft
-//! as it is.
+//! The active composer draft is persisted in the tab's `sessionStorage` as the
+//! user types so that an iOS tab reload restores it and submits against the
+//! captured file, version, and byte range.
+//! Because `sessionStorage` is isolated per tab, saving or discarding in one
+//! tab does not affect drafts in other tabs.
 //!
 //! [`layout::site`]: crate::layout::site
 
@@ -174,8 +174,8 @@ pub(crate) const INLINE: &str = "my-3 cursor-auto rounded-lg border border-line 
                                  whitespace-normal text-ink shadow-sm";
 
 impl Compose {
-    /// The writing state of the review `id`, with the draft the tab's storage
-    /// kept for it, which it keeps there from then on.
+    /// Initialize composer state for review `id`, restoring any unsaved draft
+    /// from `sessionStorage` and syncing subsequent edits back to storage.
     pub(crate) fn new(id: &str) -> Self {
         let key = composer::key(id);
         let draft = RwSignal::new(dom::stored(&key).as_deref().and_then(composer::decode));
@@ -262,7 +262,8 @@ impl Compose {
         self.refresh.update(|count| *count = count.wrapping_add(1));
     }
 
-    /// Whether the page writing this was left, which disposes of its state.
+    /// Return `true` if the owning page has been unmounted and its reactive
+    /// state disposed.
     fn gone(self) -> bool {
         self.draft.try_with_untracked(|_| ()).is_none()
     }

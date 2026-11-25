@@ -28,26 +28,25 @@ const DRIVER_VARIABLES: [&str; 8] = [
     "MSEDGEDRIVER_REMOTE",
 ];
 
-/// The code nextest exits with when its filter selected no test, which tells a
-/// run that matched nothing apart from one whose build failed.
+/// Exit code returned by nextest when its filter selects no tests,
+/// distinguishing an empty filter match from a build failure.
 const NO_TESTS_RUN: i32 = 4;
 
-/// Why a tool call failed.
 type Failure = Box<dyn Error + Send + Sync>;
 
-/// How a nextest run went, when it didn't fail outright.
+/// Outcome of a nextest run that did not fail to build or execute.
 #[derive(Debug)]
 enum HostRun {
-    /// It ran at least one test.
     Ran(Outcome),
 
-    /// It built, and its filter selected no test; holds what to report when
-    /// nothing else ran either.
+    /// Build succeeded, but the filter matched no tests.
+    /// Carries the error message to report if no browser tests matched either.
     NoneMatched(String),
 }
 
 impl HostRun {
-    /// The run as a tool's result, a run that matched nothing being an error.
+    /// Convert into a [`ToolResult`], treating an empty filter match as an
+    /// error.
     fn into_result(self) -> ToolResult {
         match self {
             Self::Ran(outcome) => Ok(outcome),
@@ -56,13 +55,10 @@ impl HostRun {
     }
 }
 
-/// How the browser tests went.
+/// Summary of a headless browser test run.
 #[derive(Debug, PartialEq, Eq)]
 struct BrowserRun {
-    /// What to report of them.
     note: String,
-
-    /// How many ran, passing or failing.
     ran: usize,
 }
 
@@ -159,11 +155,12 @@ pub(crate) async fn cargo_test(
     combine(host, browser)
 }
 
-/// The result of a run of the host's tests and the browser's together.
+/// Combine the host and browser test outcomes into a single [`ToolResult`].
 ///
-/// A name filter can select tests on one side only, as one naming a browser
-/// test does: the run succeeds when a test ran on either side, and fails when
-/// neither ran one.
+/// A test name filter may match tests on only one side (for example, a filter
+/// naming a browser-only integration test).
+/// The run succeeds if at least one test ran on either side, and fails if
+/// neither side matched any tests.
 fn combine(host: Result<HostRun, Failure>, browser: Option<BrowserRun>) -> ToolResult {
     let Some(browser) = browser else {
         return host.and_then(HostRun::into_result);
@@ -216,15 +213,14 @@ fn with_note(outcome: ToolResult, note: Option<String>) -> ToolResult {
     }
 }
 
-/// Run the browser tests of the browser crates among `packages`, or of every
-/// browser crate when `packages` is empty, in a headless browser through
-/// [`WASM_RUNNER`], returning how they went; `None` when there is no browser
-/// crate to test.
+/// Run the browser tests for the browser crates in `packages` (or all browser
+/// crates when `packages` is empty) in a headless browser via [`WASM_RUNNER`].
 ///
-/// Only the integration tests in `tests/` run there: the unit tests of a
-/// browser crate are plain logic, which the host run covers.
-/// `cargo test` drives the runner directly, since nextest can't.
-/// With `chromedriver`, the tests run in Chrome through it.
+/// Returns `None` when there are no browser crates to test.
+/// Only the integration tests in `tests/` run in the browser; unit tests in a
+/// browser crate contain pure logic covered by the host test run.
+/// `cargo test` drives the runner directly because nextest does not support it.
+/// When `chromedriver` is set, tests run in headless Chrome via that binary.
 fn wasm_test<R: ProcessRunner>(
     root: &Utf8Path,
     rustflags: &str,
@@ -319,11 +315,7 @@ fn browser_summary(stdout: &str) -> (usize, usize) {
         })
 }
 
-/// Run the host's tests through nextest, and report them.
-///
-/// # Errors
-///
-/// Fails as [`host_run`] does, and when the filter selected no test.
+/// Run host tests via nextest, failing if the filter matches no tests.
 fn cargo_test_impl<R: ProcessRunner>(
     root: &Utf8Path,
     rustflags: &str,
@@ -347,12 +339,10 @@ fn cargo_test_impl<R: ProcessRunner>(
     .and_then(HostRun::into_result)
 }
 
-/// Run the host's tests through nextest.
+/// Run host tests via nextest.
 ///
-/// # Errors
-///
-/// Fails when nextest can't be run, or ran no test for another reason than its
-/// filter selecting none, as when the build failed.
+/// Returns [`HostRun::NoneMatched`] when nextest exits with [`NO_TESTS_RUN`],
+/// or an error if nextest cannot be spawned or the build fails.
 fn host_run<R: ProcessRunner>(
     root: &Utf8Path,
     rustflags: &str,

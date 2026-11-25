@@ -262,8 +262,8 @@ fn editing_a_sent_comment_changes_only_its_draft_reply() {
     assert_eq!(comment.draft_reply.as_ref().unwrap().body, "Certain?");
 }
 
-/// An edit begun on the draft comment, and saved after the comment was sent and
-/// given a draft reply, would otherwise replace the reply.
+/// An edit started on a draft comment and saved after the comment was submitted
+/// and given a draft reply must not overwrite the draft reply.
 #[test]
 fn an_edit_is_refused_once_the_comment_holds_another_draft() {
     let mut review = review();
@@ -294,8 +294,8 @@ fn an_edit_is_refused_once_the_comment_holds_another_draft() {
     assert_eq!(review.edit(1, edit(Draft::Reply)), Ok(Draft::Reply));
 }
 
-/// A card left showing the draft comment, while the comment was sent and given
-/// a draft reply elsewhere, would otherwise withdraw the reply.
+/// A withdrawal requested for a draft comment after the comment was submitted
+/// and given a draft reply must not withdraw the draft reply.
 #[test]
 fn a_withdrawal_is_refused_once_the_comment_holds_another_draft() {
     let mut review = review();

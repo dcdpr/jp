@@ -182,8 +182,6 @@ fn a_draft_needs_something_to_say_before_it_saves() {
     assert_eq!(problem(&Draft::pass()), None);
 }
 
-/// The tab's storage keeps a draft as JSON; text it can't read, such as an
-/// older UI's, is dropped rather than misread.
 #[test]
 fn a_draft_round_trips_through_storage() {
     let draft = Draft {

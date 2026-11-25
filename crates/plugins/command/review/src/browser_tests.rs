@@ -20,8 +20,8 @@ fn an_opener_that_exits_reports_how() {
     );
 }
 
-/// `xdg-open` blocks while it runs a browser in the foreground; the server
-/// opening a page has to go on answering meanwhile.
+/// `xdg-open` blocks when launching a new browser process in the foreground;
+/// `settle` must return after the grace period so the caller is not blocked.
 #[cfg(unix)]
 #[test]
 fn an_opener_still_running_after_the_grace_period_is_left_to_run() {

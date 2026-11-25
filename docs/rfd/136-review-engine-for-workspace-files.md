@@ -220,22 +220,25 @@ when the turn is stopped or aborted, `failed` when the host returns a query
 error, or `interrupted` if the process running the pass exited before recording
 an outcome.
 
-**Progress.** Beside its comments, a review records what the reviewer made of
-the text they did not comment on:
+**Progress.** In addition to comments, a review tracks the reviewer's progress
+through passages they did not comment on:
 
-- An **approval** marks a range as read and fine as it stands.
-  It is advisory: the assistant is told to leave the passage as it is unless
-  acting on a comment requires changing it, and to say so when it does.
-  An approval is anchored like a comment, and holds while the passage reads as
-  it did when it was approved.
-  While a line of it reads otherwise, the passage is not approved, and the
-  approval is kept as changed since until the reviewer takes it back.
-- A **read-until line**, one per file, marks the last line the reviewer has
-  read.
-  The lines after it are unread, so the absence of comments there means nothing
-  yet.
-  It says nothing about the lines before it either: only an approval approves.
-  The line moves with the lines added or removed above it.
+- An **approval** marks a range as read and acceptable as-is.
+  Approvals are advisory: the assistant is instructed to leave approved passages
+  unchanged unless addressing a comment requires editing them, and to note when
+  it does.
+  An approval is anchored like a comment and remains in effect while its lines
+  match the approved version.
+  If a line in the range differs in a given version, the approval is marked as
+  outdated ("changed since") for that version until the passage is restored or
+  the reviewer revokes the approval.
+- A **read-until line** (at most one per file) records the last line the
+  reviewer has read.
+  Lines after this marker are unread, so the absence of comments there implies
+  nothing.
+  Lines before the marker are not implicitly approved; only explicit approvals
+  mark passages as approved.
+  The marker shifts automatically as lines are added or removed above it.
 
 ### Store
 
@@ -394,13 +397,12 @@ Line numbers match the files at the start of the turn; once the assistant begins
 editing a file, the quoted excerpt lets the assistant locate the target passage
 even after line numbers shift.
 
-Every pass message also states the reviewer's progress, as the version the pass
-is sent against holds it: how far each file was read, under `## Read so far`,
-and the passages approved, under `## Approved`.
-An approved passage that changed since is left out.
-Each of the two sections opens with a sentence saying what it asks of the
-assistant: `review.toml` belongs to the workspace once it is written, so a
-workspace's copy may say nothing of them.
+Every pass message also includes the reviewer's progress projected onto the
+submitted version: read-until markers under `## Read so far`, and active
+approvals under `## Approved` (omitting approvals whose passages have changed).
+Each section opens with a one-sentence instruction to the assistant, because
+`review.toml` is owned by the workspace after `jp review init` and a customized
+copy might omit those rules.
 
 Apart from those two sentences, the pass message contains only review data;
 behavioral instructions live in configuration.
@@ -413,8 +415,8 @@ live in workspace-owned files rather than inside the plugin binary:
 - A configuration file (`review.toml`) provides the system instructions: reply
   to every comment in the pass, evaluate each comment on its merits rather than
   treating it as an unconditional command, keep replies concise, leave approved
-  passages as they are, treat unread lines as not yet reviewed, and open new
-  comments for issues the reviewer missed.
+  passages unchanged, treat lines after a read-until marker as unreviewed, and
+  open new comments for issues the reviewer missed.
   It also enables both review tools.
 
 `jp review init DIR` writes `review.toml` into `DIR`, just as `jp review tools
@@ -512,9 +514,9 @@ workspace tree), the tools write to it directly.
 | `init DIR`                                                           | Generate the default `review.toml` configuration file.            |
 | `tools init DIR`                                                     | Generate the `review_reply` and `review_comment` tool configs.    |
 
-Beside those, `reopen ID|COMMENT` undoes `close` and `resolve`, and `approve`
-and `read-until` record the reviewer's progress (see [Data
-Model](#data-model)), each with an endpoint of its own in the HTTP API.
+`reopen ID|COMMENT` reopens a closed review or a resolved comment.
+`approve` and `read-until` record the reviewer's progress (see [Data
+Model](#data-model)), and each has a corresponding endpoint in the HTTP API.
 
 All commands support structured JSON output via `jp --format json`.
 

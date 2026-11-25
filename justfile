@@ -2348,9 +2348,9 @@ build-ui PLUGIN PROFILE="wasm-release": (_rustup_target "wasm32-unknown-unknown"
         wasm-release) out="${target}/ui/{{PLUGIN}}" ;;
         *) out="${target}/ui/{{PLUGIN}}.{{PROFILE}}" ;;
     esac
-    # Built whole beside the last build and swapped in, so a page loading
-    # meanwhile gets one build or the other, and a stylesheet Tailwind refuses
-    # leaves the last build as it was.
+    # Build the bundle in a staging directory and swap it into place so a page
+    # loading concurrently sees a complete build, and a failed Tailwind build
+    # leaves the previous bundle intact.
     next="${out}.next"
     rm -rf "$next"
     mkdir -p "$next"

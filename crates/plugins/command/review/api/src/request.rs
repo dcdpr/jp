@@ -85,9 +85,9 @@ pub struct EditRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub suggestion: Option<String>,
 
-    /// The draft the edit was written for; the edit is refused once the comment
-    /// holds another.
-    /// Whichever the comment holds when absent.
+    /// Target draft kind (`comment` or `reply`).
+    /// If the comment no longer holds this draft kind, the edit is rejected.
+    /// When `None`, edits whichever draft the comment currently holds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub draft: Option<Draft>,
 }
@@ -167,12 +167,13 @@ pub enum Format {
     Html,
 }
 
-/// The query of `DELETE /api/reviews/{id}/comments/{n}`, which may be left out.
+/// Query parameters for `DELETE /api/reviews/{id}/comments/{n}`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WithdrawQuery {
-    /// The draft the withdrawal was asked for; it is refused once the comment
-    /// holds another.
-    /// Whichever the comment holds when absent.
+    /// Target draft kind (`comment` or `reply`).
+    /// If the comment no longer holds this draft kind, the withdrawal is
+    /// rejected.
+    /// When `None`, withdraws whichever draft the comment currently holds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub draft: Option<Draft>,
 }

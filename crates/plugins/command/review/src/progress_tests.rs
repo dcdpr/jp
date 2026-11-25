@@ -127,8 +127,6 @@ fn an_approval_is_taken_back_by_its_number() {
     assert_eq!(left, [2]);
 }
 
-/// A page that read approval 2 before it was taken back can't take back the
-/// approval made since.
 #[test]
 fn a_number_taken_back_is_not_given_to_the_next_approval() {
     let mut progress = Progress::default();
@@ -154,8 +152,6 @@ fn a_number_taken_back_is_not_given_to_the_next_approval() {
     assert_eq!(left, [1, 3]);
 }
 
-/// A review written before the highest number was stored numbers on from its
-/// approvals.
 #[test]
 fn approvals_stored_without_the_highest_number_are_numbered_on_from() {
     let mut progress: Progress = serde_json::from_str(

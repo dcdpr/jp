@@ -172,8 +172,6 @@ fn packages_without_a_browser_crate_run_no_browser_tests() {
     assert_eq!(runner.calls().len(), 1);
 }
 
-/// A filter naming no browser test runs nothing there, which says so rather
-/// than reporting zero passed.
 #[test]
 fn a_filter_matching_no_browser_test_says_so() {
     let runner = MockProcessRunner::builder()
@@ -222,7 +220,7 @@ fn host_run_of(code: i32) -> Result<HostRun, Failure> {
     )
 }
 
-/// Nextest exits with 4 when its filter selects no test, and with 101 when the
+/// Nextest exits with 4 when its filter matches no tests, and with 101 when the
 /// build fails.
 #[test]
 fn a_host_run_that_matched_nothing_is_told_apart_from_a_failed_build() {
@@ -237,8 +235,6 @@ fn browser_passed() -> BrowserRun {
     }
 }
 
-/// A test named that exists only in the browser passes there, and the run
-/// succeeds.
 #[test]
 fn a_run_matching_only_browser_tests_succeeds() {
     let host = Ok(HostRun::NoneMatched("Unable to run any tests.".to_owned()));

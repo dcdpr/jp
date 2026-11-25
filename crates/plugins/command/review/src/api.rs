@@ -515,8 +515,8 @@ pub(crate) fn edit(
     })
 }
 
-/// `DELETE /api/reviews/{id}/comments/{n}`: withdraw a draft comment, or the
-/// draft reply on a sent one, as `query.draft` asks.
+/// `DELETE /api/reviews/{id}/comments/{n}`: withdraw a draft comment or the
+/// draft reply on a submitted comment, optionally constrained by `query.draft`.
 pub(crate) fn withdraw(
     store: &Store,
     comment: CommentRef,

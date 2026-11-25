@@ -129,10 +129,11 @@ impl Page {
         self.compose.get_value()
     }
 
-    /// Whether the page was left, which disposes of its state.
+    /// Return `true` if the page has been unmounted and its reactive state
+    /// disposed.
     ///
-    /// A task the page spawned checks this after each `await` before it touches
-    /// the page: reading a disposed signal panics.
+    /// Spawned async tasks check this after each `await` before accessing
+    /// signals, because reading a disposed signal panics.
     fn gone(self) -> bool {
         self.view.try_with_untracked(|_| ()).is_none()
     }
@@ -315,8 +316,8 @@ async fn read(
         .filter(|(version, _)| *version == asked)
         .map(|(_, revision)| revision);
     let answer = client::get::<DetailReply>(&client::detail_url(id, since, asked)).await;
-    // The page was left meanwhile, or another version was asked for, whose
-    // comments sit elsewhere.
+    // Abort if the page was unmounted or the user switched to another version
+    // while the request was in flight.
     if page.view.try_with_untracked(|view| view.version) != Some(asked) {
         return;
     }
@@ -414,7 +415,7 @@ fn fetch_diff(page: Page, id: String) {
         let id = id.clone();
         spawn_local(async move {
             let answer = client::get::<DiffView>(&client::diff_url(&id, span, &file)).await;
-            // `None` once the page was left.
+            // `try_get_untracked` returns `None` if the page was unmounted.
             if key.try_get_untracked() == Some(Some((span, file, latest))) {
                 page.diff.set(Some(answer));
             }
@@ -447,7 +448,7 @@ fn fetch_file(page: Page, id: String) {
         let id = id.clone();
         spawn_local(async move {
             let answer = client::get::<FileReply>(&client::file_url(&id, version, &file)).await;
-            // `None` once the page was left.
+            // `try_get_untracked` returns `None` if the page was unmounted.
             if key.try_get_untracked() == Some(Some((version, file))) {
                 page.file.set(Some(answer));
             }

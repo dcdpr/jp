@@ -72,8 +72,7 @@ pub fn comment_url(id: &str, number: u32) -> String {
     format!("/api/reviews/{}/comments/{number}", encode(id))
 }
 
-/// `DELETE /api/reviews/{id}/comments/{number}`, withdrawing `draft`: the
-/// comment, or its draft reply.
+/// `DELETE /api/reviews/{id}/comments/{number}?draft={draft}`.
 #[must_use]
 pub fn withdraw_url(id: &str, number: u32, draft: Draft) -> String {
     let draft = match draft {

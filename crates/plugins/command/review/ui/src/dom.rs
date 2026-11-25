@@ -1,6 +1,5 @@
-//! What the UI reads from and asks of the browser around it: the location, the
-//! history, whether the page shows, the clock, the tab's storage, the part of
-//! the page the reader sees, and what the page is scrolled to.
+//! Browser DOM and Web API wrappers: location, history, page visibility,
+//! timers, `sessionStorage`, viewport geometry, and scroll positioning.
 
 use std::{cell::Cell, future::Future, rc::Rc, time::Duration};
 
@@ -56,9 +55,8 @@ impl Nav {
         self.go_to_heading(to, None);
     }
 
-    /// Show `to`, adding it to the history with the anchor of the heading
-    /// `heading` as its fragment, which a reload or a copied address scrolls
-    /// to.
+    /// Navigate to `to` and push a history entry, appending `#heading` if
+    /// provided so that reloads and copied URLs scroll to that anchor.
     pub(crate) fn go_to_heading(self, to: Route, heading: Option<&str>) {
         if self.route.get_untracked() == to {
             return;
@@ -127,20 +125,20 @@ pub(crate) fn document_listener(name: &'static str, listener: impl Fn(Event) + '
     });
 }
 
-/// What the tab's session storage holds under `key`; `None` when nothing is, or
-/// the browser keeps no storage for the page.
+/// Read `key` from the tab's `sessionStorage`, returning `None` if absent or if
+/// storage is unavailable.
 ///
-/// Session storage belongs to one tab and survives its reloads, so two tabs on
-/// the same review keep a draft each.
+/// `sessionStorage` is scoped to a single tab and survives reloads, so multiple
+/// tabs open on the same review maintain independent drafts.
 pub(crate) fn stored(key: &str) -> Option<String> {
     window().session_storage().ok()??.get_item(key).ok()?
 }
 
-/// Keep `value` in the tab's session storage under `key`, or remove what is
-/// there for `None`.
+/// Write `value` to `sessionStorage` under `key`, or remove `key` when `value`
+/// is `None`.
 ///
-/// A browser refusing to store it, as one in private mode may, loses the draft
-/// on a reload and nothing else.
+/// Storage errors (such as quota limits or private-browsing restrictions) are
+/// ignored.
 pub(crate) fn store(key: &str, value: Option<&str>) {
     let Ok(Some(storage)) = window().session_storage() else {
         return;

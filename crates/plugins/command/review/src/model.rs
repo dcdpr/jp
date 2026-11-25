@@ -158,8 +158,8 @@ pub struct Edit {
     pub suggestion: Option<String>,
     pub body: Option<String>,
 
-    /// The draft the edit was written for: the comment, or its draft reply.
-    /// Whichever the comment holds when `None`.
+    /// Expected draft target (`Comment` or `Reply`).
+    /// When `None`, edits whichever draft the comment currently holds.
     pub expects: Option<Draft>,
 }
 
@@ -536,11 +536,11 @@ impl Review {
         Ok(Draft::Reply)
     }
 
-    /// Withdraw a draft comment, retiring its number, or the draft reply on a
-    /// sent one.
+    /// Withdraw a draft comment (retiring its number) or the draft reply on a
+    /// submitted comment.
     ///
-    /// Refused when the comment no longer holds the draft `expects` names;
-    /// whichever it holds when `None`.
+    /// Returns an error if `expects` is `Some` and does not match the draft
+    /// kind the comment currently holds.
     pub fn withdraw(&mut self, number: u32, expects: Option<Draft>) -> Result<Draft, Refusal> {
         self.writable()?;
         let missing = missing(self.last_comment, number);
@@ -619,11 +619,11 @@ impl Review {
     }
 }
 
-/// Refuse a change to comment `number` that was meant for the draft `expects`
-/// names, when the comment holds the other: it is a `draft` or it isn't.
+/// Verify that comment `number`'s current draft state (`is_draft_comment`)
+/// matches `expects`, if specified.
 ///
-/// The change was written for that draft, so it is refused rather than applied
-/// to the other one.
+/// Prevents an edit or withdrawal intended for a draft comment from mutating a
+/// draft reply after the comment has been submitted (or vice versa).
 fn expected(number: u32, draft: bool, expects: Option<Draft>) -> Result<(), Refusal> {
     match (expects, draft) {
         (Some(Draft::Comment), false) => Err(Refusal::Comment(number, Why::Sent)),
