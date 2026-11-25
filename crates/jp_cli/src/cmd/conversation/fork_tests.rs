@@ -1337,11 +1337,12 @@ fn a_failure_still_reports_the_forks_already_created() {
     assert_eq!(*out.lock(), format!("{created}\n"));
 }
 
-/// Regression: deduplicating targets gave `fork "$id" "$id"` one handle, where
-/// RFD 086 makes each occurrence a separate fork.
+/// Regression: deduplicating targets gave `fork "$id" "$id"` one handle,
+/// whereas RFD 086 specifies that each occurrence creates a separate fork.
 ///
-/// Pins the handles rather than the forks: two forks created in one run share a
-/// wall-clock ID until RFD 106 lands, so the second overwrites the first.
+/// Asserts on the resolved handles rather than the created forks because two
+/// forks created in the same run share a wall-clock ID until RFD 106 lands,
+/// causing the second fork to overwrite the first.
 #[test]
 fn a_repeated_source_gets_one_handle_per_occurrence() {
     let mut ws = Workspace::in_memory("/tmp/jp-cli-fork-repeat-test");

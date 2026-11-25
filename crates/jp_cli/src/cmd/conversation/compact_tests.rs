@@ -1150,9 +1150,9 @@ fn an_empty_plan_on_a_later_target_compacts_nothing() {
     );
 }
 
-/// Regression: a repeated ID gave `compact` two handles to one conversation, so
-/// `--reset=1` removed compaction 1 and then the compaction that had become
-/// number 1.
+/// Regression: a duplicate ID gave `compact` two handles to the same
+/// conversation, so `--reset=1` removed compaction 1 and then the second
+/// compaction after it shifted to index 1.
 #[test]
 fn a_repeated_id_resets_one_compaction() {
     let (mut ctx, _out, _tmp) = preview_ctx();

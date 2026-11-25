@@ -69,11 +69,10 @@ pub(crate) struct ConversationLoadRequest {
     /// target conversation.
     pub config_conversation: Option<usize>,
 
-    /// Whether a conversation named more than once gets one handle per
-    /// occurrence.
+    /// Whether a duplicate conversation ID yields one handle per occurrence.
     ///
-    /// `false` drops the repeats, so the command acts on each conversation
-    /// once.
+    /// When `false`, duplicate IDs are dropped so the command processes each
+    /// conversation at most once.
     pub keep_repeats: bool,
 }
 
@@ -133,7 +132,8 @@ impl ConversationLoadRequest {
         }
     }
 
-    /// Give a conversation named more than once one handle per occurrence.
+    /// Preserve duplicate conversation IDs so each occurrence yields its own
+    /// handle.
     pub fn with_repeats(mut self) -> Self {
         self.keep_repeats = true;
         self
@@ -258,9 +258,8 @@ pub(crate) struct ResolveOutcome {
 ///
 /// This is the single resolution entry point called by `run_inner`.
 ///
-/// A conversation named more than once gets one handle, at the position of its
-/// first occurrence, unless the request sets
-/// [`ConversationLoadRequest::keep_repeats`].
+/// Duplicate conversation IDs are deduplicated in first-seen order unless
+/// [`ConversationLoadRequest::keep_repeats`] is `true`.
 ///
 /// `default_id` is the configured fallback from `conversation.default_id`,
 /// consulted when no session mapping exists and no explicit `--id` is given.
@@ -299,8 +298,8 @@ pub(crate) fn resolve_request(
         interactive,
     )?;
 
-    // Before acquiring: each handle is a separate pass of the command over its
-    // conversation.
+    // Deduplicate before acquiring handles so the command processes each
+    // target conversation once.
     let ids = if request.keep_repeats {
         ids
     } else {
@@ -634,9 +633,7 @@ fn non_empty(ids: Vec<ConversationId>, empty: &'static str) -> Result<Vec<Conver
     Ok(ids)
 }
 
-/// Drop repeated IDs, keeping the first occurrence of each in its place.
-///
-/// A command given the same conversation twice acts on it once.
+/// Deduplicate conversation IDs in first-seen order.
 pub(crate) fn dedup_ids(mut ids: Vec<ConversationId>) -> Vec<ConversationId> {
     let mut seen = HashSet::with_capacity(ids.len());
     ids.retain(|id| {
@@ -652,9 +649,8 @@ pub(crate) fn dedup_ids(mut ids: Vec<ConversationId>) -> Vec<ConversationId> {
 /// Read conversation IDs from standard input, one per line.
 ///
 /// Blank lines are skipped.
-/// Order and repeats are kept, so the result is identical to passing the same
-/// IDs on the command line; [`resolve_request`] treats repeats from both the
-/// same way.
+/// Order and duplicates are preserved here so stdin targets behave identically
+/// to command-line targets; [`resolve_request`] handles deduplication for both.
 /// Errors when stdin is a terminal (nothing piped) or when no IDs are provided.
 fn read_stdin_ids() -> Result<Vec<ConversationId>> {
     if io::stdin().is_terminal() {

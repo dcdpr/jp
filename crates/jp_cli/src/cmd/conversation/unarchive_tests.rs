@@ -98,8 +98,9 @@ fn fails_on_a_held_conversation_when_nobody_can_wait() {
     assert!(ctx.workspace.acquire_conversation(&id()).is_err());
 }
 
-/// Regression: the second copy of a repeated ID found the conversation already
-/// restored by the first, and reported it as never having been archived.
+/// Regression: a duplicate ID caused the second iteration to see the
+/// conversation as already unarchived and print a "not archived, skipping"
+/// warning.
 #[test]
 fn a_repeated_id_is_unarchived_once() {
     let tmp = tempdir().unwrap();

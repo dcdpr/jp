@@ -488,8 +488,8 @@ fn repeated_ids_resolve_to_one_handle_each_in_first_seen_order() {
     .map(ConversationHandle::id)
     .collect();
 
-    // `a` sorts after `b`, so keeping it first shows the order is the user's,
-    // not the IDs'.
+    // `a` has a newer timestamp than `b`, so preserving `[a, b]` confirms
+    // deduplication keeps input order rather than sorting by ID.
     assert_eq!(ids, vec![a, b]);
 }
 

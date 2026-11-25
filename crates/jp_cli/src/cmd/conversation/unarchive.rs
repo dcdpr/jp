@@ -97,8 +97,8 @@ impl Unarchive {
             }
         }
 
-        // A repeat would find the conversation already unarchived by its first
-        // occurrence, and report it as never having been archived.
+        // Deduplicate so a repeated ID is not visited again after the first
+        // occurrence unarchives it.
         Ok(dedup_ids(ids))
     }
 }

@@ -106,8 +106,8 @@ impl CommandArgs for Fork {
 
 impl Fork {
     pub(crate) fn conversation_load_request(&self) -> ConversationLoadRequest {
-        // Each occurrence of a source is a separate fork (RFD 086), so repeats
-        // are kept.
+        // Keep duplicate IDs because each occurrence creates a separate fork
+        // (RFD 086).
         ConversationLoadRequest::explicit_or_session(&self.target).with_repeats()
     }
 
