@@ -17,7 +17,7 @@
 //! produce [`ConversationTarget`] values.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     io::{self, BufRead as _, IsTerminal as _},
 };
 
@@ -26,6 +26,7 @@ use jp_config::conversation::DefaultConversationId;
 use jp_conversation::ConversationId;
 use jp_term::sanitize::strip_controls;
 use jp_workspace::{ConversationHandle, Workspace, session::Session};
+use tracing::debug;
 
 use crate::{
     cmd::conversation_id::ConversationIds,
@@ -239,6 +240,9 @@ pub(crate) struct ResolveOutcome {
 ///
 /// This is the single resolution entry point called by `run_inner`.
 ///
+/// A conversation named more than once gets one handle, at the position of its
+/// first occurrence.
+///
 /// `default_id` is the configured fallback from `conversation.default_id`,
 /// consulted when no session mapping exists and no explicit `--id` is given.
 ///
@@ -276,7 +280,9 @@ pub(crate) fn resolve_request(
         interactive,
     )?;
 
-    let handles = ids
+    // Before acquiring: each handle is a separate pass of the command over its
+    // conversation.
+    let handles = dedup_ids(ids)
         .iter()
         .map(|id| workspace.acquire_conversation(id).map_err(Into::into))
         .collect::<Result<Vec<_>>>()?;
@@ -604,11 +610,26 @@ fn non_empty(ids: Vec<ConversationId>, empty: &'static str) -> Result<Vec<Conver
     Ok(ids)
 }
 
+/// Drop repeated IDs, keeping the first occurrence of each in its place.
+///
+/// A command given the same conversation twice acts on it once.
+pub(crate) fn dedup_ids(mut ids: Vec<ConversationId>) -> Vec<ConversationId> {
+    let mut seen = HashSet::with_capacity(ids.len());
+    ids.retain(|id| {
+        let first = seen.insert(*id);
+        if !first {
+            debug!(%id, "Dropping repeated conversation target.");
+        }
+        first
+    });
+    ids
+}
+
 /// Read conversation IDs from standard input, one per line.
 ///
 /// Blank lines are skipped.
-/// Order and duplicates are preserved, so the result is identical to passing
-/// the same IDs on the command line.
+/// Order and repeats are kept, so the result is identical to passing the same
+/// IDs on the command line; [`resolve_request`] drops the repeats from both.
 /// Errors when stdin is a terminal (nothing piped) or when no IDs are provided.
 fn read_stdin_ids() -> Result<Vec<ConversationId>> {
     if io::stdin().is_terminal() {
