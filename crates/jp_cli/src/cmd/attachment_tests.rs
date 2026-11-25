@@ -62,29 +62,16 @@ fn empty_ctx() -> (Ctx, Runtime) {
 /// `{"message": ...}` envelope and left a consumer with no `details` at all.
 #[test]
 fn an_empty_listing_is_still_an_array_in_json() {
-    let tmp = tempdir().unwrap();
-    let workspace = Workspace::in_memory(tmp.path().to_path_buf());
-    let (printer, out, _err) = Printer::memory(OutputFormat::Json);
-    let mut ctx = Ctx::new(
-        crate::bootstrap::ExecutionContext::for_workspace(&workspace),
-        workspace,
-        None,
-        Runtime::new().unwrap(),
-        Globals::default(),
-        AppConfig::new_test(),
-        None,
-        printer,
-    );
+    let id = make_id(1_700_000_020);
+    let config = AppConfig::new_test();
+    let (mut ctx, out, _err, _tmp) =
+        persisted_ctx_in(OutputFormat::Json, id, config.clone(), config);
 
-    assert!(
-        ctx.config().conversation.attachments.is_empty(),
-        "the test config must carry no attachments"
-    );
-
+    let handle = ctx.workspace.acquire_conversation(&id).unwrap();
     ls::Ls {
         target: FlagIds::default(),
     }
-    .run(&mut ctx)
+    .run(&mut ctx, &[handle])
     .unwrap();
     ctx.printer.flush();
 
@@ -141,6 +128,17 @@ fn persisted_ctx(
     id: ConversationId,
     config: AppConfig,
 ) -> (Ctx, SharedBuffer, SharedBuffer, Utf8TempDir) {
+    persisted_ctx_in(OutputFormat::Text, id, config.clone(), config)
+}
+
+/// A `Ctx` printing in `format`, whose invocation runs with `invocation` while
+/// its one conversation was created with `stored`.
+fn persisted_ctx_in(
+    format: OutputFormat,
+    id: ConversationId,
+    stored: AppConfig,
+    invocation: AppConfig,
+) -> (Ctx, SharedBuffer, SharedBuffer, Utf8TempDir) {
     let tmp = tempdir().unwrap();
     let storage = tmp.path().join(".jp");
     fs::create_dir_all(&storage).unwrap();
@@ -153,16 +151,16 @@ fn persisted_ctx(
     let fs = Arc::new(fs);
     let mut workspace = Workspace::in_memory(tmp.path()).with_backend(fs.clone());
     workspace.load_conversation_index();
-    workspace.create_conversation_with_id(id, Conversation::default(), config.clone().into());
+    workspace.create_conversation_with_id(id, Conversation::default(), stored.into());
 
-    let (printer, out, err) = Printer::memory(OutputFormat::Text);
+    let (printer, out, err) = Printer::memory(format);
     let ctx = Ctx::new(
         crate::bootstrap::ExecutionContext::for_workspace(&workspace),
         workspace,
         Some(fs),
         Runtime::new().unwrap(),
         Globals::default(),
-        config,
+        invocation,
         None,
         printer,
     );
@@ -329,6 +327,77 @@ fn rm_of_the_last_attachment_is_not_refilled_from_the_file_layer() {
         "got {:?}",
         resolved.conversation.attachments
     );
+}
+
+/// The listing is the stored list `rm` acts on, so an attachment only this
+/// invocation's config carries (a `--cfg` override, or a reset to the
+/// workspace) is not listed.
+#[test]
+fn ls_lists_the_stored_attachments_not_the_invocation_config() {
+    let id = make_id(1_700_000_015);
+    let mut stored = AppConfig::new_test();
+    stored.conversation.attachments = vec![rfd_list_attachment()];
+    let mut invocation = AppConfig::new_test();
+    invocation.conversation.attachments =
+        vec![AttachmentConfig::Url(Url::parse(TERM_URL).unwrap())];
+    let (mut ctx, out, err, _tmp) = persisted_ctx_in(OutputFormat::Json, id, stored, invocation);
+
+    let handle = ctx.workspace.acquire_conversation(&id).unwrap();
+    ls::Ls {
+        target: FlagIds::default(),
+    }
+    .run(&mut ctx, &[handle])
+    .unwrap();
+    ctx.printer.flush();
+
+    let parsed: serde_json::Value = serde_json::from_str(out.lock().trim()).unwrap();
+    assert_eq!(
+        parsed,
+        json!({ "title": "Attachments", "details": [RFD_LIST_URL] })
+    );
+    assert_eq!(*err.lock(), "");
+}
+
+/// A file attachment whose file was deleted is still removed by its path: the
+/// stored URL is rebuilt from the path without reading the file.
+#[test]
+fn rm_removes_a_file_attachment_whose_file_is_gone() {
+    let id = make_id(1_700_000_016);
+    let (mut ctx, out, err, tmp) = persisted_ctx(id, AppConfig::new_test());
+    let rt = ctx.handle().clone();
+
+    let notes = tmp.path().join("notes.md");
+    fs::write(&notes, "notes").unwrap();
+    let path_arg = || AttachmentUrlOrPath::Path(notes.as_str().into());
+
+    let handle = ctx.workspace.acquire_conversation(&id).unwrap();
+    let add = add::Add {
+        attachments: vec![path_arg()],
+        target: FlagIds::default(),
+    };
+    rt.block_on(add.run(&mut ctx, vec![handle])).unwrap();
+    // `Url` parses `file:notes.md` into this form.
+    assert_eq!(stored_urls(&ctx, &id), vec!["file:///notes.md".to_owned()]);
+
+    fs::remove_file(&notes).unwrap();
+
+    let handle = ctx.workspace.acquire_conversation(&id).unwrap();
+    let rm = rm::Rm {
+        attachments: vec![path_arg()],
+        target: FlagIds::default(),
+    };
+    rt.block_on(rm.run(&mut ctx, vec![handle])).unwrap();
+    ctx.printer.flush();
+
+    assert!(stored_urls(&ctx, &id).is_empty());
+    assert_eq!(
+        *out.lock(),
+        format!(
+            "Added file:///notes.md to conversation {id}\nRemoved file:///notes.md from \
+             conversation {id}\n"
+        )
+    );
+    assert_eq!(*err.lock(), "");
 }
 
 /// Removing what the conversation does not carry records nothing, and names the
@@ -499,6 +568,73 @@ fn rm_removes_another_spelling_of_the_url() {
     assert_eq!(
         *out.lock(),
         format!("Removed {DIFF_URL} from conversation {id}\n")
+    );
+    assert_eq!(*err.lock(), "");
+}
+
+const RETIRED_MCP_URL: &str = "mcp+github-mcp-server+repo://owner/name";
+
+/// A retired MCP resource URI is refused before anything is recorded, since a
+/// stored one fails every query on the conversation.
+#[test]
+fn add_refuses_a_retired_mcp_attachment() {
+    let id = make_id(1_700_000_017);
+    let (mut ctx, out, err, _tmp) = persisted_ctx(id, AppConfig::new_test());
+    let rt = ctx.handle().clone();
+    let before = delta_count(&ctx, &id);
+
+    let handle = ctx.workspace.acquire_conversation(&id).unwrap();
+    let add = add::Add {
+        attachments: vec![url_arg(RETIRED_MCP_URL)],
+        target: FlagIds::default(),
+    };
+    let error = rt
+        .block_on(add.run(&mut ctx, vec![handle]))
+        .expect_err("a retired attachment is refused");
+    ctx.printer.flush();
+
+    // `with_cause` lifts the message out of the metadata and lists the cause
+    // under an empty key.
+    assert_eq!(error.message.as_deref(), Some("Attachment error"));
+    assert_eq!(error.metadata, vec![
+        ("uri".to_owned(), json!(RETIRED_MCP_URL)),
+        (
+            String::new(),
+            json!(format!(
+                "MCP resource attachments are retired and can no longer be added: \
+                 `{RETIRED_MCP_URL}`"
+            ))
+        ),
+    ]);
+    assert!(stored_urls(&ctx, &id).is_empty());
+    assert_eq!(delta_count(&ctx, &id), before);
+    assert_eq!(*out.lock(), "");
+    assert_eq!(*err.lock(), "");
+}
+
+/// A conversation that already carries a retired MCP URI can still drop it,
+/// which is what the handler's error tells the user to do.
+#[test]
+fn rm_removes_a_retired_mcp_attachment() {
+    let id = make_id(1_700_000_018);
+    let mut config = AppConfig::new_test();
+    config.conversation.attachments =
+        vec![AttachmentConfig::Url(Url::parse(RETIRED_MCP_URL).unwrap())];
+    let (mut ctx, out, err, _tmp) = persisted_ctx(id, config);
+    let rt = ctx.handle().clone();
+
+    let handle = ctx.workspace.acquire_conversation(&id).unwrap();
+    let rm = rm::Rm {
+        attachments: vec![url_arg(RETIRED_MCP_URL)],
+        target: FlagIds::default(),
+    };
+    rt.block_on(rm.run(&mut ctx, vec![handle])).unwrap();
+    ctx.printer.flush();
+
+    assert!(stored_urls(&ctx, &id).is_empty());
+    assert_eq!(
+        *out.lock(),
+        format!("Removed {RETIRED_MCP_URL} from conversation {id}\n")
     );
     assert_eq!(*err.lock(), "");
 }

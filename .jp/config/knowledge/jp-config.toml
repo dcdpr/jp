@@ -149,9 +149,12 @@ What follows from this:
   edits that conversation only.
 - Replacing a *list* on a conversation (`strategy = "replace"`) pins \
   nothing that was not already pinned, so don't avoid it for fear of \
-  detaching the conversation from the workspace. Replacing a *map* does \
-  pin more: a map that states a strategy is not filled, so keys the \
-  config files add later no longer join it.
+  detaching the conversation from the workspace. Replacing a *map* \
+  removes the keys it leaves out, and those are recorded as the delta's \
+  unsets so the file layer cannot restore them. Keys the config files \
+  add later still join, because `query::conversation_config` rebuilds \
+  the conversation's layer from its resolved config, where every map is \
+  a plain per-key map again.
 - `--cfg WORKSPACE` ([RFD 038]) is the explicit way to move a \
   conversation onto the current workspace config.
 - A command that reads or changes a conversation's config has to load \

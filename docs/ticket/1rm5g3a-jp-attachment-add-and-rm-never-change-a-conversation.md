@@ -70,3 +70,25 @@ Fixed in the working tree, not yet committed.
 The URL match is exact, by `Url` equality: `%20` and `+` for a space don't match
 each other.
 `jp c show` prints the form `rm` expects.
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-25T14:47:49Z
+
+Corrections to the comment above, after review on PR #1389.
+
+The fix is committed (`a81b9a81e`), and a follow-up commit on the same PR
+changes three things:
+
+- `ls` reads the stored attachment list from the conversation's events, as `jp
+  conversation show` does, rather than loading the conversation's config layer.
+  `--cfg` overrides and `--cfg WORKSPACE` no longer change what it lists, and
+  `Commands::Attachment` no longer routes through `query::conversation_config`.
+- `rm` resolves a file path without requiring the file to exist
+  (`AttachmentUrlOrPath::parse_unchecked`), so an attachment whose file was
+  deleted or renamed is still removed by its path.
+- `add` and `jp query -a` refuse a retired MCP resource URI: the `mcp`
+  handler's `Handler::canonical` returns an error for it.
+  A conversation already holding one still removes it with `rm`.
+  A URI that arrives through config is not checked; that is [T-1rr0xfp](https://jp.computer/T-1rr0xfp).

@@ -62,12 +62,14 @@ impl Rm {
 
     pub(crate) async fn run(self, ctx: &mut Ctx, handles: Vec<ConversationHandle>) -> Output {
         // Compared by canonical URL, so any spelling of an attachment removes
-        // it. Each argument keeps its spelling for the report.
+        // it, and each argument keeps its spelling for the report. A file path
+        // resolves without the file existing, since the stored URL is all a
+        // removal needs.
         let to_remove = self
             .attachments
             .iter()
             .map(|uri| {
-                let url = uri.parse(Some(ctx.workspace.root()))?;
+                let url = uri.parse_unchecked(Some(ctx.workspace.root()))?;
                 Ok((attachment_identity(&url), url))
             })
             .collect::<crate::error::Result<Vec<_>>>()?;

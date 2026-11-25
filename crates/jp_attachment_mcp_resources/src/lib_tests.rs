@@ -35,8 +35,7 @@ async fn resolving_a_stored_attachment_names_it_and_how_to_remove_it() {
     );
 }
 
-/// A conversation carrying several of them names all of them at once, so the
-/// user does not learn about the next one by querying again.
+/// A handler holding several names all of them in one error.
 #[tokio::test]
 async fn resolving_names_every_stored_attachment() {
     let second = Url::parse("mcp+other-server+file:///notes.md").unwrap();
@@ -55,6 +54,21 @@ async fn resolving_names_every_stored_attachment() {
          `mcp+github-mcp-server+repo://owner/name`, `mcp+other-server+file:///notes.md`. Remove \
          them with: jp attachment rm 'mcp+github-mcp-server+repo://owner/name' && jp attachment \
          rm 'mcp+other-server+file:///notes.md'"
+    );
+}
+
+/// A new attachment is refused before it is stored, rather than failing every
+/// query that follows.
+#[test]
+fn a_new_attachment_is_refused() {
+    let error = McpResources::default()
+        .canonical(&uri())
+        .expect_err("mcp resource attachments are retired");
+
+    assert_eq!(
+        error.to_string(),
+        "MCP resource attachments are retired and can no longer be added: \
+         `mcp+github-mcp-server+repo://owner/name`"
     );
 }
 

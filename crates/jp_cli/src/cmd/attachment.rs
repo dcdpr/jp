@@ -85,7 +85,7 @@ impl Attachment {
         match self.command {
             Commands::Add(args) => args.run(ctx, handles).await,
             Commands::Remove(args) => args.run(ctx, handles).await,
-            Commands::List(args) => args.run(ctx),
+            Commands::List(args) => args.run(ctx, &handles),
             Commands::Print(args) => args.run(ctx).await,
         }
     }

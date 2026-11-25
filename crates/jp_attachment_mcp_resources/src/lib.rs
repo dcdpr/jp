@@ -5,7 +5,7 @@
 //! This handler keeps deserializing, listing, and removing them so those
 //! conversations load, are inspectable, and can be edited.
 //! Resolving one reports [`UnsupportedResolution`] instead of reading from an
-//! MCP server.
+//! MCP server, and adding a new one is refused with [`Retired`].
 
 use std::{collections::BTreeSet, error::Error, fmt};
 
@@ -30,8 +30,8 @@ pub struct McpResources(BTreeSet<Url>);
 
 /// Returned when an `mcp` attachment is asked for its contents.
 ///
-/// Names every attachment the conversation carries, so one query tells the user
-/// the whole set to remove rather than one per attempt.
+/// Names every URI the handler holds, each with the `jp attachment rm` command
+/// that removes it.
 #[derive(Debug)]
 pub struct UnsupportedResolution {
     uris: Vec<Url>,
@@ -60,6 +60,25 @@ impl fmt::Display for UnsupportedResolution {
 
 impl Error for UnsupportedResolution {}
 
+/// Returned when an `mcp` attachment is canonicalized, which refuses it before
+/// it is added to a conversation.
+#[derive(Debug)]
+pub struct Retired {
+    uri: Url,
+}
+
+impl fmt::Display for Retired {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "MCP resource attachments are retired and can no longer be added: `{}`",
+            self.uri
+        )
+    }
+}
+
+impl Error for Retired {}
+
 #[typetag::serde(name = "mcp")]
 #[async_trait]
 impl Handler for McpResources {
@@ -67,10 +86,10 @@ impl Handler for McpResources {
         "mcp"
     }
 
-    // MCP resource attachments are no longer resolved; keep the stored URL
-    // verbatim.
+    // Refusing here keeps a new URI from being stored. One already stored is
+    // still listed, removed, and reported by `get`.
     fn canonical(&self, uri: &Url) -> Result<Url, Box<dyn Error + Send + Sync>> {
-        Ok(uri.clone())
+        Err(Box::new(Retired { uri: uri.clone() }))
     }
 
     async fn add(

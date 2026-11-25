@@ -263,10 +263,9 @@ impl<S: Stage> Commands<S> {
         handle: &jp_workspace::ConversationHandle,
     ) -> Result<(PartialAppConfig, Vec<String>), SettleError> {
         match self {
-            Commands::Query(_) | Commands::Attachment(_) => {
-                query::conversation_config(workspace, partial, handle)
-            }
+            Commands::Query(_) => query::conversation_config(workspace, partial, handle),
             Commands::Config(_)
+            | Commands::Attachment(_)
             | Commands::AttachmentAdd(_)
             | Commands::Conversation(_)
             | Commands::Init(_)
