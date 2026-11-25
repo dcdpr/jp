@@ -2130,6 +2130,17 @@ shear *FLAGS="--fix": (_install "cargo-shear@" + shear_version)
 typecheck-js:
     npx --yes --package=typescript@5 -- tsc --project crates/plugins/command/serve-web/tsconfig.json
 
+# Source files the coverage report leaves out, on top of what `cargo llvm-cov`
+# leaves out itself (tests, `_tests.rs` files, dependencies).
+#
+# The review UI's modules that only run in a browser: the host build compiles
+# them, and no host test can call them. They belong in the report once the
+# browser tests' coverage is measured, which T-1rms9dy tracks; this list goes
+# then. The UI's pure modules stay in, since host tests cover them.
+#
+# LLVM's regex has no lookahead, so each module is named.
+coverage_ignore := 'crates/plugins/command/review/ui/src/((app|capture|card|compose|dom|highlight|lib|list|seat|widget)\.rs$|review(\.rs$|/))'
+
 # Generate code coverage into `target/lcov.info`, the way `coverage-ci` does.
 #
 # Tests run under nextest, one process per test, as they do everywhere else.
@@ -2151,7 +2162,7 @@ coverage: _coverage-setup
 
     cargo llvm-cov --branch --no-cfg-coverage --no-cfg-coverage-nightly --cargo-profile=coverage --no-report nextest
     cargo llvm-cov --branch --no-cfg-coverage --no-cfg-coverage-nightly --profile=coverage --no-report --doc
-    cargo llvm-cov report --branch --doctests --lcov --output-path=target/lcov.info --profile=coverage
+    cargo llvm-cov report --branch --doctests --lcov --output-path=target/lcov.info --profile=coverage --ignore-filename-regex '{{coverage_ignore}}'
 
 _bacon CMD *FLAGS: (_install "bacon@" + bacon_version)
     @bacon {{CMD}} -- {{FLAGS}}
@@ -2734,7 +2745,7 @@ coverage-ci: _coverage-setup _install_ci_matchers
     cargo clean --locked --workspace --profile=coverage --target-dir=target/llvm-cov-target
     cargo llvm-cov --locked --branch --no-cfg-coverage --no-cfg-coverage-nightly --cargo-profile=coverage --no-report nextest
     cargo llvm-cov --locked --branch --no-cfg-coverage --no-cfg-coverage-nightly --profile=coverage --no-report --doc
-    cargo llvm-cov report --branch --doctests --lcov --output-path lcov.info --profile=coverage
+    cargo llvm-cov report --branch --doctests --lcov --output-path lcov.info --profile=coverage --ignore-filename-regex '{{coverage_ignore}}'
 
 _coverage-setup: (_rustup_component "llvm-tools") _install-llvm-cov (_install "cargo-nextest@" + nextest_version + " cargo-expand@" + expand_version)
 

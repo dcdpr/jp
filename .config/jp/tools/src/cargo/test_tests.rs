@@ -280,6 +280,95 @@ fn a_run_matching_nothing_on_either_side_fails() {
     );
 }
 
+/// The filter names a test in a browser crate's `tests/`, which the host build
+/// leaves out: nextest exits with 4, and the browser runs it in Chrome.
+#[test]
+fn a_run_of_a_browser_test_alone_succeeds_through_both_halves() {
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns(ProcessOutput {
+            stdout: String::new(),
+            stderr: "no tests to run\n".to_owned(),
+            status: ExitCode::from_code(4),
+        })
+        .expect("cargo")
+        .args(&["metadata", "--no-deps", "--format-version=1"])
+        .returns_success(BROWSER_METADATA)
+        .expect("cargo")
+        .args(&[
+            "test",
+            "--target",
+            "wasm32-unknown-unknown",
+            "--test",
+            "*",
+            "--package=a-ui",
+            "--",
+            "seated",
+        ])
+        .returns_success("test result: ok. 1 passed; 0 failed; 0 ignored\n");
+
+    let content = cargo_test_impl(
+        Utf8Path::new("/work"),
+        "-W warnings",
+        None,
+        &[],
+        Some("seated".to_owned()),
+        false,
+        false,
+        Browsers::Run {
+            chromedriver: Some("/usr/bin/chromedriver".to_owned()),
+        },
+        &runner,
+    )
+    .unwrap()
+    .unwrap_content();
+
+    assert_eq!(
+        content,
+        "No host test matched.\n\nBrowser tests: 1 passed, in a-ui.\n"
+    );
+    assert!(
+        runner.calls()[2]
+            .env
+            .iter()
+            .any(|(key, value)| key == "CHROMEDRIVER" && value == "/usr/bin/chromedriver"),
+        "{:?}",
+        runner.calls()[2].env
+    );
+}
+
+/// The host tests ran; that the browser crates couldn't be found is said beside
+/// them rather than failing the run.
+#[test]
+fn browser_crates_that_cant_be_found_leave_the_host_run_standing() {
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns_success(r#"{"type":"test","event":"ok","name":"my_test","stdout":""}"#)
+        .expect("cargo")
+        .returns_error("could not find `Cargo.toml`\n");
+
+    let content = cargo_test_impl(
+        Utf8Path::new("/work"),
+        "-W warnings",
+        None,
+        &[],
+        None,
+        false,
+        false,
+        Browsers::Run { chromedriver: None },
+        &runner,
+    )
+    .unwrap()
+    .unwrap_content();
+
+    assert_eq!(
+        content,
+        "Ran 1/1 tests, of which 0 failed.\n\nThe browser tests weren't run: `cargo metadata` \
+         failed: could not find `Cargo.toml`\n"
+    );
+    assert_eq!(runner.calls().len(), 2, "no browser run without its crates");
+}
+
 #[test]
 fn the_browser_summary_sums_every_result_line() {
     let stdout = "test result: ok. 2 passed; 0 failed; 0 ignored\nnoise\ntest result: FAILED. 1 \
@@ -326,6 +415,7 @@ fn test_cargo_test_success() {
         None,
         false,
         false,
+        Browsers::Skip,
         &runner,
     )
     .unwrap()
@@ -357,6 +447,7 @@ fn test_cargo_test_with_failure() {
         None,
         false,
         false,
+        Browsers::Skip,
         &runner,
     )
     .unwrap()
@@ -406,6 +497,7 @@ fn a_timed_out_test_is_reported_as_failed() {
         None,
         false,
         false,
+        Browsers::Skip,
         &runner,
     )
     .unwrap()
@@ -450,6 +542,7 @@ fn a_failed_run_with_no_parsed_failures_is_not_reported_as_passing() {
         None,
         false,
         false,
+        Browsers::Skip,
         &runner,
     )
     .unwrap()
@@ -491,6 +584,7 @@ fn no_tests_ran_error_is_bounded() {
         None,
         false,
         false,
+        Browsers::Skip,
         &runner,
     )
     .expect_err("a run with zero tests is an error")
@@ -543,6 +637,7 @@ fn failure_output_is_bounded_across_the_whole_run() {
         None,
         false,
         false,
+        Browsers::Skip,
         &runner,
     )
     .unwrap()
@@ -601,6 +696,7 @@ fn failure_blocks_are_bounded_when_captured_output_is_empty() {
         None,
         false,
         false,
+        Browsers::Skip,
         &runner,
     )
     .unwrap()
@@ -665,6 +761,7 @@ fn cargo_profile_is_passed_through_to_nextest() {
         Some("my_test".to_owned()),
         false,
         false,
+        Browsers::Skip,
         &runner,
     )
     .unwrap()
@@ -703,6 +800,7 @@ fn each_package_is_passed_to_nextest() {
         Some("my_test".to_owned()),
         false,
         false,
+        Browsers::Skip,
         &runner,
     )
     .unwrap()
@@ -742,6 +840,7 @@ fn test_rustflags_reaches_cargo() {
         None,
         false,
         false,
+        Browsers::Skip,
         &runner,
     )
     .unwrap();
@@ -773,6 +872,7 @@ fn insta_workspace_root_names_the_checkout_under_test() {
         None,
         false,
         false,
+        Browsers::Skip,
         &runner,
     )
     .unwrap();
@@ -807,6 +907,7 @@ fn test_backtrace_disabled_by_default() {
         None,
         false,
         false,
+        Browsers::Skip,
         &runner,
     )
     .unwrap();
@@ -841,6 +942,7 @@ fn test_checksum_freshness_disabled_by_default() {
         None,
         false,
         false,
+        Browsers::Skip,
         &runner,
     )
     .unwrap();
@@ -874,6 +976,7 @@ fn test_checksum_freshness_enabled() {
         None,
         false,
         true,
+        Browsers::Skip,
         &runner,
     )
     .unwrap();
@@ -908,6 +1011,7 @@ fn test_backtrace_enabled() {
         None,
         true,
         false,
+        Browsers::Skip,
         &runner,
     )
     .unwrap();

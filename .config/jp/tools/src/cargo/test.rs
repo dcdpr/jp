@@ -115,44 +115,36 @@ pub(crate) async fn cargo_test(
     checksum_freshness: bool,
     wasm: bool,
 ) -> ToolResult {
-    let backtrace = backtrace.unwrap_or(false);
-    if !wasm {
-        return cargo_test_impl(
-            root,
-            rustflags,
-            profile,
-            packages,
-            testname,
-            backtrace,
-            checksum_freshness,
-            &SystemProcessRunner,
-        );
-    }
+    let browsers = if wasm {
+        let found = which::which("chromedriver")
+            .ok()
+            .and_then(|path| path.into_os_string().into_string().ok());
+        Browsers::Run {
+            chromedriver: chromedriver_for(|name| env::var_os(name).is_some(), found),
+        }
+    } else {
+        Browsers::Skip
+    };
 
-    let host = host_run(
+    cargo_test_impl(
         root,
         rustflags,
         profile,
         packages,
-        testname.clone(),
-        backtrace,
+        testname,
+        backtrace.unwrap_or(false),
         checksum_freshness,
+        browsers,
         &SystemProcessRunner,
-    );
-    let chromedriver = which::which("chromedriver")
-        .ok()
-        .and_then(|path| path.into_os_string().into_string().ok());
-    let chromedriver = chromedriver_for(|name| env::var_os(name).is_some(), chromedriver);
-    let browser = wasm_test(
-        root,
-        rustflags,
-        profile,
-        packages,
-        testname.as_deref(),
-        chromedriver.as_deref(),
-        &SystemProcessRunner,
-    );
-    combine(host, browser)
+    )
+}
+
+/// Whether a test run runs the browser crates' browser tests too, and with
+/// which `chromedriver`.
+#[derive(Debug)]
+enum Browsers {
+    Skip,
+    Run { chromedriver: Option<String> },
 }
 
 /// Combine the host and browser test outcomes into a single [`ToolResult`].
@@ -315,7 +307,8 @@ fn browser_summary(stdout: &str) -> (usize, usize) {
         })
 }
 
-/// Run host tests via nextest, failing if the filter matches no tests.
+/// Run host tests via nextest, and the browser tests when `browsers` says to,
+/// failing when neither matches a test.
 fn cargo_test_impl<R: ProcessRunner>(
     root: &Utf8Path,
     rustflags: &str,
@@ -324,9 +317,11 @@ fn cargo_test_impl<R: ProcessRunner>(
     testname: Option<String>,
     backtrace: bool,
     checksum_freshness: bool,
+    browsers: Browsers,
     runner: &R,
 ) -> ToolResult {
-    host_run(
+    let filter = testname.clone();
+    let host = host_run(
         root,
         rustflags,
         profile,
@@ -335,8 +330,21 @@ fn cargo_test_impl<R: ProcessRunner>(
         backtrace,
         checksum_freshness,
         runner,
-    )
-    .and_then(HostRun::into_result)
+    );
+    let browser = match browsers {
+        Browsers::Skip => None,
+        Browsers::Run { chromedriver } => wasm_test(
+            root,
+            rustflags,
+            profile,
+            packages,
+            filter.as_deref(),
+            chromedriver.as_deref(),
+            runner,
+        ),
+    };
+
+    combine(host, browser)
 }
 
 /// Run host tests via nextest.

@@ -1115,6 +1115,59 @@ fn what_only_the_browser_build_finds_is_reported() {
             ```"});
 }
 
+/// A browser build that fails says so, apart from one that only warns.
+#[test]
+fn a_failed_browser_build_is_reported_as_failed() {
+    let (_dir, ctx) = ctx();
+
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns_success("")
+        .expect("comfort")
+        .returns_success("")
+        .expect("cargo")
+        .returns_success(BROWSER_METADATA)
+        .expect("cargo")
+        .args(WASM_CLIPPY)
+        .returns(ProcessOutput {
+            stdout: String::new(),
+            stderr: "error[E0425]: cannot find value `x`\n".to_owned(),
+            status: ExitCode::from_code(101),
+        });
+
+    let result = cargo_check_impl(&ctx.root, "-W warnings", None, &[], WASM, &runner).unwrap();
+
+    assert_eq!(result.into_content().unwrap(), indoc::indoc! {"
+            `cargo clippy` found no warnings or errors.
+
+            `cargo clippy --target wasm32-unknown-unknown` failed on the browser crates:
+            ```
+            error[E0425]: cannot find value `x`
+            ```"});
+}
+
+#[test]
+fn browser_crates_that_cant_be_found_are_noted_and_not_built() {
+    let (_dir, ctx) = ctx();
+
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns_success("")
+        .expect("comfort")
+        .returns_success("")
+        .expect("cargo")
+        .returns_error("could not find `Cargo.toml`\n");
+
+    let result = cargo_check_impl(&ctx.root, "-W warnings", None, &[], WASM, &runner).unwrap();
+
+    assert_eq!(
+        result.into_content().unwrap(),
+        "`cargo clippy` found no warnings or errors.\n\nThe browser crates weren't checked for \
+         wasm32-unknown-unknown: `cargo metadata` failed: could not find `Cargo.toml`"
+    );
+    assert_eq!(runner.calls().len(), 3);
+}
+
 /// Checking packages none of which is a browser crate builds nothing for the
 /// browser.
 #[test]

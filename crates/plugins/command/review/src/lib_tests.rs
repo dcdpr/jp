@@ -2158,6 +2158,29 @@ fn serve_opens_the_list_and_tells_open_where_it_listens() {
     );
 }
 
+/// A server holds the store's lock before it listens, and names its address
+/// only then.
+#[test]
+fn open_while_the_server_starts_asks_to_try_again() {
+    let root = workspace();
+    let store = Store::new(root.path().join(".user/review"));
+    let Ok(Serving::Claimed(_lock)) = store.claim_server() else {
+        panic!("nothing else serves the reviews");
+    };
+    let opened = Opened::default();
+
+    let ran = run_opening(root.path(), &["open"], &opened);
+
+    assert_eq!(
+        (ran.code, ran.reason.as_deref()),
+        (
+            1,
+            Some("`jp review serve` is starting, and hasn't said where it listens yet; try again.")
+        )
+    );
+    assert_eq!(opened.urls(), Vec::<String>::new());
+}
+
 #[test]
 fn open_names_the_review_as_json() {
     let root = workspace();

@@ -411,6 +411,69 @@ async fn the_comment_routes_reach_their_comment() {
     assert_eq!((closed, review["status"].clone()), (200, json!("closed")));
 }
 
+/// Every route on what the reviewer approved and read reaches the review, as do
+/// the routes that open a comment and a review again, and a withdrawal naming
+/// its draft.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_progress_and_reopen_routes_reach_their_review() {
+    let served = served().await;
+    let id = served.start();
+    let review = format!("/api/reviews/{id}");
+    // "First line.", bytes 9 to 20 of `docs/a.md`.
+    let line = r#"{"version":1,"path":"docs/a.md","range":"3"}"#;
+    let draft = (
+        409,
+        json!({ "error": format!("{id}#1 is a draft, not yet sent.") }),
+    );
+
+    let (approved, approval) = served.send("POST", &format!("{review}/approvals"), line);
+    let unapproved = served.send("DELETE", &format!("{review}/approvals/1"), "");
+    let unnumbered = served.send("DELETE", &format!("{review}/approvals/x"), "");
+    let (read, until) = served.send("PUT", &format!("{review}/read"), line);
+    let unread = served.send("DELETE", &format!("{review}/read?path=docs/a.md"), "");
+    served.send(
+        "POST",
+        &format!("{review}/comments"),
+        r#"{"body":"Overall."}"#,
+    );
+    let reopened_draft = served.send("POST", &format!("{review}/comments/1/reopen"), "");
+    let stale = served.send("DELETE", &format!("{review}/comments/1?draft=reply"), "");
+    served.send("POST", &format!("{review}/close"), "");
+    let (reopened, summary) = served.send("POST", &format!("{review}/reopen"), "");
+
+    assert_eq!(
+        (
+            approved,
+            approval["number"].clone(),
+            approval["excerpt"].clone()
+        ),
+        (201, json!(1), json!("First line."))
+    );
+    assert_eq!(unapproved, (200, json!({ "review": id, "approval": 1 })));
+    assert_eq!(
+        unnumbered,
+        (404, json!({ "error": format!("{id} has no approval x.") }))
+    );
+    assert_eq!(
+        (
+            read,
+            until["line"].clone(),
+            until["projected"]["bytes"].clone()
+        ),
+        (200, json!(3), json!([9, 20]))
+    );
+    assert_eq!(
+        unread,
+        (
+            200,
+            json!({ "review": id, "path": "docs/a.md", "cleared": true })
+        )
+    );
+    assert_eq!(reopened_draft, draft);
+    assert_eq!(stale, draft, "a draft comment holds no draft reply");
+    assert_eq!((reopened, summary["status"].clone()), (200, json!("open")));
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_file_is_served_rendered_and_a_diff_of_one_file() {
     let served = served().await;

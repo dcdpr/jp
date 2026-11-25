@@ -17,8 +17,6 @@
 //! captured file, version, and byte range.
 //! Because `sessionStorage` is isolated per tab, saving or discarding in one
 //! tab does not affect drafts in other tabs.
-//!
-//! [`layout::site`]: crate::layout::site
 
 use std::time::Duration;
 
