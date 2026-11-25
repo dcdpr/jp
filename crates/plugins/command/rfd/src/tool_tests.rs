@@ -479,8 +479,9 @@ fn draft_needs_a_title_unless_it_has_a_ticket() {
     );
 }
 
-/// A new draft's slot is chosen by reading every ticket for the draft ids they
-/// cite, so drafting without a ticket still needs to read them.
+/// Allocating a draft slot scans all tickets for cited draft IDs, so `draft`
+/// requires read access to the ticket directory even when not seeding from a
+/// ticket.
 #[test]
 fn draft_has_to_be_allowed_to_read_the_tickets() {
     let root = workspace();

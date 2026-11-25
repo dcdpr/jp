@@ -97,9 +97,9 @@ fn a_draft_takes_the_first_free_slot() {
     assert_eq!(output.text, "Created docs/rfd/drafts/D02-next.md\n");
 }
 
-/// A slot another document still cites is skipped: promoting a draft rewrites
-/// every citation of its id, so a draft in that slot would take over the
-/// citation of the draft that held it before.
+/// Skip any slot still cited in another document, because promoting a draft
+/// rewrites every citation of its ID and would redirect stale citations to the
+/// new RFD.
 #[test]
 fn a_draft_skips_a_slot_another_document_still_cites() {
     let workspace = workspace();
@@ -122,8 +122,8 @@ fn a_draft_skips_a_slot_another_document_still_cites() {
                                   docs/ticket/02wt0kx-old.md"]);
 }
 
-/// Promotion rewrites `RFD D02` whatever letter or `_` follows it, so such a
-/// citation reserves its slot even where the bare id doesn't stand alone.
+/// Promotion rewrites `RFD D02` even when followed by a letter or `_`, so
+/// non-standalone `RFD Dnn` citations also reserve their slots.
 #[test]
 fn a_draft_skips_a_slot_cited_inside_a_word() {
     let workspace = workspace();
@@ -143,8 +143,8 @@ fn a_draft_skips_a_slot_cited_inside_a_word() {
                                   in docs/ticket/02wt0kx-old.md"]);
 }
 
-/// Promotion moves a draft's board entry to its number, so a draft given the
-/// slot of an entry left behind would take over its rank.
+/// Promotion rewrites a draft's priority board entry to its permanent number,
+/// so a stale draft entry on the board also reserves its slot.
 #[test]
 fn a_draft_skips_a_slot_the_board_still_ranks() {
     let workspace = workspace();
@@ -393,9 +393,9 @@ fn a_ticket_naming_a_missing_rfd_is_seeded_again() {
     );
 }
 
-/// Only the ticket's `Promoted to`, which the command is about to overwrite, is
-/// left out of the warning: a citation in its description is copied into the
-/// new draft.
+/// Only the seed ticket's `Promoted to` field (which the command overwrites) is
+/// omitted from the warning; dangling citations in the ticket's description are
+/// still reported.
 #[test]
 fn a_seed_tickets_own_citations_are_reported() {
     let workspace = workspace();

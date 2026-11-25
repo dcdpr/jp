@@ -427,7 +427,7 @@ fn draft(place: &Place<'_>, args: &Arguments<'_>, options: &Options) -> Reply {
     };
 
     place.require(Dir::Rfds, &[Capability::Read, Capability::Create])?;
-    // Choosing the slot reads every ticket for the draft ids it cites.
+    // Allocating a draft slot scans all tickets for cited draft IDs.
     place.require_tickets(&[Capability::Read])?;
     if ticket.is_some() {
         place.require(Dir::Tickets, &[Capability::Read, Capability::Update])?;

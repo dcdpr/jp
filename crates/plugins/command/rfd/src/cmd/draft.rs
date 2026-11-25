@@ -1,11 +1,11 @@
-//! `jp rfd draft`: a new draft from its category's template, or from a ticket.
+//! `jp rfd draft`: create a new draft from a category template or a ticket.
 //!
-//! A draft takes the first slot that no draft file holds and no RFD, draft, or
-//! ticket cites, `D05`, and its file is named after its title:
-//! `D05-my-feature.md`.
-//! The template is the project's own, `000-<category>-template.md` in the RFD
-//! directory, which `jp rfd init` writes; its `RFD NNN: TITLE` heading,
-//! `AUTHOR`, and `DATE` placeholders are filled in, and its `Category` set.
+//! A draft is assigned the first slot (`D05`) that has no file in `drafts/` and
+//! is not referenced in any RFD, draft, ticket, or priority board entry.
+//! Its file is named after its title (`D05-my-feature.md`).
+//! The template is `000-<category>-template.md` in the RFD directory (created
+//! by `jp rfd init`), with its `RFD NNN: TITLE` heading, `AUTHOR`, and `DATE`
+//! placeholders filled in and its `Category` metadata field set.
 
 use std::{fs, io};
 
@@ -31,12 +31,13 @@ pub(crate) struct Draft<'a> {
     pub date: &'a str,
 }
 
-/// A ticket a draft is seeded from.
+/// Ticket metadata used to seed a draft.
 struct Seed<'a> {
     ticket: TicketId,
     file: &'a Utf8Path,
 
-    /// The id the ticket's `Promoted to` names, which the draft replaces.
+    /// Existing `Promoted to` RFD ID on the ticket, which the new draft
+    /// replaces.
     promoted_to: Option<RfdId>,
 
     description: &'a str,
@@ -145,11 +146,12 @@ pub(crate) fn from_ticket(
     Ok(output)
 }
 
-/// Check the request and write the draft, returning its id, its path, and a
-/// warning naming the draft ids cited with no draft file to match.
+/// Validate the request and write the draft file, returning its ID, path, and
+/// an optional warning listing dangling draft references.
 ///
-/// The id the seed ticket's `Promoted to` names is left out of that warning for
-/// that ticket: the field is about to name the new draft.
+/// The RFD ID in the seed ticket's `Promoted to` field is omitted from the
+/// warning for that ticket because `from_ticket` overwrites that field with the
+/// new draft ID.
 fn create(
     paths: &Paths,
     categories: &[String],

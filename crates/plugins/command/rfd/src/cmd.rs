@@ -34,11 +34,11 @@ use crate::{
     priority::{self, PRIORITY_FILE},
 };
 
-/// A draft id, which counts as a mention only standing alone.
+/// Draft ID pattern (`D01` to `D99`), matched only as a standalone token.
 static DRAFT_TOKEN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"D[0-9]{2}").expect("valid regex"));
 
-/// A draft cited the way documents cite RFDs: `RFD D05`.
+/// Draft citation pattern (`RFD D01` to `RFD D99`).
 static DRAFT_CITATION: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"RFD (D[0-9]{2})").expect("valid regex"));
 
@@ -81,7 +81,7 @@ fn capitalized(category: &str) -> String {
     }
 }
 
-/// The draft ids `text` mentions standing alone.
+/// Return the standalone draft ID tokens (`D01` to `D99`) found in `text`.
 fn draft_tokens(text: &str) -> Vec<String> {
     let word = |c: char| c.is_ascii_alphanumeric() || c == '_';
 
@@ -96,10 +96,11 @@ fn draft_tokens(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// The draft ids `text` cites as `RFD D05` where no digit follows.
+/// Return the draft IDs cited as `RFD Dnn` (not followed by a digit) in `text`.
 ///
-/// This is the boundary a promotion's citation rewrite uses, so `_RFD D05_` and
-/// `RFD D05s` count even though the bare id doesn't stand alone there.
+/// Matches the boundary used by promotion's citation rewrite, so `_RFD D05_`
+/// and `RFD D05s` are included even though the bare ID is not a standalone
+/// token.
 fn draft_citations(text: &str) -> impl Iterator<Item = &str> {
     DRAFT_CITATION
         .captures_iter(text)
@@ -108,11 +109,11 @@ fn draft_citations(text: &str) -> impl Iterator<Item = &str> {
         .map(|id| id.as_str())
 }
 
-/// Every draft id a promotion would rewrite, with the files naming it: the ids
-/// the RFDs, drafts, and tickets mention, and the drafts the board file ranks.
+/// Collect every draft ID that promotion would rewrite, mapped to the files
+/// that reference it across RFDs, drafts, tickets, and the priority board.
 ///
-/// A board file that can't be read is passed over: promotion refuses to run
-/// until it is fixed, so its entries are never rewritten.
+/// An unreadable priority board is skipped because promotion refuses to run
+/// until the board file is valid.
 fn draft_mentions(paths: &Paths) -> Result<BTreeMap<RfdId, Vec<Utf8PathBuf>>, String> {
     let mut mentions: BTreeMap<RfdId, Vec<Utf8PathBuf>> = BTreeMap::new();
     for dir in [paths.rfds.clone(), paths.drafts(), paths.tickets.clone()] {
@@ -150,15 +151,14 @@ fn draft_mentions(paths: &Paths) -> Result<BTreeMap<RfdId, Vec<Utf8PathBuf>>, St
     Ok(mentions)
 }
 
-/// The first draft slot that no draft file holds and nothing a promotion
-/// rewrites names, with a warning naming the draft ids that are named but have
-/// no draft file, if there are any.
+/// Return the first draft slot that has no file in `drafts/` and is not
+/// referenced anywhere promotion would rewrite, along with a warning listing
+/// any dangling draft references (referenced draft IDs with no matching file).
 ///
-/// Promoting a draft rewrites every mention of its id, so a draft given a slot
-/// that is still mentioned would take over the mentions of the draft that held
-/// it before.
-/// The mention of an id in a file given as `unreported` still reserves its
-/// slot, but is left out of the warning.
+/// Promoting a draft rewrites every reference to its ID, so reusing a slot that
+/// is still referenced would redirect those stale references to the new RFD.
+/// A `(file, id)` pair passed in `unreported` still reserves `id`, but is
+/// omitted from the warning.
 fn uncited_draft_slot(
     paths: &Paths,
     unreported: Option<(&Utf8Path, RfdId)>,

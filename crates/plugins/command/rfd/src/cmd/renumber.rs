@@ -216,10 +216,11 @@ fn rewrite_references(
     Ok(updated)
 }
 
-/// A warning naming the files that name the draft slot `target`, if any.
+/// Warn if any files already reference the explicit draft slot `target`.
 ///
-/// Renumbering refuses a slot a draft file holds, so every mention of `target`
-/// was written about an earlier draft, and names the moved draft from then on.
+/// Renumbering rejects slots that already have a draft file, so any existing
+/// references to `target` are stale citations to a previous draft that will now
+/// resolve to the renumbered draft.
 fn cited_target(paths: &Paths, target: RfdId) -> Result<Option<String>, String> {
     if !matches!(target, RfdId::Draft(_)) {
         return Ok(None);

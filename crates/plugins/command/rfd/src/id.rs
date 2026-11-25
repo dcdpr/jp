@@ -288,8 +288,8 @@ fn taken(dir: &Utf8Path) -> Result<HashSet<RfdId>, String> {
     Ok(taken)
 }
 
-/// The first draft slot that no file in the drafts directory of the RFD
-/// directory `dir` takes and `reserved` doesn't hold.
+/// Return the first draft slot that has no file in `dir/drafts/` and is not in
+/// `reserved`.
 pub(crate) fn next_draft_slot(dir: &Utf8Path, reserved: &BTreeSet<RfdId>) -> Result<RfdId, String> {
     let taken = taken(&dir.join(DRAFTS_DIR))?;
 

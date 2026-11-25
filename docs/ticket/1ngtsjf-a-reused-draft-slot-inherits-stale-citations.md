@@ -43,14 +43,14 @@ Cause:
 - **Date**: 2026-11-25T06:14:39Z
 
 Happened again on 2026-11-24.
-This ticket cites `D38`, the slot was free, and `rfd_draft` handed it out for
+This ticket cites `D38`, the slot was free, and `rfd_draft` allocated it to
 "Stored Conversation Format Compatibility".
 Promoting that draft to RFD 144 rewrote all five `D38` mentions in this ticket's
 description to `144`.
-The description was restored by hand.
+The description was restored manually.
 
-Until this is fixed, a draft allocated to `D38` and promoted will rewrite this
-description again.
+Until this is fixed, allocating a draft to `D38` and promoting it will rewrite
+this description again.
 
 -----
 
@@ -58,7 +58,7 @@ description again.
 - **Date**: 2026-11-25T10:11:48Z
 
 Third occurrence, on 2026-11-25.
-The slot named in this ticket was handed out again, for "Access Grants for
-Built-in Tools", and promoting that draft to RFD 146 rewrote all eight mentions
-in the description and the comment above.
-Both were restored by hand.
+The slot cited in this ticket was allocated again to "Access Grants for Built-in
+Tools", and promoting that draft to RFD 146 rewrote all eight mentions in the
+description and the comment above.
+Both were restored manually.
