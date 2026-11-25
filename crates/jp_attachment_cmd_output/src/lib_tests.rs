@@ -27,6 +27,7 @@ fn test_uri_to_command_hierarchical() {
                 cmd: "ls".to_string(),
                 args: vec![],
                 description: None,
+                env: vec![],
             }),
         ),
         (
@@ -35,6 +36,7 @@ fn test_uri_to_command_hierarchical() {
                 cmd: "ls".to_string(),
                 args: vec![],
                 description: Some("hello world".to_string()),
+                env: vec![],
             }),
         ),
         (
@@ -43,6 +45,7 @@ fn test_uri_to_command_hierarchical() {
                 cmd: "ls".to_string(),
                 args: vec!["-lah".to_string()],
                 description: None,
+                env: vec![],
             }),
         ),
         (
@@ -51,6 +54,7 @@ fn test_uri_to_command_hierarchical() {
                 cmd: "ls".to_string(),
                 args: vec!["-lah".to_string()],
                 description: Some("hello world".to_string()),
+                env: vec![],
             }),
         ),
         (
@@ -59,6 +63,7 @@ fn test_uri_to_command_hierarchical() {
                 cmd: "git".to_string(),
                 args: vec!["diff".to_string(), "--cached".to_string()],
                 description: None,
+                env: vec![],
             }),
         ),
         (
@@ -67,6 +72,7 @@ fn test_uri_to_command_hierarchical() {
                 cmd: "ls".to_string(),
                 args: vec!["-l".to_string(), "-a".to_string(), "-h".to_string()],
                 description: None,
+                env: vec![],
             }),
         ),
         (
@@ -79,7 +85,33 @@ fn test_uri_to_command_hierarchical() {
                 cmd: "date".to_string(),
                 args: vec!["+%Y-%m-%d".to_string()],
                 description: Some("Current Date".to_string()),
+                env: vec![],
             }),
+        ),
+        (
+            "cmd://printenv?arg=TERM&env=TERM",
+            Ok(Command {
+                cmd: "printenv".to_string(),
+                args: vec!["TERM".to_string()],
+                description: None,
+                env: vec!["TERM".to_string()],
+            }),
+        ),
+        (
+            "cmd://printenv?env=TERM&env=SHELL&description=hello%20world",
+            Ok(Command {
+                cmd: "printenv".to_string(),
+                args: vec![],
+                description: Some("hello world".to_string()),
+                env: vec!["TERM".to_string(), "SHELL".to_string()],
+            }),
+        ),
+        (
+            "cmd://printenv?env=TERM=xterm",
+            Err(
+                "invalid `env` value `TERM=xterm`: expected the name of an environment variable, \
+                 such as `TERM`",
+            ),
         ),
     ];
 
@@ -103,6 +135,7 @@ fn test_uri_to_command_opaque() {
                 cmd: "ls".to_string(),
                 args: vec![],
                 description: None,
+                env: vec![],
             }),
         ),
         (
@@ -111,6 +144,7 @@ fn test_uri_to_command_opaque() {
                 cmd: "git".to_string(),
                 args: vec!["diff".to_string(), "--cached".to_string()],
                 description: None,
+                env: vec![],
             }),
         ),
         (
@@ -119,6 +153,7 @@ fn test_uri_to_command_opaque() {
                 cmd: "ls".to_string(),
                 args: vec!["-l".to_string(), "-a".to_string(), "-h".to_string()],
                 description: None,
+                env: vec![],
             }),
         ),
         (
@@ -131,6 +166,7 @@ fn test_uri_to_command_opaque() {
                     "hello world".to_string(),
                 ],
                 description: None,
+                env: vec![],
             }),
         ),
         (
@@ -139,6 +175,34 @@ fn test_uri_to_command_opaque() {
                 cmd: "git".to_string(),
                 args: vec!["diff".to_string(), "--cached".to_string()],
                 description: Some("staged changes".to_string()),
+                env: vec![],
+            }),
+        ),
+        (
+            "cmd:printenv TERM?env=TERM",
+            Ok(Command {
+                cmd: "printenv".to_string(),
+                args: vec!["TERM".to_string()],
+                description: None,
+                env: vec!["TERM".to_string()],
+            }),
+        ),
+        (
+            "cmd:printenv TERM?envs=TERM&envs=SHELL",
+            Ok(Command {
+                cmd: "printenv".to_string(),
+                args: vec!["TERM".to_string()],
+                description: None,
+                env: vec!["TERM".to_string(), "SHELL".to_string()],
+            }),
+        ),
+        (
+            "cmd:printenv TERM?env[]=TERM&envs[]=SHELL",
+            Ok(Command {
+                cmd: "printenv".to_string(),
+                args: vec!["TERM".to_string()],
+                description: None,
+                env: vec!["TERM".to_string(), "SHELL".to_string()],
             }),
         ),
         ("cmd:", Err("Empty command")),
@@ -158,6 +222,7 @@ async fn test_commands_get_missing_binary_names_command() {
             cmd: "jp-definitely-missing-binary".to_owned(),
             args: vec!["--check".to_owned()],
             description: None,
+            env: vec![],
         })
         .collect(),
     );
@@ -175,6 +240,64 @@ async fn test_commands_get_missing_binary_names_command() {
     );
 }
 
+/// Cargo sets `CARGO_PKG_NAME` in the environment of a test binary, so it is a
+/// variable the command would see if it inherited that environment.
+#[tokio::test]
+async fn test_commands_get_passes_no_variable_the_command_does_not_name() {
+    assert_eq!(
+        std::env::var("CARGO_PKG_NAME").as_deref(),
+        Ok("jp_attachment_cmd_output"),
+        "the variable must be set here for the command to be able to inherit it"
+    );
+
+    let commands = Commands(
+        std::iter::once(Command {
+            cmd: "sh".to_owned(),
+            args: vec!["-c".to_owned(), "echo ${CARGO_PKG_NAME-unset}".to_owned()],
+            description: None,
+            env: vec![],
+        })
+        .collect(),
+    );
+
+    let root = camino_tempfile::tempdir().unwrap();
+    let attachments = commands.get(root.path()).await.unwrap();
+
+    assert_eq!(attachments, vec![Attachment::text(
+        "sh -c echo ${CARGO_PKG_NAME-unset}",
+        indoc::indoc! {"
+            <Output>
+              <stdout>unset\n</stdout>
+              <code>0</code>
+            </Output>"},
+    )]);
+}
+
+#[tokio::test]
+async fn test_commands_get_passes_a_variable_the_command_names() {
+    let commands = Commands(
+        std::iter::once(Command {
+            cmd: "sh".to_owned(),
+            args: vec!["-c".to_owned(), "echo ${CARGO_PKG_NAME-unset}".to_owned()],
+            description: None,
+            env: vec!["CARGO_PKG_NAME".to_owned()],
+        })
+        .collect(),
+    );
+
+    let root = camino_tempfile::tempdir().unwrap();
+    let attachments = commands.get(root.path()).await.unwrap();
+
+    assert_eq!(attachments, vec![Attachment::text(
+        "sh -c echo ${CARGO_PKG_NAME-unset}",
+        indoc::indoc! {"
+            <Output>
+              <stdout>jp_attachment_cmd_output\n</stdout>
+              <code>0</code>
+            </Output>"},
+    )]);
+}
+
 #[tokio::test]
 async fn test_commands_get() {
     let commands = Commands(
@@ -183,16 +306,19 @@ async fn test_commands_get() {
                 cmd: "ls".to_owned(),
                 args: vec![],
                 description: None,
+                env: vec![],
             },
             Command {
                 cmd: "ls".to_owned(),
                 args: vec!["-a".to_owned()],
                 description: None,
+                env: vec![],
             },
             Command {
                 cmd: "false".to_owned(),
                 args: vec![],
                 description: Some("Run false".to_owned()),
+                env: vec![],
             },
         ]
         .into_iter()

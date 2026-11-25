@@ -2,7 +2,7 @@ use clap::{Arg, ArgAction, ArgMatches, Command, value_parser};
 use jp_config::PartialAppConfig;
 use jp_workspace::Workspace;
 
-use super::validate_attachment;
+use super::{attach_urls, validate_attachment};
 use crate::{
     IntoPartialAppConfig,
     cli::{CommandArgs, many},
@@ -63,7 +63,7 @@ impl IntoPartialAppConfig for Add {
             let uri = uri.parse(workspace.map(Workspace::root))?;
             validate_attachment(&uri)?;
 
-            partial.conversation.attachments.push(uri.clone().into());
+            attach_urls(&mut partial, [uri]);
         }
 
         Ok(partial)

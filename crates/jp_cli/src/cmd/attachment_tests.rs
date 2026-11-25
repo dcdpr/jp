@@ -1,5 +1,10 @@
+use std::fs;
+
 use camino_tempfile::tempdir;
-use jp_config::AppConfig;
+use jp_config::{
+    AppConfig,
+    conversation::attachment::{PartialAttachmentConfig, PartialAttachmentObjectConfig},
+};
 use jp_conversation::ConversationId;
 use jp_printer::{OutputFormat, Printer};
 use jp_workspace::Workspace;
@@ -73,6 +78,97 @@ fn an_empty_listing_is_still_an_array_in_json() {
         parsed.get("message").is_none(),
         "an outcome sentence would mean the prose shortcut ran: {parsed}"
     );
+}
+
+fn add_command(args: &[&str]) -> add::Add {
+    let matches = add::Add::augment(Command::new("add"))
+        .try_get_matches_from(["add"].iter().chain(args))
+        .unwrap();
+
+    add::Add::from_matches(&matches).unwrap()
+}
+
+/// Attaching a URL twice sends its content to the model twice, so adding a URL
+/// the conversation already attaches changes nothing.
+#[test]
+fn attachment_add_skips_a_url_already_attached() {
+    let diff = Url::parse("gh:pull/1/diff").unwrap();
+    let reviews = Url::parse("gh:pull/1/reviews").unwrap();
+    let mut partial = PartialAppConfig::default();
+    partial.conversation.attachments.push(diff.clone().into());
+
+    let partial = add_command(&["gh:pull/1/diff", "gh:pull/1/reviews"])
+        .apply_cli_config(None, partial, None)
+        .unwrap();
+
+    assert_eq!(partial.conversation.attachments.to_vec(), vec![
+        PartialAttachmentConfig::Url(diff),
+        PartialAttachmentConfig::Url(reviews),
+    ]);
+}
+
+#[test]
+fn attachment_add_keeps_one_entry_for_a_url_given_twice() {
+    let diff = Url::parse("gh:pull/1/diff").unwrap();
+
+    let partial = add_command(&["gh:pull/1/diff", "gh:pull/1/diff"])
+        .apply_cli_config(None, PartialAppConfig::default(), None)
+        .unwrap();
+
+    assert_eq!(partial.conversation.attachments.to_vec(), vec![
+        PartialAttachmentConfig::Url(diff)
+    ]);
+}
+
+/// A table entry and a URL entry that build the same URL resolve to the same
+/// content, so they are one attachment.
+#[test]
+fn attachment_add_skips_a_url_a_table_entry_already_builds() {
+    let table = PartialAttachmentConfig::Object(PartialAttachmentObjectConfig {
+        kind: Some("cmd".to_owned()),
+        path: Some("date".to_owned()),
+        params: None,
+    });
+    let mut partial = PartialAppConfig::default();
+    partial.conversation.attachments.push(table.clone());
+
+    let partial = add_command(&["cmd://date"])
+        .apply_cli_config(None, partial, None)
+        .unwrap();
+
+    assert_eq!(partial.conversation.attachments.to_vec(), vec![table]);
+}
+
+/// A conversation stored with a repeated URL still sends that attachment once.
+/// The repeat keeps its slot, so the groups stay aligned with the URLs.
+#[test]
+fn load_conversation_attachments_resolves_a_repeated_url_once() {
+    let tmp = tempdir().unwrap();
+    fs::write(tmp.path().join("notes.md"), "hello").unwrap();
+    let workspace = Workspace::in_memory(tmp.path().to_path_buf());
+    let (printer, _out, _err) = Printer::memory(OutputFormat::Text);
+    let runtime = Runtime::new().unwrap();
+    let ctx = Ctx::new(
+        crate::bootstrap::ExecutionContext::for_workspace(&workspace),
+        workspace,
+        None,
+        Runtime::new().unwrap(),
+        Globals::default(),
+        AppConfig::new_test(),
+        None,
+        printer,
+    );
+    let url = Url::parse("file:notes.md").unwrap();
+
+    let groups = runtime
+        .block_on(load_conversation_attachments(&ctx, vec![url.clone(), url]))
+        .unwrap();
+
+    let sources: Vec<Vec<&str>> = groups
+        .iter()
+        .map(|group| group.iter().map(|a| a.source.as_str()).collect())
+        .collect();
+    assert_eq!(sources, [vec!["notes.md"], vec![]]);
 }
 
 #[test]

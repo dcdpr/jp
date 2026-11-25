@@ -13,13 +13,18 @@
 //! `issues` is the only namespace today; the grammar is shaped as
 //! `ag://<namespace>/<id>` so more can be added without breaking existing
 //! references.
+//!
+//! The binary runs with `PATH` and `HOME` as its whole environment.
+//! An `env` query parameter names one more variable to pass to it:
+//! `ag:592?env=NAME`.
+//! The parameter can also be spelled `envs`, `env[]`, or `envs[]`.
 
 use std::{collections::BTreeSet, error::Error};
 
 use async_trait::async_trait;
 use camino::Utf8Path;
 use jp_attachment::{
-    Attachment, BoxedHandler, HANDLERS, Handler, distributed_slice, linkme, typetag,
+    Attachment, BoxedHandler, HANDLERS, Handler, child_env, distributed_slice, linkme, typetag,
 };
 use serde::{Deserialize, Serialize};
 use tracing::debug;
@@ -110,6 +115,7 @@ fn fetch(
     // attach the name here while we still have it.
     let output = duct::cmd(BINARY, ["--json".to_string(), payload])
         .dir(root)
+        .full_env(child_env(reference.env()))
         .stdout_capture()
         .stderr_capture()
         .unchecked()

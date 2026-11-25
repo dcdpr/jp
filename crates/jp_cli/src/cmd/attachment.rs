@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use clap::{ArgMatches, Command};
 use jp_attachment_agentic_shepherd as _;
 use jp_attachment_bear_note as _;
@@ -9,9 +11,9 @@ use jp_attachment_internal::{
     ResolveError, resolve as resolve_internal_attachment, validate as validate_internal_attachment,
 };
 use jp_attachment_mcp_resources as _;
-use jp_config::PartialAppConfig;
+use jp_config::{Config as _, PartialAppConfig, conversation::attachment::AttachmentConfig};
 use jp_workspace::Workspace;
-use tracing::{trace, warn};
+use tracing::{debug, trace, warn};
 use url::Url;
 
 use super::Output;
@@ -132,6 +134,38 @@ pub(crate) fn validate_attachment(uri: &Url) -> Result<()> {
     Ok(())
 }
 
+/// Attach `urls` to the conversation config, skipping every URL the config
+/// already attaches.
+///
+/// An attachment is identified by its URL, so a table entry that builds a URL
+/// attaches that URL.
+/// A URL resolves to the same content each time it is read, and every entry is
+/// sent to the provider, so a second entry for a URL only sends its content
+/// twice.
+pub(crate) fn attach_urls(partial: &mut PartialAppConfig, urls: impl IntoIterator<Item = Url>) {
+    let attachments = &mut partial.conversation.attachments;
+
+    // An entry that builds no URL is not a duplicate of one.
+    let mut attached: Vec<Url> = attachments
+        .iter()
+        .filter_map(|attachment| {
+            AttachmentConfig::from_partial(attachment.clone(), vec![])
+                .ok()?
+                .to_url()
+                .ok()
+        })
+        .collect();
+
+    for url in urls {
+        if attached.contains(&url) {
+            continue;
+        }
+
+        attached.push(url.clone());
+        attachments.push(url.into());
+    }
+}
+
 pub(crate) async fn register_attachment(
     ctx: &Ctx,
     uri: Url,
@@ -176,28 +210,44 @@ pub(crate) async fn register_attachment(
 /// rather than aborting the whole query.
 /// Every other failure (invalid URI, real I/O error, etc.) is propagated.
 ///
+/// A URL given more than once is resolved once, at its first position.
+///
 /// Returns one group per URL, in the order the URLs were given; a skipped
-/// reference yields an empty group, keeping the groups aligned with the input.
+/// reference or a repeated URL yields an empty group, keeping the groups
+/// aligned with the input.
 pub(crate) async fn load_conversation_attachments(
     ctx: &Ctx,
     urls: Vec<Url>,
 ) -> Result<Vec<Vec<jp_attachment::Attachment>>> {
+    // A conversation's stored config can repeat a URL, and each handler is
+    // built per URL, so a repeat is only visible here.
+    let mut seen = HashSet::new();
+
     // Handle the missing-conversation case inside each future so the outer
     // `try_join_all` keeps its fail-fast behavior for real errors: a
     // structural failure aborts the batch immediately instead of waiting
     // for slow HTTP/GitHub handlers to finish.
-    let futs = urls.into_iter().map(|url| async move {
-        match register_attachment(ctx, url).await {
-            Ok(atts) => Ok(atts),
-            Err(Error::AttachmentConversationMissing { id, uri }) => {
-                warn!(
-                    %id,
-                    %uri,
-                    "Skipping attachment: referenced conversation is unavailable."
-                );
-                Ok(Vec::new())
+    let futs = urls.into_iter().map(|url| {
+        let repeated = !seen.insert(url.clone());
+
+        async move {
+            if repeated {
+                debug!(uri = %url, "Skipping attachment: URL is attached more than once.");
+                return Ok(Vec::new());
             }
-            Err(error) => Err(error),
+
+            match register_attachment(ctx, url).await {
+                Ok(atts) => Ok(atts),
+                Err(Error::AttachmentConversationMissing { id, uri }) => {
+                    warn!(
+                        %id,
+                        %uri,
+                        "Skipping attachment: referenced conversation is unavailable."
+                    );
+                    Ok(Vec::new())
+                }
+                Err(error) => Err(error),
+            }
         }
     });
     futures::future::try_join_all(futs).await
