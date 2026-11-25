@@ -1,6 +1,6 @@
 # Repeated conversation IDs run a command twice on one target
 
-- **Status**: In Progress
+- **Status**: Done
 - **Authors**: jp
 - **Date**: 2026-11-25
 - **Label**: client=cli
