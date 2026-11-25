@@ -14,10 +14,11 @@
 //! `ag://<namespace>/<id>` so more can be added without breaking existing
 //! references.
 //!
-//! The binary runs with `PATH` and `HOME` as its whole environment.
-//! An `env` query parameter names one more variable to pass to it:
+//! The binary runs in an isolated environment containing `PATH` and `HOME`
+//! (plus `USERPROFILE` and `SystemRoot` on Windows).
+//! Pass additional variables from the parent environment with the `env` query
+//! parameter (also accepted as `envs`, `env[]`, or `envs[]`), for example
 //! `ag:592?env=NAME`.
-//! The parameter can also be spelled `envs`, `env[]`, or `envs[]`.
 
 use std::{collections::BTreeSet, error::Error};
 

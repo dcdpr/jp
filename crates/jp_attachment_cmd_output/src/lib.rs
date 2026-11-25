@@ -26,8 +26,8 @@ struct Command {
     args: Vec<String>,
     description: Option<String>,
 
-    /// Names of the environment variables the command receives, in addition to
-    /// the ones every process spawned for an attachment receives.
+    /// Additional environment variables forwarded to the command beyond
+    /// [`jp_attachment::BASE_ENV_VARS`].
     #[serde(default)]
     env: Vec<String>,
 }

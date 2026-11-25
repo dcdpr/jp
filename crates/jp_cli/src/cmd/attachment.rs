@@ -134,18 +134,14 @@ pub(crate) fn validate_attachment(uri: &Url) -> Result<()> {
     Ok(())
 }
 
-/// Attach `urls` to the conversation config, skipping every URL the config
-/// already attaches.
+/// Append `urls` to the conversation config, skipping URLs that are already
+/// attached.
 ///
-/// An attachment is identified by its URL, so a table entry that builds a URL
-/// attaches that URL.
-/// A URL resolves to the same content each time it is read, and every entry is
-/// sent to the provider, so a second entry for a URL only sends its content
-/// twice.
+/// Deduplication compares canonical URLs, so a URL entry and a config-table
+/// entry that resolve to the same URL are treated as duplicates.
 pub(crate) fn attach_urls(partial: &mut PartialAppConfig, urls: impl IntoIterator<Item = Url>) {
     let attachments = &mut partial.conversation.attachments;
 
-    // An entry that builds no URL is not a duplicate of one.
     let mut attached: Vec<Url> = attachments
         .iter()
         .filter_map(|attachment| {
@@ -210,17 +206,17 @@ pub(crate) async fn register_attachment(
 /// rather than aborting the whole query.
 /// Every other failure (invalid URI, real I/O error, etc.) is propagated.
 ///
-/// A URL given more than once is resolved once, at its first position.
+/// Duplicate URLs are resolved once, at their first position.
 ///
-/// Returns one group per URL, in the order the URLs were given; a skipped
-/// reference or a repeated URL yields an empty group, keeping the groups
-/// aligned with the input.
+/// Returns one group per input URL in order; a skipped reference or duplicate
+/// URL yields an empty group to keep the output aligned with `urls`.
 pub(crate) async fn load_conversation_attachments(
     ctx: &Ctx,
     urls: Vec<Url>,
 ) -> Result<Vec<Vec<jp_attachment::Attachment>>> {
-    // A conversation's stored config can repeat a URL, and each handler is
-    // built per URL, so a repeat is only visible here.
+    // Stored conversation configs can contain duplicate URLs, and each URL
+    // instantiates its own handler in `register_attachment`, so deduplicate
+    // across the batch here.
     let mut seen = HashSet::new();
 
     // Handle the missing-conversation case inside each future so the outer

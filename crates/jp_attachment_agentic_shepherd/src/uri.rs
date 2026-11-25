@@ -37,8 +37,8 @@ pub(crate) struct Reference {
     namespace: Namespace,
     id: String,
 
-    /// Names of the environment variables the tracker binary receives, in
-    /// addition to the ones every process spawned for an attachment receives.
+    /// Additional environment variables forwarded to the tracker binary beyond
+    /// [`jp_attachment::BASE_ENV_VARS`].
     #[serde(default)]
     env: Vec<String>,
 }
@@ -61,8 +61,8 @@ impl Reference {
     /// Accepts both the hierarchical (`ag://issues/592`) and opaque
     /// (`ag:issues/592`) forms, the singular and plural namespace spelling, and
     /// the bare-number shorthand (`ag:592`) which defaults to `issues`.
-    /// Each `env` query parameter names an environment variable the tracker
-    /// binary receives, in any spelling [`env_names`] reads.
+    /// Each `env` query parameter names an environment variable forwarded to
+    /// the tracker binary (in any spelling accepted by [`env_names`]).
     pub(crate) fn parse(uri: &Url) -> Result<Self, Box<dyn Error + Send + Sync>> {
         if uri.scheme() != SCHEME {
             return Err(format!("expected `{SCHEME}` scheme, got `{}`", uri.scheme()).into());

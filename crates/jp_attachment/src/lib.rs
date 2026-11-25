@@ -18,13 +18,13 @@ use url::Url;
 #[distributed_slice]
 pub static HANDLERS: [fn() -> BoxedHandler] = [..];
 
-/// Names of the environment variables passed to every process an attachment
+/// Names of the environment variables passed to every subprocess an attachment
 /// handler spawns.
 ///
-/// `PATH` lets the process find the programs it runs, and `HOME` lets it find
-/// its user-level configuration.
-/// On Windows, user-level configuration is found through `USERPROFILE`, and a
-/// process needs `SystemRoot` to load system libraries.
+/// `PATH` lets the subprocess find executables, and `HOME` lets it find
+/// user-level configuration.
+/// On Windows, `USERPROFILE` provides the user profile directory and
+/// `SystemRoot` is required to load system libraries.
 pub const BASE_ENV_VARS: &[&str] = if cfg!(windows) {
     &["PATH", "HOME", "USERPROFILE", "SystemRoot"]
 } else {
@@ -32,19 +32,19 @@ pub const BASE_ENV_VARS: &[&str] = if cfg!(windows) {
 };
 
 /// Query parameter of an attachment URL that names an environment variable to
-/// pass to the process the handler spawns.
+/// pass to the spawned subprocess.
 ///
-/// Given once per variable: `cmd://printenv?arg=TERM&env=TERM`.
-/// This is the spelling a handler writes when it renders a URL; [`env_names`]
-/// also reads `envs`, `env[]`, and `envs[]`.
+/// Repeat the parameter to pass multiple variables:
+/// `cmd://printenv?arg=TERM&env=TERM`.
+/// Handlers write this canonical spelling when rendering a URL; [`env_names`]
+/// also accepts `envs`, `env[]`, and `envs[]`.
 pub const ENV_PARAM: &str = "env";
 
-/// Every spelling of [`ENV_PARAM`] that [`env_names`] reads.
+/// Accepted query parameter spellings for [`ENV_PARAM`].
 ///
-/// A config table lists several names under one key, where the plural matches
-/// the `args` key beside it: `params.envs = ["TERM", "SHELL"]`.
-/// The bracketed spellings are the ones `arg[]` and `args[]` have for a
-/// repeated query parameter.
+/// Config tables list variable names under `params.envs = ["TERM", "SHELL"]`,
+/// matching `params.args`; `env[]` and `envs[]` match the bracketed spellings
+/// accepted for `arg[]` and `args[]`.
 const ENV_PARAM_SPELLINGS: &[&str] = &[ENV_PARAM, "envs", "env[]", "envs[]"];
 
 /// Finds the first registered attachment handler to handle the given scheme.
@@ -239,16 +239,16 @@ pub fn percent_encode_str(encoded: &str) -> String {
         .to_string()
 }
 
-/// Return the environment variable names `uri` gives as [`ENV_PARAM`] query
-/// parameters, in the order they appear.
+/// Extract the environment variable names specified by [`ENV_PARAM`] query
+/// parameters in `uri`, in order of appearance.
 ///
-/// The parameter may be spelled `env`, `envs`, `env[]`, or `envs[]`.
+/// Accepts the parameter spellings `env`, `envs`, `env[]`, and `envs[]`.
 ///
 /// # Errors
 ///
-/// Returns an error for a name that is empty, or that contains `=` or a NUL
-/// character.
-/// The parameter names a variable to pass on, and cannot set its value.
+/// Returns an error if a variable name is empty or contains `=` or a NUL byte.
+/// The parameter forwards an existing variable from the parent environment and
+/// cannot assign a new value.
 pub fn env_names(uri: &Url) -> Result<Vec<String>, Box<dyn Error + Send + Sync>> {
     let mut names = vec![];
     for (key, name) in uri.query_pairs() {
@@ -270,25 +270,17 @@ pub fn env_names(uri: &Url) -> Result<Vec<String>, Box<dyn Error + Send + Sync>>
     Ok(names)
 }
 
-/// Build the complete environment of a process an attachment handler spawns.
+/// Build the isolated environment for a subprocess spawned by an attachment
+/// handler.
 ///
-/// Returns every variable of [`BASE_ENV_VARS`] and `names` that is set in the
-/// current process, with the value it has there.
-/// No other variable of the current process is returned, so a handler that
-/// passes the result as the whole environment of the spawned process keeps the
-/// rest of its own environment from that process.
-///
-/// An attachment is resolved again for every query, and its content should be
-/// the same each time unless what it points at changed.
-/// Restricting the environment to named variables keeps unrelated state of the
-/// calling shell out of that content.
+/// Includes each variable in [`BASE_ENV_VARS`] and `names` that is set in the
+/// current process.
+/// Variables not in either list are omitted.
 #[must_use]
 pub fn child_env(names: &[String]) -> Vec<(OsString, OsString)> {
     child_env_with(names, |name| env::var_os(name))
 }
 
-/// Build the environment of a spawned process from `lookup`, which returns the
-/// value a variable has in the current process.
 fn child_env_with(
     names: &[String],
     lookup: impl Fn(&str) -> Option<OsString>,

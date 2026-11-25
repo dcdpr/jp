@@ -88,8 +88,6 @@ fn add_command(args: &[&str]) -> add::Add {
     add::Add::from_matches(&matches).unwrap()
 }
 
-/// Attaching a URL twice sends its content to the model twice, so adding a URL
-/// the conversation already attaches changes nothing.
 #[test]
 fn attachment_add_skips_a_url_already_attached() {
     let diff = Url::parse("gh:pull/1/diff").unwrap();
@@ -120,8 +118,6 @@ fn attachment_add_keeps_one_entry_for_a_url_given_twice() {
     ]);
 }
 
-/// A table entry and a URL entry that build the same URL resolve to the same
-/// content, so they are one attachment.
 #[test]
 fn attachment_add_skips_a_url_a_table_entry_already_builds() {
     let table = PartialAttachmentConfig::Object(PartialAttachmentObjectConfig {
@@ -139,8 +135,6 @@ fn attachment_add_skips_a_url_a_table_entry_already_builds() {
     assert_eq!(partial.conversation.attachments.to_vec(), vec![table]);
 }
 
-/// A conversation stored with a repeated URL still sends that attachment once.
-/// The repeat keeps its slot, so the groups stay aligned with the URLs.
 #[test]
 fn load_conversation_attachments_resolves_a_repeated_url_once() {
     let tmp = tempdir().unwrap();

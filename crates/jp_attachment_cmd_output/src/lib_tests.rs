@@ -240,10 +240,9 @@ async fn test_commands_get_missing_binary_names_command() {
     );
 }
 
-/// Cargo sets `CARGO_PKG_NAME` in the environment of a test binary, so it is a
-/// variable the command would see if it inherited that environment.
 #[tokio::test]
 async fn test_commands_get_passes_no_variable_the_command_does_not_name() {
+    // Cargo sets `CARGO_PKG_NAME` in the test runner environment.
     assert_eq!(
         std::env::var("CARGO_PKG_NAME").as_deref(),
         Ok("jp_attachment_cmd_output"),

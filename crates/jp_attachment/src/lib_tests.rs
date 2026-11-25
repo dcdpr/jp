@@ -18,7 +18,6 @@ fn var(name: &str, value: &str) -> (OsString, OsString) {
     (name.into(), value.into())
 }
 
-/// `SECRET` is set, but nothing names it, so it stays out.
 #[test]
 fn child_env_holds_the_base_variables_and_the_named_ones() {
     let env = child_env_with(&["TERM".to_owned()], lookup);
@@ -44,8 +43,6 @@ fn env_names_reads_every_env_parameter_in_order() {
     assert_eq!(env_names(&uri).unwrap(), ["TERM", "JP_SESSION"]);
 }
 
-/// A config table lists its names under one key, `params.envs = ["TERM",
-/// "SHELL"]`, which becomes `envs=TERM&envs=SHELL`.
 #[test]
 fn env_names_reads_the_plural_spelling() {
     let uri = Url::parse("cmd://printenv?envs=TERM&env=JP_SESSION&envs=SHELL").unwrap();
@@ -53,8 +50,6 @@ fn env_names_reads_the_plural_spelling() {
     assert_eq!(env_names(&uri).unwrap(), ["TERM", "JP_SESSION", "SHELL"]);
 }
 
-/// The bracketed spellings of a repeated query parameter, as `arg[]` and
-/// `args[]` are read for arguments.
 #[test]
 fn env_names_reads_the_bracketed_spellings() {
     let uri = Url::parse("cmd://printenv?env[]=TERM&envs[]=SHELL&env%5B%5D=JP_SESSION").unwrap();
@@ -69,8 +64,6 @@ fn env_names_is_empty_without_the_parameter() {
     assert_eq!(env_names(&uri).unwrap(), Vec::<String>::new());
 }
 
-/// `env` passes a variable on with the value it already has; `NAME=value` reads
-/// as an attempt to set one.
 #[test]
 fn env_names_rejects_an_assignment() {
     let uri = Url::parse("cmd://printenv?env=TERM=xterm").unwrap();

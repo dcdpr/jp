@@ -5533,9 +5533,6 @@ fn test_auth_is_a_no_op_when_the_flag_is_absent() {
     assert_eq!(partial.providers.llm.anthropic.auth, None);
 }
 
-/// A recipe that resumes a conversation passes the same `--attach` flags on
-/// every run.
-/// A URL attached twice is sent to the model twice, so the repeat is skipped.
 #[test]
 fn test_attach_skips_a_url_the_conversation_already_attaches() {
     let diff = Url::parse("gh:pull/1/diff").unwrap();

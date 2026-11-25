@@ -45,9 +45,10 @@ The `agentic-shepherd` binary must be available on `PATH`.
 A missing binary, a non-zero exit, or unparseable output fails the attachment
 loudly rather than attaching nothing.
 
-The binary does not inherit the environment `jp` runs in.
-It receives `PATH` and `HOME`, and every variable named by an `env` parameter,
-which can also be spelled `envs`, `env[]`, or `envs[]`:
+The binary does not inherit the parent `jp` environment.
+It receives `PATH` and `HOME` (plus `USERPROFILE` and `SystemRoot` on Windows),
+along with any variable named by an `env` query parameter (also accepted as
+`envs`, `env[]`, or `envs[]`):
 
 ```sh
 jp attachment add "ag:592?env=NAME"
