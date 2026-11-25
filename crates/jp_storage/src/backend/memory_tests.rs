@@ -175,13 +175,6 @@ fn load_expired_skips_future_conversations() {
 }
 
 #[test]
-fn sanitize_returns_empty_report() {
-    let backend = InMemoryStorageBackend::new();
-    let report = backend.sanitize().unwrap();
-    assert!(!report.has_repairs());
-}
-
-#[test]
 fn lock_acquire_and_release() {
     let backend = InMemoryStorageBackend::new();
 

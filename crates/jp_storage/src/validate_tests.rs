@@ -82,6 +82,74 @@ fn write_valid(storage: &camino::Utf8Path, id: &ConversationId) {
 }
 
 #[test]
+fn diagnosing_the_store_changes_nothing_on_disk() {
+    let tmp = tempdir().unwrap();
+    let workspace = tmp.path().join("workspace");
+    let user_root = tmp.path().join("user");
+    let storage = Storage::new(workspace.clone())
+        .unwrap()
+        .with_user_storage(&user_root, None, "abc")
+        .unwrap();
+    let cache = user_root
+        .join("abc")
+        .join(CONVERSATIONS_DIR)
+        .join(SCAN_CACHE_FILE);
+    fs::create_dir_all(cache.parent().unwrap()).unwrap();
+    let conversations = workspace.join(CONVERSATIONS_DIR);
+
+    let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
+    write_valid(&workspace, &id);
+    let tmp_file = conversations.join("17636257526").join("events.json.tmp");
+    fs::write(&tmp_file, "partial").unwrap();
+    let staging = conversations.join(crate::import_staging_dirname("17636257527"));
+    fs::create_dir_all(&staging).unwrap();
+    let broken = conversations.join("17636257528");
+    fs::create_dir_all(&broken).unwrap();
+    let notes = conversations.join("notes");
+    fs::create_dir_all(&notes).unwrap();
+
+    let diagnosis = storage.diagnose_conversations().unwrap();
+
+    let invalid: Vec<_> = diagnosis
+        .invalid
+        .iter()
+        .map(InvalidConversation::path)
+        .collect();
+    assert_eq!(invalid, vec![broken]);
+    assert_eq!(diagnosis.unrecognized, vec![notes]);
+    assert_eq!(diagnosis.leftovers, vec![staging.clone(), tmp_file.clone()]);
+    assert!(tmp_file.is_file());
+    assert!(staging.is_dir());
+    assert!(!cache.exists());
+}
+
+#[test]
+fn only_a_conversation_missing_nothing_but_its_metadata_can_have_it_rebuilt() {
+    let tmp = tempdir().unwrap();
+
+    let no_events = tmp.path().join("17636257526");
+    fs::create_dir_all(&no_events).unwrap();
+    assert!(!missing_only_metadata(&no_events));
+
+    let broken_events = tmp.path().join("17636257527");
+    fs::create_dir_all(&broken_events).unwrap();
+    fs::write(broken_events.join(EVENTS_FILE), "not json").unwrap();
+    assert!(!missing_only_metadata(&broken_events));
+
+    let broken_base_config = tmp.path().join("17636257528");
+    fs::create_dir_all(&broken_base_config).unwrap();
+    fs::write(broken_base_config.join(EVENTS_FILE), TWO_EVENTS).unwrap();
+    fs::write(broken_base_config.join(BASE_CONFIG_FILE), "not json").unwrap();
+    assert!(!missing_only_metadata(&broken_base_config));
+
+    let has_metadata = tmp.path().join("17636257529");
+    fs::create_dir_all(&has_metadata).unwrap();
+    fs::write(has_metadata.join(METADATA_FILE), "not json").unwrap();
+    fs::write(has_metadata.join(EVENTS_FILE), TWO_EVENTS).unwrap();
+    assert!(!missing_only_metadata(&has_metadata));
+}
+
+#[test]
 fn staging_dirs_are_swept_only_when_the_conversation_is_unlocked() {
     // The sweep runs at startup in every process, while another process may be
     // importing that same conversation under its lock. Reaping mid-copy would
@@ -166,7 +234,7 @@ fn test_valid_conversations_are_collected() {
 }
 
 #[test]
-fn test_invalid_dirname_is_detected() {
+fn a_directory_not_named_for_a_conversation_is_unrecognized() {
     let tmp = tempdir().unwrap();
     let storage = Storage::new(tmp.path()).unwrap();
 
@@ -175,14 +243,12 @@ fn test_invalid_dirname_is_detected() {
 
     let bad = tmp.path().join(CONVERSATIONS_DIR).join("not-a-valid-id");
     fs::create_dir_all(&bad).unwrap();
+    fs::write(bad.join(METADATA_FILE), "not json").unwrap();
 
     let result = storage.validate_conversations();
     assert_eq!(result.valid.len(), 1);
-    assert_eq!(result.invalid.len(), 1);
-    assert!(matches!(
-        result.invalid[0].error,
-        ValidationError::InvalidDirname
-    ));
+    assert!(result.invalid.is_empty());
+    assert_eq!(result.unrecognized, [bad]);
 }
 
 #[test]
@@ -200,10 +266,11 @@ fn test_missing_metadata_is_detected() {
 
     let result = storage.validate_conversations();
     assert_eq!(result.invalid.len(), 1);
-    assert!(matches!(
-        result.invalid[0].error,
-        ValidationError::MissingMetadata
-    ));
+    assert_eq!(result.invalid[0].error, ValidationError::Missing {
+        part: ConversationPart::Metadata,
+        location: StorageLocation::new(dir.join(METADATA_FILE).as_str()),
+    });
+    assert_eq!(result.invalid[0].error.to_string(), "missing metadata.json");
 }
 
 #[test]
@@ -222,10 +289,25 @@ fn test_corrupt_metadata_is_detected() {
 
     let result = storage.validate_conversations();
     assert_eq!(result.invalid.len(), 1);
-    assert!(matches!(
-        result.invalid[0].error,
-        ValidationError::CorruptMetadata { .. }
-    ));
+    assert_eq!(result.invalid[0].error, ValidationError::Unreadable {
+        part: ConversationPart::Metadata,
+        location: StorageLocation::new(dir.join(METADATA_FILE).as_str()),
+        error: ReadError::Malformed {
+            format: Some("JSON"),
+            message: "expected ident at line 1 column 2".to_owned(),
+            position: Some(Position { line: 1, column: 2 }),
+        },
+    });
+    assert_eq!(
+        result.invalid[0].error.to_string(),
+        "metadata.json: invalid JSON at line 1, column 2"
+    );
+}
+
+#[test]
+fn a_malformed_part_is_named_by_its_format() {
+    assert_eq!(malformed(Some("JSON")), "invalid JSON");
+    assert_eq!(malformed(None), "malformed");
 }
 
 #[test]
@@ -240,10 +322,11 @@ fn test_missing_events_is_detected() {
 
     let result = storage.validate_conversations();
     assert_eq!(result.invalid.len(), 1);
-    assert!(matches!(
-        result.invalid[0].error,
-        ValidationError::MissingEvents
-    ));
+    assert_eq!(result.invalid[0].error, ValidationError::Missing {
+        part: ConversationPart::Events,
+        location: StorageLocation::new(dir.join(EVENTS_FILE).as_str()),
+    });
+    assert_eq!(result.invalid[0].error.to_string(), "missing events.json");
 }
 
 #[test]
@@ -261,7 +344,78 @@ fn test_corrupt_events_is_detected() {
     assert_eq!(result.invalid.len(), 1);
     assert!(matches!(
         result.invalid[0].error,
-        ValidationError::CorruptEvents { .. }
+        ValidationError::Unreadable {
+            part: ConversationPart::Events,
+            error: ReadError::Malformed {
+                position: Some(Position { line: 1, column: 2 }),
+                ..
+            },
+            ..
+        }
+    ));
+    assert_eq!(
+        result.invalid[0].error.to_string(),
+        "events.json: invalid JSON at line 1, column 2"
+    );
+}
+
+#[test]
+fn a_directory_without_conversation_files_is_invalid() {
+    let tmp = tempdir().unwrap();
+    let storage = Storage::new(tmp.path()).unwrap();
+    let convs = tmp.path().join(CONVERSATIONS_DIR);
+
+    let drafted = convs.join("17636257526");
+    fs::create_dir_all(&drafted).unwrap();
+    fs::write(drafted.join("QUERY_MESSAGE.md"), "typed request").unwrap();
+
+    let empty = convs.join("17636257527-a-title");
+    fs::create_dir_all(&empty).unwrap();
+
+    let result = storage.validate_conversations();
+    assert!(result.valid.is_empty());
+
+    let mut invalid: Vec<_> = result
+        .invalid
+        .iter()
+        .map(|entry| (entry.path(), entry.error.to_string()))
+        .collect();
+    invalid.sort();
+    assert_eq!(invalid, [
+        (drafted, "missing metadata.json".to_owned()),
+        (empty, "missing metadata.json".to_owned()),
+    ]);
+}
+
+#[test]
+fn a_single_directory_is_validated_outside_the_conversations_dir() {
+    let tmp = tempdir().unwrap();
+    let elsewhere = tmp.path().join("elsewhere");
+
+    let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
+    write_valid(&elsewhere, &id);
+    let stored = elsewhere.join(CONVERSATIONS_DIR).join(id.to_dirname(None));
+    assert_eq!(validate_conversation_dir(&stored), Ok(()));
+
+    let empty = tmp.path().join("17636257529");
+    fs::create_dir_all(&empty).unwrap();
+    assert!(matches!(
+        validate_conversation_dir(&empty),
+        Err(ValidationError::Missing {
+            part: ConversationPart::Metadata,
+            ..
+        })
+    ));
+
+    let missing_metadata = tmp.path().join("renamed");
+    fs::create_dir_all(&missing_metadata).unwrap();
+    fs::write(missing_metadata.join(EVENTS_FILE), "[]").unwrap();
+    assert!(matches!(
+        validate_conversation_dir(&missing_metadata),
+        Err(ValidationError::Missing {
+            part: ConversationPart::Metadata,
+            ..
+        })
     ));
 }
 
@@ -281,35 +435,6 @@ fn test_skips_files_and_dot_dirs() {
     let result = storage.validate_conversations();
     assert_eq!(result.valid.len(), 1);
     assert!(result.invalid.is_empty());
-}
-
-#[test]
-fn test_trash_moves_invalid_to_trash() {
-    let tmp = tempdir().unwrap();
-    let storage = Storage::new(tmp.path()).unwrap();
-
-    let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
-    write_valid(tmp.path(), &id);
-
-    // Create an invalid entry.
-    let bad = tmp.path().join(CONVERSATIONS_DIR).join("not-valid");
-    fs::create_dir_all(&bad).unwrap();
-    fs::write(bad.join("somefile"), "data").unwrap();
-
-    let result = storage.validate_conversations();
-    assert_eq!(result.invalid.len(), 1);
-
-    trash_invalid_conversation(&result.invalid[0]).unwrap();
-
-    // Original should be gone, trash should have it.
-    assert!(!bad.exists());
-    assert!(
-        tmp.path()
-            .join(CONVERSATIONS_DIR)
-            .join(".trash")
-            .join("not-valid")
-            .exists()
-    );
 }
 
 #[test]
@@ -433,7 +558,10 @@ fn a_rewritten_events_file_is_validated_again() {
     assert!(result.valid.is_empty());
     assert!(matches!(
         result.invalid[0].error,
-        ValidationError::CorruptEvents { .. }
+        ValidationError::Unreadable {
+            part: ConversationPart::Events,
+            ..
+        }
     ));
 }
 
@@ -513,7 +641,10 @@ fn a_scan_of_a_just_modified_file_is_not_reused_by_the_next_process() {
     assert!(result.valid.is_empty());
     assert!(matches!(
         result.invalid[0].error,
-        ValidationError::CorruptEvents { .. }
+        ValidationError::Unreadable {
+            part: ConversationPart::Events,
+            ..
+        }
     ));
 }
 
@@ -549,7 +680,10 @@ fn a_same_stamp_rewrite_just_after_a_scan_is_read_again() {
     assert!(result.valid.is_empty());
     assert!(matches!(
         result.invalid[0].error,
-        ValidationError::CorruptEvents { .. }
+        ValidationError::Unreadable {
+            part: ConversationPart::Events,
+            ..
+        }
     ));
 }
 

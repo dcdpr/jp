@@ -12,7 +12,13 @@ use jp_conversation::{
 use test_log::test;
 
 use super::*;
-use crate::backend::{ConversationFilter, Projection, StoragePresence};
+use crate::{
+    backend::{
+        ConversationFilter, FsStorageBackend, LoadBackend as _, Projection, RecoveryBackend as _,
+        StoragePresence,
+    },
+    validate::{ConversationPart, StorageLocation, ValidationError, validate_conversation_dir},
+};
 
 #[test]
 fn test_storage_handles_missing_src() {
@@ -182,6 +188,218 @@ fn load_conversation_index_still_skips_trash() {
         .map(|entry| entry.id)
         .collect();
     assert!(ids.is_empty(), ".trash should still be invisible to scan");
+}
+
+#[test]
+fn load_conversation_index_skips_directories_without_conversation_files() {
+    let tmp = tempdir().unwrap();
+    let storage = Storage::new(tmp.path()).unwrap();
+    let convs = tmp.path().join(CONVERSATIONS_DIR);
+
+    let stored = ConversationId::try_from_deciseconds_str("17636257521").unwrap();
+    write_valid_conv_dir(&convs, &stored);
+
+    let drafted = convs.join("17636257522");
+    fs::create_dir_all(&drafted).unwrap();
+    fs::write(drafted.join("QUERY_MESSAGE.md"), "typed request").unwrap();
+
+    let ids: Vec<_> = storage
+        .load_conversation_index(ConversationFilter::default())
+        .into_iter()
+        .map(|entry| entry.id)
+        .collect();
+    assert_eq!(ids, [stored]);
+}
+
+#[test]
+fn load_conversation_index_skips_invalid_conversations() {
+    let tmp = tempdir().unwrap();
+    let storage = Storage::new(tmp.path()).unwrap();
+    let convs = tmp.path().join(CONVERSATIONS_DIR);
+
+    let valid = ConversationId::try_from_deciseconds_str("17636257521").unwrap();
+    write_valid_conv_dir(&convs, &valid);
+
+    let corrupt_metadata = ConversationId::try_from_deciseconds_str("17636257522").unwrap();
+    let dir = write_valid_conv_dir(&convs, &corrupt_metadata);
+    fs::write(dir.join(METADATA_FILE), "not json").unwrap();
+
+    let missing_events = ConversationId::try_from_deciseconds_str("17636257523").unwrap();
+    let dir = write_valid_conv_dir(&convs, &missing_events);
+    fs::remove_file(dir.join(EVENTS_FILE)).unwrap();
+
+    let ids: Vec<_> = storage
+        .load_conversation_index(ConversationFilter::default())
+        .into_iter()
+        .map(|entry| entry.id)
+        .collect();
+    assert_eq!(ids, [valid]);
+}
+
+#[test]
+fn expiry_skips_invalid_conversations() {
+    let tmp = tempdir().unwrap();
+    let backend = FsStorageBackend::new(tmp.path()).unwrap();
+    let convs = tmp.path().join(CONVERSATIONS_DIR);
+    let expired = Conversation {
+        expires_at: Some("2024-01-01T00:00:00Z".parse().unwrap()),
+        ..Default::default()
+    };
+    let now = "2025-01-01T00:00:00Z".parse().unwrap();
+
+    let valid = ConversationId::try_from_deciseconds_str("17636257521").unwrap();
+    let dir = write_valid_conv_dir(&convs, &valid);
+    fs::write(
+        dir.join(METADATA_FILE),
+        serde_json::to_string(&expired).unwrap(),
+    )
+    .unwrap();
+
+    let missing_events = ConversationId::try_from_deciseconds_str("17636257522").unwrap();
+    let dir = write_valid_conv_dir(&convs, &missing_events);
+    fs::write(
+        dir.join(METADATA_FILE),
+        serde_json::to_string(&expired).unwrap(),
+    )
+    .unwrap();
+    fs::remove_file(dir.join(EVENTS_FILE)).unwrap();
+
+    assert_eq!(backend.load_expired_conversation_ids(now), [valid]);
+}
+
+#[test]
+fn live_conversation_dirs_match_the_id_exactly() {
+    let tmp = tempdir().unwrap();
+    let backend = FsStorageBackend::new(&tmp.path().join("ws"))
+        .unwrap()
+        .with_user_storage(&tmp.path().join("user"), None, "abc")
+        .unwrap();
+    let workspace = tmp.path().join("ws").join(CONVERSATIONS_DIR);
+    let user = tmp.path().join("user").join("abc").join(CONVERSATIONS_DIR);
+    for dir in [
+        workspace.join("17941219994"),
+        user.join("17941219994-a-title"),
+        workspace.join("179412199945"),
+        workspace.join(".archive").join("17941219994"),
+        workspace.join(".trash").join("17941219994"),
+        workspace.join("not-an-id"),
+    ] {
+        fs::create_dir_all(dir).unwrap();
+    }
+    fs::write(workspace.join("17941219994-file"), "").unwrap();
+
+    let id = ConversationId::try_from_deciseconds_str("17941219994").unwrap();
+
+    assert_eq!(backend.live_conversation_dirs(&id), [
+        workspace.join("17941219994"),
+        user.join("17941219994-a-title"),
+    ]);
+}
+
+#[test]
+fn conversation_files_are_written_into_exactly_the_given_directory() {
+    let tmp = tempdir().unwrap();
+    let conversations = tmp.path().join("ws").join(CONVERSATIONS_DIR);
+    let id = ConversationId::try_from_deciseconds_str("17941219994").unwrap();
+
+    let live = write_valid_conv_dir(&conversations, &id);
+    let live_metadata = fs::read_to_string(live.join(METADATA_FILE)).unwrap();
+    let elsewhere = conversations.join(".trash").join("17941219994");
+    fs::create_dir_all(&elsewhere).unwrap();
+    fs::write(elsewhere.join("QUERY_MESSAGE.md"), "typed").unwrap();
+
+    write_conversation_files(
+        &elsewhere,
+        &Conversation::default(),
+        &ConversationStream::new_test(),
+    )
+    .unwrap();
+
+    assert_eq!(validate_conversation_dir(&elsewhere), Ok(()));
+    assert_eq!(
+        fs::read_to_string(elsewhere.join("QUERY_MESSAGE.md")).unwrap(),
+        "typed"
+    );
+    assert_eq!(
+        fs::read_to_string(live.join(METADATA_FILE)).unwrap(),
+        live_metadata
+    );
+}
+
+#[test]
+fn conversation_locations_name_the_live_or_archived_directories() {
+    let tmp = tempdir().unwrap();
+    let backend = FsStorageBackend::new(&tmp.path().join("ws"))
+        .unwrap()
+        .with_user_storage(&tmp.path().join("user"), None, "abc")
+        .unwrap();
+    let workspace = tmp.path().join("ws").join(CONVERSATIONS_DIR);
+    let user = tmp.path().join("user").join("abc").join(CONVERSATIONS_DIR);
+    let id = |s| ConversationId::try_from_deciseconds_str(s).unwrap();
+
+    write_valid_conv_dir(&workspace, &id("17941219991"));
+    write_valid_conv_dir(&user, &id("17941219991"));
+    assert_eq!(backend.conversation_locations(&id("17941219991")), [
+        StorageLocation::new(workspace.join("17941219991").as_str()),
+        StorageLocation::new(user.join("17941219991").as_str()),
+    ]);
+
+    write_valid_conv_dir(&user.join(ARCHIVE_DIR), &id("17941219992"));
+    assert_eq!(backend.conversation_locations(&id("17941219992")), [
+        StorageLocation::new(user.join(ARCHIVE_DIR).join("17941219992").as_str()),
+    ]);
+
+    assert!(
+        backend
+            .conversation_locations(&id("17941219993"))
+            .is_empty()
+    );
+}
+
+#[test]
+fn inspecting_a_conversation_reports_its_state_title_and_directories() {
+    let tmp = tempdir().unwrap();
+    let backend = FsStorageBackend::new(&tmp.path().join("ws"))
+        .unwrap()
+        .with_user_storage(&tmp.path().join("user"), None, "abc")
+        .unwrap();
+    let workspace = tmp.path().join("ws").join(CONVERSATIONS_DIR);
+    let user = tmp.path().join("user").join("abc").join(CONVERSATIONS_DIR);
+    let id = |s| ConversationId::try_from_deciseconds_str(s).unwrap();
+
+    let broken = workspace.join("17941219991-fix-the-loader");
+    fs::create_dir_all(&broken).unwrap();
+    fs::write(
+        broken.join(METADATA_FILE),
+        r#"{"title":"Fix the loader","last_activated_at":"2026-01-01T00:00:00Z"}"#,
+    )
+    .unwrap();
+    let found = backend.inspect(&id("17941219991")).unwrap();
+    assert_eq!(found.locations, [StorageLocation::new(broken.as_str())]);
+    assert_eq!(found.title.as_deref(), Some("Fix the loader"));
+    assert_eq!(
+        found.state,
+        Err(ValidationError::Missing {
+            part: ConversationPart::Events,
+            location: StorageLocation::new(broken.join(EVENTS_FILE).as_str()),
+        })
+    );
+
+    let draft = user.join("17941219992");
+    fs::create_dir_all(&draft).unwrap();
+    fs::write(draft.join("QUERY_MESSAGE.md"), "typed").unwrap();
+    let found = backend.inspect(&id("17941219992")).unwrap();
+    assert_eq!(found.locations, [StorageLocation::new(draft.as_str())]);
+    assert_eq!(found.title, None);
+    assert_eq!(
+        found.state,
+        Err(ValidationError::Missing {
+            part: ConversationPart::Metadata,
+            location: StorageLocation::new(draft.join(METADATA_FILE).as_str()),
+        })
+    );
+
+    assert!(backend.inspect(&id("17941219994")).is_none());
 }
 
 #[test]
@@ -787,6 +1005,15 @@ fn write_base_config(conv_dir: &Utf8Path, mtime_secs: u64) {
     set_mtime(&conv_dir.join(BASE_CONFIG_FILE), mtime_secs);
 }
 
+/// Write a conversation directory that passes validation, returning its path.
+fn write_valid_conv_dir(conversations: &Utf8Path, id: &ConversationId) -> Utf8PathBuf {
+    let dir = conversations.join(id.to_dirname(None));
+    fs::create_dir_all(&dir).unwrap();
+    write_meta(&dir, None, 1_000);
+    write_valid_stream(&dir);
+    dir
+}
+
 /// Write a valid, loadable conversation stream (`base_config.json` +
 /// `events.json`).
 fn write_valid_stream(conv_dir: &Utf8Path) {
@@ -829,10 +1056,10 @@ fn index_dedups_and_classifies_presence() {
     let only_user = ConversationId::try_from_deciseconds_str("17636257522").unwrap();
     let projected = ConversationId::try_from_deciseconds_str("17636257523").unwrap();
 
-    write_conv_dir(&ws_convs, &only_workspace, "x");
-    write_conv_dir(&user_convs, &only_user, "x");
-    write_conv_dir(&ws_convs, &projected, "x");
-    write_conv_dir(&user_convs, &projected, "x");
+    write_valid_conv_dir(&ws_convs, &only_workspace);
+    write_valid_conv_dir(&user_convs, &only_user);
+    write_valid_conv_dir(&ws_convs, &projected);
+    write_valid_conv_dir(&user_convs, &projected);
 
     let entries = storage.load_conversation_index(ConversationFilter::default());
     assert_eq!(
@@ -1264,6 +1491,114 @@ fn archive_and_unarchive_act_on_every_root() {
     storage.unarchive_conversation(&id).unwrap();
     assert!(active(&workspace).is_dir() && active(&user_dir).is_dir());
     assert!(!archived(&workspace).exists() && !archived(&user_dir).exists());
+}
+
+fn conv_dir_with(dir: &Utf8Path, content: &str) -> Utf8PathBuf {
+    fs::create_dir_all(dir).unwrap();
+    fs::write(dir.join(EVENTS_FILE), content).unwrap();
+    dir.to_path_buf()
+}
+
+#[test]
+fn archive_refuses_when_the_archive_holds_the_conversation() {
+    let tmp = tempdir().unwrap();
+    let storage = Storage::new(tmp.path()).unwrap();
+    let conversations = tmp.path().join(CONVERSATIONS_DIR);
+    let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
+    let live = conv_dir_with(&conversations.join("17636257526-new"), "live");
+    let archived = conv_dir_with(
+        &conversations.join(ARCHIVE_DIR).join("17636257526-old"),
+        "archived",
+    );
+
+    let error = storage.archive_conversation(&id).unwrap_err();
+
+    assert_eq!(error, Error::ConversationExists {
+        id,
+        from: live.clone(),
+        existing: archived.clone(),
+    });
+    assert_eq!(fs::read_to_string(live.join(EVENTS_FILE)).unwrap(), "live");
+    assert_eq!(
+        fs::read_to_string(archived.join(EVENTS_FILE)).unwrap(),
+        "archived"
+    );
+}
+
+#[test]
+fn unarchive_refuses_when_the_conversation_is_live() {
+    let tmp = tempdir().unwrap();
+    let storage = Storage::new(tmp.path()).unwrap();
+    let conversations = tmp.path().join(CONVERSATIONS_DIR);
+    let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
+    let live = conv_dir_with(&conversations.join("17636257526"), "live");
+    let archived = conv_dir_with(
+        &conversations.join(ARCHIVE_DIR).join("17636257526"),
+        "archived",
+    );
+
+    let error = storage.unarchive_conversation(&id).unwrap_err();
+
+    assert_eq!(error, Error::ConversationExists {
+        id,
+        from: archived.clone(),
+        existing: live.clone(),
+    });
+    assert_eq!(fs::read_to_string(live.join(EVENTS_FILE)).unwrap(), "live");
+    assert_eq!(
+        fs::read_to_string(archived.join(EVENTS_FILE)).unwrap(),
+        "archived"
+    );
+}
+
+#[test]
+fn a_collision_in_one_root_moves_nothing_in_the_other() {
+    let tmp = tempdir().unwrap();
+    let (storage, workspace, user_dir) = dual_root_storage(tmp.path());
+    let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
+    let workspace_live =
+        conv_dir_with(&workspace.join(CONVERSATIONS_DIR).join("17636257526"), "[]");
+    let user_live = conv_dir_with(&user_dir.join(CONVERSATIONS_DIR).join("17636257526"), "[]");
+    conv_dir_with(
+        &user_dir
+            .join(CONVERSATIONS_DIR)
+            .join(ARCHIVE_DIR)
+            .join("17636257526"),
+        "archived",
+    );
+
+    assert!(storage.archive_conversation(&id).is_err());
+
+    assert!(workspace_live.is_dir());
+    assert!(user_live.is_dir());
+    assert!(
+        !workspace
+            .join(CONVERSATIONS_DIR)
+            .join(ARCHIVE_DIR)
+            .join("17636257526")
+            .exists()
+    );
+}
+
+#[test]
+fn archive_and_unarchive_match_the_conversation_exactly() {
+    let tmp = tempdir().unwrap();
+    let storage = Storage::new(tmp.path()).unwrap();
+    let conversations = tmp.path().join(CONVERSATIONS_DIR);
+    let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
+    let other_live = conv_dir_with(&conversations.join("176362575260"), "[]");
+    let other_archived = conv_dir_with(&conversations.join(ARCHIVE_DIR).join("176362575261"), "[]");
+
+    assert_eq!(
+        storage.archive_conversation(&id).unwrap_err(),
+        Error::ConversationNotFound(id)
+    );
+    assert_eq!(
+        storage.unarchive_conversation(&id).unwrap_err(),
+        Error::ConversationNotFound(id)
+    );
+    assert!(other_live.is_dir());
+    assert!(other_archived.is_dir());
 }
 
 #[test]

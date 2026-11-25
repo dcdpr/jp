@@ -3,6 +3,7 @@ pub(crate) mod compact_flag;
 mod config;
 mod conversation;
 pub(crate) mod conversation_id;
+pub(crate) mod doctor;
 mod init;
 pub(crate) mod label;
 mod lock;
@@ -16,8 +17,11 @@ pub(crate) mod workspace;
 
 use std::{fmt, iter, num::NonZeroU8};
 
+use camino::Utf8Path;
 use clap::{ArgMatches, Command, error::ErrorKind, value_parser};
+use crossterm::style::Stylize as _;
 use jp_config::PartialAppConfig;
+use jp_conversation::ConversationId;
 use jp_workspace::Workspace;
 use serde_json::Value;
 pub(crate) use target::ConversationLoadRequest;
@@ -45,6 +49,7 @@ pub(crate) enum Commands<S: Stage = Settled> {
     Plugin(plugin::PluginManagement),
     Workspace(workspace::Workspace),
     Provider(provider::Provider),
+    Doctor(doctor::Doctor),
 
     /// A command a plugin provides (`jp-<name>` on `$PATH` or in the registry):
     /// its name, then its arguments.
@@ -103,6 +108,10 @@ impl Commands<Parsed> {
                 "provider",
                 Some("Manage provider credentials"),
             ))
+            .subcommand(mounted::<doctor::Doctor>(
+                "doctor",
+                Some("Report problems in the JP setup, and apply named fixes"),
+            ))
     }
 
     /// Read the subcommand `matches` names, and its arguments.
@@ -132,6 +141,7 @@ impl Commands<Parsed> {
             "plugin" => Self::Plugin(plugin::PluginManagement::from_matches(sub)?),
             "workspace" => Self::Workspace(workspace::Workspace::from_matches(sub)?),
             "provider" => Self::Provider(provider::Provider::from_matches(sub)?),
+            "doctor" => Self::Doctor(doctor::Doctor::from_matches(sub)?),
 
             // Only a plugin's command carries the unnamed argument that clap
             // collects everything after an unknown subcommand into. Without
@@ -174,6 +184,7 @@ impl Commands<Parsed> {
             Self::Plugin(args) => Commands::Plugin(args),
             Self::Workspace(args) => Commands::Workspace(args),
             Self::Provider(args) => Commands::Provider(args),
+            Self::Doctor(args) => Commands::Doctor(args),
             Self::External(args) => Commands::External(args),
         })
     }
@@ -209,7 +220,8 @@ impl Commands {
             Commands::Init(_)
             | Commands::Plugin(_)
             | Commands::Provider(_)
-            | Commands::Workspace(_) => {
+            | Commands::Workspace(_)
+            | Commands::Doctor(_) => {
                 unreachable!("handled before workspace initialization")
             }
         }
@@ -230,6 +242,7 @@ impl<S: Stage> Commands<S> {
             | Commands::Plugin(_)
             | Commands::Provider(_)
             | Commands::Workspace(_)
+            | Commands::Doctor(_)
             | Commands::External(_) => ConversationLoadRequest::none(),
         }
     }
@@ -247,6 +260,7 @@ impl<S: Stage> Commands<S> {
                 WorkspaceRequirement::None
             }
             Commands::Workspace(_) => WorkspaceRequirement::Subject,
+            Commands::Doctor(_) => WorkspaceRequirement::Diagnose,
             Commands::Query(_)
             | Commands::Config(_)
             | Commands::Conversation(_)
@@ -278,6 +292,7 @@ impl<S: Stage> Commands<S> {
             | Commands::Plugin(_)
             | Commands::Provider(_)
             | Commands::Workspace(_)
+            | Commands::Doctor(_)
             | Commands::External(_) => Ok((partial, Vec::new())),
         }
     }
@@ -302,6 +317,7 @@ impl<S: Stage> Commands<S> {
             Commands::Plugin(_) => "plugin",
             Commands::Provider(_) => "provider",
             Commands::Workspace(_) => "workspace",
+            Commands::Doctor(_) => "doctor",
             Commands::External(args) => {
                 // Use first arg as the command name (it's the subcommand name).
                 // Clap puts the subcommand name as the first element.
@@ -336,6 +352,7 @@ impl IntoPartialAppConfig for Commands {
             | Commands::Plugin(_)
             | Commands::Provider(_)
             | Commands::Workspace(_)
+            | Commands::Doctor(_)
             | Commands::External(_) => Ok(partial),
         }
     }
@@ -1114,6 +1131,12 @@ impl From<jp_storage::Error> for Error {
                 ("error", source.to_string().into()),
             ]
             .into(),
+            Error::ReadFailed { path, source } => [
+                ("message", "Failed to read".into()),
+                ("path", path.to_string().into()),
+                ("error", source.to_string().into()),
+            ]
+            .into(),
             Error::RenameFailed { from, to, source } => [
                 ("message", "Failed to move file into place".into()),
                 ("from", from.to_string().into()),
@@ -1126,10 +1149,31 @@ impl From<jp_storage::Error> for Error {
                 ("id", id.to_string().into()),
             ]
             .into(),
+            Error::ConversationExists { id, from, existing } => {
+                conversation_exists(id, &from, &existing)
+            }
         };
 
         Self::from(metadata)
     }
+}
+
+/// Format the CLI error metadata for [`jp_storage::Error::ConversationExists`].
+fn conversation_exists(
+    id: ConversationId,
+    from: &Utf8Path,
+    existing: &Utf8Path,
+) -> Vec<(&'static str, Value)> {
+    let subject = format!("Conversation {id}").bold().yellow();
+
+    vec![
+        (
+            "message",
+            format!("{subject} already exists at destination").into(),
+        ),
+        ("from", from.to_string().into()),
+        ("existing", existing.to_string().into()),
+    ]
 }
 
 impl From<jp_id::Error> for Error {

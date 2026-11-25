@@ -236,43 +236,44 @@ impl RootOpts {
 }
 
 /// The options every `jp` command accepts, before or after its name.
-#[derive(Debug, Default)]
+///
+/// [`Default`] gives the options of a command run with no global flags.
+#[derive(Debug)]
 pub(crate) struct Globals {
     /// `--cfg` values, in the order given.
     pub(crate) config: Vec<KeyValueOrPath>,
-
-    /// `--no-cfg`.
     pub(crate) no_config: bool,
-
     /// How many times `-v` was given.
     pub(crate) verbose: u8,
-
-    /// `--quiet`.
     pub(crate) quiet: bool,
-
-    /// `--no-interactive`.
     pub(crate) no_interactive: bool,
-
-    /// `--format`.
     pub(crate) format: CliFormat,
-
-    /// Whether to persist changes; `--no-persist` turns it off.
+    /// Whether to persist changes (`false` when `--no-persist` is passed).
     pub(crate) persist: bool,
-
-    /// `--workspace`.
     pub(crate) workspace: Option<WorkspaceTarget>,
-
-    /// `--width`.
     pub(crate) width: Option<u16>,
-
-    /// `--log-format`.
     pub(crate) log_format: LogFormat,
-
-    /// `--log-file`.
     pub(crate) log_file: Option<String>,
-
-    /// `--log`.
     pub(crate) log: Option<String>,
+}
+
+impl Default for Globals {
+    fn default() -> Self {
+        Self {
+            config: vec![],
+            no_config: false,
+            verbose: 0,
+            quiet: false,
+            no_interactive: false,
+            format: CliFormat::default(),
+            persist: true,
+            workspace: None,
+            width: None,
+            log_format: LogFormat::default(),
+            log_file: None,
+            log: None,
+        }
+    }
 }
 
 impl Globals {
@@ -324,10 +325,10 @@ impl Globals {
                 .long_help(
                     "Suppress chrome: progress indicators, status lines, and tool call \
                      headers.\n\nCommand output and the assistant's response still go to stdout, \
-                     and a failing run still reports its error. Redirect them (`>/dev/null`, \
-                     `2>/dev/null`) to drop those as well.\n\nTracing written to stderr by `-v` \
-                     or `--log-file=-` is suppressed too. The trace log file still records the \
-                     run in full.",
+                     and a failing run still reports its error. Conversations that fail to load \
+                     are still reported. Redirect them (`>/dev/null`, `2>/dev/null`) to drop \
+                     those as well.\n\nTracing written to stderr by `-v` or `--log-file=-` is \
+                     suppressed too. The trace log file still records the run in full.",
                 ),
         ))
         .arg(global(

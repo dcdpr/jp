@@ -92,6 +92,24 @@ impl super::Storage {
             .map_err(|error| error.source.into())
     }
 
+    /// Acquire the store-wide lock named `resource`, blocking until it is free.
+    ///
+    /// Serializes an operation over the whole store across processes.
+    /// The lock file lives in the locks directory and is not removed on
+    /// release, which makes blocking acquisition safe (see
+    /// [`FsResourceLocker::with_remove_on_drop`]).
+    /// `resource` must not collide with a conversation ID.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the lock file cannot be created or locked.
+    pub fn lock_store(&self, resource: &str) -> Result<Box<dyn ResourceGuard>> {
+        let dir = self.user_or_root_with_path(RelativePath::new(LOCKS_DIR));
+        FsResourceLocker::new(dir)
+            .lock(resource, None)
+            .map_err(|error| error.source.into())
+    }
+
     /// Read lock holder info for a conversation.
     ///
     /// Returns `None` if there's no lock file or the file can't be parsed.

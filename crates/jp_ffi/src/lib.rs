@@ -60,10 +60,8 @@ pub struct WorkspaceRef {
 /// Opening writes to disk: the user-local conversation store is created if
 /// missing and the workspace ID is persisted, as `jp` does.
 ///
-/// Corrupt conversations are **not** moved aside.
-/// Sanitizing a store is a deliberate act that trashes data, and a reader has
-/// no business doing it as a side effect of looking; a conversation whose
-/// metadata will not load is simply left out of the list.
+/// A conversation that fails validation is left out of the list, and its files
+/// are left where they are.
 ///
 /// # Safety
 ///

@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
+use jp_storage::validate::{ConversationPart, StorageLocation, ValidationError};
 use serde_json::json;
 
 use super::*;
@@ -24,6 +25,68 @@ fn details_show_the_model_beneath_the_title() {
     assert_eq!(
         details.json()["model"],
         json!("anthropic/claude-sonnet-4-5")
+    );
+}
+
+fn missing_events() -> ValidationError {
+    ValidationError::Missing {
+        part: ConversationPart::Events,
+        location: StorageLocation::labelled(
+            "/ws/.jp/conversations/10000/events.json",
+            "events.json",
+        ),
+    }
+}
+
+#[test]
+fn details_show_the_status_beneath_the_title_and_the_locations_last() {
+    let details = DetailsFmt::new(make_id(1000))
+        .with_title(Some("Fix the loader"))
+        .with_status(Some(missing_events()))
+        .with_locations(vec![
+            StorageLocation::new("/ws/.jp/conversations/10000"),
+            StorageLocation::new("/user/conversations/10000-fix-the-loader"),
+        ])
+        .with_pretty_printing(false);
+
+    let expected = [
+        "        ID  jp-c10000",
+        "     Title  Fix the loader",
+        "    Status  unable to load: missing events.json",
+        " Locations",
+        "            1. /ws/.jp/conversations/10000",
+        "            2. /user/conversations/10000-fix-the-loader",
+    ];
+    assert_eq!(details.to_string(), expected.join("\n"));
+}
+
+#[test]
+fn json_lists_the_locations_and_a_null_status_for_a_conversation_that_loads() {
+    let details = DetailsFmt::new(make_id(1000))
+        .with_locations(vec![StorageLocation::new("/ws/.jp/conversations/10000")]);
+
+    let json = details.json();
+
+    assert_eq!(json["locations"], json!(["/ws/.jp/conversations/10000"]));
+    assert_eq!(json["status"], serde_json::Value::Null);
+}
+
+#[test]
+fn json_describes_why_a_conversation_does_not_load() {
+    let details = DetailsFmt::new(make_id(1000)).with_status(Some(missing_events()));
+
+    assert_eq!(
+        details.json()["status"],
+        json!({
+            "code": "conversation_load_failed",
+            "message": "conversation failed to load",
+            "causes": [{
+                "code": "part_missing",
+                "message": "missing conversation part",
+                "part": "events",
+                "location": "/ws/.jp/conversations/10000/events.json",
+            }],
+        })
     );
 }
 

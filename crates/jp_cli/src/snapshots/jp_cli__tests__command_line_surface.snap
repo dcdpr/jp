@@ -92,7 +92,7 @@ help_heading: Some("Global Options")
 conflicts: []
 set: ["global"]
 help: Some("Suppress chrome: progress indicators, status lines, and tool call headers")
-long_help: Some("Suppress chrome: progress indicators, status lines, and tool call headers.\n\nCommand output and the assistant's response still go to stdout, and a failing run still reports its error. Redirect them (`>/dev/null`, `2>/dev/null`) to drop those as well.\n\nTracing written to stderr by `-v` or `--log-file=-` is suppressed too. The trace log file still records the run in full.")
+long_help: Some("Suppress chrome: progress indicators, status lines, and tool call headers.\n\nCommand output and the assistant's response still go to stdout, and a failing run still reports its error. Conversations that fail to load are still reported. Redirect them (`>/dev/null`, `2>/dev/null`) to drop those as well.\n\nTracing written to stderr by `-v` or `--log-file=-` is suppressed too. The trace log file still records the run in full.")
 
 ### no_interactive
 short: None
@@ -5217,6 +5217,118 @@ conflicts: []
 set: []
 help: Some("The name of the credential to remove")
 long_help: Some("The name of the credential to remove.\n\nWhen omitted, removes the sole stored credential.")
+
+### help
+short: Some('h')
+long: Some("help")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Help
+num_args: Some(0)
+value_type: alloc::string::String
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Print help (see more with '--help')")
+long_help: Some("Print help (see a summary with '-h')")
+
+## jp doctor
+about: Some("Report problems in the JP setup, and apply named fixes")
+long_about: None
+after_help: None
+after_long_help: Some("Exits with status 3 when the report lists a problem.")
+visible_aliases: []
+hidden_aliases: []
+hidden: false
+external_subcommands: None
+set: ["disable_help_subcommand"]
+usage: Usage: jp doctor [OPTIONS]
+
+### fix
+short: None
+long: Some("fix")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(1)
+value_type: alloc::string::String
+possible_values: ["rebuild-metadata"]
+value_names: Some(["NAME"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Apply the named fix to every problem it covers")
+long_help: None
+
+### id
+short: None
+long: Some("id")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Append
+num_args: Some(1)
+value_type: jp_conversation::conversation::ConversationId
+possible_values: []
+value_names: Some(["ID"])
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Apply the fix only to this conversation; repeat for more")
+long_help: None
+
+### confirm
+short: None
+long: Some("confirm")
+visible_aliases: []
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: []
+set: []
+help: Some("Prompt for confirmation before each change")
+long_help: None
+
+### no_confirm
+short: Some('y')
+long: Some("no-confirm")
+visible_aliases: ["yes"]
+hidden_aliases: []
+short_aliases: None
+index: None
+action: SetTrue
+num_args: Some(0)
+value_type: bool
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: ["false"]
+help_heading: None
+conflicts: []
+set: []
+help: Some("Skip confirmation prompts")
+long_help: None
 
 ### help
 short: Some('h')

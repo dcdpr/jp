@@ -16,7 +16,7 @@ use tracing::warn;
 use crate::{
     ARCHIVE_DIR, BASE_CONFIG_FILE, CONVERSATIONS_DIR, EVENTS_FILE, METADATA_FILE, Storage,
     backend::{ConversationFilter, ConversationIndexEntry, StoragePresence},
-    build_conversation_dir_prefix, dir_entries, find_conversation_dir_path,
+    build_conversation_dir_prefix, dir_entries, find_conversation_dir_path, holds_managed_files,
     load_conversation_id_from_entry,
     scan::{EventsSummary, FileStamp},
 };
@@ -104,6 +104,7 @@ impl PartialEq for LoadErrorInner {
 impl Storage {
     /// Scan conversation index entries from both roots for the given partition.
     ///
+    /// Only conversations that pass validation are included.
     /// IDs are deduplicated across roots, and each entry's [`StoragePresence`]
     /// records which roots hold the conversation.
     /// Entries are sorted by ID.
@@ -121,14 +122,15 @@ impl Storage {
             }
         };
 
-        let workspace_ids: HashSet<ConversationId> = scan_conversation_ids(&partition(&self.root))
+        let workspace_ids: HashSet<ConversationId> = self
+            .valid_conversation_ids(&partition(&self.root))
             .into_iter()
             .collect();
         let user_ids: HashSet<ConversationId> = self
             .user
             .as_deref()
             .map(|user| {
-                scan_conversation_ids(&partition(user))
+                self.valid_conversation_ids(&partition(user))
                     .into_iter()
                     .collect()
             })
@@ -151,7 +153,7 @@ impl Storage {
 /// A bare directory scan of the active (non-archived) partition: no workspace
 /// construction, no user-local merge, no registry writes.
 /// `jp w show` uses this to union checkout-only conversations across a
-/// workspace's sibling roots without paying a full workspace load per root —
+/// workspace's sibling roots without paying a full workspace load per root, as
 /// one loaded checkout already contributes every user-local conversation, so
 /// the siblings can only add conversations that live in their projection alone.
 #[must_use]
@@ -161,13 +163,15 @@ pub fn projected_conversation_ids(storage_dir: &Utf8Path) -> Vec<ConversationId>
 
 /// Scan a single conversations directory for IDs.
 ///
-/// Dot-prefixed entries (`.trash/`, leftover `.tmp`/`.staging-`/`.old-` dirs
-/// from older versions) are skipped by [`load_conversation_id_from_entry`].
+/// Dot-prefixed entries (`.trash/`, `.archive/`, and staging directories) and
+/// directories without managed conversation files are skipped.
 fn scan_conversation_ids(path: &Utf8Path) -> Vec<ConversationId> {
     let entries: Vec<_> = dir_entries(path).collect();
     entries
         .par_iter()
-        .filter_map(load_conversation_id_from_entry)
+        .filter_map(|entry| {
+            load_conversation_id_from_entry(entry).filter(|_| holds_managed_files(entry.path()))
+        })
         .collect()
 }
 

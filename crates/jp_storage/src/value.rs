@@ -1,6 +1,6 @@
 use std::fs;
 
-use camino::{Utf8Path, Utf8PathBuf};
+use camino::{Utf8DirEntry, Utf8Path, Utf8PathBuf};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
 
@@ -140,11 +140,23 @@ fn tmp_path_for(path: &Utf8Path) -> Utf8PathBuf {
 ///
 /// Returns `false` for a directory that cannot be read.
 pub(crate) fn has_tmp_files(dir: &Utf8Path) -> bool {
+    tmp_files_in(dir).next().is_some()
+}
+
+/// The `.tmp` files directly inside `dir`.
+///
+/// Empty for a directory that cannot be read.
+pub(crate) fn tmp_files(dir: &Utf8Path) -> Vec<Utf8PathBuf> {
+    tmp_files_in(dir).collect()
+}
+
+fn tmp_files_in(dir: &Utf8Path) -> impl Iterator<Item = Utf8PathBuf> {
     dir.read_dir_utf8()
         .into_iter()
         .flatten()
         .flatten()
-        .any(|entry| is_tmp_file(entry.path()))
+        .map(Utf8DirEntry::into_path)
+        .filter(|path| is_tmp_file(path))
 }
 
 /// Remove orphaned `.tmp` files from a directory.

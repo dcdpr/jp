@@ -6,7 +6,7 @@
 - **Parent**: W-00dxybb
 - **Label**: domain=conversation
 - **Summary**: The glossary's Conversation cluster: Turn, Event ID, Label, and
-  what makes a conversation active, live, or archived.
+  what makes a conversation active, live, archived, or invalid.
 
 The Conversation cluster covers JP's central abstraction: the persistent record
 of "talking to the assistant" and the event log that backs it.
@@ -30,8 +30,8 @@ second.
 
 > [!NOTE]
 > Cluster status: **Turn**, **Turn Summary**, **Event ID**, **Active
-> Conversation**, **Live Conversation**, **Archived Conversation**, and
-> **Label** are defined below.
+> Conversation**, **Live Conversation**, **Archived Conversation**, **Invalid
+> Conversation**, and **Label** are defined below.
 > The remaining terms are placeholders and will land in subsequent passes.
 > Until then, see the [legacy single-page glossary] for the older definitions of
 > the unfilled terms.
@@ -87,9 +87,9 @@ A conversation moved out of the default partition into the archive, to keep it
 out of listings and whole-corpus operations without deleting it.
 
 Archived conversations are deliberately **not** indexed at startup.
-That is what keeps `jp c ls`, sanitization, and the picker fast in a workspace
-where most conversations have been archived, and it is why reaching one costs an
-explicit target (`a`, `?a`, `+a`) or `--archived`.
+That is what keeps `jp c ls`, the scan for invalid conversations, and the picker
+fast in a workspace where most conversations have been archived, and it is why
+reaching one costs an explicit target (`a`, `?a`, `+a`) or `--archived`.
 
 **Implementation.** The `conversations/.archive/` partition, reached via
 `ConversationFilter { archived: true }`.
@@ -98,6 +98,20 @@ is the source of truth.
 
 **Not the same as.** A removed conversation (archiving is reversible with `jp c
 unarchive`; removal is not).
+
+### Invalid Conversation
+
+A stored conversation whose files (metadata, base config, or events) fail
+structural validation, so it cannot be loaded.
+An invalid conversation is left in place on disk and excluded from the
+conversation index.
+
+**Implementation.** `InvalidConversation` in `jp_storage::validate`, returned by
+`RecoveryBackend::scan` and `RecoveryBackend::scan_archive`.
+
+**Not the same as.** An **Archived Conversation** (a conversation moved to the
+archive partition; a conversation in either the live or archive partition can be
+invalid).
 
 ### Label
 

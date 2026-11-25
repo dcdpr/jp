@@ -13,7 +13,7 @@ use jp_inquire::{release_terminal, terminal_held};
 use jp_llm::Provider;
 use jp_mcp::{StartupSet, id::McpServerId};
 use jp_printer::Printer;
-use jp_storage::backend::FsStorageBackend;
+use jp_storage::backend::{DryRunRecovery, FsStorageBackend, NullRecoveryBackend, RecoveryBackend};
 use jp_task::TaskHandler;
 use jp_workspace::{Workspace, session::Session};
 use tokio::runtime::{Handle, Runtime};
@@ -37,6 +37,10 @@ pub(crate) struct Ctx {
     /// file-level cleanup.
     /// `None` when running with an in-memory backend.
     pub(crate) fs_backend: Option<Arc<FsStorageBackend>>,
+
+    /// Backend for inspecting, diagnosing, repairing, and removing
+    /// conversations that fail validation; see [`recovery_backend`].
+    pub(crate) recovery: Arc<dyn RecoveryBackend>,
 
     /// Merged file/CLI configuration.
     config: Arc<AppConfig>,
@@ -104,14 +108,11 @@ pub(crate) struct Term {
 
     /// Whether a user is present to answer prompts.
     ///
-    /// Gates tool permission and result prompts, label resolution, title
-    /// selection, lock-timeout handling, plugin approval, and the editor's
-    /// re-open confirmation.
+    /// Gates tool permission and result prompts, conversation confirmations
+    /// (`rm`, `archive`), label resolution, title selection, lock-timeout
+    /// handling, plugin approval, and the editor's re-open confirmation.
     /// Distinct from [`Self::is_tty`], which asks whether output can carry ANSI
     /// escapes ([RFD 048]).
-    ///
-    /// Not every prompt consults it: `conversation rm` and `conversation
-    /// archive` gate their confirmations on `--force` and `--confirm` instead.
     ///
     /// [RFD 048]: https://jp.computer/rfd/048
     pub(crate) interactive: bool,
@@ -154,10 +155,13 @@ impl Ctx {
 
         let interactive = crate::interactive(args.no_interactive, is_tty);
 
+        let recovery = recovery_backend(fs_backend.as_ref(), workspace.persists());
+
         Self {
             exec,
             workspace,
             fs_backend,
+            recovery,
             config,
             term: Term {
                 args,
@@ -330,6 +334,19 @@ impl Drop for Ctx {
         }
 
         self.printer.shutdown();
+    }
+}
+
+/// Build the [`RecoveryBackend`] for `fs`, wrapping it in [`DryRunRecovery`]
+/// when `persist` is `false` (`--no-persist`).
+pub(crate) fn recovery_backend(
+    fs: Option<&Arc<FsStorageBackend>>,
+    persist: bool,
+) -> Arc<dyn RecoveryBackend> {
+    match fs {
+        None => Arc::new(NullRecoveryBackend),
+        Some(fs) if persist => Arc::clone(fs) as Arc<dyn RecoveryBackend>,
+        Some(fs) => Arc::new(DryRunRecovery::new(Arc::clone(fs) as _)),
     }
 }
 

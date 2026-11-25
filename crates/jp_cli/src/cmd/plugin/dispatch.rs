@@ -1145,7 +1145,7 @@ async fn run_query(
     let title = resolve_title(&config, &lock, &stream, &chat_request)
         .map(|task| -> TitleFuture { Box::pin(generate_title(task, lock.id())) });
 
-    let summaries = start_turn_summaries(&config, &lock, &stream, ctx.term.args.persist);
+    let summaries = start_turn_summaries(&config, &lock, &stream, ctx.workspace.persists());
 
     // The last request before this query, to tell its turn from earlier ones.
     let before = lock.with_events(last_request_id);

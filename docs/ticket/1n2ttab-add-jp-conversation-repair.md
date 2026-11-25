@@ -1,6 +1,6 @@
 # Add jp conversation repair
 
-- **Status**: Todo
+- **Status**: Done
 - **Authors**: jp
 - **Date**: 2026-11-18
 - **Label**: client=cli
@@ -26,3 +26,21 @@ Examples:
 - [ ] Lists the actions it can take before taking any
 
 - [ ] Non-interactive mode requires the action to be named
+
+## Comments
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-23T15:28:49Z
+
+Withdrawn.
+`jp doctor` is a global command (installation, config, workspace,
+conversations), so fixes belong at its level rather than in the `jp
+conversation` namespace, which could never fix a workspace or config problem.
+The one real action this ticket had, rebuilding a missing `metadata.json` from
+the events and the directory name, becomes `jp doctor`'s first named fix (`jp
+doctor --fix rebuild-metadata`) under T-1n2ttac.
+The other examples are gone or out of scope: draft-only directories no longer
+exist (the conversation is stored before its draft), trashing was removed, and
+truncated JSON is not recovered (RFD 052 non-goal).

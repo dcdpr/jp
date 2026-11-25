@@ -299,11 +299,6 @@ with_backends!(load_expired_skips_future, |b| {
     assert!(expired.is_empty());
 });
 
-with_backends!(sanitize_empty_store, |b| {
-    let report = b.sanitize().unwrap();
-    assert!(!report.has_repairs());
-});
-
 with_backends!(lock_acquire_and_release, |b| {
     let guard = b.try_lock("conv-1", None).unwrap();
     assert!(guard.is_some(), "first lock should succeed");

@@ -12,7 +12,7 @@ use crate::{
         time::{CreationRange, TimeThreshold},
     },
     ctx::Ctx,
-    shared::confirm::{ConfirmFlag, ConversationAction, confirm_conversation_action},
+    shared::confirm::{Answers, ConfirmFlag, ConversationAction},
 };
 
 /// Archive conversations.
@@ -117,9 +117,16 @@ impl Archive {
             .as_ref()
             .and_then(|s| ctx.workspace.session_active_conversation(s));
         let preference = self.confirm.preference();
-        let multi = handles.len() > 1;
+        let count = handles.len();
+        let multi = count > 1;
+        let mut answers = Answers::default();
 
-        for handle in handles {
+        for (index, handle) in handles.into_iter().enumerate() {
+            // `N` declined the rest, so none of their locks is taken.
+            if answers.rest() == Some(false) {
+                break;
+            }
+
             let id = handle.id();
 
             // The lock comes before the question and is held until it is
@@ -138,9 +145,9 @@ impl Archive {
                 multi,
             );
 
-            if asks
-                && !confirm_conversation_action(ctx, ConversationAction::Archive, &lock, active_id)?
-            {
+            let more = index + 1 < count;
+            let action = ConversationAction::Archive;
+            if asks && !answers.confirm_action(ctx, action, &lock, active_id, more)? {
                 continue;
             }
 

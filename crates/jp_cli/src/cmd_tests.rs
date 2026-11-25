@@ -1,6 +1,8 @@
 use std::io;
 
 use camino::Utf8Path;
+use crossterm::style::Stylize as _;
+use jp_conversation::ConversationId;
 use test_log::test;
 
 use super::*;
@@ -127,6 +129,20 @@ fn write_failure_renders_the_path_and_the_os_error() {
 }
 
 #[test]
+fn read_failure_renders_the_path_and_the_os_error() {
+    let error = Error::from(jp_storage::Error::ReadFailed {
+        path: Utf8Path::new("/ws/.jp/conversations").into(),
+        source: io::Error::from(io::ErrorKind::PermissionDenied),
+    });
+
+    assert_eq!(
+        rendered(&error),
+        "Failed to read\npath=/ws/.jp/conversations\nerror=permission denied"
+    );
+    assert_eq!(error.code.get(), 1);
+}
+
+#[test]
 fn rename_failure_renders_both_paths_and_the_os_error() {
     let error = Error::from(jp_storage::Error::rename_failed(
         Utf8Path::new("/data/conv/events.json.tmp"),
@@ -138,6 +154,33 @@ fn rename_failure_renders_both_paths_and_the_os_error() {
         rendered(&error),
         "Failed to move file into \
          place\nfrom=/data/conv/events.json.tmp\nto=/data/conv/events.json\nerror=entity not found"
+    );
+}
+
+#[test]
+fn a_conversation_in_the_way_names_it_and_both_copies() {
+    let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
+    let error = Error::from(jp_storage::Error::ConversationExists {
+        id,
+        from: Utf8Path::new("/ws/.jp/conversations/17636257526").into(),
+        existing: Utf8Path::new("/ws/.jp/conversations/.archive/17636257526-old").into(),
+    });
+
+    assert_eq!(
+        error.message.as_deref(),
+        Some(
+            format!(
+                "{} already exists at destination",
+                "Conversation jp-c17636257526".bold().yellow()
+            )
+            .as_str()
+        )
+    );
+    assert_eq!(
+        strip_ansi_escapes::strip_str(rendered(&error)),
+        "Conversation jp-c17636257526 already exists at \
+         destination\nfrom=/ws/.jp/conversations/17636257526\nexisting=/ws/.jp/conversations/.\
+         archive/17636257526-old"
     );
 }
 

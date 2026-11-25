@@ -47,6 +47,7 @@
 //! [`TurnCoordinator`]: turn::coordinator::TurnCoordinator
 
 mod args;
+mod draft;
 pub(crate) mod interrupt;
 mod mcp_startup;
 mod stream;
@@ -67,6 +68,10 @@ pub(crate) use args::ToolDirective;
 use args::{QueryText, ToolFlags, ToolUse};
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, Utc};
+use draft::{
+    DraftRemoval, cleanup_query_message_file, draft_dir, draft_fingerprint, draft_store,
+    is_abandoned, preserve_query_message_file,
+};
 use indexmap::IndexMap;
 use interrupt::{InterruptAction, TurnInterrupts};
 use jp_attachment::Attachment;
@@ -278,23 +283,27 @@ impl Query {
             staged,
         } = self.acquire_lock(ctx, handle, start_new).await?;
 
-        let result = Box::pin(self.run_locked(ctx, &lock, query, fresh, staged)).await;
+        // Track whether this run created the conversation (`--new` or `--fork`)
+        // so an abandoned new conversation can be removed on exit.
+        let created = !lock.is_written();
+        let turns_before = lock.with_events(ConversationStream::turn_count);
 
-        // A run that never started a turn wrote nothing, so a directory the
-        // editor created to compose in is all that is left of the conversation.
-        // An editor that failed to open has already had its directory reclaimed
-        // by the draft's revert guard; one that closed successfully on an empty
-        // buffer has not.
-        //
-        // Done here, while the lock is still held, so no other process is
-        // mid-compose in the same directory.
-        remove_empty_conversation_dir(ctx.fs_backend.as_deref(), &lock.id());
+        let result = Box::pin(self.run_locked(ctx, &lock, query, fresh, staged)).await;
 
         // Every exit from the locked region lands here, which is what makes
         // this the one reliable drain point: a mutation scope that dropped
         // while dirty recorded its persist failure on the lock, and any `?` in
         // the region above returns past every other candidate site.
-        cmd::fold_persist_failure(result, lock.take_persist_failure())
+        let persist_failure = lock.take_persist_failure();
+
+        // If this run created the conversation and exited without adding a turn
+        // or saving a query draft, remove the empty conversation directory
+        // while we still hold the lock.
+        if created && is_abandoned(draft_store(ctx), &lock, turns_before) {
+            ctx.workspace.remove_conversation_with_lock(lock.into_mut());
+        }
+
+        cmd::fold_persist_failure(result, persist_failure)
     }
 
     /// Run the query against an already-locked conversation.
@@ -392,29 +401,22 @@ impl Query {
 
         let cid = lock.id();
 
-        // Where the editor composes the draft.
-        //
-        // Named for where the conversation lives now, not for the title it will
-        // end the run with: a write reconciles the id to a single directory,
-        // renaming the live one into the new name and deleting every other
-        // copy. Composing under the new name would put the draft in the copy
-        // that gets deleted, while the rename carries it across for free.
-        let conversation_path = ctx.fs_backend.as_deref().map_or_else(
-            || {
-                ctx.workspace
-                    .root()
-                    .join(cid.to_dirname(stored_title.as_deref()))
-            },
-            // The query draft is a transient editor scratch file, so it is
-            // written to durable user-local storage (`user = true`) and never
-            // projected into the committed workspace tree.
-            |fs| {
-                fs.find_user_local_conversation_dir(&cid)
-                    .unwrap_or_else(|| {
-                        fs.build_conversation_dir(&cid, stored_title.as_deref(), true)
-                    })
-            },
-        );
+        // Persist a newly created conversation before opening the editor or
+        // writing a recovery draft so `QUERY_MESSAGE.md` never sits in a
+        // directory without `metadata.json` and `events.json`.
+        if !lock.is_written() {
+            setup.store()?;
+        }
+
+        // Held until the run ends: under `--no-persist` it is the directory the
+        // editor composes in.
+        let (conversation_path, _scratch) = draft_dir(
+            ctx.workspace.persists(),
+            ctx.fs_backend.as_deref(),
+            ctx.workspace.root(),
+            &cid,
+            stored_title.as_deref(),
+        )?;
 
         let piped = read_piped_stdin()?;
 
@@ -444,10 +446,10 @@ impl Query {
             // Empty query, early exit. `setup` drops unflushed, discarding
             // everything staged on it, and the request was composed against a
             // view of the stream rather than the stream itself — so the stored
-            // conversation is untouched, even for `--replay`, and even when it
-            // was this run that created it.
+            // conversation is untouched, even for `--replay`. One this run
+            // created is removed by `run`, which finds no draft and no new turn.
             if query_source == QuerySource::Editor {
-                cleanup_query_message_file(ctx.fs_backend.as_deref(), &cid, DraftRemoval::Any);
+                cleanup_query_message_file(draft_store(ctx), &cid, DraftRemoval::Any);
             }
             ctx.printer.println("Query is empty, ignoring.");
             return Ok(());
@@ -499,7 +501,7 @@ impl Query {
         // disk, and a failed turn would leave `QUERY_MESSAGE.md` in a directory
         // with no persisted conversation.
         if query_source != QuerySource::Editor
-            && ctx.term.args.persist
+            && ctx.workspace.persists()
             && ctx
                 .fs_backend
                 .as_deref()
@@ -516,7 +518,7 @@ impl Query {
         // not the same text: an editor-composed draft keeps its configuration
         // and history sections, and `--template` renders the request after the
         // file was written.
-        let draft_at_send = draft_fingerprint(ctx.fs_backend.as_deref(), &cid);
+        let draft_at_send = draft_fingerprint(draft_store(ctx), &cid);
 
         // Echo the request back through the same role-aware rendering
         // machinery used by replay and live streaming — a labeled user header
@@ -608,7 +610,7 @@ impl Query {
         // title, short-circuiting the LLM round-trip. Otherwise, fall back to
         // background title generation when enabled.
         if (self.is_new() || self.fork.is_some() || stream.is_empty())
-            && ctx.term.args.persist
+            && ctx.workspace.persists()
             && self.title.is_none()
             && !self.no_title
         {
@@ -646,7 +648,7 @@ impl Query {
         // Spawn background summarization for earlier completed turns that do
         // not yet have a summary. A misconfigured summary model logs a warning
         // rather than failing the query.
-        if cfg.conversation.turn_summary.generate.auto && ctx.term.args.persist {
+        if cfg.conversation.turn_summary.generate.auto && ctx.workspace.persists() {
             match TurnSummaryTask::new(cid, &stream, &cfg, notice_sink(&ctx.printer)) {
                 Ok(Some(task)) => ctx.task_handler.spawn(task),
                 Ok(None) => {}
@@ -721,7 +723,7 @@ impl Query {
         // turn ran.
         if turn_result.is_ok() && lock.with_events(last_request_id) != before {
             cleanup_query_message_file(
-                ctx.fs_backend.as_deref(),
+                draft_store(ctx),
                 &cid,
                 DraftRemoval::IfUnchanged(draft_at_send.as_deref()),
             );
@@ -2765,114 +2767,6 @@ impl PendingStreamTrim {
         if self.replay_turn || self.pop_request {
             stream.trim_trailing_empty_turn();
         }
-    }
-}
-
-/// Write the pending request text to the conversation's user-local
-/// query-message file, so an interrupt before the turn starts never discards
-/// the composed request: the next `jp q --edit` session seeds its buffer from
-/// this file.
-///
-/// Best-effort: failing to preserve a recovery copy must not fail the query
-/// itself, so errors are logged and swallowed.
-fn preserve_query_message_file(conversation_dir: &Utf8Path, content: &str) {
-    let path = conversation_dir.join(editor::QUERY_FILENAME);
-    if let Err(error) =
-        fs::create_dir_all(conversation_dir).and_then(|()| fs::write(&path, content))
-    {
-        warn!(path = %path, %error, "Failed to preserve query message file.");
-    }
-}
-
-/// Which stored query drafts a cleanup may remove.
-#[derive(Debug, Clone, Copy)]
-enum DraftRemoval<'a> {
-    /// Remove whatever is stored.
-    Any,
-
-    /// Remove the draft only while it still matches this fingerprint.
-    ///
-    /// `None` means nothing was stored, so anything found now was written by
-    /// someone else and is left alone.
-    IfUnchanged(Option<&'a str>),
-}
-
-/// The fingerprint of a conversation's stored query draft, if it has one.
-///
-/// A draft that cannot be read has no fingerprint, which leaves it in place
-/// rather than removing bytes nothing has seen.
-fn draft_fingerprint(fs_backend: Option<&FsStorageBackend>, id: &ConversationId) -> Option<String> {
-    let dir = fs_backend.and_then(|fs| fs.find_user_local_conversation_dir(id))?;
-
-    fs::read_to_string(dir.join(editor::QUERY_FILENAME))
-        .ok()
-        .map(|content| editor::draft_revision(&content))
-}
-
-/// Remove the editor's query-message file from a conversation's user-local
-/// storage directory, tolerating its absence.
-///
-/// A title set mid-turn (e.g. from a leading markdown heading) renames the
-/// directory, so the path captured before the turn is stale; re-resolve the
-/// live directory instead.
-/// The draft is written to user-local storage and never projected into the
-/// workspace, so a single root is enough.
-/// Without a filesystem backend or user-local store there is nothing to
-/// resolve.
-///
-/// `removal` decides what may go: a draft replaced since the request was
-/// composed belongs to whoever wrote it, and removing it would discard text
-/// this invocation never saw.
-fn cleanup_query_message_file(
-    fs_backend: Option<&FsStorageBackend>,
-    id: &ConversationId,
-    removal: DraftRemoval<'_>,
-) {
-    let Some(dir) = fs_backend.and_then(|fs| fs.find_user_local_conversation_dir(id)) else {
-        return;
-    };
-
-    let path = dir.join(editor::QUERY_FILENAME);
-
-    if let DraftRemoval::IfUnchanged(fingerprint) = removal {
-        match fs::read_to_string(&path) {
-            Ok(content) if Some(editor::draft_revision(&content).as_str()) != fingerprint => {
-                debug!(path = %path, "Keeping a draft written since the request was composed.");
-                return;
-            }
-            Ok(_) => {}
-            Err(e) if e.kind() == io::ErrorKind::NotFound => return,
-            Err(e) => {
-                warn!(path = %path, error = %e, "Failed to read query message file; keeping it.");
-                return;
-            }
-        }
-    }
-
-    match fs::remove_file(&path) {
-        Ok(()) => {}
-        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-        Err(e) => warn!(path = %path, error = %e, "Failed to remove query message file."),
-    }
-}
-
-/// Remove a conversation's user-local directory when it holds nothing.
-///
-/// The editor composes into a directory named after the conversation, which it
-/// creates before anything about that conversation has been written.
-/// A run that ends without starting a turn writes nothing, so the directory is
-/// all that is left of it — and a directory without the managed files beside
-/// it is indexed as a conversation and then trashed as corrupt by the next run.
-///
-/// [`fs::remove_dir`] refuses a directory that is not empty, so a conversation
-/// with stored files, or a draft deliberately kept for recovery, is left alone.
-fn remove_empty_conversation_dir(fs_backend: Option<&FsStorageBackend>, id: &ConversationId) {
-    let Some(dir) = fs_backend.and_then(|fs| fs.find_user_local_conversation_dir(id)) else {
-        return;
-    };
-
-    if fs::remove_dir(&dir).is_ok() {
-        debug!(path = %dir, "Removed an empty conversation directory.");
     }
 }
 

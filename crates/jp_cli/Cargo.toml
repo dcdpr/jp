@@ -86,6 +86,7 @@ serde = { workspace = true }
 serde_json = { workspace = true, features = ["preserve_order"] }
 sha1 = { workspace = true }
 sha2 = { workspace = true }
+shlex = { workspace = true }
 strip-ansi-escapes = { workspace = true }
 syntect = { workspace = true, features = ["regex-fancy", "default-themes", "default-syntaxes"] }
 thiserror = { workspace = true }
