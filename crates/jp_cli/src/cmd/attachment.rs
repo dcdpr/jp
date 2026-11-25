@@ -8,7 +8,8 @@ use jp_attachment_file_content as _;
 use jp_attachment_github as _;
 use jp_attachment_http_content as _;
 use jp_attachment_internal::{
-    ResolveError, resolve as resolve_internal_attachment, validate as validate_internal_attachment,
+    ResolveError, canonical as canonical_internal_attachment,
+    resolve as resolve_internal_attachment,
 };
 use jp_attachment_mcp_resources as _;
 use jp_config::{Config as _, PartialAppConfig, conversation::attachment::AttachmentConfig};
@@ -114,34 +115,66 @@ fn attachment_scheme(uri: &Url) -> &str {
         .map_or(uri.scheme(), |(scheme, _)| scheme)
 }
 
-pub(crate) fn validate_attachment(uri: &Url) -> Result<()> {
-    trace!(%uri, "Validating attachment.");
+/// Return the URL `uri` resolves as, in the single spelling its handler writes.
+///
+/// Two attachments with the same canonical URL resolve to the same content.
+/// No I/O is performed, so a URL can be checked before it is stored.
+///
+/// # Errors
+///
+/// Returns an error when no handler serves the URL's scheme, or the handler
+/// cannot resolve the URL.
+pub(crate) fn canonical_attachment(uri: &Url) -> Result<Url> {
+    trace!(%uri, "Canonicalizing attachment.");
 
     let scheme = attachment_scheme(uri);
+    let canonical = if scheme == "jp" {
+        canonical_internal_attachment(uri)
+    } else {
+        let Some(handler) = jp_attachment::find_handler_by_scheme(scheme) else {
+            return Err(Error::NotFound("Attachment handler", scheme.to_string()));
+        };
 
-    if scheme == "jp" {
-        validate_internal_attachment(uri).map_err(|source| Error::AttachmentFailed {
-            uri: uri.clone(),
-            source,
-        })?;
-        return Ok(());
-    }
+        handler.canonical(uri)
+    };
 
-    if jp_attachment::find_handler_by_scheme(scheme).is_none() {
-        return Err(Error::NotFound("Attachment handler", scheme.to_string()));
-    }
-
-    Ok(())
+    canonical.map_err(|source| Error::AttachmentFailed {
+        uri: uri.clone(),
+        source,
+    })
 }
 
-/// Append `urls` to the conversation config, skipping URLs that are already
-/// attached.
+/// The URL attachments are compared by: the canonical URL of `uri`, or `uri` as
+/// written when it has none.
 ///
-/// Deduplication compares canonical URLs, so a URL entry and a config-table
-/// entry that resolve to the same URL are treated as duplicates.
-pub(crate) fn attach_urls(partial: &mut PartialAppConfig, urls: impl IntoIterator<Item = Url>) {
-    let attachments = &mut partial.conversation.attachments;
+/// An entry no handler can resolve still fails when it is resolved; comparing
+/// it as written only keeps it from being taken for another entry.
+pub(crate) fn attachment_identity(uri: &Url) -> Url {
+    canonical_attachment(uri).unwrap_or_else(|_| uri.clone())
+}
 
+/// Append `urls` to the conversation config, skipping every URL the config
+/// already attaches.
+///
+/// Attachments are compared by canonical URL (see [`canonical_attachment`]): a
+/// URL is skipped when an entry already attaches it in any spelling its handler
+/// treats alike, including a config table that builds it.
+/// A URL that is attached is stored as written.
+///
+/// # Errors
+///
+/// Returns an error for a URL [`canonical_attachment`] rejects, before any URL
+/// is attached.
+pub(crate) fn attach_urls(
+    partial: &mut PartialAppConfig,
+    urls: impl IntoIterator<Item = Url>,
+) -> Result<()> {
+    let urls = urls
+        .into_iter()
+        .map(|url| Ok((canonical_attachment(&url)?, url)))
+        .collect::<Result<Vec<_>>>()?;
+
+    let attachments = &mut partial.conversation.attachments;
     let mut attached: Vec<Url> = attachments
         .iter()
         .filter_map(|attachment| {
@@ -150,16 +183,19 @@ pub(crate) fn attach_urls(partial: &mut PartialAppConfig, urls: impl IntoIterato
                 .to_url()
                 .ok()
         })
+        .map(|url| attachment_identity(&url))
         .collect();
 
-    for url in urls {
-        if attached.contains(&url) {
+    for (canonical, url) in urls {
+        if attached.contains(&canonical) {
             continue;
         }
 
-        attached.push(url.clone());
+        attached.push(canonical);
         attachments.push(url.into());
     }
+
+    Ok(())
 }
 
 pub(crate) async fn register_attachment(
@@ -206,7 +242,8 @@ pub(crate) async fn register_attachment(
 /// rather than aborting the whole query.
 /// Every other failure (invalid URI, real I/O error, etc.) is propagated.
 ///
-/// Duplicate URLs are resolved once, at their first position.
+/// A URL given more than once, in any spelling its handler treats alike, is
+/// resolved once, at its first position (see [`attachment_identity`]).
 ///
 /// Returns one group per input URL in order; a skipped reference or duplicate
 /// URL yields an empty group to keep the output aligned with `urls`.
@@ -224,7 +261,7 @@ pub(crate) async fn load_conversation_attachments(
     // structural failure aborts the batch immediately instead of waiting
     // for slow HTTP/GitHub handlers to finish.
     let futs = urls.into_iter().map(|url| {
-        let repeated = !seen.insert(url.clone());
+        let repeated = !seen.insert(attachment_identity(&url));
 
         async move {
             if repeated {

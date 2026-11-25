@@ -1,9 +1,11 @@
 use std::fs;
 
 use camino_tempfile::tempdir;
+use indexmap::IndexMap;
 use jp_config::{
     AppConfig,
     conversation::attachment::{PartialAttachmentConfig, PartialAttachmentObjectConfig},
+    types::json_value::JsonValue,
 };
 use jp_conversation::ConversationId;
 use jp_printer::{OutputFormat, Printer};
@@ -135,10 +137,79 @@ fn attachment_add_skips_a_url_a_table_entry_already_builds() {
     assert_eq!(partial.conversation.attachments.to_vec(), vec![table]);
 }
 
+/// A config table writes `params.args` and `params.envs`, which become `args=`
+/// and `envs=`; the README's CLI example writes `arg=` and `env=`.
+/// Both run the same command.
+#[test]
+fn attachment_add_skips_another_spelling_of_an_attached_url() {
+    let table = PartialAttachmentConfig::Object(PartialAttachmentObjectConfig {
+        kind: Some("cmd".to_owned()),
+        path: Some("printenv".to_owned()),
+        params: Some(IndexMap::from([
+            ("args".to_owned(), JsonValue(serde_json::json!(["TERM"]))),
+            ("envs".to_owned(), JsonValue(serde_json::json!(["TERM"]))),
+        ])),
+    });
+    let mut partial = PartialAppConfig::default();
+    partial.conversation.attachments.push(table.clone());
+
+    let partial = add_command(&["cmd://printenv?arg=TERM&env=TERM"])
+        .apply_cli_config(None, partial, None)
+        .unwrap();
+
+    assert_eq!(partial.conversation.attachments.to_vec(), vec![table]);
+}
+
+/// The URL is rejected before anything is attached, rather than when the next
+/// query resolves it.
+#[test]
+fn attachment_add_rejects_a_url_its_handler_cannot_resolve() {
+    let error = add_command(&["cmd://printenv?env=TERM=xterm"])
+        .apply_cli_config(None, PartialAppConfig::default(), None)
+        .unwrap_err();
+
+    assert_eq!(
+        crate::error::error_chain(error.as_ref()),
+        "Attachment error for cmd://printenv?env=TERM=xterm: invalid `env` value `TERM=xterm`: \
+         expected the name of an environment variable, such as `TERM`"
+    );
+}
+
+fn rm_command(args: &[&str]) -> rm::Rm {
+    let matches = rm::Rm::augment(Command::new("rm"))
+        .try_get_matches_from(["rm"].iter().chain(args))
+        .unwrap();
+
+    rm::Rm::from_matches(&matches).unwrap()
+}
+
+#[test]
+fn attachment_rm_removes_another_spelling_of_the_url() {
+    let reviews = Url::parse("gh:pull/1/reviews").unwrap();
+    let mut partial = PartialAppConfig::default();
+    partial
+        .conversation
+        .attachments
+        .push(Url::parse("gh:pull/1/diff").unwrap().into());
+    partial
+        .conversation
+        .attachments
+        .push(reviews.clone().into());
+
+    let partial = rm_command(&["gh://dcdpr/jp/pull/1/diff"])
+        .apply_cli_config(None, partial, None)
+        .unwrap();
+
+    assert_eq!(partial.conversation.attachments.to_vec(), vec![
+        PartialAttachmentConfig::Url(reviews)
+    ]);
+}
+
 #[test]
 fn load_conversation_attachments_resolves_a_repeated_url_once() {
     let tmp = tempdir().unwrap();
-    fs::write(tmp.path().join("notes.md"), "hello").unwrap();
+    fs::create_dir(tmp.path().join("docs")).unwrap();
+    fs::write(tmp.path().join("docs/notes.md"), "hello").unwrap();
     let workspace = Workspace::in_memory(tmp.path().to_path_buf());
     let (printer, _out, _err) = Printer::memory(OutputFormat::Text);
     let runtime = Runtime::new().unwrap();
@@ -152,17 +223,25 @@ fn load_conversation_attachments_resolves_a_repeated_url_once() {
         None,
         printer,
     );
-    let url = Url::parse("file:notes.md").unwrap();
+    // The same URL twice, and the same file spelled another way: `docs` is the
+    // host of the last one, which the parser keeps apart from the path.
+    let urls = [
+        "file:docs/notes.md",
+        "file:docs/notes.md",
+        "file://docs/notes.md",
+    ]
+    .map(|url| Url::parse(url).unwrap())
+    .to_vec();
 
     let groups = runtime
-        .block_on(load_conversation_attachments(&ctx, vec![url.clone(), url]))
+        .block_on(load_conversation_attachments(&ctx, urls))
         .unwrap();
 
     let sources: Vec<Vec<&str>> = groups
         .iter()
         .map(|group| group.iter().map(|a| a.source.as_str()).collect())
         .collect();
-    assert_eq!(sources, [vec!["notes.md"], vec![]]);
+    assert_eq!(sources, [vec!["docs/notes.md"], vec![], vec![]]);
 }
 
 #[test]

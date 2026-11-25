@@ -67,6 +67,14 @@ impl Handler for McpResources {
         "mcp"
     }
 
+    /// The URL as stored.
+    ///
+    /// These attachments are no longer resolved, so no two spellings of one can
+    /// be told to fetch the same content.
+    fn canonical(&self, uri: &Url) -> Result<Url, Box<dyn Error + Send + Sync>> {
+        Ok(uri.clone())
+    }
+
     async fn add(
         &mut self,
         uri: &Url,

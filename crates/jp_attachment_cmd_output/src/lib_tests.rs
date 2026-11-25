@@ -98,12 +98,12 @@ fn test_uri_to_command_hierarchical() {
             }),
         ),
         (
-            "cmd://printenv?env=TERM&env=SHELL&description=hello%20world",
+            "cmd://printenv?env=SHELL&env=TERM&description=hello%20world",
             Ok(Command {
                 cmd: "printenv".to_string(),
                 args: vec![],
                 description: Some("hello world".to_string()),
-                env: vec!["TERM".to_string(), "SHELL".to_string()],
+                env: vec!["SHELL".to_string(), "TERM".to_string()],
             }),
         ),
         (
@@ -193,7 +193,7 @@ fn test_uri_to_command_opaque() {
                 cmd: "printenv".to_string(),
                 args: vec!["TERM".to_string()],
                 description: None,
-                env: vec!["TERM".to_string(), "SHELL".to_string()],
+                env: vec!["SHELL".to_string(), "TERM".to_string()],
             }),
         ),
         (
@@ -202,7 +202,7 @@ fn test_uri_to_command_opaque() {
                 cmd: "printenv".to_string(),
                 args: vec!["TERM".to_string()],
                 description: None,
-                env: vec!["TERM".to_string(), "SHELL".to_string()],
+                env: vec!["SHELL".to_string(), "TERM".to_string()],
             }),
         ),
         ("cmd:", Err("Empty command")),
@@ -213,6 +213,69 @@ fn test_uri_to_command_opaque() {
         let command = uri_to_command(&uri).map_err(|e| e.to_string());
         assert_eq!(command, expected.map_err(str::to_string));
     }
+}
+
+fn canonical(uri: &str) -> Result<String, String> {
+    Commands::default()
+        .canonical(&Url::parse(uri).unwrap())
+        .map(|url| url.to_string())
+        .map_err(|error| error.to_string())
+}
+
+/// A config table writes `args=` and `envs=`, the CLI usually `arg=` and
+/// `env=`; all of them run the same command.
+#[test]
+fn test_canonical_collapses_every_spelling_of_one_command() {
+    for spelling in [
+        "cmd://printenv?arg=TERM&env=TERM",
+        "cmd://printenv?args=TERM&envs=TERM",
+        "cmd://printenv?arg[]=TERM&env[]=TERM",
+        "cmd://printenv?env=TERM&arg=TERM",
+        "cmd:printenv TERM?env=TERM",
+    ] {
+        assert_eq!(
+            canonical(spelling).as_deref(),
+            Ok("cmd://printenv?arg=TERM&env=TERM"),
+            "{spelling}"
+        );
+    }
+}
+
+/// Which variables the command receives does not depend on the order they are
+/// named in, or how often.
+#[test]
+fn test_canonical_sorts_and_dedups_environment_names() {
+    assert_eq!(
+        canonical("cmd://printenv?env=TERM&env=SHELL&env=TERM").as_deref(),
+        Ok("cmd://printenv?env=SHELL&env=TERM")
+    );
+}
+
+#[test]
+fn test_canonical_keeps_the_argument_order() {
+    assert_eq!(
+        canonical("cmd://echo?arg=b&arg=a").as_deref(),
+        Ok("cmd://echo?arg=b&arg=a")
+    );
+}
+
+#[test]
+fn test_canonical_of_a_canonical_url_is_that_url() {
+    let once = canonical("cmd://date?arg=%2B%25Y-%25m-%25d&description=Current%20Date").unwrap();
+
+    assert_eq!(canonical(&once).as_deref(), Ok(once.as_str()));
+}
+
+#[test]
+fn test_canonical_rejects_a_url_add_rejects() {
+    assert_eq!(
+        canonical("cmd://printenv?env=TERM=xterm"),
+        Err(
+            "invalid `env` value `TERM=xterm`: expected the name of an environment variable, such \
+             as `TERM`"
+                .to_owned()
+        )
+    );
 }
 
 #[tokio::test]

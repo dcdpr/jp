@@ -161,10 +161,30 @@ impl From<&str> for ResolveError {
     }
 }
 
-/// Validate a `jp://` URI without performing I/O.
-pub fn validate(uri: &Url) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let entry = uri_to_entry(uri)?;
-    validate_entry(&entry)
+/// Return the URL a `jp://` URI resolves as, in the single spelling this crate
+/// writes, validating it without performing I/O.
+///
+/// The selector is written in its shortest form, and left out when it is the
+/// default selector, so `jp://<id>` and `jp://<id>?select=a:-1` return the same
+/// URL.
+///
+/// # Errors
+///
+/// Returns an error for a URI [`resolve`] rejects before it reads the
+/// workspace: an invalid JP ID, an unsupported resource type, an unknown query
+/// parameter, or an invalid selector.
+pub fn canonical(uri: &Url) -> Result<Url, Box<dyn Error + Send + Sync>> {
+    let mut entry = uri_to_entry(uri)?;
+    validate_entry(&entry)?;
+
+    let selector = parse_selector(&entry.select)?;
+    entry.select = if selector == Selector::default() {
+        String::new()
+    } else {
+        selector.to_string()
+    };
+
+    entry.to_url()
 }
 
 /// Resolve a `jp://` URI against the already-open workspace.

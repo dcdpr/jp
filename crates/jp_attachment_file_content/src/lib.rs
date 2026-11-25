@@ -35,6 +35,17 @@ impl Handler for FileContent {
         "file"
     }
 
+    /// The pattern as an absolute `file:///` URL, with an empty `exclude`
+    /// parameter for an exclusion.
+    fn canonical(&self, uri: &Url) -> Result<Url, Box<dyn Error + Send + Sync>> {
+        let mut url = pattern_to_uri(&uri_to_pattern(uri)?)?;
+        if uri.query_pairs().any(|(k, _)| k == "exclude") {
+            url.query_pairs_mut().append_pair("exclude", "");
+        }
+
+        Ok(url)
+    }
+
     async fn add(&mut self, uri: &Url, cwd: &Utf8Path) -> Result<(), Box<dyn Error + Send + Sync>> {
         let pattern = uri_to_pattern(uri)?;
         let is_exclude = uri.query_pairs().any(|(k, _)| k == "exclude");

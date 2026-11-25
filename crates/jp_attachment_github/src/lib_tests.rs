@@ -907,3 +907,59 @@ fn synthesizer_returns_empty_for_no_entries() {
     assert_eq!(synth.truncated, 0);
     assert!(synth.text.is_empty());
 }
+
+fn canonical(uri: &str) -> Result<String, String> {
+    GithubAttachment::default()
+        .canonical(&url(uri))
+        .map(|url| url.to_string())
+        .map_err(|error| error.to_string())
+}
+
+/// The shortform names the project's own repository, and GitHub matches owner
+/// and repository names without regard to case.
+#[test]
+fn canonical_collapses_every_spelling_of_one_pull_request() {
+    for spelling in [
+        "gh:pull/1/diff",
+        "gh://dcdpr/jp/pull/1/diff",
+        "gh://DCDPR/JP/pull/1/diff",
+    ] {
+        assert_eq!(
+            canonical(spelling).as_deref(),
+            Ok("gh://dcdpr/jp/pull/1/diff"),
+            "{spelling}"
+        );
+    }
+}
+
+/// A path is excluded when any pattern matches it, so the order patterns are
+/// given in, and how they are split across parameters, change nothing.
+#[test]
+fn canonical_lists_each_exclude_pattern_once_in_order() {
+    assert_eq!(
+        canonical("gh:pull/1/diff?exclude=b.md,a.md&exclude=a.md&no_defaults=yes").as_deref(),
+        Ok("gh://dcdpr/jp/pull/1/diff?exclude=a.md&exclude=b.md&no_defaults=true")
+    );
+}
+
+/// The diff ignores `include_outdated`, and the reviews ignore the exclude
+/// filter.
+#[test]
+fn canonical_drops_parameters_the_resource_does_not_read() {
+    assert_eq!(
+        canonical("gh:pull/1/diff?include_outdated=true").as_deref(),
+        Ok("gh://dcdpr/jp/pull/1/diff")
+    );
+    assert_eq!(
+        canonical("gh:pull/1/reviews?exclude=a.md&include_outdated=1").as_deref(),
+        Ok("gh://dcdpr/jp/pull/1/reviews?include_outdated=true")
+    );
+}
+
+#[test]
+fn canonical_rejects_an_unknown_parameter() {
+    assert_eq!(
+        canonical("gh:pull/1/diff?nope=1"),
+        Err("unknown query param `nope` in gh URI".to_owned())
+    );
+}

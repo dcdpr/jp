@@ -113,3 +113,43 @@ fn test_exclude_archived_round_trips() {
     let uri = handler.query_to_uri(&query).unwrap();
     assert_eq!(uri_to_query(&uri).unwrap(), query);
 }
+
+fn canonical(uri: &str) -> Result<String, String> {
+    BearNotes::default()
+        .canonical(&Url::parse(uri).unwrap())
+        .map(|url| url.to_string())
+        .map_err(|error| error.to_string())
+}
+
+/// The shorthand and Bear's own "Copy Link" URL name the same note.
+#[test]
+fn test_canonical_collapses_every_spelling_of_one_note() {
+    for spelling in [
+        "bear:F70FD86D",
+        "bear://get/F70FD86D",
+        "bear://x-callback-url/open-note?id=F70FD86D",
+    ] {
+        assert_eq!(
+            canonical(spelling).as_deref(),
+            Ok("bear://get/F70FD86D"),
+            "{spelling}"
+        );
+    }
+}
+
+/// A note's tags are a set; the order they are filtered by changes nothing.
+#[test]
+fn test_canonical_lists_each_tag_once_in_order() {
+    assert_eq!(
+        canonical("bear://search/rfd?tag=b&tag=a&tag=b&exclude_archived=1").as_deref(),
+        Ok("bear://search/rfd?tag=a&tag=b&exclude_archived=true")
+    );
+}
+
+#[test]
+fn test_canonical_rejects_a_url_add_rejects() {
+    assert_eq!(
+        canonical("bear:"),
+        Err("Invalid bear note query".to_owned())
+    );
+}

@@ -24,9 +24,10 @@ Issue IDs are numeric.
 ## Usage
 
 ```sh
-jp attachment add ag:592
-jp attachment add ag://issues/592
+jp query --attach ag:592 "Summarize this issue"
 ```
+
+`ag:592` and `ag://issues/592` are the same attachment.
 
 When the conversation is sent, the handler runs the following from the workspace
 root:
@@ -51,5 +52,5 @@ along with any variable named by an `env` query parameter (also accepted as
 `envs`, `env[]`, or `envs[]`):
 
 ```sh
-jp attachment add "ag:592?env=NAME"
+jp attachment print "ag:592?env=NAME"
 ```

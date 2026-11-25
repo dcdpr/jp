@@ -88,3 +88,24 @@ mod collapse_blank_lines {
         assert_eq!(collapse_blank_lines(""), "");
     }
 }
+
+mod canonical {
+    use jp_attachment::Handler as _;
+
+    use super::*;
+
+    /// A fragment never reaches the server, so it changes nothing that is
+    /// fetched.
+    #[test]
+    fn drops_the_fragment() {
+        let url = Url::parse("https://example.com/page?b=2&a=1#section").unwrap();
+
+        assert_eq!(
+            HttpContent::<Https>::default()
+                .canonical(&url)
+                .unwrap()
+                .as_str(),
+            "https://example.com/page?b=2&a=1"
+        );
+    }
+}

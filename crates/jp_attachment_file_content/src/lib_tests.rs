@@ -309,3 +309,41 @@ async fn test_file_add_rejects_oversized_binary() -> Result<(), Box<dyn Error + 
 
     Ok(())
 }
+
+fn canonical(uri: &str) -> Result<String, String> {
+    FileContent::default()
+        .canonical(&Url::parse(uri).unwrap())
+        .map(|url| url.to_string())
+        .map_err(|error| error.to_string())
+}
+
+/// Every path is relative to the workspace root, so these name one file.
+#[test]
+fn test_canonical_collapses_every_spelling_of_one_path() {
+    for spelling in [
+        "file:docs/notes.md",
+        "file:/docs/notes.md",
+        "file://docs/notes.md",
+        "file:///docs/notes.md",
+    ] {
+        assert_eq!(
+            canonical(spelling).as_deref(),
+            Ok("file:///docs/notes.md"),
+            "{spelling}"
+        );
+    }
+}
+
+/// `exclude` is read for its presence, whatever value it has.
+#[test]
+fn test_canonical_keeps_an_exclude() {
+    assert_eq!(
+        canonical("file:notes.md?exclude=true").as_deref(),
+        Ok("file:///notes.md?exclude=")
+    );
+}
+
+#[test]
+fn test_canonical_rejects_an_invalid_pattern() {
+    assert!(canonical("file:[").is_err());
+}

@@ -178,28 +178,28 @@ fn entry_url_round_trips_through_uri_to_entry() {
 }
 
 #[test]
-fn validate_rejects_invalid_selector() {
+fn canonical_rejects_invalid_selector() {
     let uri = Url::parse("jp://jp-c123456?select=zzz").unwrap();
-    assert!(validate(&uri).is_err());
+    assert!(super::canonical(&uri).is_err());
 }
 
 #[test]
-fn validate_rejects_invalid_id() {
+fn canonical_rejects_invalid_id() {
     let uri = Url::parse("jp://not-a-real-id").unwrap();
-    assert!(validate(&uri).is_err());
+    assert!(super::canonical(&uri).is_err());
 }
 
 #[test]
-fn validate_rejects_unsupported_variant() {
+fn canonical_rejects_unsupported_variant() {
     let uri = Url::parse("jp://jp-w123456").unwrap();
-    assert!(validate(&uri).is_err());
+    assert!(super::canonical(&uri).is_err());
 }
 
 #[test]
-fn validate_accepts_valid_uri() {
+fn canonical_accepts_valid_uri() {
     let id = ConversationId::try_from_deciseconds(17_013_123_456).unwrap();
     let uri = Url::parse(&format!("jp://{id}?select=a:-1")).unwrap();
-    validate(&uri).unwrap();
+    super::canonical(&uri).unwrap();
 }
 
 #[test]
@@ -529,6 +529,37 @@ fn resolve_raw_with_selector_filters_events() {
     assert!(body.contains("second assistant"));
     assert!(!body.contains("first user"), "earlier turn leaked: {body}");
     assert!(!body.contains("first assistant"));
+}
+
+fn canonical(uri: &str) -> String {
+    super::canonical(&Url::parse(uri).unwrap())
+        .unwrap()
+        .to_string()
+}
+
+/// The default selector, written out or left out, selects the same content.
+#[test]
+fn canonical_omits_the_default_selector() {
+    let id = ConversationId::try_from_deciseconds(17_013_123_456).unwrap();
+
+    for spelling in [
+        format!("jp://{id}"),
+        format!("jp://{id}?select=a:-1"),
+        format!("jp://{id}?select=assistant:-1..-1"),
+        format!("jp://{id}?select=a"),
+    ] {
+        assert_eq!(canonical(&spelling), format!("jp://{id}"), "{spelling}");
+    }
+}
+
+#[test]
+fn canonical_writes_the_selector_in_its_shortest_spelling() {
+    let id = ConversationId::try_from_deciseconds(17_013_123_456).unwrap();
+
+    assert_eq!(
+        canonical(&format!("jp://{id}?raw=events&select=user,assistant:-3..")),
+        format!("jp://{id}?select=a%2Cu%3A-3..&raw")
+    );
 }
 
 #[test]

@@ -37,24 +37,32 @@ fn child_env_omits_a_named_variable_that_is_unset() {
 }
 
 #[test]
-fn env_names_reads_every_env_parameter_in_order() {
+fn env_names_reads_every_env_parameter() {
     let uri = Url::parse("cmd://printenv?env=TERM&arg=TERM&env=JP_SESSION").unwrap();
 
-    assert_eq!(env_names(&uri).unwrap(), ["TERM", "JP_SESSION"]);
+    assert_eq!(env_names(&uri).unwrap(), ["JP_SESSION", "TERM"]);
+}
+
+/// A name given twice is passed once.
+#[test]
+fn env_names_lists_each_name_once() {
+    let uri = Url::parse("cmd://printenv?env=TERM&env=TERM").unwrap();
+
+    assert_eq!(env_names(&uri).unwrap(), ["TERM"]);
 }
 
 #[test]
 fn env_names_reads_the_plural_spelling() {
     let uri = Url::parse("cmd://printenv?envs=TERM&env=JP_SESSION&envs=SHELL").unwrap();
 
-    assert_eq!(env_names(&uri).unwrap(), ["TERM", "JP_SESSION", "SHELL"]);
+    assert_eq!(env_names(&uri).unwrap(), ["JP_SESSION", "SHELL", "TERM"]);
 }
 
 #[test]
 fn env_names_reads_the_bracketed_spellings() {
     let uri = Url::parse("cmd://printenv?env[]=TERM&envs[]=SHELL&env%5B%5D=JP_SESSION").unwrap();
 
-    assert_eq!(env_names(&uri).unwrap(), ["TERM", "SHELL", "JP_SESSION"]);
+    assert_eq!(env_names(&uri).unwrap(), ["JP_SESSION", "SHELL", "TERM"]);
 }
 
 #[test]

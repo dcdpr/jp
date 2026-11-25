@@ -6,19 +6,19 @@ It returns the standard output, standard error, and exit code of the command.
 
 ## Usage
 
-Get the `git diff` of the current project:
+Attach the `git diff` of the current project to a query:
 
 ```sh
-jp attachment add "cmd://git?arg=diff"
+jp query --attach "cmd://git?arg=diff" "Review this diff"
 ```
 
-List all added URIs:
+The attachment stays with the conversation, and the command runs again for
+every later query in it.
+
+Preview what an attachment sends without attaching it:
 
 ```sh
-jp attachment ls
-
-Attachments:
-  cmd://git?arg=diff
+jp attachment print "cmd://git?arg=diff"
 ```
 
 ## Environment
@@ -28,7 +28,7 @@ It receives `PATH` and `HOME` (plus `USERPROFILE` and `SystemRoot` on Windows),
 along with any variable named by an `env` query parameter:
 
 ```sh
-jp attachment add "cmd://printenv?arg=TERM&env=TERM"
+jp attachment print "cmd://printenv?arg=TERM&env=TERM"
 ```
 
 Repeat `env` to forward multiple variables.
@@ -47,3 +47,6 @@ path = "printenv"
 params.args = ["TERM"]
 params.envs = ["TERM"]
 ```
+
+This table and the URL above are the same attachment, so a conversation that
+attaches one does not attach the other again.

@@ -2410,9 +2410,7 @@ fn apply_attachments(
         .map(|v| v.parse(root))
         .collect::<Result<Vec<_>>>()?;
 
-    attach_urls(partial, attachments);
-
-    Ok(())
+    attach_urls(partial, attachments)
 }
 
 /// Apply the CLI reasoning configuration to the partial configuration.

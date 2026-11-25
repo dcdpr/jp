@@ -2,7 +2,7 @@ use clap::{Arg, ArgAction, ArgMatches, Command, value_parser};
 use jp_config::PartialAppConfig;
 use jp_workspace::Workspace;
 
-use super::{attach_urls, validate_attachment};
+use super::attach_urls;
 use crate::{
     IntoPartialAppConfig,
     cli::{CommandArgs, many},
@@ -59,12 +59,14 @@ impl IntoPartialAppConfig for Add {
         mut partial: PartialAppConfig,
         _: Option<&PartialAppConfig>,
     ) -> std::result::Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
-        for uri in &self.attachments {
-            let uri = uri.parse(workspace.map(Workspace::root))?;
-            validate_attachment(&uri)?;
+        let root = workspace.map(Workspace::root);
+        let uris = self
+            .attachments
+            .iter()
+            .map(|uri| uri.parse(root))
+            .collect::<Result<Vec<_>, _>>()?;
 
-            attach_urls(&mut partial, [uri]);
-        }
+        attach_urls(&mut partial, uris)?;
 
         Ok(partial)
     }

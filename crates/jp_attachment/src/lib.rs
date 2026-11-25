@@ -152,6 +152,27 @@ pub trait Handler: std::fmt::Debug + DynClone + DynHash + Send + Sync {
     /// The scheme has to be unique across all handlers.
     fn scheme(&self) -> &'static str;
 
+    /// Return the URL this handler resolves `uri` as, in the single spelling
+    /// the handler writes.
+    ///
+    /// Two URLs with the same canonical form resolve to the same attachment
+    /// content, so a caller compares canonical forms to tell whether an
+    /// attachment is already attached.
+    /// Spellings the handler treats alike map to one URL: a shorthand and its
+    /// full form, two spellings of a query parameter, or values whose order
+    /// does not change what is resolved.
+    /// The canonical form of a canonical URL is that URL.
+    ///
+    /// Performs no I/O, so it can run before anything is resolved or stored.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the handler cannot resolve `uri`, with the error
+    /// [`Self::add`] returns for it.
+    /// [`Self::add`] may still reject a URL accepted here, for a reason only
+    /// I/O can reveal, such as a file that is too large.
+    fn canonical(&self, uri: &Url) -> Result<Url, Box<dyn Error + Send + Sync>>;
+
     /// Add a new attachment, using the given URL.
     ///
     /// The `cwd` parameter is the current working directory, used by handlers
@@ -240,9 +261,11 @@ pub fn percent_encode_str(encoded: &str) -> String {
 }
 
 /// Extract the environment variable names specified by [`ENV_PARAM`] query
-/// parameters in `uri`, in order of appearance.
+/// parameters in `uri`, sorted, with each name once.
 ///
 /// Accepts the parameter spellings `env`, `envs`, `env[]`, and `envs[]`.
+/// The variables a subprocess receives do not depend on the order they are
+/// named in, so two URLs naming the same variables return the same list.
 ///
 /// # Errors
 ///
@@ -266,6 +289,9 @@ pub fn env_names(uri: &Url) -> Result<Vec<String>, Box<dyn Error + Send + Sync>>
 
         names.push(name.into_owned());
     }
+
+    names.sort();
+    names.dedup();
 
     Ok(names)
 }

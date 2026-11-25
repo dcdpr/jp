@@ -126,6 +126,18 @@ impl Handler for BearNotes {
         "bear"
     }
 
+    /// The note or search written in the `bear://get/` or `bear://search/`
+    /// form, with search tags sorted and each listed once.
+    fn canonical(&self, uri: &Url) -> Result<Url, Box<dyn Error + Send + Sync>> {
+        let mut query = uri_to_query(uri)?;
+        if let Query::Search { tags, .. } = &mut query {
+            tags.sort();
+            tags.dedup();
+        }
+
+        self.query_to_uri(&query)
+    }
+
     async fn add(
         &mut self,
         uri: &Url,
