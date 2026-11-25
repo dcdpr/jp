@@ -1422,7 +1422,7 @@ help: Some("Print help (see more with '--help')")
 long_help: Some("Print help (see a summary with '-h')")
 
 ## jp attachment add
-about: Some("Add attachment to context")
+about: Some("Add attachments to a conversation")
 long_about: None
 after_help: None
 after_long_help: None
@@ -1431,7 +1431,7 @@ hidden_aliases: ["a"]
 hidden: false
 external_subcommands: None
 set: ["arg_required_else_help", "disable_help_subcommand"]
-usage: Usage: jp attachment add [OPTIONS] [ATTACHMENTS]...
+usage: Usage: jp attachment add [OPTIONS] <ATTACHMENTS>...
 
 ### attachments
 short: None
@@ -1449,9 +1449,29 @@ value_delimiter: None
 default_values: []
 help_heading: None
 conflicts: []
+set: ["required"]
+help: Some("One or more attachments to add to the conversation")
+long_help: Some("One or more attachments to add to the conversation.\n\nIf the attachment is pointing to a file, then a file attachment is added, otherwise the attachment type can be added as a prefix.\n\nFor example, to add a `summary` attachment, use `summary://<path>`.\n\nAdding an attachment the conversation already has is not an error, but it is reported.")
+
+### id
+short: Some('i')
+long: Some("id")
+visible_aliases: ["ids"]
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(0..=1)
+value_type: jp_cli::cli::flag::Word<jp_cli::cmd::target::ConversationTarget>
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
 set: []
-help: Some("One or more attachments to add to the context")
-long_help: Some("One or more attachments to add to the context.\n\nIf the attachment is pointing to a file, then a file attachment is added, otherwise the attachment type can be added as a prefix.\n\nFor example, to add a `summary` attachment, use `summary://<path>`.")
+help: Some("Conversation ID or keyword")
+long_help: Some("Conversation ID, Interactive Filter/Picker, or Alias.\n\nInteractive Filter/Picker:\n  ?                             select from all\n  ?p, ?pinned                   select from pinned\n  ?s, ?session                  select from session\n  ?a, ?archived                 select from archived\n\nConversation Aliases:\n  ., active                     target the session's active conversation\n  r, recent                     target most recently activated in workspace\n  n, newest                     target newest created\n  p, pinned                     target most recently pinned\n  s, session                    target the session's previous conversation\n  a, archived                   target most recently archived")
 
 ### help
 short: Some('h')
@@ -1474,7 +1494,7 @@ help: Some("Print help (see more with '--help')")
 long_help: Some("Print help (see a summary with '-h')")
 
 ## jp attachment rm
-about: Some("Remove attachment from context")
+about: Some("Remove attachments from a conversation")
 long_about: None
 after_help: None
 after_long_help: None
@@ -1483,7 +1503,7 @@ hidden_aliases: ["r"]
 hidden: false
 external_subcommands: None
 set: ["disable_help_subcommand"]
-usage: Usage: jp attachment rm [OPTIONS] [ATTACHMENTS]...
+usage: Usage: jp attachment rm [OPTIONS] <ATTACHMENTS>...
 
 ### attachments
 short: None
@@ -1501,9 +1521,29 @@ value_delimiter: None
 default_values: []
 help_heading: None
 conflicts: []
+set: ["required"]
+help: Some("One or more attachments to remove from the conversation")
+long_help: Some("One or more attachments to remove from the conversation, written as `jp conversation show` lists them.\n\nAn attachment a config file declared is removed the same way: the conversation keeps its own copy of the configuration it was created with.\n\nRemoving an attachment the conversation doesn't have is not an error, but it is reported.")
+
+### id
+short: Some('i')
+long: Some("id")
+visible_aliases: ["ids"]
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(0..=1)
+value_type: jp_cli::cli::flag::Word<jp_cli::cmd::target::ConversationTarget>
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
 set: []
-help: None
-long_help: None
+help: Some("Conversation ID or keyword")
+long_help: Some("Conversation ID, Interactive Filter/Picker, or Alias.\n\nInteractive Filter/Picker:\n  ?                             select from all\n  ?p, ?pinned                   select from pinned\n  ?s, ?session                  select from session\n  ?a, ?archived                 select from archived\n\nConversation Aliases:\n  ., active                     target the session's active conversation\n  r, recent                     target most recently activated in workspace\n  n, newest                     target newest created\n  p, pinned                     target most recently pinned\n  s, session                    target the session's previous conversation\n  a, archived                   target most recently archived")
 
 ### help
 short: Some('h')
@@ -1526,7 +1566,7 @@ help: Some("Print help (see more with '--help')")
 long_help: Some("Print help (see a summary with '-h')")
 
 ## jp attachment ls
-about: Some("List attachments in context")
+about: Some("List a conversation's attachments")
 long_about: None
 after_help: None
 after_long_help: None
@@ -1536,6 +1576,26 @@ hidden: false
 external_subcommands: None
 set: ["disable_help_subcommand"]
 usage: Usage: jp attachment ls [OPTIONS]
+
+### id
+short: Some('i')
+long: Some("id")
+visible_aliases: ["ids"]
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(0..=1)
+value_type: jp_cli::cli::flag::Word<jp_cli::cmd::target::ConversationTarget>
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
+set: []
+help: Some("Conversation ID or keyword")
+long_help: Some("Conversation ID, Interactive Filter/Picker, or Alias.\n\nInteractive Filter/Picker:\n  ?                             select from all\n  ?p, ?pinned                   select from pinned\n  ?s, ?session                  select from session\n  ?a, ?archived                 select from archived\n\nConversation Aliases:\n  ., active                     target the session's active conversation\n  r, recent                     target most recently activated in workspace\n  n, newest                     target newest created\n  p, pinned                     target most recently pinned\n  s, session                    target the session's previous conversation\n  a, archived                   target most recently archived")
 
 ### help
 short: Some('h')
@@ -1619,7 +1679,7 @@ hidden_aliases: []
 hidden: true
 external_subcommands: None
 set: ["arg_required_else_help", "disable_help_subcommand"]
-usage: Usage: jp aa [OPTIONS] [ATTACHMENTS]...
+usage: Usage: jp aa [OPTIONS] <ATTACHMENTS>...
 
 ### attachments
 short: None
@@ -1637,9 +1697,29 @@ value_delimiter: None
 default_values: []
 help_heading: None
 conflicts: []
+set: ["required"]
+help: Some("One or more attachments to add to the conversation")
+long_help: Some("One or more attachments to add to the conversation.\n\nIf the attachment is pointing to a file, then a file attachment is added, otherwise the attachment type can be added as a prefix.\n\nFor example, to add a `summary` attachment, use `summary://<path>`.\n\nAdding an attachment the conversation already has is not an error, but it is reported.")
+
+### id
+short: Some('i')
+long: Some("id")
+visible_aliases: ["ids"]
+hidden_aliases: []
+short_aliases: None
+index: None
+action: Set
+num_args: Some(0..=1)
+value_type: jp_cli::cli::flag::Word<jp_cli::cmd::target::ConversationTarget>
+possible_values: []
+value_names: None
+value_delimiter: None
+default_values: []
+help_heading: None
+conflicts: []
 set: []
-help: Some("One or more attachments to add to the context")
-long_help: Some("One or more attachments to add to the context.\n\nIf the attachment is pointing to a file, then a file attachment is added, otherwise the attachment type can be added as a prefix.\n\nFor example, to add a `summary` attachment, use `summary://<path>`.")
+help: Some("Conversation ID or keyword")
+long_help: Some("Conversation ID, Interactive Filter/Picker, or Alias.\n\nInteractive Filter/Picker:\n  ?                             select from all\n  ?p, ?pinned                   select from pinned\n  ?s, ?session                  select from session\n  ?a, ?archived                 select from archived\n\nConversation Aliases:\n  ., active                     target the session's active conversation\n  r, recent                     target most recently activated in workspace\n  n, newest                     target newest created\n  p, pinned                     target most recently pinned\n  s, session                    target the session's previous conversation\n  a, archived                   target most recently archived")
 
 ### help
 short: Some('h')

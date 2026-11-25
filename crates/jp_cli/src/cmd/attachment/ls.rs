@@ -1,23 +1,39 @@
 use clap::{ArgMatches, Command};
 use jp_term::table::{DetailItem, Details};
 
-use crate::{cli::CommandArgs, cmd::Output, ctx::Ctx, output::print_details};
+use crate::{
+    cli::CommandArgs,
+    cmd::{ConversationLoadRequest, Output, conversation_id::FlagIds},
+    ctx::Ctx,
+    output::print_details,
+};
 
 /// `jp attachment ls`.
 #[derive(Debug)]
-pub(crate) struct Ls {}
+pub(crate) struct Ls {
+    /// The conversation to list; defaults to the session's active conversation.
+    pub(super) target: FlagIds<true, false>,
+}
 
 impl CommandArgs for Ls {
     fn augment(cmd: Command) -> Command {
-        cmd
+        FlagIds::<true, false>::augment(cmd)
     }
 
-    fn from_matches(_: &ArgMatches) -> Result<Self, clap::Error> {
-        Ok(Self {})
+    fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
+        Ok(Self {
+            target: FlagIds::from_matches(matches)?,
+        })
     }
 }
 
 impl Ls {
+    /// The conversation's config is layered into the invocation's, which is
+    /// what `run` lists.
+    pub(crate) fn conversation_load_request(&self) -> ConversationLoadRequest {
+        ConversationLoadRequest::explicit_or_session_with_config(&self.target)
+    }
+
     #[expect(clippy::unused_self)]
     pub(crate) fn run(self, ctx: &mut Ctx) -> Output {
         let uris = &ctx.config().conversation.attachments;
