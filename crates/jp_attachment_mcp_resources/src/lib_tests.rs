@@ -35,7 +35,7 @@ async fn resolving_a_stored_attachment_names_it_and_how_to_remove_it() {
     );
 }
 
-/// A handler holding several names all of them in one error.
+/// A handler holding multiple URIs names all of them in a single error.
 #[tokio::test]
 async fn resolving_names_every_stored_attachment() {
     let second = Url::parse("mcp+other-server+file:///notes.md").unwrap();

@@ -17,11 +17,7 @@ use crate::{
 /// `jp attachment rm`.
 #[derive(Debug)]
 pub(crate) struct Rm {
-    /// The attachments to remove from the conversation.
     pub(super) attachments: Vec<AttachmentUrlOrPath>,
-
-    /// The conversation to remove them from; defaults to the session's active
-    /// conversation.
     pub(super) target: FlagIds<true, false>,
 }
 
@@ -61,10 +57,10 @@ impl Rm {
     }
 
     pub(crate) async fn run(self, ctx: &mut Ctx, handles: Vec<ConversationHandle>) -> Output {
-        // Compared by canonical URL, so any spelling of an attachment removes
-        // it, and each argument keeps its spelling for the report. A file path
-        // resolves without the file existing, since the stored URL is all a
-        // removal needs.
+        // Match by canonical URL so equivalent spellings remove the attachment,
+        // while keeping the original argument for error reporting. File paths
+        // are converted to URLs without checking whether the file exists on
+        // disk.
         let to_remove = self
             .attachments
             .iter()
@@ -100,10 +96,10 @@ impl Rm {
             return Ok(());
         }
 
-        // A config delta cannot remove a list item, so the whole list is
-        // replaced with what remains. The conversation's config never inherits
-        // from the config files once it exists, so replacing the list pins
-        // nothing the conversation did not already pin.
+        // Config deltas cannot remove individual list items, so replace the
+        // list with the remaining attachments. Because a conversation's attachment
+        // list is already pinned at creation, replacing it does not change how
+        // file-layer configs are inherited.
         let mut overrides = PartialAppConfig::empty();
         overrides.conversation.attachments = vec_to_mergeable_partial(&kept);
 
@@ -118,20 +114,16 @@ impl Rm {
     }
 }
 
-/// A conversation's attachments, divided by what `rm` was asked to remove.
 struct Split<'a> {
-    /// The attachments that stay.
     kept: Vec<AttachmentConfig>,
-
-    /// The stored URL of each attachment that goes.
+    /// Stored URL of each removed attachment.
     removed: Vec<Url>,
-
-    /// The arguments, as written, that matched no attachment.
+    /// Arguments (as written) that matched no stored attachment.
     missing: Vec<&'a Url>,
 }
 
-/// Divide `attachments` by `to_remove`, which pairs each argument's canonical
-/// URL with the URL as written.
+/// Partition `attachments` against `to_remove` (`(canonical_url, written_url)`
+/// pairs).
 fn split(
     attachments: Vec<AttachmentConfig>,
     to_remove: &[(Url, Url)],

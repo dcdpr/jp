@@ -46,18 +46,20 @@ pub(crate) enum AttachmentUrlOrPath {
 }
 
 impl AttachmentUrlOrPath {
-    /// The attachment URL this argument names, requiring a path to exist.
+    /// Convert this argument into an attachment URL, requiring any file path to
+    /// exist on disk.
     ///
-    /// With a workspace `root`, a path must lie inside it, and becomes relative
-    /// to it.
+    /// When `root` is provided, file paths must reside within the workspace and
+    /// are made relative to `root`.
     pub fn parse(&self, root: Option<&Utf8Path>) -> Result<Url> {
         self.to_url(root, true)
     }
 
-    /// The attachment URL this argument names, whether or not a path exists.
+    /// Convert this argument into an attachment URL without checking whether a
+    /// file path exists on disk.
     ///
-    /// A path is resolved the same way [`Self::parse`] resolves it, so the URL
-    /// matches the one stored when the path was attached.
+    /// Path resolution matches [`Self::parse`], producing the same URL that was
+    /// stored when the file was attached.
     pub fn parse_unchecked(&self, root: Option<&Utf8Path>) -> Result<Url> {
         self.to_url(root, false)
     }

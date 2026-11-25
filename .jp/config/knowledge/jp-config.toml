@@ -132,29 +132,30 @@ layer supplies only gaps:
 - **Lists are pinned whole.** Attachments, instructions, and system \
   prompt sections keep the conversation's items, even when the list is \
   empty (`MergeableVec::fill_from`).
-- **Scalars are pinned when set.** An `Option` field the snapshot \
-  resolved to `None` is a gap, so a config file that sets it later fills \
-  it in, unless a delta explicitly cleared it (the stream's `unsets`).
+- **Scalars are pinned when set.** An `Option` field that resolved to \
+  `None` in the snapshot is a gap, so a config file that sets it later \
+  fills it in unless a delta explicitly cleared it (recorded in the \
+  stream's `unsets`).
 - **Maps are pinned per key.** Tools, MCP providers, command plugins, \
   model aliases, and label rules are snapshotted as plain maps \
-  (`map_to_partial_per_key`), and `fill_map` adds any key only the file \
-  layer has. A tool or MCP server added to the config files later joins \
-  existing conversations; one the conversation already has keeps its \
-  values.
+  (`map_to_partial_per_key`), and `fill_map` adds any key present only \
+  in the file layer. A tool or MCP server added to the config files \
+  later joins existing conversations; keys the conversation already has \
+  keep their stored values.
 
 What follows from this:
 
-- Attachments, instructions, and prompt sections a config file declared \
-  are the conversation's own copies. Removing one from a conversation \
-  edits that conversation only.
+- Attachments, instructions, and prompt sections declared in a config \
+  file become the conversation's own copies. Removing one from a \
+  conversation edits that conversation only.
 - Replacing a *list* on a conversation (`strategy = "replace"`) pins \
   nothing that was not already pinned, so don't avoid it for fear of \
   detaching the conversation from the workspace. Replacing a *map* \
-  removes the keys it leaves out, and those are recorded as the delta's \
-  unsets so the file layer cannot restore them. Keys the config files \
-  add later still join, because `query::conversation_config` rebuilds \
-  the conversation's layer from its resolved config, where every map is \
-  a plain per-key map again.
+  removes the omitted keys and records them in the delta's `unsets` so \
+  the file layer cannot restore them. Keys added to config files later \
+  still join the conversation, because `query::conversation_config` \
+  rebuilds the conversation's layer from its resolved config, where \
+  every map is a plain per-key map again.
 - `--cfg WORKSPACE` ([RFD 038]) is the explicit way to move a \
   conversation onto the current workspace config.
 - A command that reads or changes a conversation's config has to load \

@@ -13,7 +13,6 @@ use crate::{
 /// `jp attachment ls`.
 #[derive(Debug)]
 pub(crate) struct Ls {
-    /// The conversation to list; defaults to the session's active conversation.
     pub(super) target: FlagIds<true, false>,
 }
 
@@ -36,8 +35,8 @@ impl Ls {
 
     /// List the attachments stored on the conversation.
     ///
-    /// A `--cfg` override given to this invocation is not listed, since it is
-    /// not stored.
+    /// `--cfg` overrides on the current invocation are not stored on the
+    /// conversation and are not listed.
     pub(crate) fn run(self, ctx: &mut Ctx, handles: &[ConversationHandle]) -> Output {
         let Some(handle) = handles.first() else {
             return Err(Error::from(TargetGrammar::from_args(&self.target, false)).into());
@@ -54,9 +53,8 @@ impl Ls {
             items.push(DetailItem::plain(attachment.to_url()?.to_string()));
         }
 
-        // The text views swap an empty listing for a sentence; JSON keeps the
-        // array, so a script sees one shape whether or not anything was
-        // attached.
+        // Text output replaces an empty list with a message; JSON preserves
+        // the empty array so consumers always receive the same schema.
         if items.is_empty() && !ctx.printer.format().is_json() {
             ctx.printer
                 .println(format!("No attachments in conversation {}.", handle.id()));

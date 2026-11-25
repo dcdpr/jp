@@ -122,8 +122,6 @@ fn load_conversation_attachments_resolves_a_repeated_url_once() {
     assert_eq!(sources, [vec!["docs/notes.md"], vec![], vec![]]);
 }
 
-/// A `Ctx` over a persisted workspace holding one conversation created with
-/// `config`, and the printer's stdout and stderr.
 fn persisted_ctx(
     id: ConversationId,
     config: AppConfig,
@@ -131,8 +129,9 @@ fn persisted_ctx(
     persisted_ctx_in(OutputFormat::Text, id, config.clone(), config)
 }
 
-/// A `Ctx` printing in `format`, whose invocation runs with `invocation` while
-/// its one conversation was created with `stored`.
+/// Build a `Ctx` over a persisted workspace where the invocation runs with
+/// `invocation` config and the target conversation was created with `stored`
+/// config.
 fn persisted_ctx_in(
     format: OutputFormat,
     id: ConversationId,
@@ -168,8 +167,8 @@ fn persisted_ctx_in(
     (ctx, out, err, tmp)
 }
 
-/// The attachment `.jp/config/knowledge/rfd-priority.toml` declares, as the
-/// table a config file writes it in.
+/// Table-form attachment config matching
+/// `.jp/config/knowledge/rfd-priority.toml`.
 fn rfd_list_attachment() -> AttachmentConfig {
     let mut params = IndexMap::new();
     params.insert(
@@ -236,7 +235,8 @@ fn add_records_the_attachment_on_the_conversation() {
     assert_eq!(*err.lock(), "");
 }
 
-/// Adding what the conversation already carries records nothing, and says so.
+/// Adding an already-attached URL records no delta and reports a message on
+/// stderr.
 #[test]
 fn add_skips_an_attachment_the_conversation_already_has() {
     let id = make_id(1_700_000_011);
@@ -400,8 +400,8 @@ fn rm_removes_a_file_attachment_whose_file_is_gone() {
     assert_eq!(*err.lock(), "");
 }
 
-/// Removing what the conversation does not carry records nothing, and names the
-/// attachment that matched nothing.
+/// Removing an attachment that is not on the conversation records no delta and
+/// reports the unmatched URL on stderr.
 #[test]
 fn rm_reports_an_attachment_the_conversation_does_not_have() {
     let id = make_id(1_700_000_014);

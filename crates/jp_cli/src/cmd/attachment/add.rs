@@ -14,11 +14,7 @@ use crate::{
 /// `jp attachment add`, and its hidden shorthand `jp aa`.
 #[derive(Debug)]
 pub(crate) struct Add {
-    /// The attachments to add to the conversation.
     pub(super) attachments: Vec<AttachmentUrlOrPath>,
-
-    /// The conversation to add them to; defaults to the session's active
-    /// conversation.
     pub(super) target: FlagIds<true, false>,
 }
 
@@ -58,8 +54,8 @@ impl Add {
     }
 
     pub(crate) async fn run(self, ctx: &mut Ctx, handles: Vec<ConversationHandle>) -> Output {
-        // Each URL is paired with its canonical form, which both validates it
-        // and is what decides whether the conversation already has it.
+        // Pair each URL with its canonical form to validate it and check
+        // whether it is already attached.
         let urls = self
             .attachments
             .iter()
@@ -99,8 +95,8 @@ impl Add {
             return Ok(());
         }
 
-        // An item without a merge strategy appends, so only the new
-        // attachments are recorded.
+        // `MergeableVec` defaults to the append strategy, so only the new
+        // attachments need to be included in the delta.
         let mut overrides = PartialAppConfig::empty();
         for url in &added {
             overrides.conversation.attachments.push(url.clone().into());

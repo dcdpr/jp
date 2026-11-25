@@ -86,8 +86,9 @@ impl Handler for McpResources {
         "mcp"
     }
 
-    // Refusing here keeps a new URI from being stored. One already stored is
-    // still listed, removed, and reported by `get`.
+    // Rejecting the URI in `canonical` prevents a new attachment from being
+    // stored. Previously stored attachments can still be listed, removed, and
+    // reported by `get`.
     fn canonical(&self, uri: &Url) -> Result<Url, Box<dyn Error + Send + Sync>> {
         Err(Box::new(Retired { uri: uri.clone() }))
     }
