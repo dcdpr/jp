@@ -36,6 +36,12 @@ pub(crate) struct Checks {
     /// Run `jp wiki check` as well.
     pub wiki: bool,
 
+    /// Run `cargo doc` with the flags of the `docs` CI job as well.
+    pub docs: bool,
+
+    /// Run that `cargo doc` with `-Zrustdoc-mergeable-info`.
+    pub docs_mergeable_info: bool,
+
     /// Run the rustqual gate, `qual diff`, as well.
     pub qual: bool,
 
@@ -104,6 +110,16 @@ fn cargo_check_impl<R: ProcessRunner>(
             ));
         }
     }
+    if checks.docs {
+        notes.extend(doc_check(
+            root,
+            packages,
+            profile_arg.as_deref(),
+            &env,
+            checks.docs_mergeable_info,
+            runner,
+        ));
+    }
     if checks.qual {
         match qual_check(root, packages, profile_arg.as_deref(), &env, runner) {
             QualCheck::Clean => {}
@@ -143,6 +159,85 @@ fn cargo_check_impl<R: ProcessRunner>(
     };
 
     Ok(format!("{header}\n\n{}", notes.join("\n\n")).into())
+}
+
+/// The `RUSTDOCFLAGS` that `just docs-ci`, the `docs` job on CI, sets.
+const DOCS_RUSTDOCFLAGS: &str = concat!(
+    "-D warnings ",
+    "-D rustdoc::broken-intra-doc-links ",
+    "-D rustdoc::invalid-codeblock-attributes ",
+    "-D rustdoc::invalid-html-tags ",
+    "-D rustdoc::invalid-rust-codeblocks ",
+    "-D rustdoc::bare-urls ",
+    "-D rustdoc::unescaped-backticks ",
+    "-D rustdoc::redundant-explicit-links",
+);
+
+/// Run the `cargo doc` of `just docs-ci` over `packages`, or the whole
+/// workspace when `packages` is empty, returning what it reported as a note;
+/// `None` when it reported nothing.
+///
+/// The build gets `profile` and `env`, the same as the clippy run, so the two
+/// share a target directory and the dependency metadata built under it.
+/// Cargo documents a crate again only when its sources or dependencies change.
+/// A `cargo doc` that can't be run is a note too, rather than a failed check:
+/// the code itself was checked.
+///
+/// With `mergeable_info`, each crate's rustdoc writes its share of the search
+/// index to a directory of its own, and cargo merges them once at the end.
+/// Requires nightly cargo.
+fn doc_check<R: ProcessRunner>(
+    root: &Utf8Path,
+    packages: &[String],
+    profile: Option<&str>,
+    env: &[(&str, &str)],
+    mergeable_info: bool,
+    runner: &R,
+) -> Option<String> {
+    let scope = cargo_scope(packages, "--workspace");
+
+    let mut args = vec!["doc", "--color=never", "--quiet"];
+    args.extend(scope.iter().map(String::as_str));
+    args.extend([
+        "--keep-going",
+        "--all-features",
+        "--document-private-items",
+        "--no-deps",
+    ]);
+    args.extend(profile);
+
+    let mut env = env.to_vec();
+    env.push(("RUSTDOCFLAGS", DOCS_RUSTDOCFLAGS));
+    if mergeable_info {
+        // Without it, every crate's rustdoc rewrites the workspace's shared
+        // search index under a lock, so documenting runs one crate at a time
+        // and slows with each crate documented (rust-lang/rust#146895).
+        env.push(("CARGO_UNSTABLE_RUSTDOC_MERGEABLE_INFO", "true"));
+    }
+
+    let output = match runner.run_with_env("cargo", &args, root, &env) {
+        Ok(output) => output,
+        Err(error) => {
+            return Some(format!(
+                "The docs weren't checked: `cargo` couldn't be run: {error}"
+            ));
+        }
+    };
+
+    let stderr = strip_ansi_escapes::strip_str(&output.stderr);
+    let stderr = stderr.trim();
+    if stderr.is_empty() {
+        return if output.status.is_success() {
+            None
+        } else {
+            Some("The docs weren't checked: `cargo doc` failed without saying why.".to_owned())
+        };
+    }
+
+    Some(format!(
+        "`cargo doc`, run as the `docs` job on CI runs it, reported:\n```\n{}\n```",
+        truncate(stderr, MAX_DIAGNOSTIC_BYTES)
+    ))
 }
 
 /// Run `jp wiki check` over the workspace, returning what it found as a note;

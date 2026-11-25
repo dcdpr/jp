@@ -1,0 +1,73 @@
+[conversation.tools.github_pr_checks]
+enable = false
+run = "allow"
+
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
+
+# Independent reads against the GitHub API. Bounded so a large batch does not
+# trip its secondary rate limit; every failure is reported.
+fan_out = { concurrency = 4 }
+
+summary = "Read the CI status of a pull request, and the log of one of its jobs."
+
+description = """
+Without `job`, lists the check runs on the pull request's head commit, failed
+first, then pending, then passed. A check whose job reported errors or warnings
+through a problem matcher carries them as annotations: file, line, and the first
+line of the message. GitHub keeps at most 50 annotations per job.
+
+With `job`, downloads that job's log and returns the compiler diagnostics in it
+(`error:` and `warning:` blocks, panics, and runner errors), followed by the
+last 40 lines of the log. Use it when the annotations don't say enough, or when
+a job failed without any.
+
+Listing makes one request per check that has annotations, so it costs more of
+the rate limit than most tools. Set `JP_GITHUB_TOKEN` or `GITHUB_TOKEN` to
+avoid GitHub's limit of 60 anonymous requests an hour.
+"""
+
+examples = """
+List the checks on a PR and what the failing ones reported:
+```json
+{"number": 42}
+```
+
+Read the log of the PR's failing `docs` job:
+```json
+{"number": 42, "job": "docs"}
+```
+
+Read the log of a matrix job, by its check name:
+```json
+{"number": 42, "job": "test (windows)"}
+```
+"""
+
+[conversation.tools.github_pr_checks.style]
+inline_results = "off"
+results_file_link = "off"
+parameters = "function_call"
+
+[conversation.tools.github_pr_checks.parameters.repository]
+type = "string"
+summary = "Repository to read the pull request from, in `owner/repo` form."
+description = """
+If unspecified, defaults to the current project's GitHub repository.
+"""
+
+[conversation.tools.github_pr_checks.parameters.number]
+type = "integer"
+summary = "Pull request number whose checks to read."
+description = """
+Required. Use `github_pulls` (without `number`) first if you need to
+discover available PR numbers.
+"""
+
+[conversation.tools.github_pr_checks.parameters.job]
+type = "string"
+summary = "Check name or ID of the job whose log to read."
+description = """
+The `name` or `id` of a check in the listing, such as `docs` or
+`test (windows)`. Only GitHub Actions jobs have a log.
+"""

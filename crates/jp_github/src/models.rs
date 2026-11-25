@@ -320,6 +320,121 @@ pub mod commits {
     }
 }
 
+pub mod checks {
+    use super::{DateTime, Deserialize, Serialize, Url, Utc};
+
+    /// A page of a commit's check runs, from `GET
+    /// /repos/{owner}/{repo}/commits/{ref}/check-runs`.
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct CheckRuns {
+        /// How many check runs the commit has, across every page.
+        pub total_count: u64,
+        pub check_runs: Vec<CheckRun>,
+    }
+
+    /// One check reported on a commit: a GitHub Actions job, or a check created
+    /// by some other GitHub App.
+    ///
+    /// For a GitHub Actions job, `id` is also the job's ID, which the job-log
+    /// endpoint takes.
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct CheckRun {
+        pub id: u64,
+        pub name: String,
+        pub status: CheckStatus,
+        /// Set once `status` is `completed`.
+        pub conclusion: Option<CheckConclusion>,
+        pub started_at: Option<DateTime<Utc>>,
+        pub completed_at: Option<DateTime<Utc>>,
+        pub html_url: Option<Url>,
+        pub output: CheckRunOutput,
+        /// The GitHub App that created the check run.
+        pub app: Option<CheckApp>,
+    }
+
+    impl CheckRun {
+        /// Whether the check run is a GitHub Actions job, which has a log.
+        // qual:api
+        // Called from `.config/jp/tools`, which rustqual doesn't analyse
+        // (T-0yh5j3r item 17).
+        #[must_use]
+        pub fn is_actions_job(&self) -> bool {
+            self.app
+                .as_ref()
+                .is_some_and(|app| app.slug == "github-actions")
+        }
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+    #[serde(rename_all = "snake_case")]
+    pub enum CheckStatus {
+        Queued,
+        InProgress,
+        Completed,
+        Waiting,
+        Requested,
+        Pending,
+        /// A status this client doesn't know.
+        #[serde(other)]
+        Unknown,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+    #[serde(rename_all = "snake_case")]
+    pub enum CheckConclusion {
+        Success,
+        Failure,
+        Neutral,
+        Cancelled,
+        Skipped,
+        TimedOut,
+        ActionRequired,
+        Stale,
+        /// A conclusion this client doesn't know.
+        #[serde(other)]
+        Unknown,
+    }
+
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct CheckRunOutput {
+        pub title: Option<String>,
+        pub summary: Option<String>,
+        /// How many annotations the check run has.
+        /// Fetch them from the annotations endpoint.
+        #[serde(default)]
+        pub annotations_count: u64,
+    }
+
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct CheckApp {
+        pub slug: String,
+    }
+
+    /// A problem a check run reported against a line of a file, such as a
+    /// compiler error a problem matcher picked out of a job's log.
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct Annotation {
+        /// Path below the repository root.
+        pub path: String,
+        pub start_line: u64,
+        pub end_line: u64,
+        pub annotation_level: AnnotationLevel,
+        pub title: Option<String>,
+        pub message: String,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+    #[serde(rename_all = "snake_case")]
+    pub enum AnnotationLevel {
+        Notice,
+        Warning,
+        Failure,
+        /// A level this client doesn't know.
+        #[serde(other)]
+        Unknown,
+    }
+}
+
 pub mod search {
     use super::{Deserialize, Serialize};
 

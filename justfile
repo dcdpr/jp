@@ -2498,13 +2498,24 @@ site-ci:
     cargo test --locked -p jp-vite
 
 # Generate documentation on CI.
+#
+# `-D warnings` fails on every rustdoc warning, including those of a crate that
+# sets a rustdoc lint to `warn` in its source: a lint attribute overrides the
+# `-D` given for that lint here, but not `-D warnings`. The `cargo_check` tool
+# runs the same `cargo doc` with these flags; keep the two in step.
+#
+# `-Zrustdoc-mergeable-info` has each crate's rustdoc write its share of the
+# search index to a directory of its own, which cargo merges once at the end.
+# Without it, every crate rewrites the shared index under a lock, so crates are
+# documented one at a time and each takes longer than the last
+# (rust-lang/rust#146895). Requires nightly cargo.
 [group('ci')]
 docs-ci: _install_ci_matchers
     #!/usr/bin/env sh
     set -eu
 
-    export RUSTDOCFLAGS="-D rustdoc::broken-intra-doc-links -D rustdoc::private-intra-doc-links -D rustdoc::invalid-codeblock-attributes -D rustdoc::invalid-html-tags -D rustdoc::invalid-rust-codeblocks -D rustdoc::bare-urls -D rustdoc::unescaped-backticks -D rustdoc::redundant-explicit-links"
-    cargo doc --locked --workspace --profile=docs --all-features --keep-going --document-private-items --no-deps
+    export RUSTDOCFLAGS="-D warnings -D rustdoc::broken-intra-doc-links -D rustdoc::invalid-codeblock-attributes -D rustdoc::invalid-html-tags -D rustdoc::invalid-rust-codeblocks -D rustdoc::bare-urls -D rustdoc::unescaped-backticks -D rustdoc::redundant-explicit-links"
+    cargo doc --locked --workspace --profile=docs --all-features --keep-going --document-private-items --no-deps -Zrustdoc-mergeable-info
 
 # Generate code coverage on CI.
 #

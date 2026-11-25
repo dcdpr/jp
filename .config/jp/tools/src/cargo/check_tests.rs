@@ -1,3 +1,5 @@
+use std::{env, fs};
+
 use camino_tempfile::{Utf8TempDir, tempdir};
 use jp_process::{ExitCode, MockProcessRunner, ProcessOutput, ProcessSpec};
 use jp_tool::{Action, Context, Outcome};
@@ -522,6 +524,8 @@ fn checksum_freshness_is_absent_unless_opted_into() {
 const WIKI: Checks = Checks {
     checksum_freshness: false,
     wiki: true,
+    docs: false,
+    docs_mergeable_info: false,
     qual: false,
     site: false,
 };
@@ -609,6 +613,8 @@ fn a_wiki_that_cant_be_checked_is_a_note() {
 const QUAL: Checks = Checks {
     checksum_freshness: false,
     wiki: false,
+    docs: false,
+    docs_mergeable_info: false,
     qual: true,
     site: false,
 };
@@ -1014,6 +1020,8 @@ fn clippy_failure_short_circuits_before_running_the_gate() {
 const SITE: Checks = Checks {
     checksum_freshness: false,
     wiki: false,
+    docs: false,
+    docs_mergeable_info: false,
     qual: false,
     site: true,
 };
@@ -1204,6 +1212,244 @@ fn the_site_test_is_built_with_the_profile_and_flags_of_the_clippy_run() {
         "RUSTFLAGS".to_owned(),
         "-W warnings -Zthreads=0".to_owned()
     )]);
+}
+
+const DOCS: Checks = Checks {
+    checksum_freshness: false,
+    wiki: false,
+    docs: true,
+    docs_mergeable_info: false,
+    qual: false,
+    site: false,
+};
+
+const DOC_ARGS: &[&str] = &[
+    "doc",
+    "--color=never",
+    "--quiet",
+    "--workspace",
+    "--keep-going",
+    "--all-features",
+    "--document-private-items",
+    "--no-deps",
+];
+
+#[test]
+fn clean_docs_add_nothing() {
+    let (_dir, ctx) = ctx();
+
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns_success("")
+        .expect("comfort")
+        .returns_success("")
+        .expect("cargo")
+        .args(DOC_ARGS)
+        .returns_success("");
+
+    let result = cargo_check_impl(&ctx.root, "-W warnings", None, &[], DOCS, &runner).unwrap();
+
+    assert_eq!(
+        result.into_content().unwrap(),
+        "Check succeeded. No warnings or errors found."
+    );
+    assert_eq!(runner.calls().len(), 3);
+}
+
+#[test]
+fn rustdoc_errors_are_reported() {
+    let (_dir, ctx) = ctx();
+    let stderr = indoc::indoc! {"
+        error: unresolved link to `layout::site`
+          --> crates/plugins/command/review/ui/src/compose.rs:13:7
+           |
+        13 | //! [`layout::site`] says which, and [`at`] draws the composer there.
+           |       ^^^^^^^^^^^^ no item named `layout` in scope
+           |
+           = note: `-D rustdoc::broken-intra-doc-links` implied by `-D warnings`
+
+        error: could not document `jp-review-ui`
+    "};
+
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns_success("")
+        .expect("comfort")
+        .returns_success("")
+        .expect("cargo")
+        .args(DOC_ARGS)
+        .returns(ProcessOutput {
+            stdout: String::new(),
+            stderr: stderr.to_owned(),
+            status: ExitCode::from_code(101),
+        });
+
+    let result = cargo_check_impl(&ctx.root, "-W warnings", None, &[], DOCS, &runner).unwrap();
+
+    assert_eq!(result.into_content().unwrap(), indoc::indoc! {"
+            `cargo clippy` found no warnings or errors.
+
+            `cargo doc`, run as the `docs` job on CI runs it, reported:
+            ```
+            error: unresolved link to `layout::site`
+              --> crates/plugins/command/review/ui/src/compose.rs:13:7
+               |
+            13 | //! [`layout::site`] says which, and [`at`] draws the composer there.
+               |       ^^^^^^^^^^^^ no item named `layout` in scope
+               |
+               = note: `-D rustdoc::broken-intra-doc-links` implied by `-D warnings`
+
+            error: could not document `jp-review-ui`
+            ```"});
+}
+
+/// A failing `cargo doc` that printed nothing has no finding to report, and
+/// must not read as clean docs.
+#[test]
+fn a_cargo_doc_that_fails_silently_is_a_note() {
+    let (_dir, ctx) = ctx();
+
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns_success("")
+        .expect("comfort")
+        .returns_success("")
+        .expect("cargo")
+        .args(DOC_ARGS)
+        .returns(ProcessOutput {
+            stdout: String::new(),
+            stderr: String::new(),
+            status: ExitCode::from_code(101),
+        });
+
+    let result = cargo_check_impl(&ctx.root, "-W warnings", None, &[], DOCS, &runner).unwrap();
+
+    assert_eq!(result.into_content().unwrap(), indoc::indoc! {"
+            `cargo clippy` found no warnings or errors.
+
+            The docs weren't checked: `cargo doc` failed without saying why."});
+}
+
+/// The doc pass shares the clippy run's profile and `RUSTFLAGS`, so it reuses
+/// that run's target directory instead of building one of its own.
+#[test]
+fn docs_are_built_with_the_scope_profile_and_flags_of_the_clippy_run() {
+    let (_dir, ctx) = ctx();
+
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns_success("")
+        .expect("comfort")
+        .returns_success("")
+        .expect("cargo")
+        .args(&[
+            "doc",
+            "--color=never",
+            "--quiet",
+            "--package=jp_storage",
+            "--package=jp_workspace",
+            "--keep-going",
+            "--all-features",
+            "--document-private-items",
+            "--no-deps",
+            "--profile=agent",
+        ])
+        .returns_success("");
+
+    cargo_check_impl(
+        &ctx.root,
+        "-W warnings -Zthreads=0",
+        Some("agent"),
+        &["jp_storage".to_owned(), "jp_workspace".to_owned()],
+        DOCS,
+        &runner,
+    )
+    .unwrap();
+
+    let call = call_with_arg(&runner, "doc").expect("the doc pass must have run");
+    assert_eq!(call.env, vec![
+        ("RUSTFLAGS".to_owned(), "-W warnings -Zthreads=0".to_owned()),
+        ("RUSTDOCFLAGS".to_owned(), DOCS_RUSTDOCFLAGS.to_owned()),
+    ]);
+}
+
+#[test]
+fn mergeable_info_is_passed_to_the_doc_pass_when_enabled() {
+    let (_dir, ctx) = ctx();
+
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns_success("")
+        .expect("comfort")
+        .returns_success("")
+        .expect("cargo")
+        .args(DOC_ARGS)
+        .returns_success("");
+
+    cargo_check_impl(
+        &ctx.root,
+        "-W warnings",
+        None,
+        &[],
+        Checks {
+            docs_mergeable_info: true,
+            ..DOCS
+        },
+        &runner,
+    )
+    .unwrap();
+
+    let call = call_with_arg(&runner, "doc").expect("the doc pass must have run");
+    assert_eq!(call.env, vec![
+        ("RUSTFLAGS".to_owned(), "-W warnings".to_owned()),
+        ("RUSTDOCFLAGS".to_owned(), DOCS_RUSTDOCFLAGS.to_owned()),
+        (
+            "CARGO_UNSTABLE_RUSTDOC_MERGEABLE_INFO".to_owned(),
+            "true".to_owned()
+        ),
+    ]);
+}
+
+/// The doc pass reports what CI fails on only while its flags are the ones
+/// `just docs-ci` uses.
+///
+/// `CARGO_MANIFEST_DIR` is read at runtime rather than through `env!`, which
+/// bakes in whichever worktree compiled the test binary.
+#[test]
+fn doc_flags_match_docs_ci() {
+    let crate_dir = env::var("CARGO_MANIFEST_DIR")
+        .expect("CARGO_MANIFEST_DIR: run tests via `cargo test` or `cargo nextest`");
+    let justfile = fs::read_to_string(Utf8Path::new(&crate_dir).join("../../../justfile"))
+        .expect("the workspace justfile to be readable");
+
+    let recipe = justfile
+        .split_once("\ndocs-ci:")
+        .expect("the justfile to define `docs-ci`")
+        .1;
+    let recipe = recipe
+        .split_once("\n\n#")
+        .map_or(recipe, |(recipe, _)| recipe);
+
+    let rustdocflags = recipe
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("export RUSTDOCFLAGS="))
+        .expect("`docs-ci` to export `RUSTDOCFLAGS`");
+    assert_eq!(rustdocflags.trim_matches('"'), DOCS_RUSTDOCFLAGS);
+
+    let cargo_doc = recipe
+        .lines()
+        .find(|line| line.trim().starts_with("cargo doc "))
+        .expect("`docs-ci` to run `cargo doc`");
+    let ci_flags: Vec<&str> = cargo_doc.split_whitespace().collect();
+    // `-Zrustdoc-mergeable-info` is what `doc_mergeable_info` turns on; the
+    // tool sets it through `CARGO_UNSTABLE_RUSTDOC_MERGEABLE_INFO` instead.
+    for flag in DOC_ARGS[3..].iter().chain([&"-Zrustdoc-mergeable-info"]) {
+        assert!(
+            ci_flags.contains(flag),
+            "`docs-ci` runs `{}` without `{flag}`",
+            cargo_doc.trim()
+        );
+    }
 }
 
 /// The first command `runner` ran whose first argument is `arg`.

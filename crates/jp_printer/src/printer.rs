@@ -215,8 +215,8 @@ impl Printer {
     /// Set whether chrome reaches the error stream.
     ///
     /// [`Chrome::Silenced`] discards everything written to that stream
-    /// ([`Self::eprint`], [`Self::eprintln`], [`Self::erase_line`], and
-    /// [`Self::err_writer`]) and leaves stdout and the prompt stream alone.
+    /// ([`Self::eprint`], [`Self::eprintln`], and [`Self::err_writer`]) and
+    /// leaves stdout and the prompt stream alone.
     ///
     /// Call before the printer is shared; clones inherit the value.
     #[must_use]

@@ -3,7 +3,7 @@ enable = false
 run = "allow"
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
-summary = "Run `cargo check` for the given package, validating if the code compiles. Also reports doc comments that are badly formatted, which `cargo_fmt` auto-fixes, wiki pages a change broke, new rustqual findings that fail CI, and site files `jp vite sync` hasn't synced."
+summary = "Run `cargo check` for the given package, validating if the code compiles. Also reports rustdoc errors the `docs` CI job fails on, doc comments that are badly formatted, which `cargo_fmt` auto-fixes, wiki pages a change broke, new rustqual findings that fail CI, and site files `jp vite sync` hasn't synced."
 
 examples = """
 ```json
@@ -29,6 +29,20 @@ options.checksum_freshness = true
 # Run `jp wiki check` too: wiki pages link to line ranges and symbols in the
 # source, so a code change can break one.
 options.wiki_check = true
+
+# Run `cargo doc` too, with the flags of `just docs-ci`, which the `docs` job on
+# CI runs: broken intra-doc links and other rustdoc warnings fail that job.
+# Shares clippy's target directory, so cargo documents only the crates whose
+# sources or dependencies changed since the last run.
+options.doc_check = true
+
+# Run that `cargo doc` with `-Zrustdoc-mergeable-info`. Without it, each
+# crate's rustdoc rewrites the shared search index under a lock, so crates are
+# documented one at a time and each takes longer than the last
+# (rust-lang/rust#146895): an edit to `jp_conversation` took 2m 43s to
+# re-document its dependents, against about 7s with it. Requires nightly cargo;
+# defaults to off so the tool also works on stable Rust.
+options.doc_mergeable_info = true
 
 # Run the rustqual gate too, `qual diff` against the merge base with
 # `origin/main`: the `qual` job on CI fails on a finding the base lacks. It
