@@ -564,6 +564,30 @@ fn reset_reports_a_malformed_list_written_as_its_own_word() {
     );
 }
 
+// Each word below is the only target candidate, so a fallback to the picker
+// would parse rather than be hidden behind the error for combining targets.
+#[test]
+fn reset_reports_a_malformed_list_with_no_other_target() {
+    // `..=` is Rust's inclusive range; the list syntax has only `..`.
+    assert_eq!(
+        rejection_message(&["--reset", "1..=3"]),
+        "error: invalid value '1..=3' for '--reset [<COMPACTIONS>]': invalid compaction number \
+         `=3`\n\nFor more information, try '--help'.\n"
+    );
+    assert_eq!(
+        rejection_message(&["--reset", "+0"]),
+        "error: invalid value '+0' for '--reset [<COMPACTIONS>]': invalid compaction number \
+         `+0`\n\nFor more information, try '--help'.\n"
+    );
+
+    // The list parser trims Unicode whitespace, here a no-break space.
+    assert_eq!(
+        rejection_message(&["--reset", "1,\u{a0}0"]),
+        "error: invalid value '1,\u{a0}0' for '--reset [<COMPACTIONS>]': compaction numbers are \
+         1-based; `0` is not a valid compaction\n\nFor more information, try '--help'.\n"
+    );
+}
+
 // A list with space after its commas parses like one without, as its own word.
 #[test]
 fn reset_reads_a_spaced_list_written_as_its_own_word() {
@@ -629,7 +653,7 @@ fn reset_indices(stream: &ConversationStream, value: &str) -> Result<BTreeSet<us
     let flag = format!("--reset={value}");
     let specs = parse_compact(&[flag.as_str()]).reset.unwrap();
 
-    resolve_reset(stream, &specs)
+    resolve_reset(stream, &specs).map_err(|error| error.describe("compaction"))
 }
 
 #[test]
@@ -846,7 +870,7 @@ fn reset_dry_run_removes_nothing() {
 }
 
 /// A number that names no compaction event of a later target must not leave an
-/// earlier target reset.
+/// earlier target reset, and the error names that target.
 #[test]
 fn reset_out_of_range_on_a_later_target_removes_nothing() {
     let (mut ctx, _out, _tmp) = stored_ctx();
@@ -864,7 +888,7 @@ fn reset_out_of_range_on_a_later_target_removes_nothing() {
 
     assert_eq!(
         error.message.as_deref(),
-        Some("compaction 2 out of range (conversation has 1 compactions)")
+        Some("compaction 2 out of range (conversation jp-c10 has 1 compaction)")
     );
 
     // A is the assertion that matters: `2` names one of its four compaction

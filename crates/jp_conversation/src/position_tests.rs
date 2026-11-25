@@ -23,7 +23,8 @@ fn position_rejects_zero_from_either_end() {
 
 #[test]
 fn position_rejects_text_that_is_not_a_whole_number() {
-    for text in ["", "x", "-x", "-", "--1", "1.5", "1 "] {
+    // `usize` accepts a leading `+`, which no position is written with.
+    for text in ["", "x", "-x", "-", "--1", "1.5", "1 ", "+3", "-+3", "+0"] {
         assert_eq!(
             text.parse::<Position>(),
             Err(ParsePositionError::NotANumber(text.to_owned())),
@@ -327,5 +328,36 @@ fn resolve_error_names_the_item() {
             .unwrap_err()
             .describe("compaction"),
         "range -1..-3 is not valid: compaction 3 comes before compaction 5"
+    );
+}
+
+#[test]
+fn resolve_error_counts_one_item_in_the_singular() {
+    assert_eq!(
+        spec("2").resolve(1).unwrap_err().describe("compaction"),
+        "compaction 2 out of range (conversation has 1 compaction)"
+    );
+    assert_eq!(
+        spec("2").resolve(0).unwrap_err().describe("compaction"),
+        "compaction 2 out of range (conversation has 0 compactions)"
+    );
+}
+
+// One invocation can name several conversations, so the error says which one.
+#[test]
+fn resolve_error_in_a_conversation_names_it() {
+    assert_eq!(
+        spec("2")
+            .resolve(1)
+            .unwrap_err()
+            .describe_in("compaction", "jp-c10"),
+        "compaction 2 out of range (conversation jp-c10 has 1 compaction)"
+    );
+    assert_eq!(
+        spec("-1..-3")
+            .resolve(5)
+            .unwrap_err()
+            .describe_in("compaction", "jp-c10"),
+        "range -1..-3 is not valid in conversation jp-c10: compaction 3 comes before compaction 5"
     );
 }

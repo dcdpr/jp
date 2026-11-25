@@ -52,6 +52,11 @@ impl FromStr for Position {
             .strip_prefix('-')
             .map_or((s, false), |digits| (digits, true));
 
+        // `usize` accepts a leading `+`, which is no way to write a position.
+        if digits.starts_with('+') {
+            return Err(ParsePositionError::NotANumber(s.to_owned()));
+        }
+
         match (digits.parse::<usize>(), from_end) {
             (Ok(0), false) => Err(ParsePositionError::Zero),
             (Ok(0), true) => Err(ParsePositionError::ZeroFromEnd),
@@ -257,20 +262,42 @@ impl ResolvePositionError {
     /// clear.
     #[must_use]
     pub fn describe(&self, noun: &str) -> String {
+        self.render(noun, None)
+    }
+
+    /// Format this error like [`Self::describe`], naming `conversation` as the
+    /// one whose items the spec was resolved against.
+    #[must_use]
+    pub fn describe_in(&self, noun: &str, conversation: impl fmt::Display) -> String {
+        self.render(noun, Some(&conversation))
+    }
+
+    /// The message for `noun` items, in `conversation` when it is named.
+    fn render(&self, noun: &str, conversation: Option<&dyn fmt::Display>) -> String {
+        let name = conversation.map_or_else(String::new, |id| format!(" {id}"));
+
         match self {
             Self::OutOfRange { position, count } => {
-                format!("{noun} {position} out of range (conversation has {count} {noun}s)")
+                let plural = if *count == 1 { "" } else { "s" };
+                format!(
+                    "{noun} {position} out of range (conversation{name} has {count} \
+                     {noun}{plural})"
+                )
             }
             Self::Inverted {
                 from,
                 to,
                 from_index,
                 to_index,
-            } => format!(
-                "range {from}..{to} is not valid: {noun} {} comes before {noun} {}",
-                to_index + 1,
-                from_index + 1
-            ),
+            } => {
+                let place =
+                    conversation.map_or_else(String::new, |id| format!(" in conversation {id}"));
+                format!(
+                    "range {from}..{to} is not valid{place}: {noun} {} comes before {noun} {}",
+                    to_index + 1,
+                    from_index + 1
+                )
+            }
         }
     }
 }

@@ -14,7 +14,9 @@ use jp_config::{
 use jp_conversation::{
     ByteSize, Compaction, CompactionRange, ConversationId, ConversationStream, PolicySpec,
     ReasoningPolicy, SummaryOverlap, SummaryPolicy, SummarySource, ToolCallPolicy,
-    compaction::extend_summary_range, position::PositionSpec, stream::AffectedItem,
+    compaction::extend_summary_range,
+    position::{PositionSpec, ResolvePositionError},
+    stream::AffectedItem,
 };
 use jp_llm::event::NoticeSink;
 use jp_workspace::{ConversationHandle, ConversationMut, Workspace};
@@ -491,16 +493,19 @@ fn parse_tool_calls_mode(s: &str) -> Result<ToolCallsMode, String> {
 }
 
 /// Returns `true` if `word` has the character shape of a `--reset` compaction
-/// list: at least one ASCII digit, and only digits, ASCII whitespace, `-`, `.`,
-/// or `,`.
+/// list: at least one ASCII digit, and only digits, whitespace, `-`, `.`, `,`,
+/// `=`, or `+`.
 ///
-/// No conversation ID or target keyword matches this shape (`.` and `-` are
-/// targets, but contain no digits).
+/// The whitespace is any the list parser trims around an item.
+/// `=` and `+` are no part of the list syntax, but a near miss such as `1..=3`
+/// or `+2` is a list written wrong, not a conversation to search for.
+/// No conversation ID or target keyword matches this shape (`.`, `-`, and
+/// `+live` are targets, but contain no digits).
 fn looks_like_compaction_numbers(word: &str) -> bool {
     word.contains(|c: char| c.is_ascii_digit())
-        && word
-            .chars()
-            .all(|c| c.is_ascii_digit() || c.is_ascii_whitespace() || matches!(c, '-' | '.' | ','))
+        && word.chars().all(|c| {
+            c.is_ascii_digit() || c.is_whitespace() || matches!(c, '-' | '.' | ',' | '=' | '+')
+        })
 }
 
 /// Resolve `--reset` specs into a deduplicated set of 0-based indices into the
@@ -512,15 +517,12 @@ fn looks_like_compaction_numbers(word: &str) -> bool {
 fn resolve_reset(
     events: &ConversationStream,
     specs: &[PositionSpec],
-) -> Result<BTreeSet<usize>, String> {
+) -> Result<BTreeSet<usize>, ResolvePositionError> {
     let count = events.compactions().count();
 
     let mut selected = BTreeSet::new();
     for spec in specs {
-        let indices = spec
-            .resolve(count)
-            .map_err(|error| error.describe(COMPACTION))?;
-        selected.extend(indices);
+        selected.extend(spec.resolve(count)?);
     }
 
     Ok(selected)
@@ -1155,7 +1157,8 @@ impl Compact {
         if let Some(specs) = &self.reset {
             for handle in handles {
                 let events = ctx.workspace.events(handle)?;
-                resolve_reset(&events, specs)?;
+                resolve_reset(&events, specs)
+                    .map_err(|error| error.describe_in(COMPACTION, handle.id()))?;
             }
             return Ok(());
         }
@@ -1268,7 +1271,8 @@ impl Compact {
         events: &ConversationStream,
         specs: &[PositionSpec],
     ) -> Output {
-        let selected = resolve_reset(events, specs)?;
+        let selected = resolve_reset(events, specs)
+            .map_err(|error| error.describe_in(COMPACTION, conv.id()))?;
         let lines = reset_lines(events, &selected, self.dry_run);
 
         // Write before reporting, so a failed write is an error rather than a
