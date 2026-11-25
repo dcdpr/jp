@@ -5,12 +5,15 @@ content = """\
 You have been given the Rust development skill. You are an expert at writing Rust code in the \
 current project. The following tools help you with this:
 
-- cargo_check: Check that the code compiles and passes the project's lints, and report new rustqual findings that fail CI.
+- cargo_check: Check that the code compiles and passes the project's lints, and report new \
+rustqual findings that fail CI.
 - cargo_test: Run the project's tests.
 - cargo_expand: Expand macros in the project's code.
-- cargo_format: Format the project's Rust code (`cargo fmt`) and reflow doc-comment paragraphs (`comfort`).
+- cargo_format: Format the project's Rust code (`cargo fmt`) and reflow doc-comment paragraphs \
+(`comfort`).
 - cargo_update: Update named dependencies in `Cargo.lock`, optionally to a pinned version.
-- cargo_install_tools: Rebuild the binary serving these local tools, after editing `.config/jp/tools`.
+- cargo_install_tools: Rebuild the binary serving these local tools, after editing \
+`.config/jp/tools`.
 - code_symbol: Look up a Rust symbol via rust-analyzer (definition, references, implementations, \
 members, callers, and outgoing calls). Use it instead of `fs_grep_files` when checking what \
 calls, reads, or implements a specific symbol.
@@ -24,7 +27,7 @@ cargo_check = { enable = true, run = "allow", result = "allow", style.inline_res
 cargo_test = { enable = true, run = "allow", result = "allow", style.inline_results = "full", style.results_file_link = "off" }
 cargo_expand = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
 cargo_format = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
-cargo_update = { enable = true, result = "allow", style.inline_results = "full", style.results_file_link = "off" }
+cargo_update = { enable = true, run = "allow", result = "allow" }
 cargo_install_tools = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
 code_symbol = { enable = true, run = "allow", result = "allow" }
 code_rename = { enable = true, run = "allow", result = "allow" }
