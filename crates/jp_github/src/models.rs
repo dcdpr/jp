@@ -323,26 +323,28 @@ pub mod commits {
 pub mod checks {
     use super::{DateTime, Deserialize, Serialize, Url, Utc};
 
-    /// A page of a commit's check runs, from `GET
+    /// A page of check runs for a commit, returned by `GET
     /// /repos/{owner}/{repo}/commits/{ref}/check-runs`.
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct CheckRuns {
-        /// How many check runs the commit has, across every page.
+        /// Total number of check runs across all pages.
         pub total_count: u64,
         pub check_runs: Vec<CheckRun>,
     }
 
-    /// One check reported on a commit: a GitHub Actions job, or a check created
-    /// by some other GitHub App.
+    /// A check run reported on a commit, either a GitHub Actions job or an
+    /// external GitHub App check.
     ///
-    /// For a GitHub Actions job, `id` is also the job's ID, which the job-log
-    /// endpoint takes.
+    /// For GitHub Actions jobs, `id` is also the job ID passed to
+    /// [`ReposHandler::job_logs`].
+    ///
+    /// [`ReposHandler::job_logs`]: crate::ReposHandler::job_logs
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct CheckRun {
         pub id: u64,
         pub name: String,
         pub status: CheckStatus,
-        /// Set once `status` is `completed`.
+        /// Populated once `status` is [`CheckStatus::Completed`].
         pub conclusion: Option<CheckConclusion>,
         pub started_at: Option<DateTime<Utc>>,
         pub completed_at: Option<DateTime<Utc>>,
@@ -353,7 +355,8 @@ pub mod checks {
     }
 
     impl CheckRun {
-        /// Whether the check run is a GitHub Actions job, which has a log.
+        /// Return whether this check run was created by GitHub Actions (and
+        /// therefore has an Actions job log).
         // qual:api
         // Called from `.config/jp/tools`, which rustqual doesn't analyse
         // (T-0yh5j3r item 17).
@@ -374,7 +377,6 @@ pub mod checks {
         Waiting,
         Requested,
         Pending,
-        /// A status this client doesn't know.
         #[serde(other)]
         Unknown,
     }
@@ -390,7 +392,6 @@ pub mod checks {
         TimedOut,
         ActionRequired,
         Stale,
-        /// A conclusion this client doesn't know.
         #[serde(other)]
         Unknown,
     }
@@ -399,8 +400,10 @@ pub mod checks {
     pub struct CheckRunOutput {
         pub title: Option<String>,
         pub summary: Option<String>,
-        /// How many annotations the check run has.
-        /// Fetch them from the annotations endpoint.
+        /// Number of annotations attached to the check run, fetched separately
+        /// via [`ReposHandler::list_check_run_annotations`].
+        ///
+        /// [`ReposHandler::list_check_run_annotations`]: crate::ReposHandler::list_check_run_annotations
         #[serde(default)]
         pub annotations_count: u64,
     }
@@ -410,13 +413,13 @@ pub mod checks {
         pub slug: String,
     }
 
-    /// A problem a check run reported against a line of a file, such as a
-    /// compiler error a problem matcher picked out of a job's log.
+    /// A diagnostic annotation attached to a check run at a file and line range
+    /// (for example, a compiler error extracted by a problem matcher).
     ///
-    /// GitHub's schema allows `annotation_level` and `message` to be null.
+    /// GitHub's schema permits `annotation_level` and `message` to be `null`.
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct Annotation {
-        /// Path below the repository root.
+        /// Repository-relative file path.
         pub path: String,
         pub start_line: u64,
         pub end_line: u64,
@@ -431,32 +434,30 @@ pub mod checks {
         Notice,
         Warning,
         Failure,
-        /// A level this client doesn't know.
         #[serde(other)]
         Unknown,
     }
 
-    /// A commit's statuses, from `GET
+    /// Combined commit statuses returned by `GET
     /// /repos/{owner}/{repo}/commits/{ref}/status`.
     ///
-    /// Commit statuses are separate from check runs: a workflow or service
-    /// writes them through the statuses API, and they don't appear among a
-    /// commit's check runs.
+    /// Commit statuses are distinct from check runs: workflows and external
+    /// services publish them via the statuses API, and they do not appear in
+    /// the check-runs endpoint.
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct CombinedStatus {
-        /// How many statuses the commit has, across every page.
+        /// Total number of statuses across all pages.
         pub total_count: u64,
-        /// The latest status of each context.
+        /// Latest status for each context.
         pub statuses: Vec<Status>,
     }
 
-    /// The latest status a context reported on a commit.
+    /// The latest status reported for a given `context` on a commit.
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct Status {
         pub context: String,
         pub state: StatusState,
         pub description: Option<String>,
-        /// Where the reporter links to, which may be any URL a service chose.
         pub target_url: Option<String>,
     }
 
@@ -467,7 +468,6 @@ pub mod checks {
         Failure,
         Pending,
         Success,
-        /// A state this client doesn't know.
         #[serde(other)]
         Unknown,
     }

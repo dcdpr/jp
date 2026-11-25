@@ -390,8 +390,9 @@ fn an_annotation_without_level_or_message_keeps_its_check() {
         ```"});
 }
 
-/// A commit with more check runs than one page holds says so, so a short
-/// listing doesn't read as the whole picture.
+/// When `total_count` exceeds the number of check runs on the first page,
+/// include `total_count` in the output so the caller knows the list is
+/// truncated.
 #[test]
 fn a_truncated_listing_reports_the_total() {
     let runs = CheckRuns {

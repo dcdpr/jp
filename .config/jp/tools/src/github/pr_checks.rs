@@ -9,13 +9,13 @@ use jp_github::models::checks::{
 use super::{auth_optional, handle_404, parse_repo, read_token};
 use crate::{Error, Result, to_xml, util::truncate};
 
-/// Cap for the diagnostics a job's log contributes to the result.
+/// Maximum bytes of diagnostics extracted from a job log.
 const MAX_DIAGNOSTIC_BYTES: usize = 32_000;
 
-/// Lines of a job's log returned after its diagnostics.
+/// Number of trailing log lines included after the extracted diagnostics.
 ///
-/// The end of a failed job's log is where cargo and nextest summarize the
-/// failure and the runner reports the exit code.
+/// Cargo and nextest print their failure summary at the end of the log,
+/// followed by the runner's exit code.
 const TAIL_LINES: usize = 40;
 
 /// GitHub refuses anonymous requests for a job's log, even on a public
@@ -29,8 +29,8 @@ pub(crate) async fn github_pr_checks(
     number: u64,
     job: Option<String>,
 ) -> Result<String> {
-    // Checked before any request, so the caller doesn't spend rate limit on a
-    // lookup that ends in a 403.
+    // Check for a token before making any request to avoid spending rate limit
+    // on a PR lookup when the log request will fail with 403.
     if job.is_some() && read_token().is_none() {
         return Err(LOG_NEEDS_TOKEN.into());
     }
@@ -98,11 +98,11 @@ fn log_error(error: jp_github::Error, name: &str) -> Error {
     }
 }
 
-/// The check run `job` names, by ID or by name.
+/// Find the check run matching `job` by ID or by name.
 ///
-/// An ID wins over a name.
-/// A name several check runs share is refused with their IDs, since two
-/// workflows can each have a job of that name.
+/// Numeric IDs take precedence over names.
+/// If multiple check runs share a name (for example, when two workflows define
+/// a job with the same name), returns an error listing the matching IDs.
 fn find_run<'a>(runs: &'a [CheckRun], statuses: &[Status], job: &str) -> Result<&'a CheckRun> {
     if let Ok(id) = job.parse::<u64>()
         && let Some(run) = runs.iter().find(|run| run.id == id)
@@ -155,7 +155,8 @@ fn find_run<'a>(runs: &'a [CheckRun], statuses: &[Status], job: &str) -> Result<
     .into())
 }
 
-/// Where a check run stands, in the order the listing shows them.
+/// Summary category of a check run or commit status, ordered by display
+/// priority (failed first, then pending, then passed).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Outcome {
     Failed,
@@ -237,10 +238,12 @@ struct StatusXml {
     target_url: Option<String>,
 }
 
-/// List `runs`, then the commit `statuses`, each failed first, then pending,
-/// then passed.
-/// Each run carries its `annotations` (in the same order as `runs`), and the
-/// tally counts runs and statuses together.
+/// Format `runs` and commit `statuses` as XML, sorted with failures first, then
+/// pending, then passed.
+///
+/// `annotations` must be parallel to `runs`.
+/// The `failed`, `pending`, and `passed` counts include both check runs and
+/// commit statuses.
 fn format_checks(
     number: u64,
     sha: &str,
@@ -338,13 +341,13 @@ fn location(annotation: &Annotation) -> String {
     )
 }
 
-/// The diagnostics in a job's `log`, followed by its last [`TAIL_LINES`] lines.
+/// Extract compiler diagnostics and the last [`TAIL_LINES`] lines from `log`.
 ///
-/// Timestamps and ANSI escapes are removed from every line.
-/// A diagnostic is a compiler `error:` or `warning:` line, or a panic, with the
-/// lines that belong to it: up to the next blank line, the next diagnostic, or
-/// the next cargo progress line (`Compiling`, `Documenting`, ...).
-/// A runner `##[error]` line is a diagnostic of its own.
+/// Strips timestamps and ANSI escape codes from every line.
+/// A diagnostic block starts at a compiler `error:` or `warning:` line or a
+/// panic header and continues until the next blank line, diagnostic, or cargo
+/// progress line (`Compiling`, `Documenting`, etc.).
+/// Runner `##[error]` lines are captured as single-line diagnostics.
 fn summarize_log(run: &CheckRun, log: &str) -> String {
     let lines: Vec<String> = log.lines().map(clean_line).collect();
 
@@ -383,8 +386,9 @@ fn summarize_log(run: &CheckRun, log: &str) -> String {
     if diagnostics.is_empty() {
         header.push_str(" It has no compiler diagnostics.");
     }
-    // The excerpt holds only diagnostics and the tail, so a failure reported
-    // some other way (a formatter's diff, say) needs the whole log.
+    // The summary includes only extracted diagnostics and the log tail, so
+    // failures without standard diagnostic headers (such as a formatter diff)
+    // require inspecting the full log.
     if let Some(url) = &run.html_url {
         header.push_str(&format!("\nFull log: {url}"));
     }
@@ -400,8 +404,8 @@ fn summarize_log(run: &CheckRun, log: &str) -> String {
     )
 }
 
-/// `line` without the timestamp GitHub prefixes it with, the byte-order mark
-/// the log starts with, or ANSI escapes.
+/// Strip a leading UTF-8 BOM, GitHub timestamp prefix, ANSI escape codes, and
+/// trailing whitespace from `line`.
 fn clean_line(line: &str) -> String {
     let line = line.trim_start_matches('\u{feff}');
     let line = match line.split_once(' ') {
@@ -413,8 +417,8 @@ fn clean_line(line: &str) -> String {
     strip_ansi_escapes::strip_str(line).trim_end().to_owned()
 }
 
-/// Whether `word` is an RFC 3339 UTC timestamp, as GitHub writes them:
-/// `2026-11-25T10:00:00.1234567Z`.
+/// Return whether `word` is an RFC 3339 UTC timestamp prefix as formatted in
+/// GitHub Actions logs (`2026-11-25T10:00:00.1234567Z`).
 fn is_timestamp(word: &str) -> bool {
     word.ends_with('Z')
         && word.get(4..5) == Some("-")
@@ -435,7 +439,7 @@ fn starts_diagnostic(line: &str) -> bool {
         return false;
     };
 
-    // The lint or error code, as in `error[E0308]:`.
+    // Strip an optional lint or error code, such as `error[E0308]:`.
     let rest = match rest.strip_prefix('[') {
         Some(code) => code.split_once(']').map_or("", |(_, rest)| rest),
         None => rest,
@@ -444,8 +448,8 @@ fn starts_diagnostic(line: &str) -> bool {
     rest.starts_with(": ")
 }
 
-/// Whether `line` is one of cargo's progress lines, which it right-aligns: `
-/// Compiling foo v0.1.0`.
+/// Return whether `line` is an indented cargo progress line (e.g. `   Compiling
+/// foo v0.1.0`).
 fn is_cargo_progress(line: &str) -> bool {
     const VERBS: &[&str] = &[
         "Blocking",

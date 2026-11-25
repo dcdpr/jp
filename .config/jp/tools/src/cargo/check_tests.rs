@@ -1410,11 +1410,10 @@ fn mergeable_info_is_passed_to_the_doc_pass_when_enabled() {
     ]);
 }
 
-/// The doc pass reports what CI fails on only while its flags are the ones
-/// `just docs-ci` uses.
+/// Verify that `doc_check` uses the same flags as `just docs-ci`.
 ///
-/// `CARGO_MANIFEST_DIR` is read at runtime rather than through `env!`, which
-/// bakes in whichever worktree compiled the test binary.
+/// Reads `CARGO_MANIFEST_DIR` at runtime rather than via `env!`, which would
+/// bake in the path of whichever worktree compiled the test binary.
 #[test]
 fn doc_flags_match_docs_ci() {
     let crate_dir = env::var("CARGO_MANIFEST_DIR")
@@ -1441,8 +1440,8 @@ fn doc_flags_match_docs_ci() {
         .find(|line| line.trim().starts_with("cargo doc "))
         .expect("`docs-ci` to run `cargo doc`");
     let ci_flags: Vec<&str> = cargo_doc.split_whitespace().collect();
-    // `-Zrustdoc-mergeable-info` is what `doc_mergeable_info` turns on; the
-    // tool sets it through `CARGO_UNSTABLE_RUSTDOC_MERGEABLE_INFO` instead.
+    // `doc_mergeable_info` sets `CARGO_UNSTABLE_RUSTDOC_MERGEABLE_INFO` rather
+    // than passing `-Zrustdoc-mergeable-info` on the command line.
     for flag in DOC_ARGS[3..].iter().chain([&"-Zrustdoc-mergeable-info"]) {
         assert!(
             ci_flags.contains(flag),

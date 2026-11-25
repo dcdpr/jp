@@ -30,18 +30,18 @@ options.checksum_freshness = true
 # source, so a code change can break one.
 options.wiki_check = true
 
-# Run `cargo doc` too, with the flags of `just docs-ci`, which the `docs` job on
-# CI runs: broken intra-doc links and other rustdoc warnings fail that job.
-# Shares clippy's target directory, so cargo documents only the crates whose
-# sources or dependencies changed since the last run.
+# Run `cargo doc` with the flags from `just docs-ci` (the `docs` CI job), which
+# fails on broken intra-doc links and other rustdoc warnings. Shares clippy's
+# target directory, so cargo re-documents only crates whose sources or
+# dependencies changed since the last run.
 options.doc_check = true
 
-# Run that `cargo doc` with `-Zrustdoc-mergeable-info`. Without it, each
-# crate's rustdoc rewrites the shared search index under a lock, so crates are
-# documented one at a time and each takes longer than the last
-# (rust-lang/rust#146895): an edit to `jp_conversation` took 2m 43s to
-# re-document its dependents, against about 7s with it. Requires nightly cargo;
-# defaults to off so the tool also works on stable Rust.
+# Pass `-Zrustdoc-mergeable-info` to `cargo doc`. Without this flag, each
+# crate's rustdoc rewrites the shared search index under a lock, serializing
+# doc builds and slowing down as the index grows (rust-lang/rust#146895): an
+# edit to `jp_conversation` took 2m 43s to re-document its dependents, versus
+# about 7s with the flag. Requires nightly cargo; defaults to `false` so the
+# tool also works on stable Rust.
 options.doc_mergeable_info = true
 
 # Run the rustqual gate too, `qual diff` against the merge base with

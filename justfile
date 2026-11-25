@@ -2499,15 +2499,16 @@ site-ci:
 
 # Generate documentation on CI.
 #
-# `-D warnings` fails on every rustdoc warning, including those of a crate that
-# sets a rustdoc lint to `warn` in its source: a lint attribute overrides the
-# `-D` given for that lint here, but not `-D warnings`. The `cargo_check` tool
-# runs the same `cargo doc` with these flags; keep the two in step.
+# `-D warnings` fails on every rustdoc warning, including those in crates that
+# set `#![warn(rustdoc::all)]` in source: a source-level lint attribute
+# overrides a per-lint `-D` flag on the command line, whereas `-D warnings`
+# still promotes the warning to an error. The `cargo_check` tool runs
+# `cargo doc` with the same flags; keep the two in sync.
 #
-# `-Zrustdoc-mergeable-info` has each crate's rustdoc write its share of the
-# search index to a directory of its own, which cargo merges once at the end.
-# Without it, every crate rewrites the shared index under a lock, so crates are
-# documented one at a time and each takes longer than the last
+# `-Zrustdoc-mergeable-info` instructs each crate's rustdoc to write its search
+# index fragment to a separate directory, which cargo merges once at the end.
+# Without this flag, every crate rewrites the shared index under a lock,
+# serializing doc builds and slowing down as the index grows
 # (rust-lang/rust#146895). Requires nightly cargo.
 [group('ci')]
 docs-ci: _install_ci_matchers

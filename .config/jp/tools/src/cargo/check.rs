@@ -36,10 +36,10 @@ pub(crate) struct Checks {
     /// Run `jp wiki check` as well.
     pub wiki: bool,
 
-    /// Run `cargo doc` with the flags of the `docs` CI job as well.
+    /// Run `cargo doc` with the flags used by the `docs` CI job.
     pub docs: bool,
 
-    /// Run that `cargo doc` with `-Zrustdoc-mergeable-info`.
+    /// Pass `-Zrustdoc-mergeable-info` to `cargo doc`.
     pub docs_mergeable_info: bool,
 
     /// Run the rustqual gate, `qual diff`, as well.
@@ -161,7 +161,7 @@ fn cargo_check_impl<R: ProcessRunner>(
     Ok(format!("{header}\n\n{}", notes.join("\n\n")).into())
 }
 
-/// The `RUSTDOCFLAGS` that `just docs-ci`, the `docs` job on CI, sets.
+/// `RUSTDOCFLAGS` set by `just docs-ci` (the `docs` CI job).
 const DOCS_RUSTDOCFLAGS: &str = concat!(
     "-D warnings ",
     "-D rustdoc::broken-intra-doc-links ",
@@ -173,18 +173,19 @@ const DOCS_RUSTDOCFLAGS: &str = concat!(
     "-D rustdoc::redundant-explicit-links",
 );
 
-/// Run the `cargo doc` of `just docs-ci` over `packages`, or the whole
-/// workspace when `packages` is empty, returning what it reported as a note;
-/// `None` when it reported nothing.
+/// Run `cargo doc` with the flags from `just docs-ci` over `packages` (or the
+/// whole workspace when `packages` is empty), returning any findings as a note,
+/// or `None` when the docs build cleanly.
 ///
-/// The build gets `profile` and `env`, the same as the clippy run, so the two
-/// share a target directory and the dependency metadata built under it.
-/// Cargo documents a crate again only when its sources or dependencies change.
-/// A `cargo doc` that can't be run is a note too, rather than a failed check:
-/// the code itself was checked.
+/// Uses `profile` and `env` from the clippy pass so both share a target
+/// directory and its compiled dependency metadata.
+/// Cargo re-documents a crate only when its sources or dependencies change.
+/// If `cargo doc` cannot run, returns a note rather than failing the check so
+/// clippy's results are preserved.
 ///
-/// With `mergeable_info`, each crate's rustdoc writes its share of the search
-/// index to a directory of its own, and cargo merges them once at the end.
+/// When `mergeable_info` is enabled, each crate's rustdoc writes its search
+/// index fragment to a separate directory and cargo merges them once at the
+/// end.
 /// Requires nightly cargo.
 fn doc_check<R: ProcessRunner>(
     root: &Utf8Path,
@@ -209,9 +210,9 @@ fn doc_check<R: ProcessRunner>(
     let mut env = env.to_vec();
     env.push(("RUSTDOCFLAGS", DOCS_RUSTDOCFLAGS));
     if mergeable_info {
-        // Without it, every crate's rustdoc rewrites the workspace's shared
-        // search index under a lock, so documenting runs one crate at a time
-        // and slows with each crate documented (rust-lang/rust#146895).
+        // Without `-Zrustdoc-mergeable-info`, each crate's rustdoc rewrites
+        // the shared workspace search index under a lock, serializing doc
+        // builds and slowing down as the index grows (rust-lang/rust#146895).
         env.push(("CARGO_UNSTABLE_RUSTDOC_MERGEABLE_INFO", "true"));
     }
 

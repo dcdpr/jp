@@ -154,11 +154,11 @@ newer release has fixed.
     It also skips workspace members that live under a dot-directory: JP's
     `.config/jp/tools` crate is never analysed.
     Its own findings go unreported, and every call it makes is invisible, so a
-    `pub` item in another crate whose only callers are in `tools` is reported
-    as `DRY-002` dead code.
-    `ReposHandler::list_check_runs`, `list_check_run_annotations`, `job_logs`
-    and `CheckRun::is_actions_job` in `jp_github` (all called from
-    `.config/jp/tools/src/github/pr_checks.rs`) hit this.
+    `pub` item in another crate whose only callers are in `tools` is reported as
+    `DRY-002` dead code.
+    `ReposHandler::list_check_runs`, `list_check_run_annotations`,
+    `combined_status`, `job_logs`, and `CheckRun::is_actions_job` in `jp_github`
+    (all called from `.config/jp/tools/src/github/pr_checks.rs`) hit this.
     `PullsHandler::update`, called only from `tools`, escapes it through item
     16: other code calls a method named `update`.
     Propose taking the file set from `cargo metadata` (each workspace member's

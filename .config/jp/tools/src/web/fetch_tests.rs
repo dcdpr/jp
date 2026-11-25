@@ -155,7 +155,7 @@ mod github_issue_or_pr_redirect {
 
     #[test]
     fn pull_other_subpaths_fall_back_to_github_pulls() {
-        // `/conflicts` etc. don't have dedicated tools — the
+        // `/conflicts` etc. don't have dedicated tools; the
         // metadata+conversation answer is the closest fit, so the redirect
         // keeps them on `github_pulls`.
         let msg = redirect("https://github.com/foo/bar/pull/42/conflicts").unwrap();

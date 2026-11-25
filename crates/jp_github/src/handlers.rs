@@ -1117,10 +1117,10 @@ impl ReposHandler {
             .await
     }
 
-    /// Fetch the annotations of check run `id`, up to 100.
+    /// Fetch the annotations for check run `id`, up to 100.
     ///
-    /// GitHub keeps at most 50 annotations per GitHub Actions job, so one page
-    /// holds every annotation of one.
+    /// GitHub caps annotations at 50 per GitHub Actions job, so a single page
+    /// returns all of them.
     // qual:api
     // Called from `.config/jp/tools`, which rustqual doesn't analyse
     // (T-0yh5j3r item 17).
@@ -1163,12 +1163,11 @@ impl ReposHandler {
             .await
     }
 
-    /// Download the plain-text log of GitHub Actions job `id`.
+    /// Download the plain-text log for GitHub Actions job `id`.
     ///
-    /// GitHub answers with a redirect to a download URL that expires after a
-    /// minute, which the client follows.
-    /// GitHub refuses anonymous requests with a 403, even for a public
-    /// repository.
+    /// Follows GitHub's redirect to a short-lived signed download URL.
+    /// Requires authentication; GitHub returns 403 for anonymous requests, even
+    /// on public repositories.
     // qual:api
     // Called from `.config/jp/tools`, which rustqual doesn't analyse
     // (T-0yh5j3r item 17).
