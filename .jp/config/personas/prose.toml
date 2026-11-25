@@ -17,6 +17,7 @@ extends = [
 cargo_format = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
 cargo_check = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
 github_pr_edit = { enable = true, run = "allow", result = "allow" }
+fs_modify_file.questions.modify_dirty_file.answer = true
 
 [style]
 reasoning.display = "full"
