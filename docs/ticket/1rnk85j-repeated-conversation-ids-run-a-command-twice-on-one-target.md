@@ -34,9 +34,8 @@ Only `fork` wants a repeat: RFD 086 documents `jp c fork "$id" "$id"` as
 creating two independent forks.
 The two forks share a wall-clock ID until RFD 106 lands, the same collision
 `fork A B` has.
-Every other multi-target command is wrong on the second copy: `rm` and
-`archive` would fail, the read-only commands print twice, and `compact`
-re-applies.
+Every other multi-target command is wrong on the second copy: `rm` and `archive`
+would fail, the read-only commands print twice, and `compact` re-applies.
 
 ## Proposal
 
