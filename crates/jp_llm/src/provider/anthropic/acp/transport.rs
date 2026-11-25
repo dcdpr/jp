@@ -12,7 +12,10 @@ use std::{
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::Utc;
 use futures::{StreamExt as _, future::BoxFuture};
-use jp_config::assistant::{request::CachePolicy, tool_choice::ToolChoice};
+use jp_config::{
+    assistant::{request::CachePolicy, tool_choice::ToolChoice},
+    model::id::Name,
+};
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
@@ -450,18 +453,9 @@ pub(super) async fn drive(
                     if config_id != "model" {
                         return source;
                     }
-                    let kind = if refuses_unknown_model(&source) {
-                        StreamErrorKind::UnknownModel
-                    } else {
-                        StreamErrorKind::Other
-                    };
-                    let error = Error::ModelSelection {
-                        model: prepared.model.clone(),
-                        source,
-                    };
                     record_failure(
                         &foreground_state,
-                        StreamError::new(kind, error.to_string()).with_source(error),
+                        model_selection_failure(&prepared.model, source),
                     )
                 })?;
                 // Claude Code can normalize a model alias to a canonical identifier.
@@ -544,6 +538,28 @@ pub(super) async fn drive(
     }
 }
 
+/// Classify Claude Code's refusal to select `model`.
+///
+/// A rate-limit refusal is a subscription exhaustion scoped to `model`: it says
+/// nothing about the login's other models, and another credential in the chain
+/// may still serve this one.
+fn model_selection_failure(model: &Name, source: RpcError) -> StreamError {
+    let unknown = refuses_unknown_model(&source);
+    let rate_limited = refuses_rate_limited_model(&source);
+    let error = Error::ModelSelection {
+        model: model.clone(),
+        source,
+    };
+    let failure = if unknown {
+        StreamError::new(StreamErrorKind::UnknownModel, error.to_string())
+    } else if rate_limited {
+        StreamError::subscription_exhausted(error.to_string(), None, Some(model.to_string()))
+    } else {
+        StreamError::new(StreamErrorKind::Other, error.to_string())
+    };
+    failure.with_source(error)
+}
+
 /// Check whether a `model` config-option RPC error indicates an unknown model.
 ///
 /// Claude Code reports unknown models as a generic internal error whose
@@ -555,6 +571,21 @@ pub(super) fn refuses_unknown_model(error: &RpcError) -> bool {
         .and_then(|data| data.get("details"))
         .and_then(Value::as_str)
         .is_some_and(|details| details.starts_with("Model '") && details.ends_with("' not found"))
+}
+
+/// Check whether a `model` config-option RPC error is the API refusing the
+/// model for the account's rate limit.
+///
+/// Claude Code probes the model when it is selected and reports the API's
+/// response as `data.details`, e.g. `"API error: 429 This request would exceed
+/// your account's rate limit. ..."`.
+pub(super) fn refuses_rate_limited_model(error: &RpcError) -> bool {
+    error
+        .data
+        .as_ref()
+        .and_then(|data| data.get("details"))
+        .and_then(Value::as_str)
+        .is_some_and(|details| details.starts_with("API error: 429 "))
 }
 
 /// Fetch the `model` select options offered by the adapter for

@@ -182,6 +182,46 @@ async fn acp_stream_advances_before_requesting_a_host_rebuild() {
     assert!(matches!(next.route, Route::Http(Credential::ApiKey(_))));
 }
 
+/// A login refused for one model, such as Claude Code rejecting the model
+/// switch with a 429, hands that model to the next credential only.
+#[tokio::test]
+async fn acp_stream_moves_only_the_exhausted_model_to_the_next_credential() {
+    let (provider, model, store) = provider(&["sub:sub", "sub:sub2"]);
+    let attempt = provider.resolve(model.name()).await.unwrap();
+    let refused = Box::pin(stream::iter(vec![Err(
+        StreamError::subscription_exhausted("refused", None, Some("claude-sonnet-5".into())),
+    )]));
+    let events = provider
+        .with_acp_fallback(&model, attempt, refused)
+        .collect::<Vec<_>>()
+        .await;
+    assert_eq!(
+        events.last().unwrap().as_ref().unwrap_err().kind,
+        StreamErrorKind::CredentialChanged
+    );
+
+    let next = provider.resolve("claude-sonnet-5").await.unwrap();
+    assert_eq!(
+        next.selected.map(|selected| selected.entry),
+        Some(AuthEntry::Subscription(Some("sub2".into())))
+    );
+    let other = provider.resolve("claude-opus-5").await.unwrap();
+    assert_eq!(
+        other.selected.map(|selected| selected.entry),
+        Some(AuthEntry::Subscription(Some("sub".into())))
+    );
+    let snapshot = store.load().unwrap();
+    let profiles = snapshot.profiles(CATEGORY_LLM, PROVIDER_ANTHROPIC).unwrap();
+    assert_eq!(
+        profiles["sub"]
+            .cooldowns
+            .keys()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        vec!["claude-sonnet-5"]
+    );
+}
+
 #[tokio::test]
 async fn acp_stream_keeps_exhaustion_terminal_without_an_authorized_fallback() {
     let (provider, model, _) = provider(&["sub:sub"]);
