@@ -32,6 +32,7 @@ use jp_config::{
     interrupt::ToolInterruptAction,
     model::id::{self, ProviderId},
     style::window_rows::{RowCount, WindowRows},
+    types::color::Color,
 };
 use jp_conversation::{
     Conversation, ConversationEvent,
@@ -5850,6 +5851,8 @@ async fn test_parallel_tool_calls_rendered_atomically() {
             results_file_link: LinkStyle::Off,
             parameters: ParametersStyle::FunctionCall,
             print_stderr: false,
+            background: None,
+            result_header_background: None,
             error: ErrorStyleConfig {
                 inline_results: None,
                 results_file_link: None,
@@ -6825,6 +6828,8 @@ async fn a_tool_result_survives_a_live_window() {
             results_file_link: LinkStyle::Full,
             parameters: ParametersStyle::Off,
             print_stderr: true,
+            background: None,
+            result_header_background: None,
             error: ErrorStyleConfig {
                 inline_results: None,
                 results_file_link: None,
@@ -7063,6 +7068,8 @@ async fn a_tool_can_opt_out_of_the_progress_window() {
                     results_file_link: LinkStyle::Off,
                     parameters: ParametersStyle::Off,
                     print_stderr: false,
+                    background: None,
+                    result_header_background: None,
                     error: ErrorStyleConfig {
                         inline_results: None,
                         results_file_link: None,
@@ -9882,6 +9889,8 @@ fn non_joining_style() -> DisplayStyleConfig {
         results_file_link: LinkStyle::Off,
         parameters: ParametersStyle::Off,
         print_stderr: false,
+        background: None,
+        result_header_background: None,
         error: ErrorStyleConfig {
             inline_results: None,
             results_file_link: None,
@@ -9998,6 +10007,111 @@ async fn a_tool_that_does_not_join_reasoning_renders_unshaded_live() {
         !chrome.contains("\x1b[48;5;236m"),
         "no part of the chrome carries the reasoning background.\nChrome:\n{chrome:?}"
     );
+}
+
+/// End-to-end: a tool whose style sets `background` has its header and result
+/// shaded with it, with no reasoning region involved.
+#[tokio::test]
+async fn a_tool_background_shades_its_chrome_live() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    let storage = root.join(".jp");
+
+    let mut config = AppConfig::new_test();
+    config.style.tool_call.show = true;
+    config.conversation.tools.defaults.run = RunMode::Allow;
+    config
+        .conversation
+        .tools
+        .insert("mock_tool".to_string(), ToolConfig {
+            source: ToolSource::Local { tool: None },
+            command: None,
+            run: Some(RunMode::Allow),
+            format: None,
+            enable: None,
+            summary: None,
+            description: None,
+            examples: None,
+            parameters: IndexMap::new().into(),
+            result: None,
+            style: Some(DisplayStyleConfig {
+                background: Some(Color::Ansi256(237)),
+                ..non_joining_style()
+            }),
+            questions: IndexMap::new().into(),
+            options: IndexMap::default().into(),
+            access: None,
+            cancellation_response: None,
+            fan_out: None,
+        });
+
+    let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+    let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
+    let lock = workspace
+        .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+        .unwrap();
+
+    let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider {
+        responses: vec![
+            vec![
+                Event::tool_call_start(0, "call_mock".to_string(), "mock_tool".to_string()),
+                Event::flush(0),
+                Event::Finished(FinishReason::Completed),
+            ],
+            final_message_events("Done."),
+        ],
+        call_index: AtomicUsize::new(0),
+        model: ModelDetails::empty(id::ModelIdConfig {
+            provider: ProviderId::Test,
+            name: "tool-background-mock".parse().expect("valid name"),
+        }),
+    });
+    let model = provider
+        .model_details(&"test-model".parse().unwrap())
+        .await
+        .unwrap();
+
+    let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    let router = detached_router();
+
+    let executor_source = TestExecutorSource::new().with_executor("mock_tool", |req| {
+        Box::new(MockExecutor::completed(&req.id, &req.name, "tool output"))
+    });
+    let tool_defs = executor_source.tool_definitions();
+
+    run_turn_loop(
+        Arc::clone(&provider),
+        &model,
+        &config,
+        &router,
+        root,
+        InvocationContext::default(),
+        false, // interactive
+        &[],
+        &lock,
+        ToolChoice::Auto,
+        &tool_defs,
+        printer.clone(),
+        Arc::new(MockPromptBackend::new()),
+        ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
+        ChatRequest::from("use the tool"),
+        PendingStreamTrim::default(),
+        router.turn_interrupt(),
+        TurnInterrupts::none(),
+    )
+    .await
+    .unwrap();
+
+    printer.flush();
+    let chrome = err.lock().clone();
+    let shaded = |text: &str| {
+        chrome
+            .split('\n')
+            .any(|line| line.contains(text) && line.contains("\x1b[48;5;237m"))
+    };
+    assert!(shaded("Calling tool"), "header is unshaded:\n{chrome:?}");
+    assert!(shaded("tool output"), "result is unshaded:\n{chrome:?}");
 }
 
 /// Metadata key a provider repair patch targets in the rebuild tests.

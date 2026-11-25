@@ -29,6 +29,8 @@ const BRIEF_TOOL_STYLE: DisplayStyleConfig = DisplayStyleConfig {
     inline_results: InlineResults::Off,
     results_file_link: style::LinkStyle::Off,
     print_stderr: false,
+    background: None,
+    result_header_background: None,
     error: ErrorStyleConfig {
         inline_results: None,
         results_file_link: None,
@@ -43,6 +45,8 @@ const CHAT_TOOL_STYLE: DisplayStyleConfig = DisplayStyleConfig {
     inline_results: InlineResults::Off,
     results_file_link: style::LinkStyle::Off,
     print_stderr: false,
+    background: None,
+    result_header_background: None,
     error: ErrorStyleConfig {
         inline_results: None,
         results_file_link: None,
@@ -57,6 +61,8 @@ const FULL_TOOL_STYLE: DisplayStyleConfig = DisplayStyleConfig {
     inline_results: InlineResults::Full,
     results_file_link: style::LinkStyle::Full,
     print_stderr: false,
+    background: None,
+    result_header_background: None,
     error: ErrorStyleConfig {
         inline_results: None,
         results_file_link: None,

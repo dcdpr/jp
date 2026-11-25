@@ -86,7 +86,7 @@ use tracing::{debug, info, warn};
 use url::Url;
 
 use super::{
-    ToolRenderer,
+    ToolBackgrounds, ToolRenderer,
     executor::{
         CallExecutors, Executor, ExecutorError, ExecutorResult, ExecutorSource, FanOutCall,
         PermissionInfo, Review,
@@ -355,6 +355,13 @@ struct Batch {
     /// Whether the approved calls were released to run.
     released: bool,
 
+    /// Whether each result is shown under a `<tool> result` header.
+    ///
+    /// Set at release when more than one call header is on screen, including
+    /// those of declined calls: all call headers are printed before any tool
+    /// runs, so results do not immediately follow their own call header.
+    labelled: bool,
+
     /// Whether the progress row was claimed for the released calls.
     progress: bool,
 
@@ -380,6 +387,7 @@ impl Batch {
             open_prompt: None,
             stream_ended: false,
             released: false,
+            labelled: false,
             progress: false,
             connection_lost: false,
         }
@@ -487,6 +495,13 @@ struct Call {
 
     /// Whether the call was released to run.
     released: bool,
+
+    /// Whether the call's header reached the screen, ahead of its approval
+    /// prompt or when it was announced.
+    ///
+    /// A call declined at its prompt keeps this, since its header stays on
+    /// screen above the results of the calls that ran.
+    shown: bool,
 
     /// What was drawn for the call ahead of its approval prompt, and the
     /// arguments it was drawn from.
@@ -782,6 +797,16 @@ impl ToolCoordinator {
         PreRender::Ready(self.render_executor(executor, renderer))
     }
 
+    /// Whether [`render_executor`] draws a header for this call.
+    ///
+    /// [`render_executor`]: Self::render_executor
+    fn draws_header(&self, executor: &dyn Executor) -> bool {
+        let name = executor.tool_name();
+        !self.is_hidden(name)
+            && (!self.parameter_style(name).runs_formatter()
+                || executor.formatted_arguments().is_some())
+    }
+
     /// Render one tool call's arguments for display, returning the content to
     /// persist for replay.
     ///
@@ -854,6 +879,17 @@ impl ToolCoordinator {
             .map_or(self.tools_config.defaults.style.joins_reasoning, |cfg| {
                 cfg.style().joins_reasoning
             })
+    }
+
+    /// Return the configured background colors for `tool_name`'s chrome.
+    ///
+    /// Falls back to the `*` defaults block when `tool_name` has no explicit
+    /// config entry.
+    pub fn backgrounds(&self, tool_name: &str) -> ToolBackgrounds {
+        self.tools_config.get(tool_name).map_or_else(
+            || ToolBackgrounds::from(&self.tools_config.defaults.style),
+            |cfg| ToolBackgrounds::from(cfg.style()),
+        )
     }
 
     /// Return the response recorded for a cancelled call to `tool_name`: the
@@ -1219,6 +1255,7 @@ impl ToolCoordinator {
             decided: false,
             announced: false,
             released: false,
+            shown: false,
             pre_render: None,
             question: None,
             review: None,
@@ -1672,7 +1709,7 @@ impl ToolCoordinator {
         }
         let tool_name = batch.calls[index].tool_name.clone();
         host.renderer.focus(&batch.calls[index].tool_id);
-        self.render_result(&tool_name, &review.response, host.renderer);
+        self.render_result(&tool_name, &review.response, batch.labelled, host.renderer);
         self.settle(batch, index, review, host);
     }
 
@@ -1875,10 +1912,13 @@ impl ToolCoordinator {
                 let call = &mut batch.calls[index];
                 call.pre_render = match self.pre_render_for_prompt(executor.as_ref(), host.renderer)
                 {
-                    PreRender::Ready(content) => Some(PreRendered {
-                        content,
-                        arguments: executor.arguments(),
-                    }),
+                    PreRender::Ready(content) => {
+                        call.shown |= self.draws_header(executor.as_ref());
+                        Some(PreRendered {
+                            content,
+                            arguments: executor.arguments(),
+                        })
+                    }
                     PreRender::Deferred => None,
                 };
                 call.wait = Wait::Approval(Box::new(info.clone()));
@@ -1909,6 +1949,7 @@ impl ToolCoordinator {
             pre.content
         } else {
             host.renderer.focus(&call.tool_id);
+            call.shown |= self.draws_header(call.executor.as_ref());
             self.render_executor(call.executor.as_ref(), host.renderer)
         };
         let Some(content) = content else {
@@ -1937,6 +1978,9 @@ impl ToolCoordinator {
         }
 
         debug!(tools = admitted.len(), "Starting tool execution.");
+        // Every call was decided before release, so every header this batch
+        // will draw is already on screen, including those of declined calls.
+        batch.labelled = batch.calls.iter().filter(|call| call.shown).count() > 1;
 
         // Claimed before the sinks below, not after: `StatusRegion::source`
         // copies the region it is asked of, so a sink taken from the inert
@@ -2217,7 +2261,7 @@ impl ToolCoordinator {
         match self.result_mode(&tool_name) {
             ResultMode::Allow => {
                 host.renderer.focus(&batch.calls[index].tool_id);
-                self.render_result(&tool_name, &response, host.renderer);
+                self.render_result(&tool_name, &response, batch.labelled, host.renderer);
                 self.settle(batch, index, Review::unchanged(response), host);
             }
             // The execution service applies `result = "skip"` itself, so this
@@ -2231,7 +2275,7 @@ impl ToolCoordinator {
             // and the result stands as the tool produced it.
             ResultMode::Ask | ResultMode::Edit if !host.interactive => {
                 host.renderer.focus(&batch.calls[index].tool_id);
-                self.render_result(&tool_name, &response, host.renderer);
+                self.render_result(&tool_name, &response, batch.labelled, host.renderer);
                 self.settle(batch, index, Review::unchanged(response), host);
             }
             // Both Ask and Edit prompt whenever a user is there to answer: the
@@ -2514,7 +2558,15 @@ impl ToolCoordinator {
     }
 
     /// Show a finished call's result, unless the tool renders no chrome.
-    fn render_result(&self, tool_name: &str, response: &ToolCallResponse, renderer: &ToolRenderer) {
+    ///
+    /// A `labelled` result is shown under a header naming `tool_name`.
+    fn render_result(
+        &self,
+        tool_name: &str,
+        response: &ToolCallResponse,
+        labelled: bool,
+        renderer: &ToolRenderer,
+    ) {
         if self.is_hidden(tool_name) {
             return;
         }
@@ -2528,7 +2580,16 @@ impl ToolCoordinator {
                 )
             })
             .unwrap_or_default();
-        renderer.render_result(response, &inline_results, &results_file_link);
+        if labelled {
+            renderer.render_labelled_result(
+                response,
+                tool_name,
+                &inline_results,
+                &results_file_link,
+            );
+        } else {
+            renderer.render_result(response, &inline_results, &results_file_link);
+        }
     }
 
     /// Record a call JP could not complete.

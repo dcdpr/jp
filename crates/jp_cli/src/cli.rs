@@ -14,7 +14,7 @@
 pub(crate) mod flag;
 mod spelling;
 
-use std::{ffi::OsString, num::NonZeroUsize, str::FromStr as _};
+use std::{ffi::OsString, iter, num::NonZeroUsize, str::FromStr as _};
 
 use clap::{
     Arg, ArgAction, ArgMatches, Command,
@@ -151,7 +151,8 @@ impl Cli {
 
         let cmd = Globals::augment(cmd);
         let cmd = RootOpts::augment(cmd);
-        Commands::augment(cmd)
+        let cmd = Commands::augment(cmd);
+        Globals::declare_on_subcommands(cmd)
     }
 
     /// Parse `argv`, whose first item is the program name.
@@ -275,191 +276,237 @@ pub(crate) struct Globals {
     pub(crate) log: Option<String>,
 }
 
+/// Global options whose values accumulate across the entire command line:
+/// `--cfg` and `-v`.
+///
+/// Clap propagates a `global` argument by copying the values from the deepest
+/// command that set it to every level, so a `--cfg` passed before the
+/// subcommand would be overwritten by one passed after it.
+/// Instead, these options are declared on every command (see
+/// [`Globals::declare_on_subcommands`]) so each level keeps its own values, and
+/// are collected from the root down in command-line order.
+fn accumulating_args() -> [Arg; 2] {
+    [
+        Arg::new("config")
+            .short('c')
+            .long("cfg")
+            .action(ArgAction::Append)
+            .value_name("KEY=VALUE")
+            .value_parser(KeyValueOrPath::from_str)
+            .help_heading(GLOBAL_HEADING)
+            .help("Override a configuration value for the duration of the command"),
+        Arg::new("verbose")
+            .short('v')
+            .long("verbose")
+            .action(ArgAction::Count)
+            .help_heading(GLOBAL_HEADING)
+            .help("Increase verbosity of logging")
+            .long_help(
+                "Increase verbosity of logging.\n\nCan be specified multiple times to increase \
+                 verbosity.\n\nDefaults to printing \"error\" messages. For each increase in \
+                 verbosity, the log level is set to \"warn\", \"info\", \"debug\", and \"trace\" \
+                 respectively.",
+            ),
+    ]
+}
+
+/// `matches` and the matches of each subcommand under it, root first.
+fn levels(matches: &ArgMatches) -> impl Iterator<Item = &ArgMatches> {
+    iter::successors(Some(matches), |level| {
+        level.subcommand().map(|(_, sub)| sub)
+    })
+}
+
+/// The options deciding what a command starts from and acts on: the implicit
+/// configuration, persistence, and the workspace.
+fn scope_args() -> [Arg; 3] {
+    [
+        Arg::new("no_config")
+            .long("no-cfg")
+            .action(ArgAction::SetTrue)
+            .help(
+                "Shorthand for `--cfg=NONE`: skip implicit config loading and start from program \
+                 defaults",
+            )
+            .long_help(
+                "Shorthand for `--cfg=NONE`: skip implicit config loading and start from program \
+                 defaults.\n\nSubsequent `--cfg` values layer on top of the defaults.",
+            ),
+        Arg::new("persist")
+            .short('!')
+            .long("no-persist")
+            .visible_short_alias('P')
+            .action(ArgAction::SetTrue)
+            .default_value("false")
+            // The flag turns persistence off, so its value is inverted: present
+            // reads as `false`, absent as `true`.
+            .value_parser(BoolValueParser::new().map(|v| !v))
+            .help("Disable persistence for the duration of the command")
+            .long_help(
+                "Disable persistence for the duration of the command.\n\nModified state is \
+                 persisted to disk by default. Disabling it helps debug certain actions, and lets \
+                 you send a query to the assistant without adding it to the conversation history.",
+            ),
+        Arg::new("workspace")
+            .short('w')
+            .long("workspace")
+            .value_name("WORKSPACE")
+            .value_parser(value_parser!(WorkspaceTarget))
+            .help("The workspace to use for the command")
+            .long_help(
+                "The workspace to use for the command.\n\nAccepts the workspace targeting grammar \
+                 (see `jp w use help`): a workspace ID, a path, `cwd` / `.`, or `-` to read an ID \
+                 from stdin. Interactive runs can also use the session keywords (`s`, `?s`), the \
+                 pickers (`?`), and free-text matching.\n\nSelects the workspace for this \
+                 invocation only; it does not change the session's active workspace (that is `jp \
+                 w use`).\n\nOn `jp workspace use` and `jp workspace show` it names the workspace \
+                 the subcommand acts on, as an alternative to their positional target.",
+            ),
+    ]
+}
+
+/// The options deciding how a command uses the terminal: chrome, prompts, the
+/// output format, and the output width.
+fn terminal_args() -> [Arg; 4] {
+    [
+        Arg::new("quiet")
+            .short('q')
+            .long("quiet")
+            .action(ArgAction::SetTrue)
+            .help("Suppress chrome: progress indicators, status lines, and tool call headers")
+            .long_help(
+                "Suppress chrome: progress indicators, status lines, and tool call \
+                 headers.\n\nCommand output and the assistant's response still go to stdout, and \
+                 a failing run still reports its error. Redirect them (`>/dev/null`, \
+                 `2>/dev/null`) to drop those as well.\n\nTracing written to stderr by `-v` or \
+                 `--log-file=-` is suppressed too. The trace log file still records the run in \
+                 full.",
+            ),
+        Arg::new("no_interactive")
+            .long("no-interactive")
+            .visible_alias("non-interactive")
+            .action(ArgAction::SetTrue)
+            .help("Assume no user is available to answer prompts")
+            .long_help(
+                "Assume no user is available to answer prompts.\n\nEverything JP would ask about \
+                 resolves the way it does when JP runs without a terminal: the workspace and \
+                 conversation pickers, the lock-timeout prompt, and a third-party plugin's \
+                 approval all fail, and a tool set to ask before running runs unconfirmed.\n\nA \
+                 command with no answer to fall back on fails too: `jp init`, and any removal or \
+                 archive it would have to confirm.\n\nSet `JP_NONINTERACTIVE=1` to apply this to \
+                 every invocation in an environment, such as a script or a CI job.\n\nThis does \
+                 not change output formatting; use `--format` for that.",
+            ),
+        Arg::new("format")
+            .short('F')
+            .long("format")
+            .value_name("FORMAT")
+            .value_parser(value_parser!(CliFormat))
+            .default_value("auto")
+            .help("The output format"),
+        Arg::new("width")
+            .long("width")
+            .value_name("COLUMNS")
+            .value_parser(value_parser!(u16))
+            .help("Lay output out against this many columns")
+            .long_help(
+                "Lay output out against this many columns.\n\nDetected automatically when stdout \
+                 is a terminal. Set it when stdout is a pipe that still renders for a human at a \
+                 known width, such as a preview pane laid out by another program. `0` means \
+                 unknown, which is the default when piped: content keeps its natural width \
+                 instead of being fitted to a guess.",
+            ),
+    ]
+}
+
+/// The options deciding where the tracing log goes and what it records.
+fn logging_args() -> [Arg; 3] {
+    [
+        Arg::new("log_format")
+            .long("log-format")
+            .value_name("LOG_FORMAT")
+            .value_parser(value_parser!(LogFormat))
+            .default_value("auto")
+            .help("The format of the log output written to stderr")
+            .long_help(
+                "The format of the log output written to stderr.\n\nDefaults to \"text\" when \
+                 stderr is a terminal, and \"json\" when stderr is redirected to a file or pipe. \
+                 Only takes effect when tracing is written to stderr (via `-v` or `--log-file=-`).",
+            ),
+        Arg::new("log_file")
+            .long("log-file")
+            .value_name("PATH")
+            .help("Write the full tracing log to the given file")
+            .long_help(
+                "Write the full tracing log to the given file.\n\nUse `-` to stream logs to \
+                 stderr instead. When unset, the log is written to a temporary file. `JP_DEBUG=1` \
+                 announces its path before execution and keeps it afterward. Runs lasting at \
+                 least five minutes repeat the path at completion. A failed run without \
+                 `JP_DEBUG` reports the retained path at completion.",
+            ),
+        Arg::new("log")
+            .long("log")
+            .value_name("DIRECTIVE")
+            .help("Filter log output by target and level")
+            .long_help(
+                "Filter log output by target and level.\n\nAccepts a comma-separated list of \
+                 `target=level` pairs. Levels are one of: off, error, warn, info, debug, trace. \
+                 Targets match path prefixes.\n\nExamples: --log=tool::stderr=trace Show stderr \
+                 output from local tools. --log=mcp::stderr=debug Show stderr from MCP servers. \
+                 --log='jp_llm=trace,plugin=off' Trace jp_llm internals, silence \
+                 plugins.\n\nComposes with `-v`: verbosity sets the baseline for jp's own \
+                 modules; `--log` adds or overrides specific targets. Passing `--log` without \
+                 `-v` still enables stderr log output.",
+            ),
+    ]
+}
+
 impl Globals {
-    #[expect(clippy::too_many_lines)]
     fn augment(cmd: Command) -> Command {
         let global = |arg: Arg| arg.global(true).help_heading(GLOBAL_HEADING);
+        let [config, verbose] = accumulating_args();
+        let [no_config, persist, workspace] = scope_args();
+        let [quiet, no_interactive, format, width] = terminal_args();
+        let [log_format, log_file, log] = logging_args();
 
-        cmd.arg(global(
-            Arg::new("config")
-                .short('c')
-                .long("cfg")
-                .action(ArgAction::Append)
-                .value_name("KEY=VALUE")
-                .value_parser(KeyValueOrPath::from_str)
-                .help("Override a configuration value for the duration of the command"),
-        ))
-        .arg(global(
-            Arg::new("no_config")
-                .long("no-cfg")
-                .action(ArgAction::SetTrue)
-                .help(
-                    "Shorthand for `--cfg=NONE`: skip implicit config loading and start from \
-                     program defaults",
-                )
-                .long_help(
-                    "Shorthand for `--cfg=NONE`: skip implicit config loading and start from \
-                     program defaults.\n\nSubsequent `--cfg` values layer on top of the defaults.",
-                ),
-        ))
-        .arg(global(
-            Arg::new("verbose")
-                .short('v')
-                .long("verbose")
-                .action(ArgAction::Count)
-                .help("Increase verbosity of logging")
-                .long_help(
-                    "Increase verbosity of logging.\n\nCan be specified multiple times to \
-                     increase verbosity.\n\nDefaults to printing \"error\" messages. For each \
-                     increase in verbosity, the log level is set to \"warn\", \"info\", \
-                     \"debug\", and \"trace\" respectively.",
-                ),
-        ))
-        .arg(global(
-            Arg::new("quiet")
-                .short('q')
-                .long("quiet")
-                .action(ArgAction::SetTrue)
-                .help("Suppress chrome: progress indicators, status lines, and tool call headers")
-                .long_help(
-                    "Suppress chrome: progress indicators, status lines, and tool call \
-                     headers.\n\nCommand output and the assistant's response still go to stdout, \
-                     and a failing run still reports its error. Redirect them (`>/dev/null`, \
-                     `2>/dev/null`) to drop those as well.\n\nTracing written to stderr by `-v` \
-                     or `--log-file=-` is suppressed too. The trace log file still records the \
-                     run in full.",
-                ),
-        ))
-        .arg(global(
-            Arg::new("no_interactive")
-                .long("no-interactive")
-                .visible_alias("non-interactive")
-                .action(ArgAction::SetTrue)
-                .help("Assume no user is available to answer prompts")
-                .long_help(
-                    "Assume no user is available to answer prompts.\n\nEverything JP would ask \
-                     about resolves the way it does when JP runs without a terminal: the \
-                     workspace and conversation pickers, the lock-timeout prompt, and a \
-                     third-party plugin's approval all fail, and a tool set to ask before running \
-                     runs unconfirmed.\n\nA command with no answer to fall back on fails too: `jp \
-                     init`, and any removal or archive it would have to confirm.\n\nSet \
-                     `JP_NONINTERACTIVE=1` to apply this to every invocation in an environment, \
-                     such as a script or a CI job.\n\nThis does not change output formatting; use \
-                     `--format` for that.",
-                ),
-        ))
-        .arg(global(
-            Arg::new("format")
-                .short('F')
-                .long("format")
-                .value_name("FORMAT")
-                .value_parser(value_parser!(CliFormat))
-                .default_value("auto")
-                .help("The output format"),
-        ))
-        .arg(global(
-            Arg::new("persist")
-                .short('!')
-                .long("no-persist")
-                .visible_short_alias('P')
-                .action(ArgAction::SetTrue)
-                .default_value("false")
-                // The flag turns persistence off, so its value is inverted:
-                // present reads as `false`, absent as `true`.
-                .value_parser(BoolValueParser::new().map(|v| !v))
-                .help("Disable persistence for the duration of the command")
-                .long_help(
-                    "Disable persistence for the duration of the command.\n\nModified state is \
-                     persisted to disk by default. Disabling it helps debug certain actions, and \
-                     lets you send a query to the assistant without adding it to the conversation \
-                     history.",
-                ),
-        ))
-        .arg(global(
-            Arg::new("workspace")
-                .short('w')
-                .long("workspace")
-                .value_name("WORKSPACE")
-                .value_parser(value_parser!(WorkspaceTarget))
-                .help("The workspace to use for the command")
-                .long_help(
-                    "The workspace to use for the command.\n\nAccepts the workspace targeting \
-                     grammar (see `jp w use help`): a workspace ID, a path, `cwd` / `.`, or `-` \
-                     to read an ID from stdin. Interactive runs can also use the session keywords \
-                     (`s`, `?s`), the pickers (`?`), and free-text matching.\n\nSelects the \
-                     workspace for this invocation only; it does not change the session's active \
-                     workspace (that is `jp w use`).\n\nOn `jp workspace use` and `jp workspace \
-                     show` it names the workspace the subcommand acts on, as an alternative to \
-                     their positional target.",
-                ),
-        ))
-        .arg(global(
-            Arg::new("width")
-                .long("width")
-                .value_name("COLUMNS")
-                .value_parser(value_parser!(u16))
-                .help("Lay output out against this many columns")
-                .long_help(
-                    "Lay output out against this many columns.\n\nDetected automatically when \
-                     stdout is a terminal. Set it when stdout is a pipe that still renders for a \
-                     human at a known width, such as a preview pane laid out by another program. \
-                     `0` means unknown, which is the default when piped: content keeps its \
-                     natural width instead of being fitted to a guess.",
-                ),
-        ))
-        .arg(global(
-            Arg::new("log_format")
-                .long("log-format")
-                .value_name("LOG_FORMAT")
-                .value_parser(value_parser!(LogFormat))
-                .default_value("auto")
-                .help("The format of the log output written to stderr")
-                .long_help(
-                    "The format of the log output written to stderr.\n\nDefaults to \"text\" when \
-                     stderr is a terminal, and \"json\" when stderr is redirected to a file or \
-                     pipe. Only takes effect when tracing is written to stderr (via `-v` or \
-                     `--log-file=-`).",
-                ),
-        ))
-        .arg(global(
-            Arg::new("log_file")
-                .long("log-file")
-                .value_name("PATH")
-                .help("Write the full tracing log to the given file")
-                .long_help(
-                    "Write the full tracing log to the given file.\n\nUse `-` to stream logs to \
-                     stderr instead. When unset, the log is written to a temporary file. \
-                     `JP_DEBUG=1` announces its path before execution and keeps it afterward. \
-                     Runs lasting at least five minutes repeat the path at completion. A failed \
-                     run without `JP_DEBUG` reports the retained path at completion.",
-                ),
-        ))
-        .arg(global(
-            Arg::new("log")
-                .long("log")
-                .value_name("DIRECTIVE")
-                .help("Filter log output by target and level")
-                .long_help(
-                    "Filter log output by target and level.\n\nAccepts a comma-separated list of \
-                     `target=level` pairs. Levels are one of: off, error, warn, info, debug, \
-                     trace. Targets match path prefixes.\n\nExamples: --log=tool::stderr=trace \
-                     Show stderr output from local tools. --log=mcp::stderr=debug Show stderr \
-                     from MCP servers. --log='jp_llm=trace,plugin=off' Trace jp_llm internals, \
-                     silence plugins.\n\nComposes with `-v`: verbosity sets the baseline for jp's \
-                     own modules; `--log` adds or overrides specific targets. Passing `--log` \
-                     without `-v` still enables stderr log output.",
-                ),
-        ))
+        // Declared in the order help lists them.
+        cmd.arg(config)
+            .arg(global(no_config))
+            .arg(verbose)
+            .arg(global(quiet))
+            .arg(global(no_interactive))
+            .arg(global(format))
+            .arg(global(persist))
+            .arg(global(workspace))
+            .arg(global(width))
+            .args([log_format, log_file, log].map(global))
+    }
+
+    /// Declare the [accumulating options] on every subcommand under `cmd`.
+    ///
+    /// [accumulating options]: accumulating_args
+    fn declare_on_subcommands(cmd: Command) -> Command {
+        cmd.mut_subcommands(|sub| Self::declare_on_subcommands(sub.args(accumulating_args())))
     }
 
     fn from_matches(matches: &ArgMatches) -> Self {
+        // External subcommands (plugins) do not have these options declared on
+        // them; `try_get_*` skips those levels instead of panicking.
         Self {
-            config: matches
-                .get_many("config")
-                .map(|values| values.cloned().collect())
-                .unwrap_or_default(),
+            config: levels(matches)
+                .filter_map(|level| {
+                    level
+                        .try_get_many::<KeyValueOrPath>("config")
+                        .ok()
+                        .flatten()
+                })
+                .flatten()
+                .cloned()
+                .collect(),
             no_config: matches.get_flag("no_config"),
-            verbose: matches.get_count("verbose"),
+            verbose: levels(matches)
+                .filter_map(|level| level.try_get_one::<u8>("verbose").ok().flatten())
+                .fold(0, |count, level| count.saturating_add(*level)),
             quiet: matches.get_flag("quiet"),
             no_interactive: matches.get_flag("no_interactive"),
             format: matches.get_one("format").copied().unwrap_or_default(),

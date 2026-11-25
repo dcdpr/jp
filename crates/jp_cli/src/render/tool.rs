@@ -3,6 +3,7 @@ use std::{
     env, fmt,
     fmt::Write as _,
     fs,
+    path::{Path, PathBuf},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -13,8 +14,11 @@ use std::{
 
 use crossterm::style::Stylize as _;
 use jp_config::{
-    conversation::tool::style::{InlineResults, LinkStyle, ParametersStyle, TruncateLines},
+    conversation::tool::style::{
+        DisplayStyleConfig, InlineResults, LinkStyle, ParametersStyle, TruncateLines,
+    },
     style::{StyleConfig, window_rows::WindowRows},
+    types::color::Color,
 };
 use jp_conversation::event::ToolCallResponse;
 use jp_md::format::Formatter;
@@ -29,7 +33,7 @@ use jp_term::{
 };
 use serde_json::{Map, Value};
 
-use crate::format::sanitize_mode;
+use crate::format::{full_width_background, sanitize_mode};
 
 /// Map a window size from the config onto the printer's window budget.
 ///
@@ -41,6 +45,25 @@ pub(crate) const fn output_lines(rows: WindowRows) -> OutputLines {
         WindowRows::Off => OutputLines::Off,
         WindowRows::Auto => OutputLines::Auto,
         WindowRows::Fixed(count) => OutputLines::Rows(count.rows),
+    }
+}
+
+/// Background colors configured in a tool's `style` block.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub(crate) struct ToolBackgrounds {
+    /// Background color for the call header, arguments, prompts, and result.
+    pub call: Option<Color>,
+
+    /// Background color for the `<tool> result` header above a labelled result.
+    pub result_header: Option<Color>,
+}
+
+impl From<&DisplayStyleConfig> for ToolBackgrounds {
+    fn from(style: &DisplayStyleConfig) -> Self {
+        Self {
+            call: style.background,
+            result_header: style.result_header_background(),
+        }
     }
 }
 
@@ -115,15 +138,20 @@ pub struct ToolRenderer {
     /// [`TurnView`]: super::TurnView
     drawn: Arc<AtomicBool>,
 
-    /// Reasoning-region background captured per tool-call ID.
+    /// Background captured per tool-call ID.
     ///
-    /// Populated at the tool-call boundary (via [`set_region`]) when a tool
-    /// continues a reasoning region; the tool's permanent header and result are
-    /// shaded with it.
-    /// Empty in replay and when no region is active.
+    /// Populated at the tool-call boundary (via [`set_region`]) when a tool has
+    /// a background of its own or continues a reasoning region; the tool's
+    /// permanent header and result are shaded with it.
     ///
     /// [`set_region`]: Self::set_region
     regions: HashMap<String, DefaultBackground>,
+
+    /// Background of the `<tool> result` header, per tool-call ID, for tools
+    /// whose style sets one.
+    ///
+    /// A call without an entry shades its header like the rest of its result.
+    result_headers: HashMap<String, DefaultBackground>,
 
     /// The region background for the chrome being written right now.
     ///
@@ -153,6 +181,7 @@ impl ToolRenderer {
             separator: Arc::new(AtomicBool::new(false)),
             drawn: Arc::new(AtomicBool::new(false)),
             regions: HashMap::new(),
+            result_headers: HashMap::new(),
             current_region: None,
         }
     }
@@ -178,15 +207,35 @@ impl ToolRenderer {
         self.drawn.store(true, Ordering::Relaxed);
     }
 
-    /// Record the reasoning-region background captured for a tool call at the
-    /// tool-call boundary.
+    /// Record the background colors for a tool call at the tool-call boundary.
     ///
     /// `region` is `Some` when the tool continues a reasoning region (the live
     /// boundary returned a background), `None` otherwise.
-    /// The value keys the tool's permanent header and result shading by `id`,
-    /// and also becomes the currently-active region for the live temp/progress
-    /// line.
-    pub(crate) fn set_region(&mut self, id: &str, region: Option<DefaultBackground>) {
+    /// A background from the tool's own style takes precedence over `region`.
+    /// The resolved background is stored under `id` to shade the tool's header
+    /// and result, and becomes the active region for the live preparing line.
+    pub(crate) fn set_region(
+        &mut self,
+        id: &str,
+        region: Option<DefaultBackground>,
+        backgrounds: ToolBackgrounds,
+    ) {
+        let width = self.channel.output_width();
+        let region = backgrounds
+            .call
+            .map(|color| full_width_background(color, width))
+            .or(region);
+
+        match backgrounds.result_header {
+            Some(color) => {
+                self.result_headers
+                    .insert(id.to_owned(), full_width_background(color, width));
+            }
+            None => {
+                self.result_headers.remove(id);
+            }
+        }
+
         match &region {
             Some(bg) => {
                 self.regions.insert(id.to_owned(), bg.clone());
@@ -406,10 +455,34 @@ impl ToolRenderer {
     /// - `response` - The tool call response containing the result
     /// - `inline_results` - How to display inline results (Off, Full, Truncate)
     /// - `results_file_link` - How to display file links (Off, Full, Osc8)
-    #[expect(clippy::too_many_lines)]
     pub fn render_result(
         &self,
         response: &ToolCallResponse,
+        inline_results: &InlineResults,
+        results_file_link: &LinkStyle,
+    ) {
+        self.render_result_with(response, None, inline_results, results_file_link);
+    }
+
+    /// Renders a tool call result under a `<tool> result` header naming `name`.
+    ///
+    /// The header is shaded with the call's result-header background, falling
+    /// back to the background of the result itself.
+    /// Omitted when the result produces no visible output.
+    pub fn render_labelled_result(
+        &self,
+        response: &ToolCallResponse,
+        name: &str,
+        inline_results: &InlineResults,
+        results_file_link: &LinkStyle,
+    ) {
+        self.render_result_with(response, Some(name), inline_results, results_file_link);
+    }
+
+    fn render_result_with(
+        &self,
+        response: &ToolCallResponse,
+        label: Option<&str>,
         inline_results: &InlineResults,
         results_file_link: &LinkStyle,
     ) {
@@ -420,137 +493,132 @@ impl ToolRenderer {
             return;
         }
 
-        // This tool's captured reasoning-region background, if it continued one.
-        // The whole result (inline body and file links, OSC 8 hyperlinks
-        // included) is shaded with it.
+        // This tool's captured background, if it has one of its own or
+        // continued a reasoning region. The whole result (inline body and file
+        // links, OSC 8 hyperlinks included) is shaded with it.
         let region = self.regions.get(&response.id);
 
-        // Get content, handling both Ok and Err results
-        let raw_content = response.content();
+        let (ext, inner_content) = split_result_content(response.content());
+        let path = write_results_file(ext.as_deref(), &inner_content);
 
-        // Try to parse as JSON and pretty-print if valid
-        let content = if let Ok(json) = serde_json::from_str::<Value>(raw_content.trim()) {
-            if let Ok(pretty) = serde_json::to_string_pretty(&json) {
-                format!("```json\n{pretty}\n```")
-            } else {
-                raw_content.trim_end().to_owned()
-            }
-        } else {
-            raw_content.trim_end().to_owned()
-        };
-
-        // Extract language from code fence if present
-        let mut lines: Vec<&str> = content.lines().collect();
-        let mut ext = lines.first().and_then(|v| v.strip_prefix("```")).map(|v| {
-            v.chars()
-                .take_while(char::is_ascii_alphabetic)
-                .collect::<String>()
-        });
-
-        // Remove code fence markers for processing
-        if ext.is_some() && !lines.is_empty() {
-            lines.remove(0);
-            lines.pop_if(|v| v.trim() == "```");
-        }
-
-        if ext.is_none() {
-            let trimmed = content.trim();
-            if trimmed.starts_with('<')
-                && (has_xml_envelope(trimmed) || quick_xml::de::from_str::<Value>(trimmed).is_ok())
-            {
-                ext = Some("xml".to_owned());
-            } else if trimmed.starts_with('{') && serde_json::from_str::<Value>(trimmed).is_ok() {
-                ext = Some("json".to_owned());
-            }
-        }
-
-        let inner_content = lines.join("\n");
-
-        // Write to temp file
-        let millis = time::SystemTime::now()
-            .duration_since(time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .subsec_millis();
-
-        let file_name = match ext.as_ref() {
-            Some(e) if !e.is_empty() => format!("tool_call_{millis}.{e}"),
-            _ => format!("tool_call_{millis}"),
-        };
-
-        let path = env::temp_dir().join(&file_name);
-        let _err = fs::write(&path, &inner_content);
-
-        // Filtered ahead of the highlighter, which adds JP's own styling. The
-        // span is closed after the lines that are kept, not at the end of the
-        // text a truncated result cuts.
+        // Sanitized before syntax highlighting adds JP's own ANSI sequences.
+        // `write_tool_output` closes the span after the kept lines so
+        // truncation does not discard the closing reset.
         let shown = sanitize_unclosed(&inner_content, ContentClass::ToolOutput, self.sanitize());
 
-        // Determine max lines based on config
-        let total_lines = shown.lines().count();
         let max_lines = match inline_results {
             InlineResults::Off => 0,
-            InlineResults::Full => total_lines,
+            InlineResults::Full => shown.lines().count(),
             InlineResults::Truncate(TruncateLines { lines }) => *lines,
         };
 
-        // Render intro header
-        let wrote_inline = !matches!(inline_results, InlineResults::Off) && max_lines > 0;
-        if wrote_inline {
-            let lang = ext.as_ref().filter(|e| !e.is_empty());
-            let mut code_state = lang.map(|lang| self.formatter.begin_code_block(lang));
-            let mut head = "\n".to_owned();
+        let wrote_inline = max_lines > 0;
+        let wrote_link = !matches!(results_file_link, LinkStyle::Off);
 
-            if let Some(lang) = ext.as_ref() {
-                head.push_str("```");
-                head.push_str(lang);
-                head.push('\n');
-            }
-
-            let mut kept = String::new();
-            for line in shown.lines().take(max_lines) {
-                // highlight_line expects the trailing newline.
-                let with_nl = format!("{line}\n");
-                if let Some(ref mut state) = code_state {
-                    let rendered = self.formatter.render_code_line(&with_nl, state, None, 0);
-                    kept.push_str(&rendered);
-                } else {
-                    kept.push_str(line);
-                    kept.push('\n');
-                }
-            }
-
-            let mut tail = String::new();
-            if ext.is_some() {
-                tail.push_str("```\n");
-            }
-
-            if inline_results.is_truncated() && max_lines < total_lines {
-                tail.push_str(&format!(" _(truncated to {max_lines} lines)_\n"));
-            }
-
-            self.write_chrome(region, |w| {
-                w.write_str(&head)?;
-
-                // Every kept line ends in a newline, so this finds the final
-                // line break unless nothing was kept. It is the last `\n`, not
-                // the last byte: a highlighted line ends with the
-                // highlighter's reset, written after its newline.
-                if let Some((lines, after)) = kept.rsplit_once('\n') {
-                    write_tool_output(w, lines)?;
-                    w.write_char('\n')?;
-                    w.write_str(after)?;
-                }
-
-                w.write_str(&tail)
-            });
+        if let Some(name) = label
+            && (wrote_inline || wrote_link)
+        {
+            self.render_result_header(&response.id, name, region);
         }
 
-        // Render file links
-        let wrote_link = match results_file_link {
-            LinkStyle::Off => false,
+        if wrote_inline {
+            self.render_inline_result(region, ext.as_deref(), &shown, max_lines);
+        }
+
+        self.render_results_file_link(region, results_file_link, &path);
+
+        // A rendered result owes a blank-line separator before the next tool
+        // call header, but only when it actually produced visible output: an
+        // empty result with no file link writes nothing, so it must not push a
+        // stray blank line ahead of the next header. The debt is emitted lazily
+        // so it survives the streaming temp line, and is dropped by visible
+        // assistant content that follows.
+        if wrote_inline || wrote_link {
+            self.separator.store(true, Ordering::Relaxed);
+        }
+    }
+
+    /// Write the `<tool> result` header above the result of call `id`.
+    fn render_result_header(&self, id: &str, name: &str, region: Option<&DefaultBackground>) {
+        // Emit the leading blank line (settling any pending separator from an
+        // earlier result) using the result's background so the header itself
+        // stays one row tall.
+        self.separator.store(false, Ordering::Relaxed);
+        self.write_chrome(region, |w| w.write_char('\n'));
+        let header_region = self.result_headers.get(id).or(region);
+        let styled_name = self.shown_name(name).yellow().bold();
+        self.write_chrome(header_region, |w| writeln!(w, "{styled_name} result"));
+    }
+
+    /// Write the first `max_lines` lines of `shown`, highlighted as `ext` and
+    /// fenced when the language is known.
+    fn render_inline_result(
+        &self,
+        region: Option<&DefaultBackground>,
+        ext: Option<&str>,
+        shown: &str,
+        max_lines: usize,
+    ) {
+        let lang = ext.filter(|e| !e.is_empty());
+        let mut code_state = lang.map(|lang| self.formatter.begin_code_block(lang));
+        let mut head = "\n".to_owned();
+
+        if let Some(lang) = ext {
+            head.push_str("```");
+            head.push_str(lang);
+            head.push('\n');
+        }
+
+        let mut kept = String::new();
+        for line in shown.lines().take(max_lines) {
+            // highlight_line expects the trailing newline.
+            let with_nl = format!("{line}\n");
+            if let Some(ref mut state) = code_state {
+                let rendered = self.formatter.render_code_line(&with_nl, state, None, 0);
+                kept.push_str(&rendered);
+            } else {
+                kept.push_str(line);
+                kept.push('\n');
+            }
+        }
+
+        let mut tail = String::new();
+        if ext.is_some() {
+            tail.push_str("```\n");
+        }
+
+        if max_lines < shown.lines().count() {
+            tail.push_str(&format!(" _(truncated to {max_lines} lines)_\n"));
+        }
+
+        self.write_chrome(region, |w| {
+            w.write_str(&head)?;
+
+            // Every kept line ends in a newline, so this finds the final line
+            // break unless nothing was kept. It is the last `\n`, not the last
+            // byte: a highlighted line ends with the highlighter's reset,
+            // written after its newline.
+            if let Some((lines, after)) = kept.rsplit_once('\n') {
+                write_tool_output(w, lines)?;
+                w.write_char('\n')?;
+                w.write_str(after)?;
+            }
+
+            w.write_str(&tail)
+        });
+    }
+
+    /// Write the link to the temp file holding the full result.
+    fn render_results_file_link(
+        &self,
+        region: Option<&DefaultBackground>,
+        style: &LinkStyle,
+        path: &Path,
+    ) {
+        match style {
+            LinkStyle::Off => {}
             LinkStyle::Full => {
                 self.write_chrome(region, |w| writeln!(w, "see: {}", path.display()));
-                true
             }
             LinkStyle::Osc8 => {
                 self.write_chrome(region, |w| {
@@ -567,18 +635,7 @@ impl ToolRenderer {
                         )
                     )
                 });
-                true
             }
-        };
-
-        // A rendered result owes a blank-line separator before the next tool
-        // call header, but only when it actually produced visible output: an
-        // empty result with no file link writes nothing, so it must not push a
-        // stray blank line ahead of the next header. The debt is emitted lazily
-        // so it survives the streaming temp line, and is dropped by visible
-        // assistant content that follows.
-        if wrote_inline || wrote_link {
-            self.separator.store(true, Ordering::Relaxed);
         }
     }
 
@@ -715,6 +772,69 @@ impl ToolRenderer {
 
         format!("Calling {label} {}", names.join(", "))
     }
+}
+
+/// Extract the language tag (if detected) and unwrapped body from a tool
+/// result.
+///
+/// A JSON result is pretty-printed and reported as `json`.
+/// A fenced result reports its fence's language; an unfenced one is reported as
+/// `xml` or `json` when it parses as either.
+fn split_result_content(raw: &str) -> (Option<String>, String) {
+    let content = serde_json::from_str::<Value>(raw.trim())
+        .ok()
+        .and_then(|json| serde_json::to_string_pretty(&json).ok())
+        .map_or_else(
+            || raw.trim_end().to_owned(),
+            |pretty| format!("```json\n{pretty}\n```"),
+        );
+
+    let mut lines: Vec<&str> = content.lines().collect();
+    let fenced = lines.first().and_then(|v| v.strip_prefix("```")).map(|v| {
+        v.chars()
+            .take_while(char::is_ascii_alphabetic)
+            .collect::<String>()
+    });
+
+    if fenced.is_some() {
+        lines.remove(0);
+        lines.pop_if(|v| v.trim() == "```");
+        return (fenced, lines.join("\n"));
+    }
+
+    let trimmed = content.trim();
+    let ext = if trimmed.starts_with('<')
+        && (has_xml_envelope(trimmed) || quick_xml::de::from_str::<Value>(trimmed).is_ok())
+    {
+        Some("xml".to_owned())
+    } else if trimmed.starts_with('{') && serde_json::from_str::<Value>(trimmed).is_ok() {
+        Some("json".to_owned())
+    } else {
+        None
+    };
+
+    (ext, lines.join("\n"))
+}
+
+/// Write the full result to a file in the temp directory using `ext` as the
+/// file extension, and return its path.
+///
+/// A failed write is ignored: the link then points at a missing file, and the
+/// result still reaches the assistant.
+fn write_results_file(ext: Option<&str>, content: &str) -> PathBuf {
+    let millis = time::SystemTime::now()
+        .duration_since(time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .subsec_millis();
+
+    let file_name = match ext {
+        Some(e) if !e.is_empty() => format!("tool_call_{millis}.{e}"),
+        _ => format!("tool_call_{millis}"),
+    };
+
+    let path = env::temp_dir().join(file_name);
+    let _err = fs::write(&path, content);
+    path
 }
 
 /// Write a tool's own output, already filtered, as a content span.

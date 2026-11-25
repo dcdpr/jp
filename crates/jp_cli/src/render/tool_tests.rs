@@ -7,6 +7,7 @@ use jp_config::{
         Sanitization,
         window_rows::{RowCount, WindowRows},
     },
+    types::color::Color,
 };
 use jp_conversation::event::ToolCallResponse;
 use jp_printer::{ErrChannel, OutputFormat, Printer, SharedBuffer, TerminalCapability};
@@ -405,7 +406,11 @@ fn a_background_a_result_left_open_stays_off_the_row_below() {
     // next row when the terminal scrolls. Closed before, the row is filled
     // with the region background, which closes ahead of the break.
     let (mut renderer, err, _) = create_renderer();
-    renderer.set_region("call_1", Some(terminal_region()));
+    renderer.set_region(
+        "call_1",
+        Some(terminal_region()),
+        ToolBackgrounds::default(),
+    );
     let response = ToolCallResponse {
         id: "call_1".into(),
         result: Ok("\x1b[41mfailed".into()),
@@ -978,7 +983,7 @@ fn test_format_args_keeps_nonempty_array_value() {
 #[test]
 fn set_region_shades_the_tool_call_header() {
     let (mut renderer, chrome, _) = create_renderer();
-    renderer.set_region("id1", Some(terminal_region()));
+    renderer.set_region("id1", Some(terminal_region()), ToolBackgrounds::default());
 
     let mut args = Map::new();
     args.insert("path".into(), Value::String("/tmp/x".into()));
@@ -1000,7 +1005,11 @@ fn set_region_shades_the_tool_call_header() {
 #[test]
 fn set_region_shades_the_result() {
     let (mut renderer, chrome, _) = create_renderer();
-    renderer.set_region("call_1", Some(terminal_region()));
+    renderer.set_region(
+        "call_1",
+        Some(terminal_region()),
+        ToolBackgrounds::default(),
+    );
 
     let response = ToolCallResponse {
         id: "call_1".into(),
@@ -1026,7 +1035,11 @@ fn result_uses_its_own_tool_region_keyed_by_id() {
     // entered a region stays unshaded even while another tool's region is set
     // as the current one.
     let (mut renderer, chrome, _) = create_renderer();
-    renderer.set_region("shaded", Some(terminal_region()));
+    renderer.set_region(
+        "shaded",
+        Some(terminal_region()),
+        ToolBackgrounds::default(),
+    );
 
     let response = ToolCallResponse {
         id: "plain".into(),
@@ -1045,8 +1058,8 @@ fn result_uses_its_own_tool_region_keyed_by_id() {
 #[test]
 fn clearing_a_region_with_none_unshades_following_chrome() {
     let (mut renderer, chrome, _) = create_renderer();
-    renderer.set_region("id1", Some(terminal_region()));
-    renderer.set_region("id1", None);
+    renderer.set_region("id1", Some(terminal_region()), ToolBackgrounds::default());
+    renderer.set_region("id1", None, ToolBackgrounds::default());
 
     let args = Map::new();
     renderer.render_tool_call("foo", &args, &ParametersStyle::FunctionCall);
@@ -1066,7 +1079,7 @@ fn preparing_line_fills_to_the_edge_under_a_region() {
     // to the right edge — `\x1b[K` fills with whatever background is active —
     // and only then writes the text over the start of the filled row.
     let (mut renderer, err) = create_renderer_with_show(true);
-    renderer.set_region("id1", Some(terminal_region()));
+    renderer.set_region("id1", Some(terminal_region()), ToolBackgrounds::default());
 
     renderer.register("id1", "fs_read_file");
     renderer.channel.flush();
@@ -1079,5 +1092,167 @@ fn preparing_line_fills_to_the_edge_under_a_region() {
     assert!(
         raw.ends_with("\x1b[49m"),
         "the background closes at the row's end so it never leaks below: {raw:?}"
+    );
+}
+
+fn tool_backgrounds() -> ToolBackgrounds {
+    ToolBackgrounds {
+        call: Some(Color::Ansi256(237)),
+        result_header: Some(Color::Ansi256(235)),
+    }
+}
+
+#[test]
+fn a_labelled_result_is_shown_under_a_header_naming_its_tool() {
+    let (renderer, err, _) = create_renderer();
+    renderer.render_labelled_result(
+        &response("Updated the PR."),
+        "github_pr_edit",
+        &InlineResults::Full,
+        &LinkStyle::Off,
+    );
+    renderer.channel.flush();
+
+    assert_eq!(
+        strip_ansi(&err.lock()),
+        "\ngithub_pr_edit result\n\nUpdated the PR.\n"
+    );
+}
+
+/// Each result header emits one leading blank line and clears any pending
+/// separator, so consecutive labelled results have a single blank line between
+/// them.
+#[test]
+fn a_labelled_result_is_separated_from_the_result_before_it() {
+    let (renderer, err, _) = create_renderer();
+    renderer.render_labelled_result(
+        &response("first"),
+        "fs_read_file",
+        &InlineResults::Full,
+        &LinkStyle::Off,
+    );
+    renderer.render_labelled_result(
+        &ToolCallResponse {
+            id: "call_2".into(),
+            result: Ok("second".into()),
+        },
+        "cargo_check",
+        &InlineResults::Full,
+        &LinkStyle::Off,
+    );
+    renderer.channel.flush();
+
+    assert_eq!(
+        strip_ansi(&err.lock()),
+        "\nfs_read_file result\n\nfirst\n\ncargo_check result\n\nsecond\n"
+    );
+}
+
+#[test]
+fn a_labelled_result_that_shows_nothing_has_no_header() {
+    let (renderer, err, _) = create_renderer();
+    renderer.render_labelled_result(
+        &response(""),
+        "github_pr_edit",
+        &InlineResults::Full,
+        &LinkStyle::Off,
+    );
+    renderer.render_labelled_result(
+        &response("done"),
+        "github_pr_edit",
+        &InlineResults::Off,
+        &LinkStyle::Off,
+    );
+    renderer.channel.flush();
+
+    assert_eq!(strip_ansi(&err.lock()), "");
+}
+
+#[test]
+fn a_tool_background_takes_precedence_over_the_reasoning_region() {
+    let (mut renderer, err, _) = create_renderer();
+    renderer.set_region("call_1", Some(terminal_region()), tool_backgrounds());
+
+    renderer.render_tool_call("fs_read_file", &Map::new(), &ParametersStyle::FunctionCall);
+    renderer.channel.flush();
+
+    assert_eq!(
+        err.lock().clone(),
+        "\x1b[48;5;237mCalling tool \
+         \x1b[38;5;11m\x1b[1mfs_read_file\x1b[0m\x1b[48;5;237m\x1b[K\x1b[49m\n"
+    );
+}
+
+/// Prompts are shaded by the printer from `current_region`, so a prompt for a
+/// call with its own background carries that background.
+#[test]
+fn focusing_a_call_with_a_tool_background_makes_it_the_current_region() {
+    let (mut renderer, _, _) = create_renderer();
+    renderer.set_region("call_1", Some(terminal_region()), tool_backgrounds());
+    renderer.set_region("call_2", None, ToolBackgrounds::default());
+
+    renderer.focus("call_1");
+
+    assert_eq!(
+        renderer.current_region(),
+        Some(DefaultBackground {
+            param: "48;5;237".into(),
+            fill: BackgroundFill::Terminal,
+        })
+    );
+}
+
+#[test]
+fn the_result_header_is_shaded_with_its_own_background() {
+    let (mut renderer, err, _) = create_renderer();
+    renderer.set_region("call_1", None, tool_backgrounds());
+
+    renderer.render_labelled_result(
+        &response("done"),
+        "github_pr_edit",
+        &InlineResults::Full,
+        &LinkStyle::Off,
+    );
+    renderer.channel.flush();
+
+    assert_eq!(
+        err.lock().clone(),
+        concat!(
+            // The blank line above the header, in the result's background.
+            "\x1b[48;5;237m\x1b[K\x1b[49m\n",
+            "\x1b[38;5;11m\x1b[1m\x1b[48;5;235mgithub_pr_edit\x1b[0m",
+            "\x1b[48;5;235m result\x1b[K\x1b[49m\n",
+            "\x1b[48;5;237m\x1b[K\x1b[49m\n",
+            "\x1b[48;5;237mdone\x1b[0m\x1b[48;5;237m\x1b[K\x1b[49m\n",
+        )
+    );
+}
+
+#[test]
+fn the_result_header_falls_back_to_the_result_background() {
+    let (mut renderer, err, _) = create_renderer();
+    renderer.set_region(
+        "call_1",
+        Some(terminal_region()),
+        ToolBackgrounds::default(),
+    );
+
+    renderer.render_labelled_result(
+        &response("done"),
+        "github_pr_edit",
+        &InlineResults::Full,
+        &LinkStyle::Off,
+    );
+    renderer.channel.flush();
+
+    assert_eq!(
+        err.lock().clone(),
+        concat!(
+            "\x1b[48;5;236m\x1b[K\x1b[49m\n",
+            "\x1b[38;5;11m\x1b[1m\x1b[48;5;236mgithub_pr_edit\x1b[0m",
+            "\x1b[48;5;236m result\x1b[K\x1b[49m\n",
+            "\x1b[48;5;236m\x1b[K\x1b[49m\n",
+            "\x1b[48;5;236mdone\x1b[0m\x1b[48;5;236m\x1b[K\x1b[49m\n",
+        )
     );
 }

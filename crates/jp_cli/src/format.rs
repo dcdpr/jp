@@ -9,7 +9,12 @@ use jp_config::{
 };
 use jp_conversation::{ByteSize, Compaction, Labels, ToolCallPolicy};
 use jp_md::style::{Color as MdColor, MarkdownStyleSheet, Style as MdStyle};
-use jp_term::{sanitize::SanitizeMode, table::DetailItem};
+use jp_printer::OutputWidth;
+use jp_term::{
+    background::{BackgroundFill, DefaultBackground},
+    sanitize::SanitizeMode,
+    table::DetailItem,
+};
 use serde_json::json;
 use url::Url;
 
@@ -220,6 +225,24 @@ pub(crate) fn color_to_bg_param(color: Color) -> String {
     match color {
         Color::Ansi256(n) => format!("48;5;{n}"),
         Color::Rgb { r, g, b } => format!("48;2;{r};{g};{b}"),
+    }
+}
+
+/// A background of `color` that fills each row of output laid out at `width`.
+///
+/// A terminal gets the erase-to-end-of-line escape: it follows the real edge,
+/// so a window resized part-way through a response still shades whole lines,
+/// and it leaves no trailing spaces in a copied selection.
+/// A declared width pads with real spaces instead, because a host that lays out
+/// its own sub-window (an `fzf` preview pane) drops the erase, leaving the
+/// shading to stop at the last character.
+pub(crate) fn full_width_background(color: Color, width: OutputWidth) -> DefaultBackground {
+    DefaultBackground {
+        param: color_to_bg_param(color),
+        fill: match width {
+            OutputWidth::Declared(width) => BackgroundFill::Column(usize::from(width)),
+            OutputWidth::Terminal(_) | OutputWidth::Unknown => BackgroundFill::Terminal,
+        },
     }
 }
 

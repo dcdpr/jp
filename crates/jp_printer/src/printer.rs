@@ -870,6 +870,12 @@ impl ErrChannel {
         self.printer.flush();
     }
 
+    /// The width output is laid out against.
+    #[must_use]
+    pub fn output_width(&self) -> OutputWidth {
+        self.printer.output_width()
+    }
+
     /// Claim a status region on the chrome channel.
     ///
     /// The chrome-facing counterpart of [`Printer::status_region`], so a
