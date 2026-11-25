@@ -36,5 +36,5 @@ What bypassing costs:
 - [ ] Check errors raised before the printer exists today (argument parsing,
       format resolution) still print, and say so in the commit
 
-- [ ] Test that a styled error message is plain under `--format=text` and
-      inside the JSON `message`
+- [ ] Test that a styled error message is plain under `--format=text` and inside
+      the JSON `message`
