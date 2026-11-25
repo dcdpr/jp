@@ -1407,14 +1407,12 @@ impl ToolConfigWithDefaults {
             .tool
             .enable
             .as_ref()
-            .map(ToPartial::to_partial)
-            .unwrap_or_default();
+            .map_or_default(ToPartial::to_partial);
         let defaults = self
             .defaults
             .enable
             .as_ref()
-            .map(ToPartial::to_partial)
-            .unwrap_or_default();
+            .map_or_default(ToPartial::to_partial);
         tool.effective(&defaults)
     }
 

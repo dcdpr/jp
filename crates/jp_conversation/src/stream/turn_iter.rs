@@ -6,6 +6,8 @@
 //! [`ConversationStream`]: super::ConversationStream
 //! [`TurnStart`]: crate::event::TurnStart
 
+use std::mem;
+
 use super::ConversationEventWithConfigRef;
 use crate::{EventId, event::format_turn_summary};
 
@@ -120,9 +122,8 @@ impl<'a> IterTurns<'a> {
                 let index = turns.len();
                 turns.push(Turn {
                     index,
-                    events: current,
+                    events: mem::take(&mut current),
                 });
-                current = Vec::new();
             }
             current.push(event);
         }

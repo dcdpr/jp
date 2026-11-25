@@ -1,5 +1,3 @@
-use std::str::FromStr as _;
-
 use super::*;
 use crate::assignment::KvAssignment;
 

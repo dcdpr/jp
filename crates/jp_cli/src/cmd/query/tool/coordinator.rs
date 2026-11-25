@@ -88,10 +88,10 @@ use url::Url;
 use super::{
     ToolRenderer,
     executor::{
-        CallExecutors, Executor, ExecutorError, ExecutorResult, ExecutorSource, FanOutCall,
+        CallExecutors, DynExecutor, DynFanOutCall, ExecutorError, ExecutorResult, ExecutorSource,
         PermissionInfo, Review,
     },
-    inquiry::{self, InquiryBackend, InquiryError},
+    inquiry::{self, DynInquiryBackend, InquiryError},
     prompter::{PermissionResult, ToolPrompter},
 };
 use crate::{
@@ -115,7 +115,7 @@ pub(crate) struct Host<'a> {
     pub prompter: &'a Arc<ToolPrompter>,
 
     /// Answers a question routed to an assistant instead of the user.
-    pub inquiry_backend: &'a Arc<dyn InquiryBackend>,
+    pub inquiry_backend: &'a Arc<dyn DynInquiryBackend>,
 
     /// The conversation where inquiry events are recorded and flushed to disk
     /// before prompting the user.
@@ -442,7 +442,7 @@ struct Group {
 
     /// The call as a whole, which the execution service records once every
     /// operation is settled.
-    fan_out: Arc<dyn FanOutCall>,
+    fan_out: Arc<dyn DynFanOutCall>,
 
     /// The operations' indices into the batch's calls.
     operations: Vec<usize>,
@@ -458,7 +458,7 @@ struct Group {
 struct Call {
     tool_id: String,
     tool_name: String,
-    executor: Arc<dyn Executor>,
+    executor: Arc<dyn DynExecutor>,
 
     /// Key of the call's display state: its tool call id, or for an operation,
     /// that id and the operation's position.
@@ -752,8 +752,7 @@ impl ToolCoordinator {
     pub fn parameter_style(&self, tool_name: &str) -> ParametersStyle {
         self.tools_config
             .get(tool_name)
-            .map(|c| c.style().parameters.clone())
-            .unwrap_or_default()
+            .map_or_default(|c| c.style().parameters.clone())
     }
 
     /// Pre-render a tool call ahead of its approval prompt.
@@ -769,7 +768,11 @@ impl ToolCoordinator {
     /// service produced.
     /// A formatter configured with `format = "ask"` has not run yet at this
     /// point, which is [`PreRender::Deferred`].
-    fn pre_render_for_prompt(&self, executor: &dyn Executor, renderer: &ToolRenderer) -> PreRender {
+    fn pre_render_for_prompt(
+        &self,
+        executor: &dyn DynExecutor,
+        renderer: &ToolRenderer,
+    ) -> PreRender {
         let name = executor.tool_name();
         if self.parameter_style(name).runs_formatter() && executor.formatted_arguments().is_none() {
             // Running a program before the user okays the tool would be
@@ -789,7 +792,11 @@ impl ToolCoordinator {
     /// service's formatter produced.
     /// The formatter is a program, so it runs once, there, under the call's
     /// access policy and cancellation token, and never a second time here.
-    fn render_executor(&self, executor: &dyn Executor, renderer: &ToolRenderer) -> Option<String> {
+    fn render_executor(
+        &self,
+        executor: &dyn DynExecutor,
+        renderer: &ToolRenderer,
+    ) -> Option<String> {
         let name = executor.tool_name();
         if self.is_hidden(name) {
             return None;
@@ -869,8 +876,7 @@ impl ToolCoordinator {
     pub fn result_mode(&self, tool_name: &str) -> ResultMode {
         self.tools_config
             .get(tool_name)
-            .map(|config| config.result())
-            .unwrap_or_default()
+            .map_or_default(|config| config.result())
     }
 
     /// Cancel the work in flight for the calls being handled.
@@ -1036,7 +1042,7 @@ impl ToolCoordinator {
     /// - `NeedsPrompt`: requires an interactive user prompt
     pub fn decide_permission(
         &mut self,
-        executor: &dyn Executor,
+        executor: &dyn DynExecutor,
         interactive: bool,
         turn_state: &TurnState,
     ) -> PermissionDecision {
@@ -1083,7 +1089,7 @@ impl ToolCoordinator {
         result: Result<PermissionResult, String>,
         info: &PermissionInfo,
         turn_state: &mut TurnState,
-        executor: &dyn Executor,
+        executor: &dyn DynExecutor,
     ) -> Result<(), ToolCallResponse> {
         match result {
             Ok(PermissionResult::Run { arguments, persist }) => {
@@ -1192,7 +1198,7 @@ impl ToolCoordinator {
     fn add_call(
         &self,
         batch: &mut Batch,
-        executor: Arc<dyn Executor>,
+        executor: Arc<dyn DynExecutor>,
         group: Option<usize>,
         host: &Host<'_>,
     ) {
@@ -2520,14 +2526,12 @@ impl ToolCoordinator {
         }
         let style = self.tools_config.get(tool_name);
         let is_error = response.result.is_err();
-        let (inline_results, results_file_link) = style
-            .map(|config| {
-                (
-                    config.style().inline_results(is_error).clone(),
-                    config.style().results_file_link(is_error).clone(),
-                )
-            })
-            .unwrap_or_default();
+        let (inline_results, results_file_link) = style.map_or_default(|config| {
+            (
+                config.style().inline_results(is_error).clone(),
+                config.style().results_file_link(is_error).clone(),
+            )
+        });
         renderer.render_result(response, &inline_results, &results_file_link);
     }
 

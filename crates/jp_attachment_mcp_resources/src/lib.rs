@@ -9,10 +9,9 @@
 
 use std::{collections::BTreeSet, error::Error, fmt};
 
-use async_trait::async_trait;
 use camino::Utf8Path;
 use jp_attachment::{
-    Attachment, BoxedHandler, HANDLERS, Handler, distributed_slice, linkme, typetag,
+    Attachment, BoxedHandler, HANDLERS, Handler, HandlerFuture, distributed_slice, linkme, typetag,
 };
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -61,7 +60,6 @@ impl fmt::Display for UnsupportedResolution {
 impl Error for UnsupportedResolution {}
 
 #[typetag::serde(name = "mcp")]
-#[async_trait]
 impl Handler for McpResources {
     fn scheme(&self) -> &'static str {
         "mcp"
@@ -73,33 +71,36 @@ impl Handler for McpResources {
         Ok(uri.clone())
     }
 
-    async fn add(
-        &mut self,
-        uri: &Url,
-        _cwd: &Utf8Path,
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        self.0.insert(uri.clone());
+    fn add<'a>(&'a mut self, uri: &'a Url, _cwd: &'a Utf8Path) -> HandlerFuture<'a, ()> {
+        Box::pin(async move {
+            self.0.insert(uri.clone());
 
-        Ok(())
+            Ok(())
+        })
     }
 
-    async fn remove(&mut self, uri: &Url) -> Result<(), Box<dyn Error + Send + Sync>> {
-        self.0.remove(uri);
+    fn remove<'a>(&'a mut self, uri: &'a Url) -> HandlerFuture<'a, ()> {
+        Box::pin(async move {
+            self.0.remove(uri);
 
-        Ok(())
+            Ok(())
+        })
     }
 
-    async fn list(&self) -> Result<Vec<Url>, Box<dyn Error + Send + Sync>> {
-        Ok(self.0.clone().into_iter().collect())
+    fn list(&self) -> HandlerFuture<'_, Vec<Url>> {
+        Box::pin(async move { Ok(self.0.clone().into_iter().collect()) })
     }
 
-    async fn get(&self, _: &Utf8Path) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>> {
-        if self.0.is_empty() {
-            return Ok(vec![]);
-        }
-        Err(Box::new(UnsupportedResolution {
-            uris: self.0.iter().cloned().collect(),
-        }))
+    fn get<'a>(&'a self, _: &'a Utf8Path) -> HandlerFuture<'a, Vec<Attachment>> {
+        Box::pin(async move {
+            if self.0.is_empty() {
+                return Ok(vec![]);
+            }
+            Err(UnsupportedResolution {
+                uris: self.0.iter().cloned().collect(),
+            }
+            .into())
+        })
     }
 }
 

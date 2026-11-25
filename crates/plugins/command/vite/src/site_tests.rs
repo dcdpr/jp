@@ -99,7 +99,7 @@ fn only_the_owned_directory_is_owned() {
 
 #[test]
 fn a_project_without_workflows_gets_no_pages() {
-    assert!(pages(&settings(None, None)).is_empty());
+    assert_eq!(pages(&settings(None, None)), [] as [Owned; 0]);
 }
 
 #[test]

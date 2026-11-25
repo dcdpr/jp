@@ -370,15 +370,12 @@ impl Ls {
         };
 
         let last_message_at_fmt = if self.full {
-            details
-                .last_event_at
-                .map(|t| {
-                    let format = "%Y-%m-%d %H:%M:%S";
-                    let local_offset: FixedOffset = *Local::now().offset();
+            details.last_event_at.map_or_default(|t| {
+                let format = "%Y-%m-%d %H:%M:%S";
+                let local_offset: FixedOffset = *Local::now().offset();
 
-                    t.with_timezone(&local_offset).format(format).to_string()
-                })
-                .unwrap_or_default()
+                t.with_timezone(&local_offset).format(format).to_string()
+            })
         } else {
             details.last_event_at.map_or_else(String::new, |t| {
                 let ago = (Utc::now() - t).to_std().expect("valid duration");

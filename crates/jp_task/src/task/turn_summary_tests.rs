@@ -428,5 +428,6 @@ fn a_summary_of_an_edited_turn_is_not_current() {
         }
     }
 
-    assert!(still_current(&events, vec![summary]).is_empty());
+    assert_eq!(still_current(&events, vec![summary]), []
+        as [GeneratedTurnSummary; 0]);
 }

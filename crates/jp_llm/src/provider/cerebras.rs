@@ -1,6 +1,5 @@
 use std::{collections::HashMap, sync::LazyLock, time::Duration};
 
-use async_trait::async_trait;
 use futures::{Stream, StreamExt as _, future, stream};
 use jp_config::{
     assistant::tool_choice::ToolChoice,
@@ -17,7 +16,7 @@ use jp_conversation::{
 };
 use jp_tool::ToolDefinition;
 use reqwest::header::{self, HeaderMap, HeaderValue};
-use reqwest_eventsource::{Event as SseEvent, EventSource, retry::Never};
+use reqwest_eventsource::Event as SseEvent;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use tracing::{debug, trace, warn};
@@ -26,7 +25,7 @@ use super::{
     EventStream, ModelDetails, Provider,
     lookup::find_listed,
     openai::{flatten_all_of, parameters_with_strict_mode},
-    openai_compat::{merge_consecutive_assistant_messages, parse_chunk},
+    openai_compat::{event_source, merge_consecutive_assistant_messages, parse_chunk},
 };
 use crate::{
     error::{Error, Result, StreamError, StreamErrorKind},
@@ -55,7 +54,6 @@ pub struct Cerebras {
     base_url: String,
 }
 
-#[async_trait]
 impl Provider for Cerebras {
     async fn model_details(&self, name: &Name) -> Result<ModelDetails> {
         let id: ModelIdConfig = (PROVIDER, name.as_ref()).try_into()?;
@@ -91,11 +89,18 @@ impl Provider for Cerebras {
         Ok(models)
     }
 
-    async fn chat_completion_stream(
+    fn chat_completion_stream(
         &self,
         model: &ModelDetails,
         query: ChatQuery,
-    ) -> Result<EventStream> {
+    ) -> impl Future<Output = Result<EventStream>> + Send {
+        future::ready(self.open_stream(model, query))
+    }
+}
+
+impl Cerebras {
+    /// Build the chat completion request and open its event stream.
+    fn open_stream(&self, model: &ModelDetails, query: ChatQuery) -> Result<EventStream> {
         debug!(
             model = %model.id.name,
             "Starting Cerebras chat completion stream."
@@ -115,12 +120,7 @@ impl Provider for Cerebras {
             .header("content-type", "application/json")
             .json(&body);
 
-        let mut es =
-            EventSource::new(request).map_err(|e| Error::InvalidResponse(e.to_string()))?;
-        // Retries are owned by the stream retry layer; disable EventSource's
-        // own auto-reconnect so a closed connection ends the stream instead of
-        // silently re-issuing the request.
-        es.set_retry_policy(Box::new(Never));
+        let es = event_source(request)?;
 
         Ok(with_tool_call_keepalive(
             assemble_event_stream(es, is_structured),

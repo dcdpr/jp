@@ -1,10 +1,9 @@
 use std::{collections::BTreeSet, error::Error};
 
-use async_trait::async_trait;
 use camino::Utf8Path;
 use jp_attachment::{
-    Attachment, BoxedHandler, ENV_PARAM, HANDLERS, Handler, child_env, distributed_slice,
-    env_names, linkme, percent_decode_str, percent_encode_str, typetag,
+    Attachment, BoxedHandler, ENV_PARAM, HANDLERS, Handler, HandlerFuture, child_env,
+    distributed_slice, env_names, linkme, percent_decode_str, percent_encode_str, typetag,
 };
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -50,7 +49,7 @@ impl Command {
             query_pairs.push(format!("description={}", percent_encode_str(prefix)));
         }
 
-        let mut uri = format!("{scheme}://{}", &self.cmd);
+        let mut uri = format!("{scheme}://{}", self.cmd);
         if !query_pairs.is_empty() {
             uri.push_str(&format!("?{}", query_pairs.join("&")));
         }
@@ -85,7 +84,6 @@ impl Output {
 }
 
 #[typetag::serde(name = "cmd")]
-#[async_trait]
 impl Handler for Commands {
     fn scheme(&self) -> &'static str {
         "cmd"
@@ -95,66 +93,70 @@ impl Handler for Commands {
         uri_to_command(uri)?.to_uri(self.scheme())
     }
 
-    async fn add(
-        &mut self,
-        uri: &Url,
-        _cwd: &Utf8Path,
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        self.0.insert(uri_to_command(uri)?);
+    fn add<'a>(&'a mut self, uri: &'a Url, _cwd: &'a Utf8Path) -> HandlerFuture<'a, ()> {
+        Box::pin(async move {
+            self.0.insert(uri_to_command(uri)?);
 
-        Ok(())
+            Ok(())
+        })
     }
 
-    async fn remove(&mut self, uri: &Url) -> Result<(), Box<dyn Error + Send + Sync>> {
-        self.0.remove(&uri_to_command(uri)?);
+    fn remove<'a>(&'a mut self, uri: &'a Url) -> HandlerFuture<'a, ()> {
+        Box::pin(async move {
+            self.0.remove(&uri_to_command(uri)?);
 
-        Ok(())
+            Ok(())
+        })
     }
 
-    async fn list(&self) -> Result<Vec<Url>, Box<dyn Error + Send + Sync>> {
-        let mut commands = vec![];
-        for command in &self.0 {
-            commands.push(command.to_uri(self.scheme())?);
-        }
+    fn list(&self) -> HandlerFuture<'_, Vec<Url>> {
+        Box::pin(async move {
+            let mut commands = vec![];
+            for command in &self.0 {
+                commands.push(command.to_uri(self.scheme())?);
+            }
 
-        Ok(commands)
+            Ok(commands)
+        })
     }
 
-    async fn get(&self, root: &Utf8Path) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>> {
-        let mut attachments = vec![];
-        for command in &self.0 {
-            let cmd_line = std::iter::once(command.cmd.clone())
-                .chain(command.args.iter().cloned())
-                .collect::<Vec<_>>()
-                .join(" ");
+    fn get<'a>(&'a self, root: &'a Utf8Path) -> HandlerFuture<'a, Vec<Attachment>> {
+        Box::pin(async move {
+            let mut attachments = vec![];
+            for command in &self.0 {
+                let cmd_line = std::iter::once(command.cmd.clone())
+                    .chain(command.args.iter().cloned())
+                    .collect::<Vec<_>>()
+                    .join(" ");
 
-            // A failed spawn yields a bare `io::Error` ("No such file or
-            // directory") that doesn't name the binary, so attach the command
-            // line here while we still have it.
-            let output = duct::cmd(command.cmd.as_str(), command.args.as_slice())
-                .dir(root)
-                .full_env(child_env(&command.env))
-                .stdout_capture()
-                .stderr_capture()
-                .unchecked()
-                .run()
-                .map_err(|e| format!("failed to run command `{cmd_line}`: {e}"))?;
+                // A failed spawn yields a bare `io::Error` ("No such file or
+                // directory") that doesn't name the binary, so attach the command
+                // line here while we still have it.
+                let output = duct::cmd(command.cmd.as_str(), command.args.as_slice())
+                    .dir(root)
+                    .full_env(child_env(&command.env))
+                    .stdout_capture()
+                    .stderr_capture()
+                    .unchecked()
+                    .run()
+                    .map_err(|e| format!("failed to run command `{cmd_line}`: {e}"))?;
 
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let stderr = String::from_utf8_lossy(&output.stderr);
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let stderr = String::from_utf8_lossy(&output.stderr);
 
-            let output = Output {
-                stdout: (!stdout.is_empty()).then(|| stdout.to_string()),
-                stderr: (!stderr.is_empty()).then(|| stderr.to_string()),
-                code: output.status.code().unwrap_or(0),
-            };
+                let output = Output {
+                    stdout: (!stdout.is_empty()).then(|| stdout.to_string()),
+                    stderr: (!stderr.is_empty()).then(|| stderr.to_string()),
+                    code: output.status.code().unwrap_or(0),
+                };
 
-            let mut attachment = Attachment::text(cmd_line, output.try_to_xml()?);
-            attachment.description = command.description.clone();
-            attachments.push(attachment);
-        }
+                let mut attachment = Attachment::text(cmd_line, output.try_to_xml()?);
+                attachment.description = command.description.clone();
+                attachments.push(attachment);
+            }
 
-        Ok(attachments)
+            Ok(attachments)
+        })
     }
 }
 

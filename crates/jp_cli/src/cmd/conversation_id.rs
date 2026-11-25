@@ -192,8 +192,7 @@ impl<const SESSION: bool, const MULTI: bool, const GLOBAL: bool> CommandArgs
 fn read_ids(matches: &ArgMatches) -> Vec<ConversationTarget> {
     matches
         .get_many::<ConversationTarget>("id")
-        .map(|vals| vals.cloned().collect())
-        .unwrap_or_default()
+        .map_or_default(|vals| vals.cloned().collect())
 }
 
 /// When multiple values are provided, only literal conversation IDs are allowed

@@ -10,7 +10,7 @@ type FlagSingle = FlagIds<false, false>;
 #[test]
 fn positional_multi_no_args() {
     let cmd = parse_args::<PositionalMulti>(&[]).unwrap();
-    assert!(cmd.ids().is_empty());
+    assert_eq!(cmd.ids(), []);
 }
 
 #[test]
@@ -60,7 +60,7 @@ fn positional_multi_rejects_keyword_in_multi() {
 #[test]
 fn positional_single_no_args() {
     let cmd = parse_args::<PositionalSingle>(&[]).unwrap();
-    assert!(cmd.ids().is_empty());
+    assert_eq!(cmd.ids(), []);
 }
 
 #[test]
@@ -84,7 +84,7 @@ fn positional_single_rejects_two_values() {
 #[test]
 fn flag_multi_no_flag() {
     let cmd = parse_args::<FlagMulti>(&[]).unwrap();
-    assert!(cmd.ids().is_empty());
+    assert_eq!(cmd.ids(), []);
 }
 
 #[test]
@@ -151,7 +151,7 @@ fn flag_multi_rejects_keyword_in_multi() {
 #[test]
 fn flag_single_no_flag() {
     let cmd = parse_args::<FlagSingle>(&[]).unwrap();
-    assert!(cmd.ids().is_empty());
+    assert_eq!(cmd.ids(), []);
 }
 
 #[test]

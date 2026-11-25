@@ -8,7 +8,8 @@
 //! machine that already ran `codex login` can hand JP a working credential
 //! without a second browser round-trip.
 
-use async_trait::async_trait;
+use std::{error::Error, future};
+
 use camino::Utf8PathBuf;
 use chrono::{DateTime, TimeDelta, Utc};
 use serde::Deserialize;
@@ -22,7 +23,6 @@ use crate::{
 #[derive(Debug, Clone, Copy)]
 pub struct OpenaiAuth;
 
-#[async_trait]
 impl ProviderAuth for OpenaiAuth {
     fn setup_token_hint(&self) -> &'static str {
         "OpenAI issues no long-lived setup token. Either run `jp provider llm auth login openai` \
@@ -32,18 +32,27 @@ impl ProviderAuth for OpenaiAuth {
          refreshed; `--import-codex` stores the refreshable token pair instead."
     }
 
-    async fn recover_identity(
+    fn recover_identity(
         &self,
         token: &str,
-    ) -> Result<AccountIdentity, Box<dyn std::error::Error + Send + Sync>> {
-        let identity = oauth::identity_from_tokens("", token);
-
-        if identity.account_id.is_none() {
-            return Err("the token carries no ChatGPT account claim".into());
-        }
-
-        Ok(identity)
+    ) -> impl Future<Output = Result<AccountIdentity, Box<dyn Error + Send + Sync>>> + Send {
+        future::ready(identity_from_access_token(token))
     }
+}
+
+/// Decode the account identity from an access token's JWT claims.
+///
+/// Fails when the token carries no `ChatGPT` account claim.
+fn identity_from_access_token(
+    token: &str,
+) -> Result<AccountIdentity, Box<dyn Error + Send + Sync>> {
+    let identity = oauth::identity_from_tokens("", token);
+
+    if identity.account_id.is_none() {
+        return Err("the token carries no ChatGPT account claim".into());
+    }
+
+    Ok(identity)
 }
 
 /// A credential read out of the Codex CLI's cache.

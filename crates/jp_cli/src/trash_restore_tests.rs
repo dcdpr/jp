@@ -7,7 +7,6 @@ use std::{
 
 use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::{Utf8TempDir, tempdir};
-use crossterm::style::Stylize as _;
 use jp_config::{AppConfig, PartialAppConfig};
 use jp_conversation::ConversationId;
 use jp_printer::{OutputFormat, Printer};

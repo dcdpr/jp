@@ -30,8 +30,7 @@ pub async fn get_crate_source_resource(uri: &Url) -> Result<String, Error> {
     let source = document
         .select(&PRE_RUST)
         .next()
-        .map(|el| el.text().collect::<String>())
-        .unwrap_or_default();
+        .map_or_default(|el| el.text().collect::<String>());
 
     // The source is plain text, but rustdoc prefixes each line with a line
     // number followed by the source code. Strip the line numbers and skip

@@ -57,7 +57,7 @@ fn plan_items_are_in_document_order() {
     let plan = build_execution_plan(&stream, &mut pending);
     let (items, orphaned) = plan.into_parts();
 
-    assert!(orphaned.is_empty());
+    assert_eq!(orphaned, [] as [(usize, ToolCallRequest); 0]);
     assert_eq!(items.len(), 3);
     assert_eq!(items[0].request.id, "a");
     assert_eq!(items[0].index, 0);
@@ -91,7 +91,7 @@ fn responded_requests_are_skipped() {
     let plan = build_execution_plan(&stream, &mut pending);
     let (items, orphaned) = plan.into_parts();
 
-    assert!(orphaned.is_empty());
+    assert_eq!(orphaned, [] as [(usize, ToolCallRequest); 0]);
     assert_eq!(items.len(), 1);
     assert_eq!(items[0].request.id, "pending");
     assert_eq!(items[0].index, 0);
@@ -191,7 +191,7 @@ fn previous_turn_requests_are_ignored() {
     let plan = build_execution_plan(&stream, &mut pending);
     let (items, orphaned) = plan.into_parts();
 
-    assert!(orphaned.is_empty());
+    assert_eq!(orphaned, [] as [(usize, ToolCallRequest); 0]);
     assert_eq!(items.len(), 1);
     assert_eq!(items[0].request.id, "new");
 }
@@ -240,7 +240,7 @@ fn non_tool_events_are_ignored() {
     let plan = build_execution_plan(&stream, &mut pending);
     let (items, orphaned) = plan.into_parts();
 
-    assert!(orphaned.is_empty());
+    assert_eq!(orphaned, [] as [(usize, ToolCallRequest); 0]);
     assert_eq!(items.len(), 2);
     assert_eq!(items[0].request.id, "a");
     assert_eq!(items[0].index, 0);

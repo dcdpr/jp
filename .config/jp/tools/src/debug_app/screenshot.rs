@@ -230,7 +230,7 @@ fn capture(
         .into());
     }
 
-    let size = fs::metadata(path).map(|m| m.len()).unwrap_or_default();
+    let size = fs::metadata(path).map_or_default(|m| m.len());
     if size == 0 {
         return Err(format!(
             "`screencapture` reported success but left nothing at {path}. The window may have \

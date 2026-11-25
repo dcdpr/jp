@@ -2,7 +2,6 @@ use std::time::Duration;
 
 use camino_tempfile::tempdir;
 use chrono::{TimeZone as _, Utc};
-use crossterm::style::Stylize as _;
 use jp_config::AppConfig;
 use jp_conversation::{
     Conversation, ConversationEvent, ConversationId, Labels,
@@ -3038,7 +3037,7 @@ fn a_pattern_is_required() {
 fn e_is_repeatable_and_stands_in_for_the_positional_pattern() {
     let grep = parse(&["-e", "alpha", "--pattern", "beta"]).unwrap();
     assert_eq!(grep.patterns, ["alpha", "beta"]);
-    assert!(grep.pattern.is_empty());
+    assert_eq!(grep.pattern, [] as [String; 0]);
 }
 
 #[test]

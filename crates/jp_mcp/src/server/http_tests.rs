@@ -1,9 +1,13 @@
+#![expect(
+    clippy::unused_async_trait_impl,
+    reason = "test doubles implement async traits synchronously"
+)]
+
 use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
 };
 
-use async_trait::async_trait;
 use indexmap::IndexMap;
 use jp_config::{
     AppConfig, Config as _,
@@ -30,7 +34,6 @@ use crate::{
 };
 
 struct Count(Arc<AtomicUsize>);
-#[async_trait]
 impl BuiltinTool for Count {
     async fn execute(&self, _: &Value, _: &IndexMap<String, Value>) -> Outcome {
         self.0.fetch_add(1, Ordering::SeqCst);

@@ -274,8 +274,7 @@ pub(crate) fn resolve(target: &WorkspaceTarget, env: &TargetEnv<'_>) -> Result<R
             let rows: Vec<WorkspaceRow> = env
                 .store
                 .load(session)
-                .map(|mapping| mapping.history)
-                .unwrap_or_default()
+                .map_or_default(|mapping| mapping.history)
                 .into_iter()
                 .filter_map(|entry| {
                     let id = entry

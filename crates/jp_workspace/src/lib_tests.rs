@@ -11,7 +11,7 @@ use jp_config::{
 };
 use jp_conversation::event::ChatRequest;
 use jp_storage::{
-    backend::{FsStorageBackend, NullLockBackend, NullPersistBackend, PersistBackend as _},
+    backend::{FsStorageBackend, NullLockBackend, NullPersistBackend},
     value::read_json,
 };
 use parking_lot::RwLock;
@@ -533,10 +533,8 @@ fn test_a_workspace_without_persistence_writes_nothing() {
     lock.into_mut()
         .update_metadata_and_flush(|metadata| metadata.title = Some("Changed".to_owned()))
         .unwrap();
-    assert!(
-        fs.load_conversation_ids(ConversationFilter::default())
-            .is_empty()
-    );
+    assert_eq!(fs.load_conversation_ids(ConversationFilter::default()), []
+        as [ConversationId; 0]);
 }
 
 #[test]

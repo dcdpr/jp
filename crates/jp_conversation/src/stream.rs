@@ -1586,7 +1586,6 @@ impl ConversationStream {
     /// Events with no config delta between them share one config allocation, in
     /// either direction.
     /// Prefer [`Self::iter`] whenever only event content is needed.
-    #[must_use]
     pub fn iter_with_config(
         &self,
     ) -> impl DoubleEndedIterator<Item = ConversationEventWithConfigRef<'_>> {

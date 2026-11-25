@@ -508,8 +508,7 @@ impl Query<Parsed> {
 fn values<T: Clone + Send + Sync + 'static>(matches: &ArgMatches, id: &str) -> Vec<T> {
     matches
         .get_many(id)
-        .map(|values| values.cloned().collect())
-        .unwrap_or_default()
+        .map_or_default(|values| values.cloned().collect())
 }
 
 /// The words of the query, written before `--` or after it.

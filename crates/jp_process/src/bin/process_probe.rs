@@ -49,9 +49,7 @@ fn main() {
             ),
             "cwd" => line(
                 &mut io::stdout(),
-                &env::current_dir()
-                    .map(|dir| dir.display().to_string())
-                    .unwrap_or_default(),
+                &env::current_dir().map_or_default(|dir| dir.display().to_string()),
             ),
             #[cfg(unix)]
             // SAFETY: both calls only read this process's own ids.

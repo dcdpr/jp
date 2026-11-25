@@ -1,3 +1,4 @@
+// qual:allow(srp, file_length=1000) reason: "run entry point, config loading, workspace loading, logging, and runtime setup in one file; split in T-1rp06gh"
 mod access;
 mod bootstrap;
 mod cli;
@@ -6,8 +7,6 @@ mod config_pipeline;
 mod ctx;
 mod deferred_report;
 mod editor;
-#[cfg(test)]
-mod env_testing;
 mod error;
 mod format;
 mod load_failure;

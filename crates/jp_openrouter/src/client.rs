@@ -94,7 +94,6 @@ impl Client {
             .await?)
     }
 
-    #[must_use]
     pub fn chat_completion_stream(
         &self,
         request: request::ChatCompletion,
@@ -269,24 +268,22 @@ fn parse_chunk(chunk: &str) -> Result<response::ChatCompletion> {
         metadata,
     } = error;
 
-    let details = metadata
-        .map(|metadata| match metadata {
-            response::ErrorMetadata::Moderation {
-                reasons,
-                provider_name,
-                ..
-            } => {
-                let provider = provider_name.as_deref().unwrap_or("unknown");
-                format!(": ({provider}) {}", reasons.join("\n"))
-            }
-            response::ErrorMetadata::Provider { provider_name, raw } => {
-                let provider = provider_name.as_deref().unwrap_or("unknown");
-                let json = to_string_pretty(&raw).unwrap_or_default();
-                format!(": ({provider}) {json}")
-            }
-            response::ErrorMetadata::Other(_) => String::new(),
-        })
-        .unwrap_or_default();
+    let details = metadata.map_or_default(|metadata| match metadata {
+        response::ErrorMetadata::Moderation {
+            reasons,
+            provider_name,
+            ..
+        } => {
+            let provider = provider_name.as_deref().unwrap_or("unknown");
+            format!(": ({provider}) {}", reasons.join("\n"))
+        }
+        response::ErrorMetadata::Provider { provider_name, raw } => {
+            let provider = provider_name.as_deref().unwrap_or("unknown");
+            let json = to_string_pretty(&raw).unwrap_or_default();
+            format!(": ({provider}) {json}")
+        }
+        response::ErrorMetadata::Other(_) => String::new(),
+    });
 
     Err(Error::Api {
         code,

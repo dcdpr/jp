@@ -1,6 +1,6 @@
 //! Reasoning content styling configuration.
 
-use std::{fmt, num::ParseIntError};
+use std::{fmt, num::ParseIntError, str::FromStr};
 
 use schematic::{Config, ConfigEnum, TransformResult};
 use serde::{Deserialize, Serialize};
@@ -303,11 +303,19 @@ impl Default for TruncateChars {
     }
 }
 
+impl FromStr for TruncateChars {
+    type Err = ParseIntError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        s.parse().map(|characters| Self { characters })
+    }
+}
+
 impl TryFrom<&str> for TruncateChars {
     type Error = ParseIntError;
 
     fn try_from(s: &str) -> Result<Self, Self::Error> {
-        s.parse().map(|characters| Self { characters })
+        s.parse()
     }
 }
 

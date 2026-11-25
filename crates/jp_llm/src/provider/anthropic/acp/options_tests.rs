@@ -1,3 +1,4 @@
+use async_anthropic::types::Message;
 use datetime_literal::datetime;
 use jp_config::{AppConfig, model::parameters::ReasoningConfig};
 use jp_conversation::{
@@ -43,7 +44,7 @@ fn a_new_session_is_titled_up_front() {
     let thread = ThreadBuilder::new().with_events(events).build().unwrap();
     let model = super::super::model_details(&"claude-opus-5".parse().unwrap());
     let prepared = PreparedRequest::new(&model, thread.into()).unwrap();
-    assert!(prepared.history.is_empty());
+    assert_eq!(prepared.history, [] as [Message; 0]);
 
     let metadata = metadata(&prepared, &BTreeMap::new()).unwrap();
 

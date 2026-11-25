@@ -48,7 +48,7 @@ fn a_list_answers_to_no_name() {
         keys.variables(Some("work")),
         Err(ApiKeyEnvError::Unknown { ref available, .. }) if available.is_empty()
     ));
-    assert!(keys.names().is_empty());
+    assert_eq!(keys.names(), [] as [&str; 0]);
 }
 
 /// A named key can itself be read from several variables, in order.

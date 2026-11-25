@@ -294,8 +294,7 @@ fn the_definitions_name_every_argument_the_tools_read() {
             .unwrap_or_else(|| panic!("{tool} has a definition"));
         let mut names: Vec<String> = definition["parameters"]
             .as_table()
-            .map(|table| table.keys().cloned().collect())
-            .unwrap_or_default();
+            .map_or_default(|table| table.keys().cloned().collect());
         names.sort();
         names
     };

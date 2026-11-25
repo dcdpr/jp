@@ -23,7 +23,7 @@ fn the_defaults_name_the_assistant_and_bound_its_text() {
 
     assert_eq!(defaults.assistant, "assistant");
     assert_eq!(defaults.max_chars, 600);
-    assert!(defaults.cfg.is_empty());
+    assert_eq!(defaults.cfg, [] as [String; 0]);
 }
 
 /// Keys a newer `jp-review` reads are left alone rather than refused.

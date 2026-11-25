@@ -622,11 +622,19 @@ impl fmt::Display for Tokens {
     }
 }
 
+impl FromStr for Tokens {
+    type Err = BoxedError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(s.parse()?))
+    }
+}
+
 impl TryFrom<&str> for Tokens {
     type Error = BoxedError;
 
     fn try_from(s: &str) -> Result<Self, Self::Error> {
-        Ok(Self(s.parse()?))
+        s.parse()
     }
 }
 

@@ -13,7 +13,7 @@ use jp_config::AppConfig;
 use jp_conversation::{Conversation, ConversationId};
 use jp_printer::{OutputFormat, Printer, SharedBuffer};
 use jp_storage::backend::{FsStorageBackend, LockBackend as _};
-use jp_workspace::Workspace;
+use jp_workspace::{ConversationHandle, Workspace};
 use tokio::runtime::Runtime;
 
 use super::*;
@@ -502,5 +502,6 @@ fn resolve_filtered_empty_when_nothing_matches() {
         ..empty_rm()
     };
 
-    assert!(cmd.resolve_filtered(&ws).unwrap().is_empty());
+    assert_eq!(cmd.resolve_filtered(&ws).unwrap(), []
+        as [ConversationHandle; 0]);
 }

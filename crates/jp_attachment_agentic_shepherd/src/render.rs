@@ -110,8 +110,7 @@ fn render_outline(items: &[Item], depth: usize, out: &mut String) {
         let prefix = item
             .timestamp
             .as_ref()
-            .map(|t| format!("({}, {}) ", t.user.name, t.datetime))
-            .unwrap_or_default();
+            .map_or_default(|t| format!("({}, {}) ", t.user.name, t.datetime));
         out.push_str(&format!("{indent}- {prefix}{}\n", item_line(item)));
         render_block_continuations(&item.continuations, depth + 1, out);
     }
@@ -232,8 +231,7 @@ fn render_prefixed(out: &mut String, verb: &str, prefixed: &PrefixedItem) {
         .item
         .timestamp
         .as_ref()
-        .map(|t| format!(" ({}, {})", t.user.name, t.datetime))
-        .unwrap_or_default();
+        .map_or_default(|t| format!(" ({}, {})", t.user.name, t.datetime));
     out.push_str(&format!(
         "- {verb}: {} {}{when}\n",
         prefixed.prefix.trim(),

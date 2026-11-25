@@ -5,12 +5,13 @@ use camino_tempfile::tempdir;
 use jp_printer::{OutputFormat, Printer};
 use jp_workspace::{
     Id,
+    roots::{RootEntry, resolve_live_roots},
     session::{Session, SessionId, SessionSource},
     session_store::WorkspaceSessionStore,
 };
 
 use super::*;
-use crate::cmd::workspace::target::TargetEnv;
+use crate::{DEFAULT_STORAGE_DIR, cmd::workspace::target::TargetEnv};
 
 fn env_at<'a>(
     launch_cwd: Utf8PathBuf,
@@ -277,13 +278,9 @@ fn selecting_a_workspace_registers_its_checkout() {
     // A checkout no workspace-loading command has run in: nothing knows it
     // yet.
     let id = Id::from_str("ws123").unwrap();
-    assert!(
-        jp_workspace::roots::resolve_live_roots(
-            &env.workspaces_dir,
-            &id,
-            crate::DEFAULT_STORAGE_DIR
-        )
-        .is_empty()
+    assert_eq!(
+        resolve_live_roots(&env.workspaces_dir, &id, DEFAULT_STORAGE_DIR),
+        [] as [RootEntry; 0]
     );
 
     Use {

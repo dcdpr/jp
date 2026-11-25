@@ -29,7 +29,8 @@ use jp_conversation::{
     event::{ChatResponse, EventKind, ToolCallResponse},
 };
 use jp_tool::ToolDefinition;
-use reqwest_eventsource::Event as SseEvent;
+use reqwest::RequestBuilder;
+use reqwest_eventsource::{Event as SseEvent, EventSource, retry::Never};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tracing::{debug, trace, warn};
@@ -40,7 +41,7 @@ use super::{
 };
 use crate::{
     decoding::ArgumentDecoders,
-    error::StreamError,
+    error::{Error, StreamError},
     event::{Event, FinishReason},
     stream::aggregator::reasoning::ReasoningExtractor,
 };
@@ -300,6 +301,18 @@ pub(crate) fn convert_tool_choice(choice: &ToolChoice) -> &'static str {
         ToolChoice::None => "none",
         ToolChoice::Required | ToolChoice::Function(_) => "required",
     }
+}
+
+/// Open the SSE event source for `request`, with its automatic reconnect turned
+/// off.
+///
+/// The stream retry layer owns retries, so a closed connection ends the stream
+/// instead of silently re-issuing the request.
+pub(crate) fn event_source(request: RequestBuilder) -> Result<EventSource, Error> {
+    let mut source =
+        EventSource::new(request).map_err(|e| Error::InvalidResponse(e.to_string()))?;
+    source.set_retry_policy(Box::new(Never));
+    Ok(source)
 }
 
 /// Assemble the provider-agnostic event stream from a raw SSE event source.

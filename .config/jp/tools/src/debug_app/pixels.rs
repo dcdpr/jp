@@ -218,7 +218,7 @@ fn capture(
         .into());
     }
 
-    if fs::metadata(path).map(|m| m.len()).unwrap_or_default() == 0 {
+    if fs::metadata(path).map_or_default(|m| m.len()) == 0 {
         return Err(format!(
             "`screencapture` reported success but left nothing at {path}. The window may have \
              closed while it was being read."

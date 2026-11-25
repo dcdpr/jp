@@ -6,7 +6,7 @@ use std::{
 use camino::Utf8PathBuf;
 use camino_tempfile::Utf8TempDir;
 use clap::error::ErrorKind;
-use crossterm::style::{Color, Stylize as _};
+use crossterm::style::Color;
 use jp_conversation::{Conversation, ConversationId};
 use jp_printer::{OutputFormat, Printer, SharedBuffer};
 use jp_storage::{

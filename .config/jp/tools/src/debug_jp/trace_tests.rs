@@ -49,7 +49,7 @@ fn renders_report_from_launched_trace_log() {
     let Outcome::Success { content } = outcome else {
         panic!("expected a success outcome");
     };
-    assert!(!content.is_empty());
+    assert_ne!(content, "");
     // A natural exit carries no shutdown-warning banner.
     assert!(!content.contains("[!WARNING]"));
     // The report and copied streams landed under tmp/profiling.
@@ -85,7 +85,7 @@ fn renders_report_from_json_format_marker_line() {
     let Outcome::Success { content } = outcome else {
         panic!("expected a success outcome");
     };
-    assert!(!content.is_empty());
+    assert_ne!(content, "");
     assert!(root.join("tmp/profiling").exists());
 }
 

@@ -55,7 +55,7 @@ fn current_target_has_arch_and_os() {
     );
     // On any test platform, the arch should be non-empty.
     let arch = target.split('-').next().unwrap();
-    assert!(!arch.is_empty());
+    assert_ne!(arch, "");
 }
 
 #[test]

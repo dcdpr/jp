@@ -221,7 +221,8 @@ fn resolve_prunes_unreadable_registry_files() {
     fs::create_dir_all(&roots_dir).unwrap();
     fs::write(roots_dir.join("bogus.json"), "not json").unwrap();
 
-    assert!(resolve_live_roots(&workspaces_dir, &id, STORAGE_DIR).is_empty());
+    assert_eq!(resolve_live_roots(&workspaces_dir, &id, STORAGE_DIR), []
+        as [RootEntry; 0]);
     assert!(
         !roots_dir.join("bogus.json").exists(),
         "corrupt entry removed"
@@ -245,11 +246,13 @@ fn deleted_root_nested_in_same_id_workspace_is_not_live() {
     upsert_root(&dir, &nested).unwrap();
     fs::remove_dir_all(&nested).unwrap();
 
-    assert!(resolve_live_roots(&workspaces_dir, &id, STORAGE_DIR).is_empty());
+    assert_eq!(resolve_live_roots(&workspaces_dir, &id, STORAGE_DIR), []
+        as [RootEntry; 0]);
 }
 
 #[cfg(unix)]
 mod legacy_symlink {
+    use camino::Utf8PathBuf;
     use test_log::test;
 
     use super::*;
@@ -289,9 +292,10 @@ mod legacy_symlink {
 
         std::os::unix::fs::symlink(tmp.path().join("gone"), dir.join("storage")).unwrap();
 
-        assert!(resolve_live_roots(&workspaces_dir, &id, STORAGE_DIR).is_empty());
+        assert_eq!(resolve_live_roots(&workspaces_dir, &id, STORAGE_DIR), []
+            as [RootEntry; 0]);
         assert!(!dir.join("storage").is_symlink(), "dead link removed");
-        assert!(registry_files(&dir.join(ROOTS_DIR)).is_empty());
+        assert_eq!(registry_files(&dir.join(ROOTS_DIR)), [] as [Utf8PathBuf; 0]);
     }
 
     #[test]
@@ -307,9 +311,10 @@ mod legacy_symlink {
         write_checkout(&other, &wid("zz999"));
         std::os::unix::fs::symlink(other.join(STORAGE_DIR), dir.join("storage")).unwrap();
 
-        assert!(resolve_live_roots(&workspaces_dir, &id, STORAGE_DIR).is_empty());
+        assert_eq!(resolve_live_roots(&workspaces_dir, &id, STORAGE_DIR), []
+            as [RootEntry; 0]);
         assert!(!dir.join("storage").is_symlink(), "mismatched link removed");
-        assert!(registry_files(&dir.join(ROOTS_DIR)).is_empty());
+        assert_eq!(registry_files(&dir.join(ROOTS_DIR)), [] as [Utf8PathBuf; 0]);
     }
 }
 
@@ -398,8 +403,8 @@ fn known_workspaces_orders_by_recency_rootless_last() {
     let ids: Vec<String> = known.iter().map(|w| w.id.to_string()).collect();
 
     assert_eq!(ids, ["aaaaa", "bbbbb", "ccccc", "ddddd"]);
-    assert!(known[2].roots.is_empty());
-    assert!(known[3].roots.is_empty());
+    assert_eq!(known[2].roots, [] as [RootEntry; 0]);
+    assert_eq!(known[3].roots, [] as [RootEntry; 0]);
 }
 
 #[test]
@@ -425,5 +430,8 @@ fn known_workspaces_skips_non_workspace_entries() {
 #[test]
 fn known_workspaces_missing_dir_is_empty() {
     let tmp = tempdir().unwrap();
-    assert!(known_workspaces(&tmp.path().join("absent"), STORAGE_DIR).is_empty());
+    assert_eq!(
+        known_workspaces(&tmp.path().join("absent"), STORAGE_DIR),
+        [] as [KnownWorkspace; 0]
+    );
 }

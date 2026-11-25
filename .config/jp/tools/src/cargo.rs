@@ -190,7 +190,7 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
 /// An unset argument and an empty array both return no packages, which every
 /// subcommand reads as the whole workspace.
 fn packages(arg: Option<OneOrMany<String>>) -> Vec<String> {
-    arg.map(OneOrMany::into_vec).unwrap_or_default()
+    arg.map_or_default(OneOrMany::into_vec)
 }
 
 /// Cargo flags that scope a run to `packages`: one `--package=<name>` per

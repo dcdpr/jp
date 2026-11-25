@@ -1,4 +1,4 @@
-use futures::{StreamExt as _, stream};
+use futures::stream;
 use serde_json::{Map, Value, json};
 
 use super::*;

@@ -1361,7 +1361,7 @@ fn parse_list_marker(content: &str) -> Option<ListMarker> {
 /// behind by a just-closed inner block (e.g. a fenced code block).
 /// Stops after one line so two-blank-lines-end-of-list semantics still
 /// propagate to the walk.
-fn leading_blank_line_bytes(s: &str) -> usize {
+const fn leading_blank_line_bytes(s: &str) -> usize {
     let bytes = s.as_bytes();
     let mut idx = 0;
     while idx < bytes.len() && (bytes[idx] == b' ' || bytes[idx] == b'\t') {
@@ -1873,7 +1873,7 @@ enum MathScan {
 
 /// Scan a potential `$..$` or `$$..$$` math span starting at `start`, mirroring
 /// comrak's `handle_dollars` / `scan_to_closing_dollar` rules.
-fn scan_math_span(bytes: &[u8], start: usize, limit: usize) -> MathScan {
+const fn scan_math_span(bytes: &[u8], start: usize, limit: usize) -> MathScan {
     let opendollars = ascii_run(bytes, start, b'$', limit);
     if start + opendollars == limit {
         return MathScan::Incomplete;
@@ -1948,7 +1948,7 @@ fn scan_math_span(bytes: &[u8], start: usize, limit: usize) -> MathScan {
 }
 
 /// Count consecutive `ch` bytes in `bytes[start..limit]`.
-fn ascii_run(bytes: &[u8], start: usize, ch: u8, limit: usize) -> usize {
+const fn ascii_run(bytes: &[u8], start: usize, ch: u8, limit: usize) -> usize {
     let mut n = 0;
     while start + n < limit && bytes[start + n] == ch {
         n += 1;

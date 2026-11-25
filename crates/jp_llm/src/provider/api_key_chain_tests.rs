@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 
 use jp_config::types::api_key_env::KeyVariables;
+use jp_test::env_var::EnvVarGuard;
+use serial_test::serial;
 
 use super::*;
 
@@ -18,8 +20,8 @@ fn also_set() -> &'static str {
 const UNSET: &str = "JP_TEST_CHAIN_KEY_UNSET";
 const ALSO_UNSET: &str = "JP_TEST_CHAIN_KEY_ALSO_UNSET";
 
-// Each test that mutates the environment uses its own variable, so the tests
-// stay independent however the runner schedules them.
+// Each test that sets a variable uses its own, so a test failing part-way
+// cannot leave a value another test reads.
 const BLANK: &str = "JP_TEST_CHAIN_KEY_BLANK";
 const WHITESPACE: &str = "JP_TEST_CHAIN_KEY_WHITESPACE";
 const VERBATIM: &str = "JP_TEST_CHAIN_KEY_VERBATIM";
@@ -40,12 +42,10 @@ fn chain(entries: &[&str]) -> Vec<AuthEntry> {
 
 /// A variable exported with no value is not a credential.
 #[test]
+#[serial(env_vars)]
 fn test_a_blank_variable_holds_no_key() {
-    // SAFETY: single-threaded test, and the variable is read back immediately.
-    unsafe {
-        std::env::set_var(BLANK, "");
-        std::env::set_var(WHITESPACE, "   \n");
-    }
+    let _blank = EnvVarGuard::set(BLANK, "");
+    let _whitespace = EnvVarGuard::set(WHITESPACE, "   \n");
 
     assert_eq!(read_key(BLANK), None, "an empty value is not a key");
     assert_eq!(
@@ -54,29 +54,22 @@ fn test_a_blank_variable_holds_no_key() {
         "a whitespace-only value is not a key"
     );
     assert_eq!(read_key(UNSET), None);
-
-    unsafe {
-        std::env::remove_var(BLANK);
-        std::env::remove_var(WHITESPACE);
-    }
 }
 
 /// A real key is passed through byte-exact.
 #[test]
+#[serial(env_vars)]
 fn test_a_key_is_read_verbatim() {
-    // SAFETY: single-threaded test, and the variable is read back immediately.
-    unsafe { std::env::set_var(VERBATIM, " sk-1\n") }
+    let _verbatim = EnvVarGuard::set(VERBATIM, " sk-1\n");
 
     assert_eq!(read_key(VERBATIM).as_deref(), Some(" sk-1\n"));
-
-    unsafe { std::env::remove_var(VERBATIM) }
 }
 
 /// A blank variable falls through as if absent.
 #[test]
+#[serial(env_vars)]
 fn test_a_blank_key_falls_through_to_the_next_entry() {
-    // SAFETY: single-threaded test, and the variable is read back immediately.
-    unsafe { std::env::set_var(BLANK_IN_CHAIN, "") }
+    let _blank = EnvVarGuard::set(BLANK_IN_CHAIN, "");
 
     let expected = std::env::var(set()).unwrap();
     let keys = many(&[("primary", BLANK_IN_CHAIN), ("fallback", set())]);
@@ -90,8 +83,6 @@ fn test_a_blank_key_falls_through_to_the_next_entry() {
 
     assert_eq!(key, expected);
     assert_eq!(selected, AuthEntry::ApiKey(Some("fallback".to_owned())));
-
-    unsafe { std::env::remove_var(BLANK_IN_CHAIN) }
 }
 
 /// The default chain resolves the one key `api_key_env` names.

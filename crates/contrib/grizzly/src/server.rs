@@ -280,6 +280,10 @@ fn urlencoded(s: &str) -> String {
 }
 
 #[tool_handler(router = self.tool_router)]
+#[expect(
+    clippy::unused_async_trait_impl,
+    reason = "rmcp's `tool_handler` generates the async methods"
+)]
 impl rmcp::ServerHandler for GrizzlyService {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())

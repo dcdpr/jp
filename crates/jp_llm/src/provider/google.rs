@@ -1,8 +1,7 @@
 // qual:allow(srp, file_length=1200) reason: "provider, request building, stream mapping, and model catalog in one file; split in T-1hb8d4m"
-use std::{collections::HashMap, sync::LazyLock, time::Duration};
+use std::{collections::HashMap, future, sync::LazyLock, time::Duration};
 
 use async_stream::stream;
-use async_trait::async_trait;
 use base64::Engine as _;
 use chrono::NaiveDate;
 use futures::{StreamExt as _, TryStreamExt as _};
@@ -64,7 +63,6 @@ pub struct Google {
     silence_allowance: Option<Duration>,
 }
 
-#[async_trait]
 impl Provider for Google {
     async fn model_details(&self, name: &Name) -> Result<ModelDetails> {
         let id: ModelIdConfig = (PROVIDER, name.as_ref()).try_into()?;
@@ -84,11 +82,18 @@ impl Provider for Google {
             .collect())
     }
 
-    async fn chat_completion_stream(
+    fn chat_completion_stream(
         &self,
         model: &ModelDetails,
         query: ChatQuery,
-    ) -> Result<EventStream> {
+    ) -> impl Future<Output = Result<EventStream>> + Send {
+        future::ready(self.open_stream(model, query))
+    }
+}
+
+impl Google {
+    /// Build the chat completion request and open its event stream.
+    fn open_stream(&self, model: &ModelDetails, query: ChatQuery) -> Result<EventStream> {
         let client = self.client.clone();
         let (request, structured) = create_request(model, query)?;
         let slug = model.id.name.clone();
@@ -1408,8 +1413,7 @@ fn error_details(value: &Value) -> &[Value] {
     value
         .pointer("/message/error/details")
         .and_then(Value::as_array)
-        .map(Vec::as_slice)
-        .unwrap_or_default()
+        .map_or_default(Vec::as_slice)
 }
 
 /// The delay Gemini asks the caller to wait, read from the

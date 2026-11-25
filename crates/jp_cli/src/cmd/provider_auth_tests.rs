@@ -1,14 +1,18 @@
+#![expect(
+    clippy::unused_async_trait_impl,
+    reason = "test doubles implement async traits synchronously"
+)]
+
 use std::{
     error::Error as StdError,
     io,
     sync::{Arc, Mutex},
 };
 
-use async_trait::async_trait;
 use camino_tempfile::Utf8TempDir;
 use clap::error::ErrorKind;
 use jp_credentials::{FsCredentialBackend, PROVIDER_ANTHROPIC};
-use jp_llm::credential::ExternalAuth;
+use jp_llm::credential::DynExternalAuth;
 use jp_printer::OutputFormat;
 use jp_storage::resource_lock::FsResourceLocker;
 
@@ -24,9 +28,8 @@ struct FakeAuth {
     status_fails: bool,
 }
 
-#[async_trait]
-impl ProviderAuth for FakeAuth {
-    fn external_auth(&self) -> Option<&dyn ExternalAuth> {
+impl jp_llm::ProviderAuth for FakeAuth {
+    fn external_auth(&self) -> Option<&dyn DynExternalAuth> {
         Some(self)
     }
     fn setup_token_hint(&self) -> &'static str {
@@ -40,8 +43,7 @@ impl ProviderAuth for FakeAuth {
     }
 }
 
-#[async_trait]
-impl ExternalAuth for FakeAuth {
+impl jp_llm::ExternalAuth for FakeAuth {
     fn directory_name(&self) -> &'static str {
         "claude"
     }

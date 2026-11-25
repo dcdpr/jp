@@ -5,7 +5,6 @@ authors.workspace = true
 description = "Print JP directory paths."
 documentation.workspace = true
 edition.workspace = true
-homepage.workspace = true
 license-file.workspace = true
 publish.workspace = true
 readme.workspace = true

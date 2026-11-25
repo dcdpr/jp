@@ -1,5 +1,3 @@
-use std::fmt::Write as _;
-
 use super::*;
 
 /// A full-width (`\x1b[K`) reasoning-style background.

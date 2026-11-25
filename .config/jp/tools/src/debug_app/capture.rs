@@ -741,8 +741,7 @@ fn orphaned_bundles(dir: &Utf8Path) -> Vec<String> {
         let id = path.file_stem().unwrap_or_default().to_owned();
         let sidecar = profiles_dir(dir).join(format!("{id}.json"));
         if fs::read_to_string(&sidecar)
-            .ok()
-            .is_some_and(|raw| serde_json::from_str::<Recording>(&raw).is_ok())
+            .is_ok_and(|raw| serde_json::from_str::<Recording>(&raw).is_ok())
         {
             continue;
         }

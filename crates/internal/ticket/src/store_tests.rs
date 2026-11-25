@@ -1234,7 +1234,7 @@ fn relabel_writes_every_ticket_or_none() {
             .starts_with(&format!("{fresh}: `package=jp_legacy` is retired")),
         "{error}"
     );
-    assert!(labels_of(&dir, fresh).is_empty());
+    assert_eq!(labels_of(&dir, fresh), [] as [String; 0]);
     assert_eq!(labels_of(&dir, old), ["package=jp_legacy"]);
 }
 

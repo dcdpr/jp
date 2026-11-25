@@ -4,7 +4,7 @@ use chrono::{TimeZone as _, Utc};
 use proptest::prelude::*;
 use serde_json::Map;
 
-use super::assign_turn_indices;
+use super::{AffectedItem, assign_turn_indices};
 use crate::{
     ByteSize, Compaction, ConversationEvent, ConversationStream, EventKind, PolicySpec,
     ReasoningPolicy, SummaryPolicy, ToolCallPolicy,
@@ -842,7 +842,7 @@ fn affected_items_reports_nothing_for_a_summary_compaction() {
         ))
     };
 
-    assert!(stream.affected_items(&compaction).is_empty());
+    assert_eq!(stream.affected_items(&compaction), [] as [AffectedItem; 0]);
 }
 
 #[test]
@@ -963,7 +963,8 @@ fn affected_items_ignores_turns_outside_the_range() {
         ..tool_call_compaction(PolicySpec::new(ToolCallPolicy::Omit))
     };
 
-    assert!(stream.affected_items(&out_of_range).is_empty());
+    assert_eq!(stream.affected_items(&out_of_range), [] as [AffectedItem;
+        0]);
 }
 
 // ---------------------------------------------------------------------------

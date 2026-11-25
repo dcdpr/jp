@@ -5,7 +5,6 @@ authors.workspace = true
 description = "Web UI for browsing JP conversations and continuing them."
 documentation.workspace = true
 edition.workspace = true
-homepage.workspace = true
 license-file.workspace = true
 publish.workspace = true
 readme.workspace = true

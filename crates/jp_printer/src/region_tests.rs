@@ -121,7 +121,7 @@ fn a_delayed_region_paints_nothing_until_its_delay_passes() {
     stack.claim_test(1, style, unsized_terminal(), &mut out);
     stack.redraw(&mut out);
 
-    assert!(out.is_empty());
+    assert_eq!(out, [] as [u8; 0]);
 }
 
 #[test]
@@ -198,7 +198,7 @@ fn releasing_a_buried_claim_leaves_the_screen_alone() {
 
     stack.release(buried, &mut out);
 
-    assert!(out.is_empty());
+    assert_eq!(out, [] as [u8; 0]);
 }
 
 #[test]
@@ -217,7 +217,7 @@ fn suspension_erases_the_row_and_blocks_redraws() {
     out.clear();
     stack.redraw(&mut out);
     stack.set_detail(id, "still here".to_owned(), &mut out);
-    assert!(out.is_empty());
+    assert_eq!(out, [] as [u8; 0]);
 
     stack.resume(&mut out);
     assert_eq!(String::from_utf8(out).unwrap(), "\r\x1b[Kstill here");

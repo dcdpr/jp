@@ -34,7 +34,7 @@ use jp_credentials::{
 };
 use jp_inquire::prompt::{PromptBackend as _, TerminalPromptBackend};
 use jp_llm::{
-    credential::{AccountIdentity, ProviderAuth, provider_auth},
+    credential::{AccountIdentity, DynProviderAuth, provider_auth},
     provider::openai::{auth as openai_auth, oauth as openai_oauth},
 };
 use jp_printer::Printer;
@@ -452,7 +452,7 @@ impl Login {
         &self,
         store: &CredentialStore,
         printer: &Printer,
-        auth: &dyn ProviderAuth,
+        auth: &dyn DynProviderAuth,
         data_root: Option<&Utf8Path>,
     ) -> Output {
         let _guard = store.try_lock_auth().map_err(|error| store_error(&error))?;
@@ -493,7 +493,7 @@ impl Login {
         &self,
         store: &CredentialStore,
         printer: &Printer,
-        auth: &dyn ProviderAuth,
+        auth: &dyn DynProviderAuth,
         data_root: Option<&Utf8Path>,
     ) -> Result<Acquired, Error> {
         if let Some(external) = auth.external_auth().filter(|_| !self.direct) {
@@ -556,7 +556,7 @@ impl Login {
     }
 
     async fn resolve_identity(
-        auth: &dyn ProviderAuth,
+        auth: &dyn DynProviderAuth,
         acquired: Acquired,
     ) -> (
         CredentialSecret,
@@ -671,7 +671,11 @@ impl Login {
 
 impl Login {
     /// Obtain a credential by whichever flow the flags selected.
-    async fn acquire(&self, auth: &dyn ProviderAuth, printer: &Printer) -> Result<Acquired, Error> {
+    async fn acquire(
+        &self,
+        auth: &dyn DynProviderAuth,
+        printer: &Printer,
+    ) -> Result<Acquired, Error> {
         if self.setup_token && self.target.provider == ProviderId::Anthropic && !self.direct {
             return Err(Error::from(
                 "direct token login requires --direct --setup-token",
@@ -929,7 +933,7 @@ impl List {
         store: &CredentialStore,
         api_keys: &[(String, String, String)],
         printer: &Printer,
-        auth: impl Fn(ProviderId) -> Option<Box<dyn ProviderAuth>>,
+        auth: impl Fn(ProviderId) -> Option<Box<dyn DynProviderAuth>>,
     ) -> Output {
         let document = store.load().map_err(|e| store_error(&e))?;
         let now = Utc::now();
@@ -1120,15 +1124,14 @@ impl Logout {
         &self,
         store: &CredentialStore,
         printer: &Printer,
-        auth: impl Fn(ProviderId) -> Option<Box<dyn ProviderAuth>>,
+        auth: impl Fn(ProviderId) -> Option<Box<dyn DynProviderAuth>>,
     ) -> Output {
         let _guard = store.try_lock_auth().map_err(|error| store_error(&error))?;
         let target = self.target;
         let document = store.load().map_err(|error| store_error(&error))?;
         let profiles = document.profiles(CATEGORY_LLM, &target.store_key());
-        let names = profiles
-            .map(|profiles| profiles.keys().cloned().collect::<Vec<_>>())
-            .unwrap_or_default();
+        let names =
+            profiles.map_or_default(|profiles| profiles.keys().cloned().collect::<Vec<_>>());
         let name = match &self.name {
             Some(name) => name.clone(),
             None if names.len() == 1 => names[0].clone(),

@@ -10,6 +10,7 @@ use jp_config::{
 };
 use jp_conversation::{Conversation, ConversationId};
 use jp_storage::backend::FsStorageBackend;
+use jp_test::env_var::EnvVarGuard;
 use jp_workspace::{
     Workspace,
     session::{Session, SessionId, SessionSource},
@@ -21,7 +22,6 @@ use serial_test::serial;
 use test_log::test;
 
 use super::*;
-use crate::env_testing::EnvVarGuard;
 
 #[test]
 fn a_successful_run_keeps_its_trace_log_only_under_jp_debug() {

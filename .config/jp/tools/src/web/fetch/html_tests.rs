@@ -647,7 +647,7 @@ mod extract_preview_after_heading {
     fn empty_when_nothing_follows() {
         let html = r#"<h2 id="s">Title</h2>"#;
         let preview = preview_for(html);
-        assert!(preview.is_empty());
+        assert_eq!(preview, "");
     }
 }
 

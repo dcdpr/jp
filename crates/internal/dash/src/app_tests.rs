@@ -822,7 +822,7 @@ fn test_slash_filters_as_you_type_and_includes_idle_worktrees() {
 
     // Keys that normally act are part of the query while typing.
     type_keys(&mut app, "q");
-    assert!(lines(&app).is_empty());
+    assert_eq!(lines(&app), [] as [String; 0]);
     app.handle(key(KeyCode::Backspace));
 
     app.handle(key(KeyCode::Enter));

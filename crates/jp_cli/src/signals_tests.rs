@@ -298,7 +298,7 @@ async fn a_cloned_router_shares_the_handler_stack() {
     // The press stopped at the handler, so neither of these ran.
     assert!(!router.shutdown_token().is_cancelled());
     assert!(!clone.shutdown_token().is_cancelled());
-    assert!(signals.exit_codes().is_empty());
+    assert_eq!(signals.exit_codes(), [] as [i32; 0]);
 }
 
 /// Drives the full Ctrl-C escalation ladder through the real signal task —
@@ -320,13 +320,13 @@ async fn escalation_ladder_reaches_exit_through_signal_task() {
             .expect("handler should be notified"),
     );
     assert!(!router.shutdown_token().is_cancelled());
-    assert!(signals.exit_codes().is_empty());
+    assert_eq!(signals.exit_codes(), [] as [i32; 0]);
 
     // Second press within the cooldown: bypasses the handler and requests a
     // graceful shutdown.
     signals.interrupt().await;
     router.shutdown_token().cancelled().await;
-    assert!(signals.exit_codes().is_empty());
+    assert_eq!(signals.exit_codes(), [] as [i32; 0]);
 
     // Third press: the exit action fires with the SIGINT exit code. Delivery
     // is asynchronous, so poll for the recording rather than asserting

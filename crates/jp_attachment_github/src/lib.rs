@@ -49,11 +49,10 @@ use std::{
     error::Error,
 };
 
-use async_trait::async_trait;
 use camino::Utf8Path;
 use glob::Pattern;
 use jp_attachment::{
-    Attachment, BoxedHandler, HANDLERS, Handler, distributed_slice, linkme, typetag,
+    Attachment, BoxedHandler, HANDLERS, Handler, HandlerFuture, distributed_slice, linkme, typetag,
 };
 use jp_github::{
     Error as GhError, Octocrab,
@@ -95,7 +94,6 @@ pub struct GithubAttachment {
 }
 
 #[typetag::serde(name = "github")]
-#[async_trait]
 impl Handler for GithubAttachment {
     fn scheme(&self) -> &'static str {
         "gh"
@@ -105,48 +103,52 @@ impl Handler for GithubAttachment {
         canonical_url(&parse_uri(uri)?)
     }
 
-    async fn add(
-        &mut self,
-        uri: &Url,
-        _cwd: &Utf8Path,
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        // Validate the URI shape now so a typo fails fast at attach time
-        // rather than at the next conversation turn.
-        parse_uri(uri)?;
-        self.urls.insert(uri.clone());
-        Ok(())
+    fn add<'a>(&'a mut self, uri: &'a Url, _cwd: &'a Utf8Path) -> HandlerFuture<'a, ()> {
+        Box::pin(async move {
+            // Validate the URI shape now so a typo fails fast at attach time
+            // rather than at the next conversation turn.
+            parse_uri(uri)?;
+            self.urls.insert(uri.clone());
+            Ok(())
+        })
     }
 
-    async fn remove(&mut self, uri: &Url) -> Result<(), Box<dyn Error + Send + Sync>> {
-        self.urls.remove(uri);
-        Ok(())
+    fn remove<'a>(&'a mut self, uri: &'a Url) -> HandlerFuture<'a, ()> {
+        Box::pin(async move {
+            self.urls.remove(uri);
+            Ok(())
+        })
     }
 
-    async fn list(&self) -> Result<Vec<Url>, Box<dyn Error + Send + Sync>> {
-        Ok(self.urls.iter().cloned().collect())
+    fn list(&self) -> HandlerFuture<'_, Vec<Url>> {
+        Box::pin(async move { Ok(self.urls.iter().cloned().collect()) })
     }
 
-    async fn get(&self, _: &Utf8Path) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>> {
-        debug!(id = "gh", "Fetching GitHub attachments.");
+    fn get<'a>(&'a self, _: &'a Utf8Path) -> HandlerFuture<'a, Vec<Attachment>> {
+        Box::pin(async move {
+            debug!(id = "gh", "Fetching GitHub attachments.");
 
-        let mut attachments = Vec::with_capacity(self.urls.len());
-        for url in &self.urls {
-            match fetch(url).await {
-                Ok(att) => attachments.push(att),
-                Err(error) => {
-                    // Surface the failure instead of silently dropping the
-                    // attachment. Workflows like `just pr-review` rely on
-                    // `gh:pull/N/diff` being present — a silent skip would
-                    // let the LLM produce a "review" with no diff in
-                    // context, with the prompt still claiming the diff is
-                    // attached. Better to fail loudly so the user can
-                    // investigate (token, network, rate limit) and retry.
-                    error!(uri = %url, %error, "Failed to fetch GitHub attachment.");
-                    return Err(format!("failed to fetch GitHub attachment {url}: {error}").into());
+            let mut attachments = Vec::with_capacity(self.urls.len());
+            for url in &self.urls {
+                match fetch(url).await {
+                    Ok(att) => attachments.push(att),
+                    Err(error) => {
+                        // Surface the failure instead of silently dropping the
+                        // attachment. Workflows like `just pr-review` rely on
+                        // `gh:pull/N/diff` being present — a silent skip would
+                        // let the LLM produce a "review" with no diff in
+                        // context, with the prompt still claiming the diff is
+                        // attached. Better to fail loudly so the user can
+                        // investigate (token, network, rate limit) and retry.
+                        error!(uri = %url, %error, "Failed to fetch GitHub attachment.");
+                        return Err(
+                            format!("failed to fetch GitHub attachment {url}: {error}").into()
+                        );
+                    }
                 }
             }
-        }
-        Ok(attachments)
+            Ok(attachments)
+        })
     }
 }
 
@@ -684,11 +686,7 @@ fn render_diff_header(
 ) -> String {
     let title = pr.title.as_deref().unwrap_or("(no title)");
     let author = pr.user.as_ref().map_or("(unknown)", |u| u.login.as_str());
-    let html_url = pr
-        .html_url
-        .as_ref()
-        .map(ToString::to_string)
-        .unwrap_or_default();
+    let html_url = pr.html_url.as_ref().map_or_default(ToString::to_string);
     let head = pr
         .head
         .as_ref()

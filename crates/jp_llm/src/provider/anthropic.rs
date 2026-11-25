@@ -16,7 +16,6 @@ use async_anthropic::{
     },
 };
 use async_stream::try_stream;
-use async_trait::async_trait;
 use base64::Engine as _;
 use camino::Utf8PathBuf;
 use chrono::{NaiveDate, Utc};
@@ -404,7 +403,6 @@ fn is_switchable(error: &AnthropicError) -> bool {
     }
 }
 
-#[async_trait]
 impl Provider for Anthropic {
     fn mcp_tool_metadata(&self, model: &ModelDetails) -> Map<String, Value> {
         if model.served_by_subscription() && self.config.subscription_flow == SubscriptionFlow::Acp
@@ -3372,8 +3370,7 @@ fn map_message_delta(delta: &types::MessageDelta) -> Option<Event> {
             let (category, explanation) = delta
                 .stop_details
                 .as_ref()
-                .map(|d| (d.category.clone(), d.explanation.clone()))
-                .unwrap_or_default();
+                .map_or_default(|d| (d.category.clone(), d.explanation.clone()));
             Some(Event::Finished(FinishReason::Refused {
                 category,
                 explanation,
@@ -3408,8 +3405,7 @@ impl From<AnthropicError> for StreamError {
                 let refusal = limits
                     .overage_disabled_reason
                     .as_deref()
-                    .map(|reason| format!(" Extra usage unavailable: {reason}."))
-                    .unwrap_or_default();
+                    .map_or_default(|reason| format!(" Extra usage unavailable: {reason}."));
 
                 StreamError::subscription_exhausted(
                     format!("Subscription limit reached ({window}).{refusal} ({error})"),

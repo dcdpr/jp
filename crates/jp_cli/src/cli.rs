@@ -92,8 +92,7 @@ where
 {
     matches
         .get_many::<T>(id)
-        .map(|values| values.cloned().collect())
-        .unwrap_or_default()
+        .map_or_default(|values| values.cloned().collect())
 }
 
 /// The error for a subcommand name a command declares but does not read.
@@ -457,8 +456,7 @@ impl Globals {
         Self {
             config: matches
                 .get_many("config")
-                .map(|values| values.cloned().collect())
-                .unwrap_or_default(),
+                .map_or_default(|values| values.cloned().collect()),
             no_config: matches.get_flag("no_config"),
             verbose: matches.get_count("verbose"),
             quiet: matches.get_flag("quiet"),

@@ -1,5 +1,6 @@
 use std::{env, path::PathBuf};
 
+pub mod env_var;
 pub mod macros;
 pub mod mock;
 

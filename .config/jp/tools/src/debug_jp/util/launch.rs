@@ -481,6 +481,5 @@ fn spawn_reader<R: Read + Send + 'static>(
 fn join_reader(handle: Option<thread::JoinHandle<Vec<u8>>>) -> String {
     handle
         .and_then(|h| h.join().ok())
-        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
-        .unwrap_or_default()
+        .map_or_default(|bytes| String::from_utf8_lossy(&bytes).into_owned())
 }

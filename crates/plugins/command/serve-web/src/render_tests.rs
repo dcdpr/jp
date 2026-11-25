@@ -83,7 +83,7 @@ fn render_reasoning_events_split_by_a_redacted_event_as_one_region() {
                 if html.contains("I can test this directly by verifying the return value.")
         ),
         "reasoning events must form one region, got: {:?}",
-        &rendered[1]
+        rendered[1]
     );
 }
 
@@ -101,7 +101,7 @@ fn render_reasoning_separator_as_a_paragraph_break() {
     let rendered = render_events(&events);
     assert_eq!(rendered.len(), 2);
     let RenderedEvent::Reasoning { html } = &rendered[1] else {
-        panic!("expected one reasoning region, got: {:?}", &rendered[1]);
+        panic!("expected one reasoning region, got: {:?}", rendered[1]);
     };
     assert_eq!(
         html.matches("<p>").count(),

@@ -310,7 +310,7 @@ fn test_ignores_mismatched_event_type() {
 #[test]
 fn test_peek_partial_events_empty() {
     let builder = EventBuilder::new();
-    assert!(builder.peek_partial_events().is_empty());
+    assert_eq!(builder.peek_partial_events(), [] as [ChatResponse; 0]);
 }
 
 #[test]
@@ -423,7 +423,7 @@ fn test_structured_not_included_in_peek_partial_events() {
     builder.handle_part(0, EventPart::Structured("{\"partial".into()), Map::new());
 
     // Structured buffers are not a usable resume point.
-    assert!(builder.peek_partial_events().is_empty());
+    assert_eq!(builder.peek_partial_events(), [] as [ChatResponse; 0]);
 }
 
 /// Drain emits buffered text for `Reasoning`/`Message`/`Structured` so partial

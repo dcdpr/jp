@@ -1,7 +1,7 @@
 use assert_matches::assert_matches;
 use camino::Utf8Path;
 use jp_config::{
-    PartialAppConfig, PartialConfig as _,
+    PartialAppConfig,
     assignment::KvAssignment,
     conversation::DefaultConversationId,
     providers::mcp::{PartialMcpProviderConfig, PartialStdioConfig},

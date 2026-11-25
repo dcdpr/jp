@@ -4,7 +4,9 @@ use std::{
 };
 
 use camino_tempfile::Utf8TempDir;
-use jp_plugin::message::{ErrorResponse, InterruptAction, QueryOutcome};
+use jp_plugin::message::{
+    ErrorResponse, InterruptAction, InterruptRequest, QueryOutcome, QueryRequest,
+};
 use pretty_assertions::assert_eq;
 use serde_json::{Value, json};
 use tokio::sync::watch;
@@ -14,7 +16,7 @@ use crate::{
     api::{NewCommentRequest, NewReview},
     model::{Reply as Answered, Role, Verdict},
     options::Options,
-    pass::{Ended, Outcome},
+    pass::{Ended, Outcome, Pass},
     store::{Store, now},
     test_support::{CONVERSATION, Host, Written, eventually, within},
 };
@@ -196,7 +198,7 @@ async fn a_stop_before_the_conversation_exists_waits_for_it() {
     let query = f.written.first_query().await;
 
     assert_eq!(f.passes.stop(f.id), Ok(Some(1)));
-    assert!(f.written.interrupts().is_empty());
+    assert_eq!(f.written.interrupts(), [] as [InterruptRequest; 0]);
 
     f.host.created(&query);
     within(starting).await.unwrap().unwrap();
@@ -322,8 +324,8 @@ async fn a_pass_submitted_while_shutting_down_is_refused() {
             "The server is shutting down, and starts no more passes."
         ))
     );
-    assert!(f.written.queries().is_empty());
-    assert!(f.store.peek(f.id).unwrap().passes.list.is_empty());
+    assert_eq!(f.written.queries(), [] as [QueryRequest; 0]);
+    assert_eq!(f.store.peek(f.id).unwrap().passes.list, [] as [Pass; 0]);
 }
 
 #[tokio::test(flavor = "multi_thread")]

@@ -25,7 +25,7 @@ fn an_abandoned_rfd_opens_with_the_reason() {
         output.text,
         "docs/rfd/042-idea.md: Abandoned (Discussion -> Abandoned)\n"
     );
-    assert!(output.warnings.is_empty());
+    assert_eq!(output.warnings, [] as [String; 0]);
     assert_eq!(
         workspace.read("docs/rfd/042-idea.md"),
         "\

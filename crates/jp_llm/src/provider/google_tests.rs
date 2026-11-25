@@ -1178,7 +1178,7 @@ mod trailing_thought_signature {
         ]);
 
         assert_eq!(committed.len(), 1);
-        assert!(signatures(&committed).is_empty());
+        assert_eq!(signatures(&committed), [] as [&str; 0]);
     }
 }
 
@@ -2291,7 +2291,7 @@ mod silence_allowance {
     use crate::{
         event::Event,
         model::ModelDetails,
-        provider::{Google, Provider as _, ProviderId},
+        provider::{DynProvider as _, Google, ProviderId},
         query::{ChatQuery, Truncation},
     };
 

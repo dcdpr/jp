@@ -45,7 +45,7 @@ fn ranges_count_utf16_code_units() {
 #[test]
 fn unclosed_markup_is_left_as_written() {
     assert_eq!(styled("a ** b `c").text, "a ** b `c");
-    assert!(styled("a ** b `c").styles.is_empty());
+    assert_eq!(styled("a ** b `c").styles, [] as [String; 0]);
 }
 
 #[test]

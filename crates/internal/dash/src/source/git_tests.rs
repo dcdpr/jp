@@ -2,6 +2,8 @@ use std::fs;
 
 use camino::Utf8PathBuf;
 use camino_tempfile::Utf8TempDir;
+use jp_test::env_var::EnvVarGuard;
+use serial_test::serial;
 
 use super::*;
 
@@ -9,12 +11,6 @@ fn run(dir: &Utf8Path, args: &[&str]) -> String {
     let out = Command::new("git")
         .arg("-C")
         .arg(dir)
-        .args([
-            "-c",
-            "core.hooksPath=/dev/null",
-            "-c",
-            "commit.gpgSign=false",
-        ])
         .args(args)
         .output()
         .unwrap();
@@ -89,7 +85,10 @@ fn is_ancestor(dir: &Utf8Path, ancestor: &str, of: &str) -> bool {
 }
 
 #[test]
+#[serial(env_vars)]
 fn test_rebase_stack_moves_every_branch_onto_the_new_base() {
+    let _git_global = EnvVarGuard::set("GIT_CONFIG_GLOBAL", "");
+    let _git_system = EnvVarGuard::set("GIT_CONFIG_SYSTEM", "");
     let tmp = Utf8TempDir::new().unwrap();
     let (work, remote, b1, b2) = stack(&tmp, "base\none\n");
     commit(&work, "main.txt", "later\n");
@@ -109,7 +108,10 @@ fn test_rebase_stack_moves_every_branch_onto_the_new_base() {
 }
 
 #[test]
+#[serial(env_vars)]
 fn test_rebase_stack_pushes_nothing_once_a_branch_moved() {
+    let _git_global = EnvVarGuard::set("GIT_CONFIG_GLOBAL", "");
+    let _git_system = EnvVarGuard::set("GIT_CONFIG_SYSTEM", "");
     let tmp = Utf8TempDir::new().unwrap();
     let (work, remote, b1, b2) = stack(&tmp, "base\none\n");
     commit(&work, "main.txt", "later\n");
@@ -129,7 +131,10 @@ fn test_rebase_stack_pushes_nothing_once_a_branch_moved() {
 }
 
 #[test]
+#[serial(env_vars)]
 fn test_rebase_stack_reports_conflicts_and_leaves_the_branches_alone() {
+    let _git_global = EnvVarGuard::set("GIT_CONFIG_GLOBAL", "");
+    let _git_system = EnvVarGuard::set("GIT_CONFIG_SYSTEM", "");
     let tmp = Utf8TempDir::new().unwrap();
     let (work, remote, b1, b2) = stack(&tmp, "base\none\n");
     // `main` changes the line `b1` changed.

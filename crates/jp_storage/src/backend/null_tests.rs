@@ -31,7 +31,7 @@ fn read_only_session_backend_discards_writes() {
         .unwrap();
 
     assert_eq!(inner.load_session("getsid-12345").unwrap(), None);
-    assert!(backend.list_session_keys().is_empty());
+    assert_eq!(backend.list_session_keys(), [] as [String; 0]);
 }
 
 #[test]
