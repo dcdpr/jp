@@ -166,6 +166,8 @@ impl From<Url> for PartialAttachmentConfig {
 ///
 /// Its URL is `<type>://<path>`, with each `params` entry added as a query
 /// parameter.
+/// For `type = "file"`, `path` is a path relative to the workspace root, taken
+/// exactly as written.
 #[derive(Debug, Clone, PartialEq, Config)]
 pub struct AttachmentObjectConfig {
     /// The type of the attachment.
@@ -221,16 +223,28 @@ impl ToPartial for AttachmentObjectConfig {
 }
 
 impl AttachmentObjectConfig {
-    /// Convert an attachment configuration to a URL.
+    /// Convert an attachment configuration to the generic `<type>://<path>`
+    /// URL, with `params` added as query parameters.
     ///
     /// # Errors
     ///
     /// Returns an error if the URL cannot be constructed due to invalid parts.
     pub fn to_url(&self) -> Result<Url, Error> {
-        let mut url = format!("{}://{}", self.kind, self.path)
+        let url = format!("{}://{}", self.kind, self.path)
             .parse::<Url>()
             .map_err(|e| Error::Custom(Box::new(e)))?;
 
+        self.with_params(url)
+    }
+
+    /// Add `params` to `url` as query parameters, a list value as the same
+    /// parameter repeated.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a parameter value is neither a string nor a list of
+    /// strings.
+    pub fn with_params(&self, mut url: Url) -> Result<Url, Error> {
         for (key, value) in &self.params {
             match &value.0 {
                 Value::String(value) => {

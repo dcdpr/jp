@@ -39,6 +39,86 @@ async fn test_file_add_include() -> Result<(), Box<dyn Error + Send + Sync>> {
     Ok(())
 }
 
+/// `file://notes.md` parses as host `notes.md` with path `/`; the host alone is
+/// the file name.
+#[tokio::test]
+#[test_log::test]
+async fn a_host_with_an_empty_path_names_a_file() -> Result<(), Box<dyn Error + Send + Sync>> {
+    let tmp = tempdir()?;
+    fs::write(tmp.path().join("notes.md"), "notes")?;
+
+    let mut handler = FileContent::default();
+    handler
+        .add(&Url::parse("file://notes.md")?, tmp.path())
+        .await?;
+
+    assert_eq!(handler.includes.iter().collect::<Vec<_>>(), vec![
+        &Pattern::new("/notes.md")?
+    ]);
+
+    let attachments = handler.get(tmp.path()).await?;
+    assert_eq!(attachments, vec![Attachment::text("notes.md", "notes")]);
+
+    Ok(())
+}
+
+#[test]
+fn the_host_form_suggests_the_lossless_spelling() {
+    let suggest = |url: &str| host_form_spelling(&Url::parse(url).unwrap());
+
+    assert_eq!(suggest("file://notes.md"), Some("file:notes.md".to_owned()));
+    // The parser lowercased `Docs`; the suggestion can only carry what it kept.
+    assert_eq!(
+        suggest("file://Docs/Notes.md"),
+        Some("file:docs/Notes.md".to_owned())
+    );
+    assert_eq!(
+        suggest("file://path/x.txt?exclude"),
+        Some("file:path/x.txt?exclude".to_owned())
+    );
+    assert_eq!(suggest("file:docs/notes.md"), None);
+    assert_eq!(suggest("file:///docs/notes.md"), None);
+}
+
+#[test]
+fn a_table_path_goes_in_the_url_path() -> Result<(), Box<dyn Error + Send + Sync>> {
+    let handler = FileContent::default();
+
+    assert_eq!(
+        handler.table_url("Docs/Notes.md")?.as_str(),
+        "file:///Docs/Notes.md"
+    );
+    assert_eq!(handler.table_url("**/*.md")?.as_str(), "file:///**/*.md");
+    assert_eq!(
+        handler.table_url("café/my notes.md")?.as_str(),
+        "file:///caf%C3%A9/my%20notes.md"
+    );
+
+    Ok(())
+}
+
+/// A table's `path` reaches the handler as written, including its case and
+/// characters a URL percent-encodes.
+#[tokio::test]
+#[test_log::test]
+async fn a_table_path_attaches_that_exact_file() -> Result<(), Box<dyn Error + Send + Sync>> {
+    let tmp = tempdir()?;
+    fs::create_dir(tmp.path().join("Docs"))?;
+    fs::write(tmp.path().join("Docs/Café Notes.md"), "notes")?;
+
+    let mut handler = FileContent::default();
+    let url = handler.table_url("Docs/Café Notes.md")?;
+    handler.add(&url, tmp.path()).await?;
+
+    let attachments = handler.get(tmp.path()).await?;
+    assert_eq!(attachments, vec![Attachment::text(
+        "Docs/Café Notes.md",
+        "notes"
+    )]);
+
+    Ok(())
+}
+
 #[tokio::test]
 #[test_log::test]
 async fn test_file_add_exclude() -> Result<(), Box<dyn Error + Send + Sync>> {

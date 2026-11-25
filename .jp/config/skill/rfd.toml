@@ -5,7 +5,7 @@ extends = [
 
 [conversation]
 attachments = [
-    "file://docs/rfd/001-jp-rfd-process.md",
+    "file:docs/rfd/001-jp-rfd-process.md",
 ]
 
 [conversation.tools]

@@ -84,7 +84,6 @@ use jp_config::{
     },
     conversation::{
         ConversationConfig,
-        attachment::AttachmentConfig,
         tool::{
             Enable, PartialEnableConfig, PartialToolConfig, PartialToolsConfig, ToggleScope,
             ToolSource,
@@ -137,7 +136,7 @@ use url::Url;
 
 use super::{
     ConversationLoadRequest, Output,
-    attachment::{attach_urls, load_conversation_attachments},
+    attachment::{attach_urls, attachment_url, load_conversation_attachments},
     compact_flag::CompactFlag,
     conversation_id::{ConversationIds, FlagIds},
     lock::LockOutcome,
@@ -1426,8 +1425,8 @@ impl TurnInputs {
             .conversation
             .attachments
             .iter()
-            .map(AttachmentConfig::to_url)
-            .collect::<std::result::Result<Vec<_>, _>>()?;
+            .map(attachment_url)
+            .collect::<Result<Vec<_>>>()?;
 
         // One group per URL, in declaration order, flattened into the order
         // the provider receives them in.

@@ -505,6 +505,37 @@ fn add_skips_a_url_a_table_entry_already_builds() {
     );
 }
 
+/// A `file` table keeps its `path` out of the URL host, so its case survives
+/// and it matches the `file:<path>` URL for the same file.
+#[test]
+fn add_skips_the_file_url_of_an_attached_file_table() {
+    let id = make_id(1_700_000_034);
+    let mut config = AppConfig::new_test();
+    config.conversation.attachments = vec![AttachmentConfig::Object(AttachmentObjectConfig {
+        kind: "file".to_owned(),
+        path: "Docs/Notes.md".to_owned(),
+        params: IndexMap::new(),
+    })];
+    let (mut ctx, out, err, _tmp) = persisted_ctx(id, config);
+    let rt = ctx.handle().clone();
+    let before = delta_count(&ctx, &id);
+
+    let handle = ctx.workspace.acquire_conversation(&id).unwrap();
+    let add = add::Add {
+        attachments: vec![url_arg("file:Docs/Notes.md")],
+        target: FlagIds::default(),
+    };
+    rt.block_on(add.run(&mut ctx, vec![handle])).unwrap();
+    ctx.printer.flush();
+
+    assert_eq!(delta_count(&ctx, &id), before);
+    assert_eq!(*out.lock(), "");
+    assert_eq!(
+        *err.lock(),
+        format!("Already attached to conversation {id}: file:///Docs/Notes.md\n")
+    );
+}
+
 /// A URL its handler rejects is refused before anything is recorded.
 #[test]
 fn add_refuses_a_url_its_handler_cannot_resolve() {
@@ -695,6 +726,65 @@ fn load_conversation_attachments_propagates_other_errors() {
         Error::AttachmentFailed { uri, .. } => assert_eq!(uri, bad_uri),
         other => panic!("expected AttachmentFailed, got {other:?}"),
     }
+}
+
+fn table(kind: &str, path: &str, params: &[(&str, &str)]) -> AttachmentConfig {
+    AttachmentConfig::Object(AttachmentObjectConfig {
+        kind: kind.to_owned(),
+        path: path.to_owned(),
+        params: params
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), JsonValue((*v).into())))
+            .collect::<IndexMap<_, _>>(),
+    })
+}
+
+/// A `file` table resolves to the URL `jp attachment add <path>` writes, so the
+/// two forms name the same attachment and `rm` finds either.
+#[test]
+fn a_file_table_and_its_file_url_are_the_same_attachment() {
+    let cases = [
+        ("Docs/Notes.md", &[][..], "file:Docs/Notes.md"),
+        ("café/my notes.md", &[][..], "file:café/my notes.md"),
+        (
+            "**/*.md",
+            &[("exclude", "true")][..],
+            "file:**/*.md?exclude=true",
+        ),
+    ];
+
+    for (path, params, written) in cases {
+        assert_eq!(
+            attachment_url(&table("file", path, params)).unwrap(),
+            Url::parse(written).unwrap(),
+            "{path}"
+        );
+    }
+
+    assert_eq!(
+        attachment_url(&table("file", "Docs/Notes.md", &[]))
+            .unwrap()
+            .as_str(),
+        "file:///Docs/Notes.md"
+    );
+}
+
+/// A type whose handler keeps the default builds `<type>://<path>`, as does a
+/// type with no handler.
+#[test]
+fn other_tables_build_the_generic_url() {
+    assert_eq!(
+        attachment_url(&table("https", "example.com/docs", &[("lang", "en")]))
+            .unwrap()
+            .as_str(),
+        "https://example.com/docs?lang=en"
+    );
+    assert_eq!(
+        attachment_url(&table("jp", "jp-c123456", &[("raw", "")]))
+            .unwrap()
+            .as_str(),
+        "jp://jp-c123456?raw="
+    );
 }
 
 #[test]

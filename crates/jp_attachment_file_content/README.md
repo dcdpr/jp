@@ -4,41 +4,39 @@ This crate provides an attachment handler for the full content of a file.
 
 ## File URI Format
 
-A file URI has the format
-
-```sh
-file://host/path
-```
-
-However, this attachment handler enforces the following restrictions:
-
-- `host` is always ignored<sup>*</sup> (and can be omitted)
-- `path` is always relative to the workspace root
-
-This means that the following URIs are equivalent:
+Write a file URI as `file:<path>`, with `path` relative to the workspace root.
+These URIs are equivalent:
 
 - `file:path/to/file.txt`
 - `file:/path/to/file.txt`
-- `file://path/to/file.txt`
 - `file:///path/to/file.txt`
 
-<sup>*Technically, for `file://path/to/file.txt`, the host is `path`, but this
-handler considers this part of the final path, so it is not ignored, but
-prepended to the path.
-</sup>
+Do not write `file://path/to/file.txt`. There, `path` is the URL host, which
+URL parsing lowercases and IDNA-encodes before the handler sees it, so
+`file://Docs/notes.md` reads as `docs/notes.md`. The handler still reads the
+host as the first path segment, so existing URIs keep resolving, but logs a
+warning naming the `file:<path>` spelling.
+
+As a config table, `path` is taken exactly as written:
+
+```toml
+[[conversation.attachments]]
+type = "file"
+path = "Docs/Notes.md"
+```
 
 ## Usage
 
 The handler supports glob patterns for file inclusion and exclusion of files:
 
 ```sh
-jp attachment add file://**/*.md
+jp attachment add 'file:**/*.md'
 ```
 
 Exclusions can be specified using the `exclude` flag:
 
 ```sh
-jp attachment add file://path/to/file.txt?exclude
+jp attachment add 'file:path/to/file.txt?exclude'
 ```
 
 `jp` has built-in support for short-hand file URIs:

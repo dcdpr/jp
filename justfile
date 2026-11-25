@@ -1649,7 +1649,7 @@ rfd-triage NNN *ARGS: _install-jp _install-rfd
 
     printf "Triaging feedback on $file\n\n" >&2
     jp query $target --cfg=personas/rfd-triager \
-        --attach "file://$file" \
+        --attach "file:$file" \
         --attach "jp://${review_id}?select=u,a:-1" \
         $note_attach \
         $extra_edit \

@@ -4,11 +4,12 @@ use camino::Utf8Path;
 use glob::Pattern;
 use ignore::{WalkBuilder, WalkState, overrides::OverrideBuilder};
 use jp_attachment::{
-    Attachment, BoxedHandler, HANDLERS, Handler, HandlerFuture, distributed_slice, linkme, typetag,
+    Attachment, BoxedHandler, HANDLERS, Handler, HandlerFuture, distributed_slice, linkme,
+    percent_decode_str, typetag,
 };
 use serde::{Deserialize, Serialize};
 use tracing::{debug, trace, warn};
-use url::Url;
+use url::{Position, Url};
 
 #[distributed_slice(HANDLERS)]
 #[linkme(crate = linkme)]
@@ -39,6 +40,14 @@ impl Handler for FileContent {
             url.query_pairs_mut().append_pair("exclude", "");
         }
 
+        Ok(url)
+    }
+
+    /// `file:///<path>`, keeping `path` out of the URL host, where the parser
+    /// would lowercase and IDNA-encode its first segment.
+    fn table_url(&self, path: &str) -> Result<Url, Box<dyn Error + Send + Sync>> {
+        let mut url = Url::parse("file:///")?;
+        url.set_path(path);
         Ok(url)
     }
 
@@ -298,31 +307,55 @@ fn build_attachment(path: &Utf8Path, cwd: &Utf8Path) -> Option<Attachment> {
     Some(Attachment::text(rel.to_string(), content))
 }
 
-/// We need to do some extra work to get the path relative to the workspace.
+/// The workspace-relative pattern a `file` URL names, rooted at `/`.
 ///
-/// - For `file:**/*.md`, the `**` part is marked as the domain, so we need to
-///   merge it back.
-///
-/// - A file URI is *almost always absolute, but there's also a way to make it
-///   relative:
-///
-///   - <file:path/to/file.txt> -> absolute
-///   - <file:/path/to/file.txt> -> absolute
-///   - <file://path/to/file.txt> -> relative (host is `path`)
-///   - <file:///path/to/file.txt> -> absolute
-///
-/// To manage this, we make *all* paths absolute.
-/// This is okay, because paths are always relative to the workspace root, so
-/// `path/to/file.txt` and `/path/to/file.txt` both point to
+/// Every path is relative to the workspace root, so `file:path/to/file.txt`,
+/// `file:/path/to/file.txt` and `file:///path/to/file.txt` all name
 /// `{workspace}/path/to/file.txt`.
+/// The path is percent-decoded.
+///
+/// `file://path/to/file.txt` parses with host `path`, which is read as the
+/// first path segment, and `file://file.txt` as the file name alone.
+/// The parser has already lowercased and IDNA-encoded that host, so this form
+/// logs a warning naming the `file:<path>` spelling.
 fn uri_to_pattern(uri: &Url) -> Result<Pattern, Box<dyn Error + Send + Sync>> {
-    let domain = uri.host_str().unwrap_or("");
-    let mut path = format!("{domain}{}", uri.path());
+    let path = percent_decode_str(uri.path())?;
+    let mut path = match uri.host_str().filter(|host| !host.is_empty()) {
+        Some(host) if path == "/" => host.to_owned(),
+        Some(host) => format!("{host}{path}"),
+        None => path,
+    };
+
+    if let Some(spelling) = host_form_spelling(uri) {
+        warn!(
+            url = %uri,
+            %spelling,
+            "File attachment URL starts its path in the URL host, which URL parsing lowercases. \
+             Write it as `file:<path>`."
+        );
+    }
+
     if !path.starts_with('/') {
         path = format!("/{path}");
     }
 
     Ok(Pattern::new(&path).map_err(|e| e.to_string())?)
+}
+
+/// The `file:<path>` spelling of a URL whose path starts in its host, such as
+/// `file://docs/notes.md`.
+///
+/// `None` when the URL has no host.
+/// The parser lowercases and IDNA-encodes a host, so the spelling carries the
+/// host as parsed, which can differ from what was written.
+fn host_form_spelling(uri: &Url) -> Option<String> {
+    let host = uri.host_str().filter(|host| !host.is_empty())?;
+    let path = match uri.path() {
+        "/" => "",
+        path => path,
+    };
+
+    Some(format!("file:{host}{path}{}", &uri[Position::AfterPath..]))
 }
 
 fn pattern_to_uri(pattern: &Pattern) -> Result<Url, Box<dyn Error + Send + Sync>> {
