@@ -31,11 +31,16 @@ use regex::Regex;
 use crate::{
     id::{self, ResolveError, RfdId},
     paths::Paths,
+    priority::{self, PRIORITY_FILE},
 };
 
 /// A draft id, which counts as a mention only standing alone.
 static DRAFT_TOKEN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"D[0-9]{2}").expect("valid regex"));
+
+/// A draft cited the way documents cite RFDs: `RFD D05`.
+static DRAFT_CITATION: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"RFD (D[0-9]{2})").expect("valid regex"));
 
 /// Whether `id` names a draft.
 fn is_draft(id: &str) -> bool {
@@ -91,19 +96,24 @@ fn draft_tokens(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// The first draft slot that no draft file holds and no RFD, draft, or ticket
-/// mentions, with a warning naming the draft ids that are mentioned but have no
-/// draft file, if there are any.
+/// The draft ids `text` cites as `RFD D05` where no digit follows.
 ///
-/// Promoting a draft rewrites every mention of its id, so a draft given a slot
-/// that is still mentioned would take over the mentions of the draft that held
-/// it before.
-/// Mentions in `unreported` still reserve their slots, but are left out of the
-/// warning.
-fn uncited_draft_slot(
-    paths: &Paths,
-    unreported: Option<&Utf8Path>,
-) -> Result<(RfdId, Option<String>), String> {
+/// This is the boundary a promotion's citation rewrite uses, so `_RFD D05_` and
+/// `RFD D05s` count even though the bare id doesn't stand alone there.
+fn draft_citations(text: &str) -> impl Iterator<Item = &str> {
+    DRAFT_CITATION
+        .captures_iter(text)
+        .filter_map(|captures| captures.get(1))
+        .filter(|id| !text[id.end()..].starts_with(|c: char| c.is_ascii_digit()))
+        .map(|id| id.as_str())
+}
+
+/// Every draft id a promotion would rewrite, with the files naming it: the ids
+/// the RFDs, drafts, and tickets mention, and the drafts the board file ranks.
+///
+/// A board file that can't be read is passed over: promotion refuses to run
+/// until it is fixed, so its entries are never rewritten.
+fn draft_mentions(paths: &Paths) -> Result<BTreeMap<RfdId, Vec<Utf8PathBuf>>, String> {
     let mut mentions: BTreeMap<RfdId, Vec<Utf8PathBuf>> = BTreeMap::new();
     for dir in [paths.rfds.clone(), paths.drafts(), paths.tickets.clone()] {
         for file in markdown_files(&dir)? {
@@ -112,9 +122,12 @@ fn uncited_draft_slot(
                 Err(error) if error.kind() == io::ErrorKind::InvalidData => continue,
                 Err(error) => return Err(format!("{file}: {error}")),
             };
-            let ids: BTreeSet<RfdId> = draft_tokens(&text)
+            let tokens = draft_tokens(&text);
+            let ids: BTreeSet<RfdId> = tokens
                 .iter()
-                .filter_map(|token| parse(token))
+                .map(String::as_str)
+                .chain(draft_citations(&text))
+                .filter_map(parse)
                 .collect();
             for id in ids {
                 mentions.entry(id).or_default().push(file.clone());
@@ -122,6 +135,35 @@ fn uncited_draft_slot(
         }
     }
 
+    if let Ok(Some(board)) = priority::read(&paths.rfds) {
+        let file = paths.rfds.join(PRIORITY_FILE);
+        let ids: BTreeSet<RfdId> = board
+            .placed()
+            .filter_map(parse)
+            .filter(|id| matches!(id, RfdId::Draft(_)))
+            .collect();
+        for id in ids {
+            mentions.entry(id).or_default().push(file.clone());
+        }
+    }
+
+    Ok(mentions)
+}
+
+/// The first draft slot that no draft file holds and nothing a promotion
+/// rewrites names, with a warning naming the draft ids that are named but have
+/// no draft file, if there are any.
+///
+/// Promoting a draft rewrites every mention of its id, so a draft given a slot
+/// that is still mentioned would take over the mentions of the draft that held
+/// it before.
+/// The mention of an id in a file given as `unreported` still reserves its
+/// slot, but is left out of the warning.
+fn uncited_draft_slot(
+    paths: &Paths,
+    unreported: Option<(&Utf8Path, RfdId)>,
+) -> Result<(RfdId, Option<String>), String> {
+    let mentions = draft_mentions(paths)?;
     let reserved = mentions.keys().copied().collect();
     let slot = id::next_draft_slot(&paths.rfds, &reserved)?;
 
@@ -136,7 +178,7 @@ fn uncited_draft_slot(
         .flat_map(|(id, files)| {
             files
                 .into_iter()
-                .filter(|file| Some(file.as_path()) != unreported)
+                .filter(move |file| Some((file.as_path(), id)) != unreported)
                 .map(move |file| format!("\n  {id} in {}", paths.show(&file)))
         })
         .collect();

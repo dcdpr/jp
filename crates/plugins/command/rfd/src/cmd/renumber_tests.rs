@@ -182,6 +182,29 @@ fn without_a_target_a_draft_skips_a_slot_another_document_still_cites() {
     );
 }
 
+/// Moving a draft into a slot that is still cited is allowed, since it can put
+/// a stale citation right, but the citations it takes over are named.
+#[test]
+fn a_named_target_that_is_still_cited_is_reported() {
+    let workspace = workspace();
+    workspace.write("docs/ticket/03xx0aa-old.md", "See [RFD D01].\n");
+
+    let output = renumber(
+        &workspace.paths,
+        &Links::default(),
+        "D06",
+        Some("D01"),
+        true,
+    )
+    .unwrap();
+
+    assert!(workspace.exists("docs/rfd/drafts/D01-other.md"));
+    assert_eq!(output.warnings, ["Warning: these files cite D01 from \
+                                  before this draft took it; check that \
+                                  they mean it:\n  \
+                                  docs/ticket/03xx0aa-old.md"]);
+}
+
 /// A ticket names a published RFD by its bare number in a link label, so the
 /// label follows the RFD where a bare `042` in prose doesn't.
 #[test]

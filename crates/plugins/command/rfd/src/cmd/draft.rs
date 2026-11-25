@@ -35,6 +35,10 @@ pub(crate) struct Draft<'a> {
 struct Seed<'a> {
     ticket: TicketId,
     file: &'a Utf8Path,
+
+    /// The id the ticket's `Promoted to` names, which the draft replaces.
+    promoted_to: Option<RfdId>,
+
     description: &'a str,
 }
 
@@ -120,6 +124,11 @@ pub(crate) fn from_ticket(
     let seed = Seed {
         ticket,
         file: &ticket_file,
+        promoted_to: parsed
+            .metadata
+            .promoted_to
+            .as_deref()
+            .and_then(|promoted| promoted.parse().ok()),
         description: &parsed.description,
     };
     let (id, file, cited) = create(paths, categories, &seeded, Some(&seed))?;
@@ -139,8 +148,8 @@ pub(crate) fn from_ticket(
 /// Check the request and write the draft, returning its id, its path, and a
 /// warning naming the draft ids cited with no draft file to match.
 ///
-/// The ticket a draft is seeded from is left out of that warning: its `Promoted
-/// to` is about to name the new draft.
+/// The id the seed ticket's `Promoted to` names is left out of that warning for
+/// that ticket: the field is about to name the new draft.
 fn create(
     paths: &Paths,
     categories: &[String],
@@ -172,7 +181,10 @@ fn create(
         Err(error) => return Err(format!("{template_path}: {error}")),
     };
 
-    let (id, cited) = uncited_draft_slot(paths, seed.map(|seed| seed.file))?;
+    let (id, cited) = uncited_draft_slot(
+        paths,
+        seed.and_then(|seed| Some((seed.file, seed.promoted_to?))),
+    )?;
     let mut text = fill(&template, id, title, &category, draft.author, draft.date)
         .map_err(|problem| format!("{}: {problem}", paths.show(&template_path)))?;
     if let Some(seed) = seed {

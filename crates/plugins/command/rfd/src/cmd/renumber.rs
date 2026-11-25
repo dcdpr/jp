@@ -18,7 +18,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use doc::references::{self, Rule, markdown_files};
 use ticket::render;
 
-use super::{Leftovers, listed, stem, uncited_draft_slot};
+use super::{Leftovers, draft_mentions, listed, stem, uncited_draft_slot};
 use crate::{
     Output,
     document::{Document, Header},
@@ -61,7 +61,10 @@ pub(crate) fn renumber(
         .collect();
 
     let (new, cited) = match target {
-        Some(text) => (parse_target(old, text)?, None),
+        Some(text) => {
+            let new = parse_target(old, text)?;
+            (new, cited_target(paths, new)?)
+        }
         None if matches!(old, RfdId::Draft(_)) => uncited_draft_slot(paths, None)?,
         None => (id::next_number(&paths.rfds)?, None),
     };
@@ -211,6 +214,29 @@ fn rewrite_references(
     }
 
     Ok(updated)
+}
+
+/// A warning naming the files that name the draft slot `target`, if any.
+///
+/// Renumbering refuses a slot a draft file holds, so every mention of `target`
+/// was written about an earlier draft, and names the moved draft from then on.
+fn cited_target(paths: &Paths, target: RfdId) -> Result<Option<String>, String> {
+    if !matches!(target, RfdId::Draft(_)) {
+        return Ok(None);
+    }
+
+    let files = draft_mentions(paths)?.remove(&target).unwrap_or_default();
+
+    Ok((!files.is_empty()).then(|| {
+        listed(
+            &format!(
+                "Warning: these files cite {target} from before this draft took it; check that \
+                 they mean it:"
+            ),
+            paths,
+            &files,
+        )
+    }))
 }
 
 /// Point the `Promoted to` field of the ticket file at `path` at `new` when it
