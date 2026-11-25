@@ -23,12 +23,11 @@ fn handler() -> BoxedHandler {
     (Box::new(FileContent::default()) as Box<dyn Handler>).into()
 }
 
-/// A file attachment path that cannot be read: it leaves the workspace, or
-/// resolving it failed.
+/// Error returned when a file attachment path leaves the workspace or cannot be
+/// resolved.
 #[derive(Debug, thiserror::Error)]
 #[error("cannot attach '{path}': {reason}")]
 pub struct PathError {
-    /// The workspace-relative path as the attachment names it.
     pub path: String,
     pub reason: FsAccessError,
 }
@@ -57,8 +56,8 @@ impl Handler for FileContent {
         Ok(url)
     }
 
-    /// `file:///<path>`, keeping `path` out of the URL host, where the parser
-    /// would lowercase and IDNA-encode its first segment.
+    /// Builds `file:///<path>` so `path` stays out of the URL host, where the
+    /// URL parser would lowercase and IDNA-encode its first segment.
     fn table_url(&self, path: &str) -> Result<Url, Box<dyn Error + Send + Sync>> {
         path_to_url(path)
     }
@@ -195,8 +194,8 @@ impl Handler for FileContent {
     }
 }
 
-/// The matcher selecting which files the walk under `cwd` yields: those
-/// matching an `includes` glob and no `excludes` pattern.
+/// Build the directory walker matcher for `cwd` from the `includes` globs and
+/// `excludes` patterns.
 fn walk_overrides(
     cwd: &Utf8Path,
     includes: &[Cow<'_, str>],
@@ -239,11 +238,11 @@ fn walk_overrides(
     builder.build()
 }
 
-/// Read a file the walk under `cwd` found, as an attachment named by its path
-/// relative to `cwd`.
+/// Read a directory entry from the walk under `cwd` into an [`Attachment`]
+/// keyed by its workspace-relative path.
 ///
-/// `None` for a directory, an entry that cannot be read, and a symlink whose
-/// target is outside the workspace.
+/// Returns `None` for directories, unreadable entries, or symlinks whose
+/// targets resolve outside the workspace.
 fn read_walked_entry(entry: Result<DirEntry, ignore::Error>, cwd: &Utf8Path) -> Option<Attachment> {
     let entry = entry.ok()?;
     if entry.file_type().is_some_and(|kind| kind.is_dir()) {
@@ -251,10 +250,10 @@ fn read_walked_entry(entry: Result<DirEntry, ignore::Error>, cwd: &Utf8Path) -> 
     }
     let rel = Utf8Path::from_path(entry.path())?.strip_prefix(cwd).ok()?;
 
-    // The walk does not descend into a linked directory, but it does yield a
-    // symlink to a file, so each entry is resolved like a named path. One a
-    // glob happened to match is skipped rather than failing the whole
-    // attachment.
+    // The walker does not descend into symlinked directories, but it yields
+    // symlinks to files, so resolve each entry against the workspace root. If
+    // a glob matches a symlink that points outside the workspace, skip that
+    // entry rather than failing the whole attachment.
     let resolved = match resolve(cwd, rel.as_str()) {
         Ok(Some(resolved)) if !resolved.is_dir() => resolved,
         Ok(_) => return None,
@@ -271,15 +270,15 @@ fn is_glob(pattern: &str) -> bool {
     pattern.contains(['*', '?', '['])
 }
 
-/// What the workspace-relative `rel` names, with every symlink on it followed.
+/// Resolve the workspace-relative path `rel` against `cwd`, following symlinks.
 ///
-/// `Ok(None)` when nothing is there: the path does not exist, or a symlink on
-/// it points at nothing.
+/// Returns `Ok(None)` if the path does not exist or traverses a dangling
+/// symlink.
 ///
 /// # Errors
 ///
-/// Returns an error when `rel` climbs out of the workspace with `..`, when its
-/// target lies outside the workspace, or when the filesystem cannot be read.
+/// Returns an error if `rel` escapes the workspace via `..` or a symlink, or if
+/// an I/O error occurs while reading the filesystem.
 fn resolve(cwd: &Utf8Path, rel: &str) -> Result<Option<ResolvedPath>, PathError> {
     match resolve_path(cwd, Utf8Path::new(rel), None, Resolve::Target) {
         Ok(resolved) if resolved.kind.is_some() => Ok(Some(resolved)),
@@ -296,8 +295,7 @@ fn resolve(cwd: &Utf8Path, rel: &str) -> Result<Option<ResolvedPath>, PathError>
 /// OpenAI 20 MB, Gemini 20 MB) even after base64 expansion (~33% overhead).
 const MAX_BINARY_SIZE: u64 = 10 * 1024 * 1024;
 
-/// Read the file at `path`, a target [`resolve`] returned, as an attachment
-/// named `rel`.
+/// Read the resolved file at `path` into an [`Attachment`] with source `rel`.
 fn build_attachment(rel: &str, path: &Utf8Path) -> Option<Attachment> {
     // Detect binary file types from magic bytes. `get_from_path` only reads the
     // first few KB, so we don't load the entire file into memory just to check
@@ -355,17 +353,19 @@ fn build_attachment(rel: &str, path: &Utf8Path) -> Option<Attachment> {
     Some(Attachment::text(rel.to_string(), content))
 }
 
-/// The workspace-relative pattern a `file` URL names, rooted at `/`.
+/// Extract the workspace-relative glob pattern from a `file` URL, rooted at
+/// `/`.
 ///
-/// Every path is relative to the workspace root, so `file:path/to/file.txt`,
-/// `file:/path/to/file.txt` and `file:///path/to/file.txt` all name
+/// All paths are relative to the workspace root, so `file:path/to/file.txt`,
+/// `file:/path/to/file.txt`, and `file:///path/to/file.txt` all resolve to
 /// `{workspace}/path/to/file.txt`.
-/// The path is percent-decoded.
+/// The URL path is percent-decoded.
 ///
-/// `file://path/to/file.txt` parses with host `path`, which is read as the
-/// first path segment, and `file://file.txt` as the file name alone.
-/// The parser has already lowercased and IDNA-encoded that host, so this form
-/// logs a warning naming the `file:<path>` spelling.
+/// In `file://path/to/file.txt`, `path` is parsed as the URL host and treated
+/// as the first path segment (`file://file.txt` treats the host as the file
+/// name).
+/// Because the URL parser lowercases and IDNA-encodes the host, this form logs
+/// a warning suggesting the `file:<path>` syntax.
 fn uri_to_pattern(uri: &Url) -> Result<Pattern, Box<dyn Error + Send + Sync>> {
     let path = percent_decode_str(uri.path())?;
     let mut path = match uri.host_str().filter(|host| !host.is_empty()) {
@@ -390,12 +390,11 @@ fn uri_to_pattern(uri: &Url) -> Result<Pattern, Box<dyn Error + Send + Sync>> {
     Ok(Pattern::new(&path).map_err(|e| e.to_string())?)
 }
 
-/// The `file:<path>` spelling of a URL whose path starts in its host, such as
-/// `file://docs/notes.md`.
+/// Return the `file:<path>` form for a `file` URL that has a non-empty host
+/// (such as `file://docs/notes.md`), or `None` if the URL has no host.
 ///
-/// `None` when the URL has no host.
-/// The parser lowercases and IDNA-encodes a host, so the spelling carries the
-/// host as parsed, which can differ from what was written.
+/// Because the URL parser has already lowercased and IDNA-encoded the host, the
+/// returned string reflects the normalized host rather than the original input.
 fn host_form_spelling(uri: &Url) -> Option<String> {
     let host = uri.host_str().filter(|host| !host.is_empty())?;
     let path = match uri.path() {
@@ -406,10 +405,11 @@ fn host_form_spelling(uri: &Url) -> Option<String> {
     Some(format!("file:{host}{path}{}", &uri[Position::AfterPath..]))
 }
 
-/// The `file:///<path>` URL naming a raw, unencoded `path`.
+/// Build a `file:///<path>` URL from a raw, unencoded `path`.
 ///
-/// Every character of `path` is literal, so `?`, `#` and `%` are
-/// percent-encoded, and [`uri_to_pattern`] reads back exactly `path`.
+/// All characters in `path` are treated as literal path characters: `?`, `#`,
+/// and `%` are percent-encoded so [`uri_to_pattern`] decodes the exact input
+/// `path`.
 fn path_to_url(path: &str) -> Result<Url, Box<dyn Error + Send + Sync>> {
     let mut url = Url::parse("file:///")?;
     // `set_path` encodes `?` and `#`, but keeps an existing `%XX` as it is.

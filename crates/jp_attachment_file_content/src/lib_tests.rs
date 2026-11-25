@@ -10,7 +10,6 @@ use url::Url;
 
 use super::*;
 
-/// A workspace `ws`, beside a directory `outside` holding `secret.txt`.
 fn workspace_beside_a_secret() -> (Utf8TempDir, Utf8PathBuf) {
     let tmp = tempdir().unwrap();
     let ws = tmp.path().join("ws");
@@ -87,7 +86,8 @@ fn the_host_form_suggests_the_lossless_spelling() {
     let suggest = |url: &str| host_form_spelling(&Url::parse(url).unwrap());
 
     assert_eq!(suggest("file://notes.md"), Some("file:notes.md".to_owned()));
-    // The parser lowercased `Docs`; the suggestion can only carry what it kept.
+    // The URL parser lowercases the host `Docs` before `host_form_spelling`
+    // sees the URL.
     assert_eq!(
         suggest("file://Docs/Notes.md"),
         Some("file:docs/Notes.md".to_owned())
@@ -162,7 +162,6 @@ async fn a_table_path_with_a_percent_sign_attaches_that_exact_file()
     Ok(())
 }
 
-/// The URLs `list` returns name the patterns they were built from.
 #[tokio::test]
 #[test_log::test]
 async fn listed_urls_round_trip_their_patterns() -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -486,8 +485,8 @@ async fn a_named_symlink_out_of_the_workspace_is_refused() {
     assert_matches!(error.reason, FsAccessError::Escape(_));
 }
 
-/// The read itself is confined, not only `add`: a handler restored from a
-/// stored conversation reads its includes without going through `add`.
+/// `get` also enforces workspace confinement when reading patterns deserialized
+/// from a stored conversation (which bypass `add`).
 #[cfg(unix)]
 #[tokio::test]
 #[test_log::test]
@@ -505,8 +504,6 @@ async fn a_stored_include_out_of_the_workspace_is_refused_when_read() {
     assert_matches!(error.reason, FsAccessError::Escape(_));
 }
 
-/// A glob skips a symlink that leaves the workspace rather than failing, and
-/// keeps the files beside it.
 #[cfg(unix)]
 #[tokio::test]
 #[test_log::test]
@@ -530,8 +527,6 @@ async fn a_glob_skips_symlinks_out_of_the_workspace() {
     assert_eq!(attachments, vec![Attachment::text("docs/real.md", "real")]);
 }
 
-/// A symlink to a file inside the workspace attaches under the name it was
-/// given.
 #[cfg(unix)]
 #[tokio::test]
 #[test_log::test]

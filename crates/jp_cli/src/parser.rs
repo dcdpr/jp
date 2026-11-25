@@ -124,12 +124,14 @@ impl AttachmentUrlOrPath {
     }
 }
 
-/// The `file` URL naming the workspace-relative `path`, as an exclusion when
-/// `exclude` is set.
+/// Build a `file` URL for the workspace-relative `path`, appending
+/// `exclude=true` when `exclude` is set.
 ///
-/// The `file` handler builds it as it builds a `file` table with this `path`,
-/// so the two forms name the same attachment, and a `#`, `?` or `%` in the file
-/// name stays part of it.
+/// Uses the `file` handler's [`Handler::table_url`] so CLI file paths and `type
+/// = "file"` config tables produce identical URLs, and literal `#`, `?`, or `%`
+/// characters in the file name are percent-encoded.
+///
+/// [`Handler::table_url`]: jp_attachment::Handler::table_url
 fn file_url(path: &Utf8Path, exclude: bool) -> Result<Url> {
     let handler = jp_attachment::find_handler_by_scheme("file")
         .ok_or_else(|| Error::NotFound("Attachment handler", "file".to_owned()))?;

@@ -46,10 +46,10 @@ impl AssignKeyValue for PartialAttachmentConfig {
                     let edits_params = kv.key().clone().trim_prefix("params");
                     object.assign(kv)?;
 
-                    // A `params` edit leaves the URL's path alone, so the
-                    // attachment stays a URL, rebuilt as `<type>://<path>`. A
-                    // table's `path` is read by the attachment's handler, which
-                    // can take it as a raw path rather than as URL text.
+                    // Editing `params` leaves the URL's path untouched, so keep
+                    // the attachment as a `Url` rebuilt via `<type>://<path>`.
+                    // Editing `path` or `type` converts it to an `Object` table
+                    // so the handler's `table_url` interprets `path`.
                     *self = if edits_params {
                         let object = AttachmentObjectConfig::from_partial(object, vec![])?;
                         Self::Url(object.to_url()?)
@@ -248,13 +248,13 @@ impl AttachmentObjectConfig {
         self.with_params(url)
     }
 
-    /// Add `params` to `url` as query parameters, a list value as the same
-    /// parameter repeated.
+    /// Append `params` to `url` as query parameters, repeating the key for
+    /// array values.
     ///
     /// # Errors
     ///
-    /// Returns an error if a parameter value is neither a string nor a list of
-    /// strings.
+    /// Returns an error if a parameter value is neither a string nor an array
+    /// of strings.
     pub fn with_params(&self, mut url: Url) -> Result<Url, Error> {
         for (key, value) in &self.params {
             match &value.0 {

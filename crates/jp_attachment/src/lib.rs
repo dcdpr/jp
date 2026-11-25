@@ -174,13 +174,13 @@ pub trait Handler: std::fmt::Debug + DynClone + DynHash + Send + Sync {
     /// require I/O (such as a missing or oversized file).
     fn canonical(&self, uri: &Url) -> Result<Url, Box<dyn Error + Send + Sync>>;
 
-    /// Build the URL for an attachment written as a config table, from its
-    /// `path`.
+    /// Build the URL for a config table attachment from its `path`.
     ///
-    /// The caller adds the table's `params` as query parameters.
-    /// The default is `<scheme>://<path>`, which puts the start of `path` in
-    /// the URL's authority.
-    /// A handler whose `path` belongs elsewhere in its URL overrides this.
+    /// The caller appends the table's `params` as query parameters.
+    /// Defaults to `<scheme>://<path>`, which places the first segment of
+    /// `path` in the URL authority.
+    /// Handlers whose `path` belongs in the URL path (such as `file`) override
+    /// this method.
     ///
     /// # Errors
     ///

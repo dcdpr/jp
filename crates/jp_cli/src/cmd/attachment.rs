@@ -155,11 +155,15 @@ fn attachment_scheme(uri: &Url) -> &str {
         .map_or(uri.scheme(), |(scheme, _)| scheme)
 }
 
-/// The URL an attachment config names.
+/// Build the [`Url`] for an [`AttachmentConfig`].
 ///
-/// A table's URL is built by the handler for its `type`, which knows where
-/// `path` belongs in that URL, with `params` added as query parameters.
-/// A type no handler serves, such as `jp`, gets the generic `<type>://<path>`.
+/// For a table attachment, delegates URL construction to the [`Handler`] for
+/// `type` via [`Handler::table_url`] and appends `params` as query parameters.
+/// Types without a registered [`Handler`] (such as `jp`) fall back to
+/// `<type>://<path>`.
+///
+/// [`Handler::table_url`]: jp_attachment::Handler::table_url
+/// [`Handler`]: jp_attachment::Handler
 pub(crate) fn attachment_url(attachment: &AttachmentConfig) -> Result<Url> {
     let AttachmentConfig::Object(table) = attachment else {
         return Ok(attachment.to_url()?);
