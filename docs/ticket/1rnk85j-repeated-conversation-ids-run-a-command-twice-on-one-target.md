@@ -13,7 +13,7 @@ command two handles to the same conversation, and the command acts on it once
 per handle:
 
 ```sh
-jp c compact "$id" "$id" --reset 1   # removes compaction 1, then what was compaction 2
+jp c compact "$id" "$id" --reset=1   # removes compaction 1, then what was compaction 2
 jp c compact "$id" "$id" --summary  # two paid summary requests, two stored compactions
 printf '%s\n' "$id" "$id" | jp c print -   # prints the conversation twice
 ```
@@ -30,13 +30,20 @@ duplicates are preserved, so stdin matches the command line.
 Keyword targets don't repeat: `+session` reads a history `activate` already
 dedups, and `+pinned` / `+archived` come from maps.
 
-No multi-target command wants a repeat: `rm` and `archive` would fail on the
-second copy, the read-only commands print twice, and `compact` re-applies.
+Only `fork` wants a repeat: RFD 086 documents `jp c fork "$id" "$id"` as
+creating two independent forks.
+The two forks share a wall-clock ID until RFD 106 lands, the same collision
+`fork A B` has.
+Every other multi-target command is wrong on the second copy: `rm` and
+`archive` would fail, the read-only commands print twice, and `compact`
+re-applies.
 
 ## Proposal
 
 Drop repeated IDs in `resolve_request`, before handles are acquired, keeping
 first-seen order.
+`fork` opts out through its `ConversationLoadRequest` and keeps one handle per
+occurrence.
 Do it silently, with a `debug!` line per dropped ID: an error would break piping
 IDs from overlapping files (`cat a.txt b.txt | jp c rm -`), and the intent of a
 repeat is unambiguous.

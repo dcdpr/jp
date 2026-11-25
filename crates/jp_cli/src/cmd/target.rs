@@ -68,6 +68,13 @@ pub(crate) struct ConversationLoadRequest {
     /// `Some(0)` is the common case for commands that need config from their
     /// target conversation.
     pub config_conversation: Option<usize>,
+
+    /// Whether a conversation named more than once gets one handle per
+    /// occurrence.
+    ///
+    /// `false` drops the repeats, so the command acts on each conversation
+    /// once.
+    pub keep_repeats: bool,
 }
 
 impl ConversationLoadRequest {
@@ -78,6 +85,7 @@ impl ConversationLoadRequest {
             multi: false,
             session: true,
             config_conversation: None,
+            keep_repeats: false,
         }
     }
 
@@ -88,6 +96,7 @@ impl ConversationLoadRequest {
             multi: false,
             session: true,
             config_conversation: None,
+            keep_repeats: false,
         }
     }
 
@@ -98,6 +107,7 @@ impl ConversationLoadRequest {
             multi: false,
             session: true,
             config_conversation: Some(0),
+            keep_repeats: false,
         }
     }
 
@@ -108,6 +118,7 @@ impl ConversationLoadRequest {
             multi: false,
             session: true,
             config_conversation: None,
+            keep_repeats: false,
         }
     }
 
@@ -118,7 +129,14 @@ impl ConversationLoadRequest {
             multi: false,
             session: true,
             config_conversation: Some(0),
+            keep_repeats: false,
         }
+    }
+
+    /// Give a conversation named more than once one handle per occurrence.
+    pub fn with_repeats(mut self) -> Self {
+        self.keep_repeats = true;
+        self
     }
 
     /// Use explicit targets if non-empty, otherwise resolve from
@@ -241,7 +259,8 @@ pub(crate) struct ResolveOutcome {
 /// This is the single resolution entry point called by `run_inner`.
 ///
 /// A conversation named more than once gets one handle, at the position of its
-/// first occurrence.
+/// first occurrence, unless the request sets
+/// [`ConversationLoadRequest::keep_repeats`].
 ///
 /// `default_id` is the configured fallback from `conversation.default_id`,
 /// consulted when no session mapping exists and no explicit `--id` is given.
@@ -282,7 +301,12 @@ pub(crate) fn resolve_request(
 
     // Before acquiring: each handle is a separate pass of the command over its
     // conversation.
-    let handles = dedup_ids(ids)
+    let ids = if request.keep_repeats {
+        ids
+    } else {
+        dedup_ids(ids)
+    };
+    let handles = ids
         .iter()
         .map(|id| workspace.acquire_conversation(id).map_err(Into::into))
         .collect::<Result<Vec<_>>>()?;
@@ -629,7 +653,8 @@ pub(crate) fn dedup_ids(mut ids: Vec<ConversationId>) -> Vec<ConversationId> {
 ///
 /// Blank lines are skipped.
 /// Order and repeats are kept, so the result is identical to passing the same
-/// IDs on the command line; [`resolve_request`] drops the repeats from both.
+/// IDs on the command line; [`resolve_request`] treats repeats from both the
+/// same way.
 /// Errors when stdin is a terminal (nothing piped) or when no IDs are provided.
 fn read_stdin_ids() -> Result<Vec<ConversationId>> {
     if io::stdin().is_terminal() {

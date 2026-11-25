@@ -6,7 +6,7 @@ use std::{
 
 use camino_tempfile::tempdir;
 use chrono::{DateTime, TimeZone as _, Utc};
-use jp_config::{AppConfig, PartialAppConfig};
+use jp_config::{AppConfig, PartialAppConfig, conversation::DefaultConversationId};
 use jp_conversation::{
     Conversation, ConversationEvent, ConversationId, ConversationStream, Labels, OverlayAction,
     OverlayMatcher, OverlayPatch,
@@ -25,7 +25,7 @@ use super::*;
 use crate::{
     Globals,
     cli::parse_args,
-    cmd::{compact_flag::CompactFlag, conversation_id::PositionalIds},
+    cmd::{compact_flag::CompactFlag, conversation_id::PositionalIds, target::resolve_request},
 };
 
 /// Assert a fork reproduces its source, entry IDs included.
@@ -1335,6 +1335,40 @@ fn a_failure_still_reports_the_forks_already_created() {
         .find(|id| *id != first)
         .expect("the first source was forked before the failure");
     assert_eq!(*out.lock(), format!("{created}\n"));
+}
+
+/// Regression: deduplicating targets gave `fork "$id" "$id"` one handle, where
+/// RFD 086 makes each occurrence a separate fork.
+///
+/// Pins the handles rather than the forks: two forks created in one run share a
+/// wall-clock ID until RFD 106 lands, so the second overwrites the first.
+#[test]
+fn a_repeated_source_gets_one_handle_per_occurrence() {
+    let mut ws = Workspace::in_memory("/tmp/jp-cli-fork-repeat-test");
+    let source = ConversationId::try_from(DateTime::<Utc>::UNIX_EPOCH).unwrap();
+    ws.create_conversation_with_id(
+        source,
+        Conversation::default(),
+        Arc::new(AppConfig::new_test()),
+    );
+
+    let source_arg = source.to_string();
+    let fork = parse_args::<Fork>(&[&source_arg, &source_arg]).unwrap();
+    let ids: Vec<_> = resolve_request(
+        &fork.conversation_load_request(),
+        &ws,
+        None,
+        DefaultConversationId::Ask,
+        false,
+        false,
+    )
+    .unwrap()
+    .handles
+    .iter()
+    .map(ConversationHandle::id)
+    .collect();
+
+    assert_eq!(ids, vec![source, source]);
 }
 
 /// Create two conversations with distinct content, fork only one, and verify

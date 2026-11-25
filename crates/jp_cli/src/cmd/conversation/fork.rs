@@ -106,7 +106,9 @@ impl CommandArgs for Fork {
 
 impl Fork {
     pub(crate) fn conversation_load_request(&self) -> ConversationLoadRequest {
-        ConversationLoadRequest::explicit_or_session(&self.target)
+        // Each occurrence of a source is a separate fork (RFD 086), so repeats
+        // are kept.
+        ConversationLoadRequest::explicit_or_session(&self.target).with_repeats()
     }
 
     pub(crate) async fn run(self, ctx: &mut Ctx, handles: &[ConversationHandle]) -> Output {
