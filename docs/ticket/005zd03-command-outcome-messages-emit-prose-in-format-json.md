@@ -153,8 +153,7 @@ wasteful.
 - **From**: jp
 - **Date**: 2026-08-23T16:12:54Z
 
-Two details above have moved since this was filed, both while implementing [RFD
-103].
+Two details above have moved since this was filed, while implementing [RFD 103].
 
 `cmd/conversation/fork.rs:190` is off the list.
 `jp c fork` prints the IDs it created — one per line in text mode, a JSON array

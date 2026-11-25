@@ -88,7 +88,9 @@ changes three things:
 - `rm` resolves a file path without requiring the file to exist
   (`AttachmentUrlOrPath::parse_unchecked`), so an attachment whose file was
   deleted or renamed is still removed by its path.
-- `add` and `jp query -a` refuse a retired MCP resource URI: the `mcp`
-  handler's `Handler::canonical` returns an error for it.
+- `add` and `jp query -a` refuse a retired MCP resource URI: the `mcp` handler's
+  `Handler::canonical` returns an error for it.
   A conversation already holding one still removes it with `rm`.
-  A URI that arrives through config is not checked; that is [T-1rr0xfp](https://jp.computer/T-1rr0xfp).
+  A URI that arrives through config is not checked; that is [T-1rr0xfp].
+
+[T-1rr0xfp]: https://jp.computer/T-1rr0xfp
