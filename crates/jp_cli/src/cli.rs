@@ -6,6 +6,10 @@
 //! matches back into a [`Cli`].
 //! Each subcommand declares and reads its own arguments; see [`Commands`].
 //!
+//! clap reads a word that starts with `-` as flags.
+//! A value that starts with a from-end position (`--reset -3..-1`) is attached
+//! to its option before clap rejects it; see [`match_argv`].
+//!
 //! A flag whose value is optional is declared through [`flag`], which decides
 //! whether a word after it is its value or the start of the free text.
 //!
@@ -19,11 +23,12 @@ use std::{ffi::OsString, num::NonZeroUsize, str::FromStr as _};
 use clap::{
     Arg, ArgAction, ArgMatches, Command,
     builder::{BoolValueParser, TypedValueParser as _},
+    error::ErrorKind,
     value_parser,
 };
 
-use self::flag::Parsed;
 pub(crate) use self::spelling::Spelling;
+use self::{flag::Parsed, spelling::attach_from_end_values};
 use crate::{
     CliFormat, KeyValueOrPath, LogFormat,
     cmd::{Commands, workspace::target::WorkspaceTarget},
@@ -51,6 +56,26 @@ pub(crate) trait CommandArgs: Sized {
     /// Returns an error when a value cannot be used, or no subcommand was given
     /// where one is required.
     fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error>;
+
+    /// Read the arguments back from `matches`, given how each option's value
+    /// was written.
+    ///
+    /// A command overrides this when one of its flags takes an optional value
+    /// that may be a positional argument instead, which only `spelling` can
+    /// tell apart.
+    /// Every other command reads the same arguments with or without it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when a value cannot be used, or no subcommand was given
+    /// where one is required.
+    fn from_spelled_matches(
+        matches: &ArgMatches,
+        spelling: &Spelling,
+    ) -> Result<Self, clap::Error> {
+        let _ = spelling;
+        Self::from_matches(matches)
+    }
 }
 
 /// The subcommand `matches` selected, or the error for a missing one.
@@ -123,11 +148,51 @@ impl<A: CommandArgs, B: CommandArgs> CommandArgs for (A, B) {
 /// reports reading them back.
 #[cfg(test)]
 pub(crate) fn parse_args<T: CommandArgs>(args: &[&str]) -> Result<T, clap::Error> {
-    let argv = ["test"].into_iter().chain(args.iter().copied());
+    let argv = ["test"].iter().chain(args).map(OsString::from).collect();
     let mut cmd = T::augment(Command::new("test"));
-    let matches = cmd.try_get_matches_from_mut(argv)?;
+    let (matches, spelling) = match_argv(&mut cmd, argv)?;
 
-    T::from_matches(&matches).map_err(|error| error.format(&mut cmd))
+    T::from_spelled_matches(&matches, &spelling).map_err(|error| error.format(&mut cmd))
+}
+
+/// Match `argv` against `cmd`, and record how each option's value was written.
+///
+/// `argv` starts with the program name.
+/// `cmd` is fully built when this returns.
+///
+/// When clap rejects `argv` for an unknown argument, each value that starts
+/// with a from-end position is attached to the option written before it
+/// ([`attach_from_end_values`]), and the result is matched in place of `argv`.
+/// A command line clap accepts as written is never rewritten.
+///
+/// # Errors
+///
+/// Returns clap's error for arguments that do not match `cmd`, including the
+/// help and version requests clap reports as errors.
+/// For a rewritten command line, that is the error of the rewritten one.
+fn match_argv(
+    cmd: &mut Command,
+    argv: Vec<OsString>,
+) -> Result<(ArgMatches, Spelling), clap::Error> {
+    let (matches, argv) = match cmd.try_get_matches_from_mut(&argv) {
+        Ok(matches) => (matches, argv),
+        Err(error) if error.kind() == ErrorKind::UnknownArgument => {
+            // A failed match builds only the subcommands it reached, and the
+            // walk reads the options of each command it descends into.
+            cmd.build();
+            let Some(argv) = attach_from_end_values(cmd, &argv) else {
+                return Err(error);
+            };
+
+            (cmd.try_get_matches_from_mut(&argv)?, argv)
+        }
+        Err(error) => return Err(error),
+    };
+
+    cmd.build();
+    let spelling = Spelling::of(cmd, &matches, &argv);
+
+    Ok((matches, spelling))
 }
 
 /// A parsed `jp` invocation.
@@ -164,12 +229,10 @@ impl Cli {
         I: IntoIterator<Item = T>,
         T: Into<OsString> + Clone,
     {
-        let argv: Vec<OsString> = argv.into_iter().map(Into::into).collect();
+        let argv = argv.into_iter().map(Into::into).collect();
 
         let mut cmd = Self::command();
-        let matches = cmd.try_get_matches_from_mut(&argv)?;
-        cmd.build();
-        let spelling = Spelling::of(&cmd, &matches, &argv);
+        let (matches, spelling) = match_argv(&mut cmd, argv)?;
 
         // An error from reading the matches back carries no usage line of its
         // own; formatting it against the subcommand gives it the same chrome as

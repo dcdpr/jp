@@ -28,13 +28,32 @@ where
     T: FromStr,
     T::Err: fmt::Display,
 {
+    split_list_with(value, item, |part| {
+        part.parse()
+            .map_err(|error| format!("invalid {item} '{part}': {error}"))
+    })
+}
+
+/// Split a comma-separated flag value into its items, reading each with
+/// `parse`.
+///
+/// The same splitting as [`split_list`], for items whose parser words its own
+/// error message.
+///
+/// # Errors
+///
+/// Returns a message naming the item when one is empty, or the error `parse`
+/// returns for an item it rejects.
+pub(crate) fn split_list_with<T>(
+    value: &str,
+    item: &str,
+    parse: impl Fn(&str) -> std::result::Result<T, String>,
+) -> std::result::Result<Vec<T>, String> {
     value
         .split(',')
         .map(|part| match part.trim() {
             "" => Err(format!("empty {item} in '{value}'")),
-            part => part
-                .parse()
-                .map_err(|error| format!("invalid {item} '{part}': {error}")),
+            part => parse(part),
         })
         .collect()
 }

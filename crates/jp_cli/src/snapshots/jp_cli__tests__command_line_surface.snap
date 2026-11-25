@@ -2518,7 +2518,7 @@ short_aliases: None
 index: None
 action: Append
 num_args: Some(1)
-value_type: jp_cli::cmd::turn_selection::TurnSpec
+value_type: jp_conversation::position::PositionSpec
 possible_values: []
 value_names: Some(["TURN"])
 value_delimiter: Some(',')
@@ -2770,7 +2770,7 @@ short_aliases: None
 index: None
 action: Append
 num_args: Some(1)
-value_type: jp_cli::cmd::turn_selection::TurnSpec
+value_type: jp_conversation::position::PositionSpec
 possible_values: []
 value_names: Some(["TURN"])
 value_delimiter: Some(',')
@@ -3010,16 +3010,16 @@ short_aliases: None
 index: None
 action: Set
 num_args: Some(0..=1)
-value_type: jp_cli::cli::flag::Word<usize>
+value_type: jp_cli::cli::flag::Word<alloc::vec::Vec<jp_conversation::position::PositionSpec>>
 possible_values: []
-value_names: Some(["INDEX"])
+value_names: Some(["COMPACTIONS"])
 value_delimiter: None
 default_values: []
 help_heading: None
 conflicts: ["keep_first", "keep_last", "from", "to", "first", "last", "turn", "reasoning", "tools", "summary", "summary_context", "compact", "model", "over"]
-set: ["require_equals"]
+set: []
 help: Some("Remove compaction events from the stream")
-long_help: Some("Remove compaction events from the stream.\n\nWithout a value, removes every compaction event, restoring the raw event history so the LLM sees all original events. With a value (`--reset=2`), removes only that compaction event, numbered as `jp conversation show` lists them. Mutually exclusive with the policy, range, and DSL flags: `--reset` undoes compaction, it does not re-compact in the same invocation. Composes with `--dry-run` to preview the removal.")
+long_help: Some("Remove compaction events from the stream.\n\nWithout a value, removes every compaction event, restoring the raw event history so the LLM sees all original events.\n\nWith a value, removes only the compaction events it names, numbered as `jp conversation show` lists them: a single one (`2`), an inclusive range (`1..5`, `3..`, `..3`), or several of either separated by commas (`1,3..5`). `-N` counts from the end, so `--reset -1` removes the most recent one and `--reset -3..-1` the last three. A number that names no compaction event is an error, and nothing is removed.\n\nA word after `--reset` that is no such value is read as the conversation to target, so `--reset recent` removes every compaction event of the most recent conversation.\n\nMutually exclusive with the policy, range, and DSL flags: `--reset` undoes compaction, it does not re-compact in the same invocation. Composes with `--dry-run` to preview the removal.")
 
 ### compact
 short: Some('k')
@@ -3886,7 +3886,7 @@ short_aliases: None
 index: None
 action: Append
 num_args: Some(1)
-value_type: jp_cli::cmd::turn_selection::TurnSpec
+value_type: jp_conversation::position::PositionSpec
 possible_values: []
 value_names: Some(["TURN"])
 value_delimiter: Some(',')
