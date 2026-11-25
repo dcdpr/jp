@@ -64,7 +64,6 @@ impl Handler for AgenticShepherd {
         "ag"
     }
 
-    /// The reference written in its hierarchical form, `ag://issues/592`.
     fn canonical(&self, uri: &Url) -> Result<Url, Box<dyn Error + Send + Sync>> {
         Reference::parse(uri)?.to_url()
     }

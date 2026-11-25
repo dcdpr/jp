@@ -91,8 +91,6 @@ impl Handler for Commands {
         "cmd"
     }
 
-    /// The command written in the hierarchical form, with its arguments, then
-    /// its environment variables, then its description.
     fn canonical(&self, uri: &Url) -> Result<Url, Box<dyn Error + Send + Sync>> {
         uri_to_command(uri)?.to_uri(self.scheme())
     }

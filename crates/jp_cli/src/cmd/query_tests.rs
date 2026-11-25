@@ -5533,8 +5533,6 @@ fn test_auth_is_a_no_op_when_the_flag_is_absent() {
     assert_eq!(partial.providers.llm.anthropic.auth, None);
 }
 
-/// A rejected `--attach` must fail before the conversation records it: once
-/// recorded, every later query on the conversation fails on it.
 #[test]
 fn test_attach_rejects_a_url_its_handler_cannot_resolve() {
     let diff = Url::parse("gh:pull/1/diff").unwrap();

@@ -15,8 +15,7 @@ impl Handler for MyAttachmentHandler {
         "my-scheme"
     }
 
-    // Parse the URL, rejecting what `add` would reject, and render it back in
-    // the one spelling this handler writes.
+    // Parse and validate the URL, returning its canonical representation.
     fn canonical(&self, uri: &Url) -> Result<Url, Box<dyn Error>> {
         Ok(uri.clone())
     }

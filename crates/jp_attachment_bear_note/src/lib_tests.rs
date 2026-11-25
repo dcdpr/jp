@@ -121,7 +121,6 @@ fn canonical(uri: &str) -> Result<String, String> {
         .map_err(|error| error.to_string())
 }
 
-/// The shorthand and Bear's own "Copy Link" URL name the same note.
 #[test]
 fn test_canonical_collapses_every_spelling_of_one_note() {
     for spelling in [
@@ -137,7 +136,6 @@ fn test_canonical_collapses_every_spelling_of_one_note() {
     }
 }
 
-/// A note's tags are a set; the order they are filtered by changes nothing.
 #[test]
 fn test_canonical_lists_each_tag_once_in_order() {
     assert_eq!(

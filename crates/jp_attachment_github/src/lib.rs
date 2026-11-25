@@ -101,8 +101,6 @@ impl Handler for GithubAttachment {
         "gh"
     }
 
-    /// The pull request written in its full `gh://OWNER/REPO/pull/N/...` form,
-    /// lowercased, carrying only the parameters the resource reads.
     fn canonical(&self, uri: &Url) -> Result<Url, Box<dyn Error + Send + Sync>> {
         canonical_url(&parse_uri(uri)?)
     }
@@ -285,12 +283,11 @@ fn parse_uri(uri: &Url) -> Result<ParsedUri, Box<dyn Error + Send + Sync>> {
     })
 }
 
-/// Render `parsed` in the single spelling [`GithubAttachment::canonical`]
-/// returns.
+/// Normalize `parsed` into its canonical `gh://owner/repo/pull/N/...` URL.
 ///
-/// GitHub matches owner and repository names without regard to case, and a path
-/// is excluded when any pattern matches it, so names are lowercased and exclude
-/// patterns are sorted, each listed once.
+/// Owner and repository names are lowercased, exclude patterns are sorted and
+/// deduplicated, and query parameters that do not apply to the resource kind
+/// are omitted.
 fn canonical_url(parsed: &ParsedUri) -> Result<Url, Box<dyn Error + Send + Sync>> {
     let (number, resource) = match parsed.kind {
         ResourceKind::PullDiff { number } => (number, "diff"),
@@ -303,8 +300,6 @@ fn canonical_url(parsed: &ParsedUri) -> Result<Url, Box<dyn Error + Send + Sync>
         parsed.repo.to_lowercase()
     ))?;
 
-    // The diff reads the exclude filter and the reviews read
-    // `include_outdated`; neither reads the other's.
     let mut pairs = vec![];
     match parsed.kind {
         ResourceKind::PullDiff { .. } => {

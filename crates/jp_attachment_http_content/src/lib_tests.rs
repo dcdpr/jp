@@ -94,8 +94,6 @@ mod canonical {
 
     use super::*;
 
-    /// A fragment never reaches the server, so it changes nothing that is
-    /// fetched.
     #[test]
     fn drops_the_fragment() {
         let url = Url::parse("https://example.com/page?b=2&a=1#section").unwrap();

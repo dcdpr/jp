@@ -915,8 +915,6 @@ fn canonical(uri: &str) -> Result<String, String> {
         .map_err(|error| error.to_string())
 }
 
-/// The shortform names the project's own repository, and GitHub matches owner
-/// and repository names without regard to case.
 #[test]
 fn canonical_collapses_every_spelling_of_one_pull_request() {
     for spelling in [
@@ -932,8 +930,6 @@ fn canonical_collapses_every_spelling_of_one_pull_request() {
     }
 }
 
-/// A path is excluded when any pattern matches it, so the order patterns are
-/// given in, and how they are split across parameters, change nothing.
 #[test]
 fn canonical_lists_each_exclude_pattern_once_in_order() {
     assert_eq!(
@@ -942,8 +938,6 @@ fn canonical_lists_each_exclude_pattern_once_in_order() {
     );
 }
 
-/// The diff ignores `include_outdated`, and the reviews ignore the exclude
-/// filter.
 #[test]
 fn canonical_drops_parameters_the_resource_does_not_read() {
     assert_eq!(

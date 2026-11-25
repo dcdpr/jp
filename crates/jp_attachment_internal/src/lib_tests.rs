@@ -537,7 +537,6 @@ fn canonical(uri: &str) -> String {
         .to_string()
 }
 
-/// The default selector, written out or left out, selects the same content.
 #[test]
 fn canonical_omits_the_default_selector() {
     let id = ConversationId::try_from_deciseconds(17_013_123_456).unwrap();

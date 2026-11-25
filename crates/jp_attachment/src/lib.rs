@@ -152,25 +152,23 @@ pub trait Handler: std::fmt::Debug + DynClone + DynHash + Send + Sync {
     /// The scheme has to be unique across all handlers.
     fn scheme(&self) -> &'static str;
 
-    /// Return the URL this handler resolves `uri` as, in the single spelling
-    /// the handler writes.
+    /// Return the canonical form of `uri`.
     ///
-    /// Two URLs with the same canonical form resolve to the same attachment
-    /// content, so a caller compares canonical forms to tell whether an
-    /// attachment is already attached.
-    /// Spellings the handler treats alike map to one URL: a shorthand and its
-    /// full form, two spellings of a query parameter, or values whose order
-    /// does not change what is resolved.
-    /// The canonical form of a canonical URL is that URL.
+    /// Two URLs with the same canonical form resolve to identical attachment
+    /// content, so callers compare canonical URLs to deduplicate attachments.
+    /// Equivalent spellings (shorthands vs. full URLs, parameter aliases, or
+    /// order-independent query values) normalize to a single URL.
+    /// Calling `canonical` on an already-canonical URL returns that URL
+    /// unchanged.
     ///
-    /// Performs no I/O, so it can run before anything is resolved or stored.
+    /// Performs no I/O, so callers can validate and canonicalize a URL before
+    /// resolving or storing it.
     ///
     /// # Errors
     ///
-    /// Returns an error when the handler cannot resolve `uri`, with the error
-    /// [`Self::add`] returns for it.
-    /// [`Self::add`] may still reject a URL accepted here, for a reason only
-    /// I/O can reveal, such as a file that is too large.
+    /// Returns an error if `uri` is invalid for this handler.
+    /// [`Self::add`] may still reject a URL accepted here for reasons that
+    /// require I/O (such as a missing or oversized file).
     fn canonical(&self, uri: &Url) -> Result<Url, Box<dyn Error + Send + Sync>>;
 
     /// Add a new attachment, using the given URL.
@@ -261,11 +259,9 @@ pub fn percent_encode_str(encoded: &str) -> String {
 }
 
 /// Extract the environment variable names specified by [`ENV_PARAM`] query
-/// parameters in `uri`, sorted, with each name once.
+/// parameters in `uri`, sorted and deduplicated.
 ///
 /// Accepts the parameter spellings `env`, `envs`, `env[]`, and `envs[]`.
-/// The variables a subprocess receives do not depend on the order they are
-/// named in, so two URLs naming the same variables return the same list.
 ///
 /// # Errors
 ///

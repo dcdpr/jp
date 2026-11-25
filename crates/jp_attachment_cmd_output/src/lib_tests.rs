@@ -222,8 +222,6 @@ fn canonical(uri: &str) -> Result<String, String> {
         .map_err(|error| error.to_string())
 }
 
-/// A config table writes `args=` and `envs=`, the CLI usually `arg=` and
-/// `env=`; all of them run the same command.
 #[test]
 fn test_canonical_collapses_every_spelling_of_one_command() {
     for spelling in [
@@ -241,8 +239,6 @@ fn test_canonical_collapses_every_spelling_of_one_command() {
     }
 }
 
-/// Which variables the command receives does not depend on the order they are
-/// named in, or how often.
 #[test]
 fn test_canonical_sorts_and_dedups_environment_names() {
     assert_eq!(

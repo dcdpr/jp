@@ -12,8 +12,8 @@ Attach the `git diff` of the current project to a query:
 jp query --attach "cmd://git?arg=diff" "Review this diff"
 ```
 
-The attachment stays with the conversation, and the command runs again for
-every later query in it.
+The attachment is persisted with the conversation, and the command re-runs on
+each subsequent query.
 
 Preview what an attachment sends without attaching it:
 
@@ -48,5 +48,5 @@ params.args = ["TERM"]
 params.envs = ["TERM"]
 ```
 
-This table and the URL above are the same attachment, so a conversation that
-attaches one does not attach the other again.
+This config entry and the URL above resolve to the same canonical URL, so
+attaching both adds the attachment only once.

@@ -627,12 +627,6 @@ fn write_config(root: &Utf8Path, name: &str, content: &str) -> KeyValueOrPath {
     KeyValueOrPath::Path(path)
 }
 
-/// A conversation's attachment list is replaced through `jp config set --id
-/// <id> --cfg @file`, with a file declaring the `replace` strategy.
-///
-/// The attachment commands do not write to a conversation, and a `--cfg` key
-/// assignment on `conversation.attachments` appends to the list, so this is the
-/// documented way to fix an attachment a conversation already stores.
 #[test]
 fn config_set_with_a_replace_file_replaces_a_conversations_attachments() {
     let tmp = camino_tempfile::tempdir().unwrap();
@@ -642,8 +636,6 @@ fn config_set_with_a_replace_file_replaces_a_conversations_attachments() {
             value = ["cmd://printenv?arg=TERM&env=TERM"]
         "#});
 
-    // The conversation, as `config set` finds it: an attachment that no longer
-    // receives `TERM`, and one the user keeps.
     let mut stored = PartialAppConfig::new_test();
     for url in ["cmd://printenv?arg=TERM", "gh:pull/1/diff"] {
         stored

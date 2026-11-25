@@ -137,9 +137,6 @@ fn attachment_add_skips_a_url_a_table_entry_already_builds() {
     assert_eq!(partial.conversation.attachments.to_vec(), vec![table]);
 }
 
-/// A config table writes `params.args` and `params.envs`, which become `args=`
-/// and `envs=`; the README's CLI example writes `arg=` and `env=`.
-/// Both run the same command.
 #[test]
 fn attachment_add_skips_another_spelling_of_an_attached_url() {
     let table = PartialAttachmentConfig::Object(PartialAttachmentObjectConfig {
@@ -160,8 +157,6 @@ fn attachment_add_skips_another_spelling_of_an_attached_url() {
     assert_eq!(partial.conversation.attachments.to_vec(), vec![table]);
 }
 
-/// The URL is rejected before anything is attached, rather than when the next
-/// query resolves it.
 #[test]
 fn attachment_add_rejects_a_url_its_handler_cannot_resolve() {
     let error = add_command(&["cmd://printenv?env=TERM=xterm"])
@@ -223,8 +218,8 @@ fn load_conversation_attachments_resolves_a_repeated_url_once() {
         None,
         printer,
     );
-    // The same URL twice, and the same file spelled another way: `docs` is the
-    // host of the last one, which the parser keeps apart from the path.
+    // Include an exact duplicate and an alternate `file://` spelling where
+    // `Url::parse` places `docs` in the host component.
     let urls = [
         "file:docs/notes.md",
         "file:docs/notes.md",

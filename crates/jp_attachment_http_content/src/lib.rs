@@ -113,12 +113,12 @@ impl Handler for HttpContent<Https> {
     }
 }
 
-/// The URL a request for `uri` is sent to.
+/// Strip the URL fragment to produce the canonical request URL.
 ///
-/// A fragment never reaches the server, so it is dropped.
-/// Parsing has already lowercased the host, dropped a default port, and
-/// resolved dot segments; the query is kept as written, since a server may read
-/// its parameters in order.
+/// Fragments are not sent to HTTP servers, and [`Url::parse`] already
+/// lowercases the host, strips default ports, and resolves dot segments.
+/// Query parameter order is preserved because servers may treat it as
+/// significant.
 fn canonical_url(uri: &Url) -> Url {
     let mut url = uri.clone();
     url.set_fragment(None);

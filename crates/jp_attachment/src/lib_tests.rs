@@ -43,7 +43,6 @@ fn env_names_reads_every_env_parameter() {
     assert_eq!(env_names(&uri).unwrap(), ["JP_SESSION", "TERM"]);
 }
 
-/// A name given twice is passed once.
 #[test]
 fn env_names_lists_each_name_once() {
     let uri = Url::parse("cmd://printenv?env=TERM&env=TERM").unwrap();

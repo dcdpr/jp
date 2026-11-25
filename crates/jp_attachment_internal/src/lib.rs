@@ -161,18 +161,16 @@ impl From<&str> for ResolveError {
     }
 }
 
-/// Return the URL a `jp://` URI resolves as, in the single spelling this crate
-/// writes, validating it without performing I/O.
+/// Validate and canonicalize a `jp://` URI without performing I/O.
 ///
-/// The selector is written in its shortest form, and left out when it is the
-/// default selector, so `jp://<id>` and `jp://<id>?select=a:-1` return the same
-/// URL.
+/// Normalizes the selector to its canonical shorthand and omits it when it
+/// equals [`Selector::default`], so `jp://<id>` and `jp://<id>?select=a:-1`
+/// produce the same URL.
 ///
 /// # Errors
 ///
-/// Returns an error for a URI [`resolve`] rejects before it reads the
-/// workspace: an invalid JP ID, an unsupported resource type, an unknown query
-/// parameter, or an invalid selector.
+/// Returns an error if the URI has an invalid JP ID, an unsupported resource
+/// variant, an unknown query parameter, or an invalid selector.
 pub fn canonical(uri: &Url) -> Result<Url, Box<dyn Error + Send + Sync>> {
     let mut entry = uri_to_entry(uri)?;
     validate_entry(&entry)?;

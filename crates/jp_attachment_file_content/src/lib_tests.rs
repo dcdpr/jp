@@ -317,7 +317,6 @@ fn canonical(uri: &str) -> Result<String, String> {
         .map_err(|error| error.to_string())
 }
 
-/// Every path is relative to the workspace root, so these name one file.
 #[test]
 fn test_canonical_collapses_every_spelling_of_one_path() {
     for spelling in [
@@ -334,7 +333,6 @@ fn test_canonical_collapses_every_spelling_of_one_path() {
     }
 }
 
-/// `exclude` is read for its presence, whatever value it has.
 #[test]
 fn test_canonical_keeps_an_exclude() {
     assert_eq!(

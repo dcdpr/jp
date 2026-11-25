@@ -115,15 +115,15 @@ fn attachment_scheme(uri: &Url) -> &str {
         .map_or(uri.scheme(), |(scheme, _)| scheme)
 }
 
-/// Return the URL `uri` resolves as, in the single spelling its handler writes.
+/// Validate and canonicalize `uri` via its scheme's attachment handler.
 ///
 /// Two attachments with the same canonical URL resolve to the same content.
-/// No I/O is performed, so a URL can be checked before it is stored.
+/// Performs no I/O, so callers can validate a URL before storing it.
 ///
 /// # Errors
 ///
-/// Returns an error when no handler serves the URL's scheme, or the handler
-/// cannot resolve the URL.
+/// Returns an error if no handler is registered for the scheme or if the
+/// handler rejects `uri`.
 pub(crate) fn canonical_attachment(uri: &Url) -> Result<Url> {
     trace!(%uri, "Canonicalizing attachment.");
 
@@ -144,27 +144,26 @@ pub(crate) fn canonical_attachment(uri: &Url) -> Result<Url> {
     })
 }
 
-/// The URL attachments are compared by: the canonical URL of `uri`, or `uri` as
-/// written when it has none.
+/// Return the deduplication key for `uri`: its canonical URL, or `uri` verbatim
+/// if canonicalization fails.
 ///
-/// An entry no handler can resolve still fails when it is resolved; comparing
-/// it as written only keeps it from being taken for another entry.
+/// Falling back to the raw URL ensures an unresolvable entry is not conflated
+/// with a distinct entry; it still fails when resolved.
 pub(crate) fn attachment_identity(uri: &Url) -> Url {
     canonical_attachment(uri).unwrap_or_else(|_| uri.clone())
 }
 
-/// Append `urls` to the conversation config, skipping every URL the config
-/// already attaches.
+/// Append `urls` to the conversation config, skipping URLs that are already
+/// attached.
 ///
-/// Attachments are compared by canonical URL (see [`canonical_attachment`]): a
-/// URL is skipped when an entry already attaches it in any spelling its handler
-/// treats alike, including a config table that builds it.
-/// A URL that is attached is stored as written.
+/// Deduplication compares canonical URLs (see [`canonical_attachment`]), so an
+/// equivalent URL spelling or config-table entry is skipped.
+/// Newly attached URLs are stored as written.
 ///
 /// # Errors
 ///
-/// Returns an error for a URL [`canonical_attachment`] rejects, before any URL
-/// is attached.
+/// Returns an error if [`canonical_attachment`] rejects any URL in `urls`,
+/// before modifying `partial`.
 pub(crate) fn attach_urls(
     partial: &mut PartialAppConfig,
     urls: impl IntoIterator<Item = Url>,
@@ -242,8 +241,8 @@ pub(crate) async fn register_attachment(
 /// rather than aborting the whole query.
 /// Every other failure (invalid URI, real I/O error, etc.) is propagated.
 ///
-/// A URL given more than once, in any spelling its handler treats alike, is
-/// resolved once, at its first position (see [`attachment_identity`]).
+/// Duplicate URLs (including equivalent spellings that normalize to the same
+/// [`attachment_identity`]) are resolved once, at their first position.
 ///
 /// Returns one group per input URL in order; a skipped reference or duplicate
 /// URL yields an empty group to keep the output aligned with `urls`.
