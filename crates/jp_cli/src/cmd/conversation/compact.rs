@@ -496,9 +496,9 @@ fn parse_tool_calls_mode(s: &str) -> Result<ToolCallsMode, String> {
 /// list: at least one ASCII digit, and only digits, whitespace, `-`, `.`, `,`,
 /// `=`, or `+`.
 ///
-/// The whitespace is any the list parser trims around an item.
-/// `=` and `+` are no part of the list syntax, but a near miss such as `1..=3`
-/// or `+2` is a list written wrong, not a conversation to search for.
+/// Matches any whitespace trimmed by the list parser.
+/// `=` and `+` are not valid list syntax, but near-misses such as `1..=3` or
+/// `+2` are malformed lists rather than conversation targets.
 /// No conversation ID or target keyword matches this shape (`.`, `-`, and
 /// `+live` are targets, but contain no digits).
 fn looks_like_compaction_numbers(word: &str) -> bool {

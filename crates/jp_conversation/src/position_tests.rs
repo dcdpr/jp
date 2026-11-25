@@ -23,7 +23,7 @@ fn position_rejects_zero_from_either_end() {
 
 #[test]
 fn position_rejects_text_that_is_not_a_whole_number() {
-    // `usize` accepts a leading `+`, which no position is written with.
+    // `usize::parse` accepts a leading `+`, which is not valid position syntax.
     for text in ["", "x", "-x", "-", "--1", "1.5", "1 ", "+3", "-+3", "+0"] {
         assert_eq!(
             text.parse::<Position>(),

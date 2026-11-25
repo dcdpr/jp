@@ -52,7 +52,7 @@ impl FromStr for Position {
             .strip_prefix('-')
             .map_or((s, false), |digits| (digits, true));
 
-        // `usize` accepts a leading `+`, which is no way to write a position.
+        // `usize::parse` accepts a leading `+`, which is not valid position syntax.
         if digits.starts_with('+') {
             return Err(ParsePositionError::NotANumber(s.to_owned()));
         }
@@ -265,14 +265,19 @@ impl ResolvePositionError {
         self.render(noun, None)
     }
 
-    /// Format this error like [`Self::describe`], naming `conversation` as the
-    /// one whose items the spec was resolved against.
+    /// Format this error for a conversation's sequence of `noun` items,
+    /// including the `conversation` ID in the message.
+    ///
+    /// An inverted range includes both the bounds as written and the 1-based
+    /// positions they resolved to, so inverted from-end ranges (`-1..-3`) are
+    /// clear.
     #[must_use]
     pub fn describe_in(&self, noun: &str, conversation: impl fmt::Display) -> String {
         self.render(noun, Some(&conversation))
     }
 
-    /// The message for `noun` items, in `conversation` when it is named.
+    /// Format the error message for `noun` items, optionally including the
+    /// `conversation` ID.
     fn render(&self, noun: &str, conversation: Option<&dyn fmt::Display>) -> String {
         let name = conversation.map_or_else(String::new, |id| format!(" {id}"));
 
