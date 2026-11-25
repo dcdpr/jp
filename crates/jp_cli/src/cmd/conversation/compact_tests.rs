@@ -417,9 +417,9 @@ fn reset_counts_a_negative_number_from_the_end() {
     );
 }
 
-/// A list or range that starts with a from-end number is no number as a whole,
-/// which is all clap reads as a value after a flag.
-/// It is the flag's value all the same.
+/// Ranges and lists starting with a negative offset (`-3..-1`, `-3,-1`) are not
+/// single numbers, so clap does not accept them via `allow_negative_numbers`
+/// alone; `attach_from_end_values` attaches them to `--reset`.
 #[test]
 fn reset_reads_a_value_starting_from_the_end_as_its_own_word() {
     let from_end =
@@ -454,8 +454,8 @@ fn reset_does_not_take_a_following_flag_as_its_value() {
     assert_eq!(compact.target.ids(), []);
 }
 
-// A word that is no list of compaction numbers is the conversation to target,
-// and the flag reads as written bare.
+// A word that is not a compaction list is treated as a conversation target,
+// leaving `--reset` bare.
 #[test]
 fn reset_gives_a_word_that_is_no_compaction_list_to_the_targets() {
     let compact = parse_compact(&["--reset", "recent"]);
@@ -493,9 +493,8 @@ fn parse_cli_compact(args: &[&str]) -> Compact {
     compact
 }
 
-// Telling `--reset recent` from `--reset=recent` needs how the value was
-// written, which only reaches `compact` when every command above it passes it
-// down.
+// Distinguishing `--reset recent` from `--reset=recent` requires `Spelling` to
+// be threaded from `Cli` down to `Compact`.
 #[test]
 fn reset_gives_its_word_to_the_targets_on_the_real_command_line() {
     let compact = parse_cli_compact(&["--reset", "recent"]);
@@ -526,8 +525,8 @@ fn reset_gives_its_word_back_at_the_place_it_was_written() {
     ]);
 }
 
-// `=` says the value is the flag's, so one that is no list of compaction
-// numbers is an error rather than a conversation.
+// An attached value (`--reset=recent`) always belongs to the flag, so a
+// non-list value is rejected rather than treated as a conversation target.
 #[test]
 fn reset_keeps_an_attached_value_for_itself() {
     assert_eq!(

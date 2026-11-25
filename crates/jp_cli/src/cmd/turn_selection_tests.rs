@@ -765,9 +765,8 @@ fn turn_list_rejects_an_empty_or_malformed_item() {
     assert!(parse(&["--turn=1,x"]).is_err());
 }
 
-/// A list that starts with a from-end position is no number as a whole, which
-/// is all clap reads as a value after a flag.
-/// It is the flag's value all the same, with `=` or without.
+/// Lists and ranges starting with a negative offset (`-3,-1`, `-3..-2`) are
+/// accepted both with `=` and as a space-separated word.
 #[test]
 fn turn_list_starting_with_a_from_end_position_is_read_with_or_without_an_equals_sign() {
     let expected = vec![

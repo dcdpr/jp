@@ -1,15 +1,14 @@
-//! Positions in an ordered sequence, as a user writes them.
+//! 1-based user-facing positions and ranges in an ordered sequence.
 //!
-//! JP numbers the turns of a conversation, and the compaction events stored in
-//! it, from `1`.
-//! A [`Position`] is one such number, counted from the start of the sequence
-//! (`3`) or from its end (`-1` is the last item).
-//! A [`PositionSpec`] is one position or an inclusive range of them, written
-//! `A..B`, where either end may be omitted.
+//! JP numbers conversation turns and compaction events from `1`.
+//! A [`Position`] is a 1-based index counted from the start (`3`) or from the
+//! end (`-1` is the last item).
+//! A [`PositionSpec`] is a single position or an inclusive `A..B` range where
+//! either bound may be omitted.
 //!
-//! Both types hold the numbers as written.
+//! Both types store the 1-based numbers as written.
 //! [`Position::index`], [`PositionSpec::resolve`], and [`PositionSpec::clamp`]
-//! are where a 1-based position becomes a 0-based index.
+//! translate them to 0-based indices against a sequence length.
 //!
 //! See `docs/wiki/00dxyba-indexing-and-counting-conventions.md`.
 
@@ -101,16 +100,18 @@ impl PositionSpec {
         }
     }
 
-    /// The 0-based indices this spec names in a sequence of `count` items.
+    /// Resolve this spec to a half-open 0-based index range in a sequence of
+    /// `count` items.
     ///
-    /// The range is half-open, and empty only for `..` on an empty sequence.
+    /// The returned range is empty only for `..` on an empty sequence.
     ///
     /// # Errors
     ///
-    /// Returns an error when either end names an item the sequence does not
-    /// have, or when the range ends before it starts.
-    /// Both ends are checked against `count` before they are compared, because
-    /// a from-end position only names an item when it is within `count`.
+    /// Returns an error if either bound is out of range for `count`, or if the
+    /// resolved end precedes the start (`to_index < from_index`).
+    /// Bounds are validated against `count` before ordering is checked, because
+    /// a from-end position can only be converted to an index when it is within
+    /// `count`.
     pub fn resolve(self, count: usize) -> Result<Range<usize>, ResolvePositionError> {
         let (from, to) = self.ends();
         let index = |position: Position| {
@@ -137,16 +138,12 @@ impl PositionSpec {
         Ok(from_index.unwrap_or(0)..to_index.map_or(count, |index| index + 1))
     }
 
-    /// The 0-based indices this spec names in a sequence of `count` items, with
-    /// an end that overshoots the sequence clamped onto it.
+    /// Resolve this spec to a half-open 0-based index range in a sequence of
+    /// `count` items, clamping out-of-range bounds to the sequence boundaries.
     ///
-    /// A range that reaches before the first item starts at the first, and one
-    /// that reaches past the last item ends at the last.
-    /// The range is half-open.
-    ///
-    /// `None` when no item is left: the sequence is empty, the range starts
-    /// past the last item or ends before the first, or it ends before it
-    /// starts.
+    /// Returns `None` if the clamped range is empty: the sequence is empty, the
+    /// start lies past the last item, the end lies before the first item, or
+    /// the resolved end precedes the start.
     #[must_use]
     pub fn clamp(self, count: usize) -> Option<Range<usize>> {
         let last = count.checked_sub(1)?;
@@ -198,21 +195,22 @@ impl fmt::Display for PositionSpec {
     }
 }
 
-/// Why text does not name a [`Position`].
+/// Error returned when parsing a [`Position`] or [`PositionSpec`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParsePositionError {
-    /// The text is not a whole number, with or without a leading `-`.
+    /// The input is not an integer.
     NotANumber(String),
 
-    /// The text is `0`, and positions counted from the start begin at `1`.
+    /// The input is `0`, which is invalid for 1-based positions.
     Zero,
 
-    /// The text is `-0`, and positions counted from the end begin at `-1`.
+    /// The input is `-0`, which is invalid for 1-based from-end offsets.
     ZeroFromEnd,
 }
 
 impl ParsePositionError {
-    /// The error message for a sequence whose items are each called `noun`.
+    /// Format this error for a sequence whose items are called `noun` (e.g.
+    /// `"turn"` or `"compaction"`).
     #[must_use]
     pub fn describe(&self, noun: &str) -> String {
         match self {
@@ -225,37 +223,38 @@ impl ParsePositionError {
     }
 }
 
-/// Why a [`PositionSpec`] names no item of a sequence.
+/// Error returned when resolving a [`PositionSpec`] against a sequence length.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResolvePositionError {
-    /// An end of the spec names an item the sequence does not have.
+    /// A bound falls outside `1..=count`.
     OutOfRange {
-        /// The end, as written.
+        /// The out-of-range bound as written.
         position: Position,
         /// The number of items in the sequence.
         count: usize,
     },
 
-    /// The range ends before it starts.
+    /// The resolved end index precedes the start index (`to_index <
+    /// from_index`).
     Inverted {
-        /// The start of the range, as written.
+        /// The start bound as written.
         from: Position,
-        /// The end of the range, as written.
+        /// The end bound as written.
         to: Position,
-        /// The 0-based index `from` names.
+        /// The resolved 0-based start index.
         from_index: usize,
-        /// The 0-based index `to` names.
+        /// The resolved 0-based end index.
         to_index: usize,
     },
 }
 
 impl ResolvePositionError {
-    /// The error message for a conversation's sequence of items, each called
-    /// `noun`.
+    /// Format this error for a conversation's sequence of `noun` items (e.g.
+    /// `"turn"` or `"compaction"`).
     ///
-    /// An inverted range is shown both as written and as the 1-based numbers
-    /// its ends resolve to, which is where a crossing between from-end
-    /// positions is visible.
+    /// An inverted range includes both the bounds as written and the 1-based
+    /// positions they resolved to, so inverted from-end ranges (`-1..-3`) are
+    /// clear.
     #[must_use]
     pub fn describe(&self, noun: &str) -> String {
         match self {

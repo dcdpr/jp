@@ -34,16 +34,14 @@ where
     })
 }
 
-/// Split a comma-separated flag value into its items, reading each with
-/// `parse`.
+/// Split a comma-separated flag value into items and parse each with `parse`.
 ///
-/// The same splitting as [`split_list`], for items whose parser words its own
-/// error message.
+/// Like [`split_list`], but delegates error formatting for individual items to
+/// `parse`.
 ///
 /// # Errors
 ///
-/// Returns a message naming the item when one is empty, or the error `parse`
-/// returns for an item it rejects.
+/// Returns an error if any item is empty or rejected by `parse`.
 pub(crate) fn split_list_with<T>(
     value: &str,
     item: &str,

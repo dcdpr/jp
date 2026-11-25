@@ -31,14 +31,14 @@ consistent and happens in exactly one place per boundary.
   rendered.
   Nothing in between carries an ambiguous "is this 0- or 1-based?" value.
 
-The stream API of `jp_conversation` takes and returns core values (0-based),
-never a user value.
-A position a user writes is parsed into a `Position` or a `PositionSpec`
-(`jp_conversation::position`), which hold the number as written.
-It becomes a 0-based value at one of the points listed under "Where the
-translation lives": `jp_cli`'s flag parsers for
-`--turn`/`--from`/`--to`/`--reset`, the attachment selector, and `RuleBound`'s
-`FromStr`/`Display` for config values and the inline DSL.
+The stream API of `jp_conversation` takes and returns 0-based core values, never
+user-facing 1-based values.
+User-written positions parse into `Position` or `PositionSpec`
+(`jp_conversation::position`), which store the 1-based numbers as written.
+They translate to 0-based indices at the boundary points listed under [Where the
+translation lives](#where-the-translation-lives): `jp_cli`'s flag parsers for
+`--turn`, `--from`, `--to`, and `--reset`, the attachment selector, and
+`RuleBound`'s `FromStr`/`Display` for config values and the inline DSL.
 
 One consequence worth knowing before touching `RuleBound`: because it normalizes
 at parse time, its `FromEnd` payload is already a 0-based offset (`FromEnd(0)`
@@ -100,19 +100,18 @@ Two consequences worth calling out:
   (`1..3,4..6`) remain separate windows so `jp conversation compact` compacts
   each window independently.
 
-- A value that starts with a from-end position can be written as a word of its
-  own, with or without `=`: `--turn -3,-1`, `--reset -3..-1`.
-  A word that starts with `-` and a digit is never a flag, since no flag of
-  `jp` starts with a digit.
-  Written directly after an option that takes a value, it is that option's
+- Values starting with a from-end position can be passed as a separate word,
+  with or without `=`: `--turn -3,-1`, `--reset -3..-1`.
+  Because no `jp` flag starts with a digit, a word starting with `-` and a digit
+  directly after an option that takes a value is attached to that option as its
   value (`attach_from_end_values` in `jp_cli::cli::spelling`).
 
-- Compaction events are numbered the same way.
-  `jp conversation compact --reset` takes the same list of positions and ranges
-  (`--reset=1,3..5`), numbering the compaction events from `1` in stream order,
-  as `jp conversation show` lists them.
-  `--reset -1` is the most recent one, and any out-of-range item returns an
-  error.
+- Compaction events use the same 1-based numbering.
+  `jp conversation compact --reset` accepts a comma-separated list of positions
+  and ranges (`--reset 1,3..5`), numbering compaction events from `1` in stream
+  order as listed by `jp conversation show`.
+  `--reset -1` selects the most recent compaction event, and any out-of-range
+  item returns an error.
 
 ## Which bounds go where
 
@@ -215,8 +214,8 @@ so it is half-open and uses distinct flag names (`--created-since` /
   `PositionSpec::clamp` resolves it against the turn count, so a range that
   overshoots the conversation selects the turns it does cover.
 
-- **Compaction numbers** (`jp_cli::cmd::conversation::compact`): `--reset`
-  takes a comma-separated list of `PositionSpec` items.
+- **Compaction numbers** (`jp_cli::cmd::conversation::compact`): `--reset` takes
+  a comma-separated list of `PositionSpec` items.
   `resolve_reset` resolves each one against the number of compaction events in
   the stream with `PositionSpec::resolve`, and `reset_lines` renders the 0-based
   indices back as 1-based numbers.

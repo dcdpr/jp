@@ -6,9 +6,9 @@
 //! matches back into a [`Cli`].
 //! Each subcommand declares and reads its own arguments; see [`Commands`].
 //!
-//! clap reads a word that starts with `-` as flags.
-//! A value that starts with a from-end position (`--reset -3..-1`) is attached
-//! to its option before clap rejects it; see [`match_argv`].
+//! clap treats a word starting with `-` as a flag.
+//! A value starting with a from-end position (`--reset -3..-1`) is attached to
+//! its option before clap rejects it; see [`match_argv`].
 //!
 //! A flag whose value is optional is declared through [`flag`], which decides
 //! whether a word after it is its value or the start of the free text.
@@ -57,17 +57,17 @@ pub(crate) trait CommandArgs: Sized {
     /// where one is required.
     fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error>;
 
-    /// Read the arguments back from `matches`, given how each option's value
-    /// was written.
+    /// Read the arguments back from `matches`, using `spelling` to distinguish
+    /// attached from space-separated option values.
     ///
     /// A command overrides this when one of its flags takes an optional value
     /// that may be a positional argument instead, which only `spelling` can
-    /// tell apart.
-    /// Every other command reads the same arguments with or without it.
+    /// disambiguate.
+    /// Every other command reads the same arguments with or without `spelling`.
     ///
     /// # Errors
     ///
-    /// Returns an error when a value cannot be used, or no subcommand was given
+    /// Returns an error when a value is invalid, or no subcommand was given
     /// where one is required.
     fn from_spelled_matches(
         matches: &ArgMatches,
@@ -160,16 +160,17 @@ pub(crate) fn parse_args<T: CommandArgs>(args: &[&str]) -> Result<T, clap::Error
 /// `argv` starts with the program name.
 /// `cmd` is fully built when this returns.
 ///
-/// When clap rejects `argv` for an unknown argument, each value that starts
-/// with a from-end position is attached to the option written before it
-/// ([`attach_from_end_values`]), and the result is matched in place of `argv`.
+/// When clap rejects `argv` for an unknown argument, each value starting with a
+/// from-end position is attached to the preceding option
+/// ([`attach_from_end_values`]), and the rewritten `argv` is matched instead.
 /// A command line clap accepts as written is never rewritten.
 ///
 /// # Errors
 ///
 /// Returns clap's error for arguments that do not match `cmd`, including the
 /// help and version requests clap reports as errors.
-/// For a rewritten command line, that is the error of the rewritten one.
+/// If `argv` was rewritten, returns the error from matching the rewritten
+/// arguments.
 fn match_argv(
     cmd: &mut Command,
     argv: Vec<OsString>,

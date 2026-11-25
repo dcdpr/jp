@@ -115,8 +115,8 @@ fn a_dash_inside_a_word_does_not_start_another_flag() {
     );
 }
 
-// A word that starts with `-` and a digit is a value, never a flag, so it is
-// its option's whether or not `=` joins the two.
+// A word starting with `-` and a digit is always a value, never a flag, whether
+// or not `=` joins it to the option.
 #[test]
 fn a_from_end_value_is_its_options_as_a_word_of_its_own() {
     for args in [
@@ -140,8 +140,8 @@ fn a_from_end_value_is_its_options_as_a_word_of_its_own() {
     }
 }
 
-// The value is its option's for good: one the option cannot read is reported as
-// that option's value, not as an unknown flag.
+// Once attached to its option, an invalid from-end value reports the option's
+// parse error rather than an unknown-flag error.
 #[test]
 fn a_from_end_value_its_option_rejects_reports_the_options_error() {
     assert_eq!(
@@ -151,8 +151,8 @@ fn a_from_end_value_its_option_rejects_reports_the_options_error() {
     );
 }
 
-// After a flag that takes no value the word has no option to belong to, and
-// stays the unknown flag clap reads it as.
+// After a boolean flag that takes no value, a `-<digit>` word has no option to
+// attach to and is rejected by clap as an unknown flag.
 #[test]
 fn a_from_end_value_after_a_flag_without_a_value_is_an_unknown_flag() {
     assert_eq!(
@@ -180,8 +180,8 @@ fn digit_shorts(cmd: &Command, path: &str, found: &mut Vec<String>) {
     }
 }
 
-// Reading a word that starts with `-` and a digit as a value is only right
-// while no such word can be a flag.
+// Treating a `-<digit>` word as an option value is sound only if no short flag
+// is a digit.
 #[test]
 fn no_flag_starts_with_a_digit() {
     let mut cmd = Cli::command();

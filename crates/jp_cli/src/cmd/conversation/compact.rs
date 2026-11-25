@@ -41,7 +41,7 @@ use crate::{
     parser::split_list_with,
 };
 
-/// What the position errors call a compaction event.
+/// Noun passed to position error formatters for compaction events.
 const COMPACTION: &str = "compaction";
 
 /// `jp conversation compact`.
@@ -176,8 +176,8 @@ impl CommandArgs for Compact {
         matches: &ArgMatches,
         spelling: &Spelling,
     ) -> Result<Self, clap::Error> {
-        // `--reset` gives a word that is no list of compaction numbers back to
-        // the conversation targets, so the targets are read after it.
+        // `--reset` returns any non-list argument to the positional
+        // conversation targets, so resolve `--reset` before building targets.
         let mut targets = TargetWords::read(matches);
         let reset = Flag::<Reset>::decide_now(matches, spelling, &mut targets)?;
 
@@ -270,9 +270,9 @@ impl OptionalValue for Summary {
 enum Reset {}
 
 impl OptionalValue for Reset {
-    // A list of compaction numbers is never meant as a conversation target, and
-    // no other word is ever the flag's, so a word written on its own is decided
-    // by what it is, wherever it sits.
+    // A list of compaction numbers is never a conversation target, and any
+    // other word is always a target, so classify every space-separated value
+    // by its content regardless of position.
     const CLAIMS_EVERY_SEPARATE_VALUE: bool = true;
     const ID: &'static str = "reset";
 
@@ -281,10 +281,10 @@ impl OptionalValue for Reset {
     type Value = Vec<PositionSpec>;
 
     fn declare(arg: Arg) -> Arg {
-        // `allow_negative_numbers` has clap read a from-end number written as
-        // its own word (`--reset -1`) as the value. A list or range that starts
-        // from the end (`--reset -3..-1`) is no number as a whole; it reaches
-        // the flag through `attach_from_end_values`.
+        // `allow_negative_numbers` lets clap accept a single negative offset
+        // (`--reset -1`) as a separate word. Ranges and lists starting with a
+        // negative offset (`--reset -3..-1`) are not single numbers and are
+        // attached by `attach_from_end_values`.
         arg.long("reset")
             .value_name("COMPACTIONS")
             .allow_negative_numbers(true)
@@ -333,9 +333,9 @@ impl OptionalValue for Reset {
         }
     }
 
-    /// A word shaped like a list of compaction numbers is the flag's even when
-    /// it does not parse: reading `--reset 0` as a conversation to search for
-    /// would leave the flag bare, which removes every compaction event.
+    /// Claim any word shaped like a compaction list even if parsing failed:
+    /// treating `--reset 0` as a conversation target would leave `--reset` bare
+    /// and remove every compaction event.
     fn claim(word: &str, parsed: Option<Vec<PositionSpec>>, (): &()) -> Claim<Vec<PositionSpec>> {
         match parsed {
             Some(specs) => Claim::Value(specs),
@@ -490,12 +490,12 @@ fn parse_tool_calls_mode(s: &str) -> Result<ToolCallsMode, String> {
     })
 }
 
-/// Whether `word` is shaped like a `--reset` value: at least one digit, and
-/// nothing beside digits but the `-`, `.`, and `,` of the list syntax and the
-/// whitespace the list parser trims around each item.
+/// Returns `true` if `word` has the character shape of a `--reset` compaction
+/// list: at least one ASCII digit, and only digits, ASCII whitespace, `-`, `.`,
+/// or `,`.
 ///
-/// No conversation ID or target keyword has that shape; `.` and `-` are
-/// targets, and hold no digit.
+/// No conversation ID or target keyword matches this shape (`.` and `-` are
+/// targets, but contain no digits).
 fn looks_like_compaction_numbers(word: &str) -> bool {
     word.contains(|c: char| c.is_ascii_digit())
         && word
@@ -503,15 +503,12 @@ fn looks_like_compaction_numbers(word: &str) -> bool {
             .all(|c| c.is_ascii_digit() || c.is_ascii_whitespace() || matches!(c, '-' | '.' | ','))
 }
 
-/// Resolve `--reset` specs to the 0-based indices, among the stream's
-/// compaction events, of the ones they name.
-///
-/// An event named by several specs is selected once.
+/// Resolve `--reset` specs into a deduplicated set of 0-based indices into the
+/// stream's compaction events.
 ///
 /// # Errors
 ///
-/// Returns an error when any spec names a compaction event the stream does not
-/// have, or is a range that ends before it starts.
+/// Returns an error if any spec is out of range or inverted (`from > to`).
 fn resolve_reset(
     events: &ConversationStream,
     specs: &[PositionSpec],
@@ -529,12 +526,12 @@ fn resolve_reset(
     Ok(selected)
 }
 
-/// The lines reporting which compaction events a `--reset` removes.
+/// Format the status lines reporting which compaction events `--reset` removes.
 ///
-/// `selected` holds 0-based indices among the compaction events of `events`.
-/// Each line carries the number and the description `jp conversation show`
-/// lists that event under, so `events` must be the stream as it is before the
-/// removal.
+/// `selected` holds 0-based indices into the compaction events of `events`
+/// before removal.
+/// Each line uses the 1-based compaction number and description from `jp
+/// conversation show`.
 fn reset_lines(
     events: &ConversationStream,
     selected: &BTreeSet<usize>,
@@ -1152,8 +1149,8 @@ impl Compact {
     /// Covers the out-of-range and malformed `--turn` values, an empty plan, an
     /// unresolvable summary overlap, and a blank verbatim summary — every
     /// refusal that needs no provider.
-    /// `--reset` plans no compaction; its one refusal is a number that names no
-    /// compaction event of a target.
+    /// For `--reset`, validates that every compaction spec resolves against
+    /// every target conversation.
     fn preflight(&self, ctx: &Ctx, handles: &[ConversationHandle]) -> Output {
         if let Some(specs) = &self.reset {
             for handle in handles {
@@ -1256,15 +1253,14 @@ impl Compact {
         Ok(())
     }
 
-    /// Handle `--reset[=COMPACTIONS]`: remove the compaction events `specs`
-    /// name, numbered from 1 in stream order.
+    /// Handle `--reset[=COMPACTIONS]`: remove the compaction events selected by
+    /// `specs`, numbered from 1 in stream order.
     ///
-    /// Every spec resolves against `events` before anything is removed, so a
-    /// number that names no compaction event fails the run with the stream
-    /// intact (matching `--turn`), and removing one event cannot shift the
-    /// number of another.
-    /// Under `--dry-run` nothing is removed and the lines describe what would
-    /// be.
+    /// Every spec resolves against `events` before any event is removed, so an
+    /// out-of-range number fails with the stream intact (matching `--turn`),
+    /// and removing one event does not shift the numbering of the rest.
+    /// Under `--dry-run`, nothing is removed and the output previews the
+    /// removals.
     fn run_reset(
         &self,
         ctx: &Ctx,

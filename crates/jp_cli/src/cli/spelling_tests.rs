@@ -224,8 +224,8 @@ fn the_walk_does_not_descend_into_a_value_that_names_a_subcommand() {
     );
 }
 
-// `--raw` takes `--opt` as its value, so `--opt` is no option there and has no
-// value to take.
+// `--raw` consumes `--opt` as its value, so `--opt` is not parsed as an option
+// and does not attach `-3`.
 #[test]
 fn an_option_read_as_another_options_value_takes_no_from_end_value() {
     assert_eq!(from_end_attached(&["sub", "--raw", "--opt", "-3"]), None);
@@ -235,7 +235,7 @@ fn an_option_read_as_another_options_value_takes_no_from_end_value() {
     );
 }
 
-// Everything after a plugin's command name is the plugin's to read.
+// Everything after a plugin command name is passed to the plugin untouched.
 #[test]
 fn a_plugin_commands_arguments_are_kept_as_written() {
     assert_eq!(from_end_attached(&["plugin", "--cfg", "-3"]), None);

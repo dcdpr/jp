@@ -49,13 +49,11 @@ pub(crate) struct FlagIds<const SESSION: bool, const MULTI: bool, const GLOBAL: 
     ids: Vec<ConversationTarget>,
 }
 
-/// The positional conversation targets of a command, as the words they were
-/// written as.
+/// Positional conversation target arguments as raw command-line words.
 ///
-/// A flag whose optional value may be a conversation target instead gives such
-/// a word back here.
-/// [`PositionalIds::from_words`] then reads the targets, the given words
-/// included.
+/// An optional-value flag whose separate argument turns out to be a
+/// conversation target returns that word here; [`PositionalIds::from_words`]
+/// then parses all target words in command-line order.
 #[derive(Debug, Default)]
 pub(crate) struct TargetWords {
     /// Each word with its clap index, in command-line order.

@@ -7,11 +7,11 @@
 //! [`Spelling::of`] walks the arguments with clap's own lexer and records, for
 //! each occurrence of each option, whether its value was attached to it.
 //!
-//! clap also decides from how a word is written whether it is a value at all: a
-//! word that starts with `-` is a flag.
-//! [`attach_from_end_values`] walks the arguments the same way, and attaches a
-//! value that starts with a from-end position (`-3..-1`) to its option, so clap
-//! reads it as that option's value.
+//! clap also decides from a word's prefix whether it is a value or a flag: a
+//! word starting with `-` is treated as a flag.
+//! [`attach_from_end_values`] walks the arguments the same way and attaches any
+//! value starting with a from-end position (`-3..-1`) to its preceding option
+//! so clap parses it as that option's value.
 
 use std::{
     collections::HashMap,
@@ -103,20 +103,18 @@ impl Spelling {
     }
 }
 
-/// Attach each value that starts with a from-end position to the option written
-/// directly before it.
+/// Attach each value starting with a from-end position to the preceding option.
 ///
-/// clap reads a word that starts with `-` as flags, unless the option before it
-/// accepts a negative number and the whole word is one.
-/// A range or list that starts with a from-end position (`-3..-1`, `-3,-1`) is
-/// not a number as a whole, so clap rejects it as the unknown flag `-3`.
+/// clap treats a word starting with `-` as a flag, unless the preceding option
+/// accepts negative numbers and the entire word is a single negative number.
+/// A range or list starting with a from-end position (`-3..-1`, `-3,-1`) is not
+/// a single number, so clap rejects it as an unknown flag `-3`.
 ///
-/// No flag of `jp` starts with a digit.
-/// A word that starts with `-` and a digit, written directly after an option
-/// that still takes a value, is therefore that value, and is joined to the
-/// option with `=`: `--reset -3..-1` becomes `--reset=-3..-1`.
-/// Every other word is kept as written, including each word after `--` and each
-/// argument of a plugin's command.
+/// Because no `jp` flag starts with a digit, a word starting with `-` and a
+/// digit directly after an option that takes a value is joined to that option
+/// with `=`: `--reset -3..-1` becomes `--reset=-3..-1`.
+/// Every other word is kept as written, including arguments after `--` and
+/// arguments to a plugin command.
 ///
 /// `cmd` is the built command `argv` is matched against.
 /// Returns `None` when no value is attached.
@@ -148,21 +146,21 @@ pub(crate) fn attach_from_end_values(cmd: &Command, argv: &[OsString]) -> Option
     attached.then_some(words)
 }
 
-/// Where a walk over the words of a command line stands.
+/// State of a pass over command-line arguments.
 struct Walk<'a> {
-    /// The innermost command the walk has descended into, whose options the
-    /// next word is read against.
+    /// The innermost subcommand the walk has entered, whose options the next
+    /// word is matched against.
     cmd: &'a Command,
 
-    /// The option the previous word wrote, while it still takes a value.
+    /// The option from the previous word, if it still awaits a separate value.
     open: Option<&'a Arg>,
 
-    /// Whether every word from here on is a value, whatever it looks like.
+    /// Whether all remaining words are positional values (after `--` or an
+    /// external subcommand).
     values_only: bool,
 }
 
 impl<'a> Walk<'a> {
-    /// A walk that starts at the root command `cmd`, which must be built.
     const fn new(cmd: &'a Command) -> Self {
         Self {
             cmd,
@@ -171,10 +169,8 @@ impl<'a> Walk<'a> {
         }
     }
 
-    /// Step over `token`, the next word of the command line.
-    ///
-    /// Returns whether the word is a from-end value of the option written
-    /// directly before it.
+    /// Advance past `token` and return `true` if it is a from-end value
+    /// belonging to the preceding option.
     fn step(&mut self, token: &ParsedArg<'_>) -> bool {
         let word = token.to_value_os();
         let option = self.open.take();
@@ -207,46 +203,43 @@ impl<'a> Walk<'a> {
         false
     }
 
-    /// Step over `word`, which starts no option: the name of a subcommand, the
-    /// name of a plugin's command, or a positional value.
+    /// Advance past a non-option `word`: enter a declared subcommand, stop
+    /// option parsing at a plugin subcommand, or ignore a positional value.
     fn enter(&mut self, word: &OsStr) {
         match self.cmd.find_subcommand(word) {
             Some(sub) => self.cmd = sub,
-            // A plugin's command, whose arguments are the plugin's to read.
+            // A plugin command parses its own arguments.
             None => self.values_only = self.cmd.is_allow_external_subcommands_set(),
         }
     }
 }
 
-/// Whether `word` starts with `-` and a digit, as a from-end position does.
+/// Returns `true` if `word` starts with `-` followed by an ASCII digit.
 fn starts_from_end(word: &OsStr) -> bool {
     matches!(word.as_encoded_bytes(), [b'-', digit, ..] if digit.is_ascii_digit())
 }
 
-/// Whether clap reads `token` as the value of `option`, written without one
-/// directly before it.
+/// Returns `true` if clap consumes `token` as the separate value of `option`.
 ///
-/// clap gives an option any word that does not look like a flag, and any word
-/// at all when the option accepts a value that does.
+/// clap consumes any non-flag word as the option's value, or any word at all
+/// when the option sets `allow_hyphen_values`.
 fn takes(option: &Arg, token: &ParsedArg<'_>) -> bool {
     option.is_allow_hyphen_values_set() || !(token.is_long() || token.is_short())
 }
 
-/// What one word of the command line writes, read against the options of a
-/// command.
+/// Classification of a command-line token against a command's declared options.
 enum Written<'a> {
     /// An option that takes values, and whether a value is attached to it.
     Option { arg: &'a Arg, attached: bool },
 
-    /// Flags that take no value, or an option the command does not declare.
+    /// Flags that take no value, or an unrecognized option.
     Flags,
 
-    /// A word that starts no option: a value, or the name of a subcommand.
+    /// A plain word (a value or subcommand name).
     Word,
 }
 
 impl<'a> Written<'a> {
-    /// Read `token` against the options `cmd` declares.
     fn read(cmd: &'a Command, token: &ParsedArg<'_>) -> Self {
         let option = if let Some((name, value)) = token.to_long() {
             name.ok()

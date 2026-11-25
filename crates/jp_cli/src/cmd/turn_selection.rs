@@ -51,7 +51,7 @@ pub(crate) enum CliRangeBound {
     At(DateTime<Utc>),
 }
 
-/// What the position errors call a turn.
+/// Noun passed to position error formatters for turns.
 const TURN: &str = "turn";
 
 /// Whether `s` is the most-recent-compaction marker.
@@ -145,7 +145,7 @@ fn parse_keep_last(s: &str) -> Result<RuleBound, String> {
     Ok(bound)
 }
 
-/// The 0-based stream bound a 1-based turn position resolves to.
+/// Convert a 1-based turn [`Position`] into a 0-based [`RangeBound`].
 fn range_bound(position: Position) -> RangeBound {
     match position {
         Position::Absolute(n) => RangeBound::Absolute(n.saturating_sub(1)),

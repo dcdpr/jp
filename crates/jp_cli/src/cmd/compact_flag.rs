@@ -338,7 +338,7 @@ fn parse_policy_options<'a>(
     Ok(over)
 }
 
-/// The rule bound a DSL turn position stands for.
+/// Convert a 1-based DSL turn [`Position`] into a [`RuleBound`].
 ///
 /// `RuleBound::Absolute` holds the 1-based number as written, while
 /// `RuleBound::FromEnd` holds a 0-based offset from the last turn.
