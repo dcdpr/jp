@@ -48,6 +48,18 @@ pub const MAX_COOLDOWN: chrono::TimeDelta = chrono::TimeDelta::days(7);
 /// The cooldown scope covering every model on an account.
 pub const SCOPE_ACCOUNT: &str = "account";
 
+/// The prefix of a cooldown scope that covers exactly one model ID.
+const MODEL_SCOPE_PREFIX: &str = "model:";
+
+/// The cooldown scope covering only the model with ID `model`.
+///
+/// It does not cover other models whose ID contains this one, such as
+/// `claude-sonnet-5-5` for `claude-sonnet-5`.
+#[must_use]
+pub fn model_scope(model: &str) -> String {
+    format!("{MODEL_SCOPE_PREFIX}{model}")
+}
+
 /// When a cooldown recorded now should expire.
 ///
 /// Provider-reported timing wins when it is in the future, capped at
@@ -354,8 +366,9 @@ impl StoreGuard {
 impl CredentialStore {
     /// Record a quota cooldown against a stored profile.
     ///
-    /// `scope` is the whole account ([`SCOPE_ACCOUNT`]) or a model family;
-    /// resolution skips the profile only for models the scope matches.
+    /// `scope` is the whole account ([`SCOPE_ACCOUNT`]), a model family, or one
+    /// model ([`model_scope`]); resolution skips the profile only for models
+    /// the scope matches.
     /// A later expiry never shortens an existing cooldown for the same scope,
     /// so a concurrent process that saw a longer window wins.
     ///
@@ -619,8 +632,9 @@ pub struct StoredCredential {
     /// The account email, when identity recovery reported one.
     pub email: Option<String>,
 
-    /// Active quota cooldowns, keyed by scope: the whole account (`"account"`)
-    /// or a model family (`"opus"`, `"sonnet"`).
+    /// Active quota cooldowns, keyed by scope: the whole account (`"account"`),
+    /// a model family (`"opus"`, `"sonnet"`), or one model ID
+    /// (`"model:claude-sonnet-5"`).
     /// Values are the instant the cooldown expires.
     #[serde(default)]
     pub cooldowns: BTreeMap<String, DateTime<Utc>>,
@@ -669,10 +683,15 @@ impl StoredCredential {
 /// recorded as the provider reports it (`seven_day_opus`) or as the bare family
 /// name (`opus`).
 ///
+/// A [`model_scope`] covers only the model with exactly that ID.
+///
 /// An unrecognized scope covers only models whose name contains it, so a window
 /// this build does not know about cannot silently take a whole account out of
 /// use.
 fn scope_covers(scope: &str, model: &str) -> bool {
+    if let Some(id) = scope.strip_prefix(MODEL_SCOPE_PREFIX) {
+        return model == id;
+    }
     match scope {
         SCOPE_ACCOUNT | "five_hour" | "seven_day" | "overage" => true,
         scope => {

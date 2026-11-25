@@ -772,6 +772,7 @@ async fn a_rate_limited_model_selection_exhausts_the_subscription_for_that_model
     prepared.model = "claude-fable-5-2".parse().unwrap();
     let environment = options::environment(&prepared, CachePolicy::Short);
     let (sender, mut receiver) = mpsc::channel(16);
+    let before = Utc::now();
     let error = timeout(
         Duration::from_secs(5),
         drive(
@@ -794,13 +795,19 @@ async fn a_rate_limited_model_selection_exhausts_the_subscription_for_that_model
     .await
     .unwrap()
     .unwrap_err();
+    let after = Utc::now();
     let Error::Stream(error) = error else {
         panic!("expected classified failure, got {error:?}")
     };
     assert_eq!(error.kind, StreamErrorKind::SubscriptionExhausted);
     // Scoped to the model, so the login stays in use for every other model.
-    assert_eq!(error.quota_scope.as_deref(), Some("claude-fable-5-2"));
-    assert_eq!(error.quota_reset, None);
+    assert_eq!(error.quota_scope.as_deref(), Some("model:claude-fable-5-2"));
+    // The refusal reports no reset, so the cooldown is kept short.
+    let reset = error.quota_reset.unwrap();
+    assert!(
+        reset >= before + MODEL_REFUSAL_COOLDOWN && reset <= after + MODEL_REFUSAL_COOLDOWN,
+        "{reset}"
+    );
     assert!(matches!(
         error.source().unwrap().downcast_ref::<Error>(),
         Some(Error::ModelSelection { model, .. }) if model.as_ref() == "claude-fable-5-2"
@@ -816,6 +823,13 @@ fn a_429_in_the_error_data_is_a_rate_limited_model() {
     }));
     assert!(refuses_rate_limited_model(&refused));
 
+    // A per-minute limit clears on its own; it is not the account refusing the
+    // model.
+    let burst = RpcError::internal_error().data(json!({
+        "details": "API error: 429 This request would exceed the rate limit for your \
+                    organization of 30,000 input tokens per minute.",
+    }));
+    assert!(!refuses_rate_limited_model(&burst));
     let overloaded =
         RpcError::internal_error().data(json!({"details": "API error: 529 Overloaded"}));
     assert!(!refuses_rate_limited_model(&overloaded));

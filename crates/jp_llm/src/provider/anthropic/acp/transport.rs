@@ -10,12 +10,13 @@ use std::{
 };
 
 use camino::{Utf8Path, Utf8PathBuf};
-use chrono::Utc;
+use chrono::{TimeDelta, Utc};
 use futures::{StreamExt as _, future::BoxFuture};
 use jp_config::{
     assistant::{request::CachePolicy, tool_choice::ToolChoice},
     model::id::Name,
 };
+use jp_credentials::model_scope;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
@@ -538,11 +539,20 @@ pub(super) async fn drive(
     }
 }
 
+/// How long a login stays out of use for a model it refused to select.
+///
+/// The refusal reports no reset, and its text does not tell a spent allowance
+/// from a short-lived rate limit, so the cooldown is kept short: a login
+/// skipped too briefly is refused once more, while one skipped too long may
+/// send the model to paid API access.
+pub(super) const MODEL_REFUSAL_COOLDOWN: TimeDelta = TimeDelta::minutes(5);
+
 /// Classify Claude Code's refusal to select `model`.
 ///
-/// A rate-limit refusal is a subscription exhaustion scoped to `model`: it says
-/// nothing about the login's other models, and another credential in the chain
-/// may still serve this one.
+/// A rate-limit refusal is a subscription exhaustion scoped to exactly `model`:
+/// it says nothing about the login's other models, and another credential in
+/// the chain may still serve this one.
+/// It lasts [`MODEL_REFUSAL_COOLDOWN`].
 fn model_selection_failure(model: &Name, source: RpcError) -> StreamError {
     let unknown = refuses_unknown_model(&source);
     let rate_limited = refuses_rate_limited_model(&source);
@@ -553,7 +563,11 @@ fn model_selection_failure(model: &Name, source: RpcError) -> StreamError {
     let failure = if unknown {
         StreamError::new(StreamErrorKind::UnknownModel, error.to_string())
     } else if rate_limited {
-        StreamError::subscription_exhausted(error.to_string(), None, Some(model.to_string()))
+        StreamError::subscription_exhausted(
+            error.to_string(),
+            Some(Utc::now() + MODEL_REFUSAL_COOLDOWN),
+            Some(model_scope(model)),
+        )
     } else {
         StreamError::new(StreamErrorKind::Other, error.to_string())
     };
@@ -579,13 +593,17 @@ pub(super) fn refuses_unknown_model(error: &RpcError) -> bool {
 /// Claude Code probes the model when it is selected and reports the API's
 /// response as `data.details`, e.g. `"API error: 429 This request would exceed
 /// your account's rate limit. ..."`.
+/// Any other 429, such as a per-minute token limit, does not match.
 pub(super) fn refuses_rate_limited_model(error: &RpcError) -> bool {
     error
         .data
         .as_ref()
         .and_then(|data| data.get("details"))
         .and_then(Value::as_str)
-        .is_some_and(|details| details.starts_with("API error: 429 "))
+        .is_some_and(|details| {
+            details.starts_with("API error: 429 ")
+                && details.contains("would exceed your account's rate limit")
+        })
 }
 
 /// Fetch the `model` select options offered by the adapter for

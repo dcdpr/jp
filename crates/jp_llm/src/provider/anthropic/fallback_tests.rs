@@ -9,13 +9,15 @@ use std::{
 };
 
 use jp_config::{AppConfig, providers::llm::AuthEntry, types::api_key_env::ApiKeyEnv};
+use jp_conversation::thread::Thread;
 use jp_credentials::{
     CATEGORY_LLM, CredentialBackend, CredentialSecret, InMemoryCredentialBackend,
-    PROVIDER_ANTHROPIC, StoreError, StoredCredential,
+    PROVIDER_ANTHROPIC, StoreError, StoredCredential, model_scope,
 };
 use jp_storage::resource_lock::InMemoryResourceLocker;
 
 use super::*;
+use crate::query::Truncation;
 
 const SET_ENV_VAR: &str = if cfg!(windows) { "USERNAME" } else { "USER" };
 
@@ -113,6 +115,12 @@ fn notices(events: &[result::Result<Event, StreamError>]) -> Vec<&str> {
         .collect()
 }
 
+fn model_refused(model: &str) -> EventStream {
+    Box::pin(stream::iter(vec![Err(
+        StreamError::subscription_exhausted("refused", None, Some(model_scope(model))),
+    )]))
+}
+
 fn exhausted() -> EventStream {
     Box::pin(stream::iter(vec![Err(
         StreamError::subscription_exhausted("spent", None, Some("five_hour".into())),
@@ -187,12 +195,9 @@ async fn acp_stream_advances_before_requesting_a_host_rebuild() {
 #[tokio::test]
 async fn acp_stream_moves_only_the_exhausted_model_to_the_next_credential() {
     let (provider, model, store) = provider(&["sub:sub", "sub:sub2"]);
-    let attempt = provider.resolve(model.name()).await.unwrap();
-    let refused = Box::pin(stream::iter(vec![Err(
-        StreamError::subscription_exhausted("refused", None, Some("claude-sonnet-5".into())),
-    )]));
+    let attempt = provider.resolve(&model.id.name).await.unwrap();
     let events = provider
-        .with_acp_fallback(&model, attempt, refused)
+        .with_acp_fallback(&model, attempt, model_refused("claude-sonnet-5"))
         .collect::<Vec<_>>()
         .await;
     assert_eq!(
@@ -205,11 +210,15 @@ async fn acp_stream_moves_only_the_exhausted_model_to_the_next_credential() {
         next.selected.map(|selected| selected.entry),
         Some(AuthEntry::Subscription(Some("sub2".into())))
     );
-    let other = provider.resolve("claude-opus-5").await.unwrap();
-    assert_eq!(
-        other.selected.map(|selected| selected.entry),
-        Some(AuthEntry::Subscription(Some("sub".into())))
-    );
+    // A newer model whose ID extends the refused one is a different model.
+    for other in ["claude-opus-5", "claude-sonnet-5-5"] {
+        let attempt = provider.resolve(other).await.unwrap();
+        assert_eq!(
+            attempt.selected.map(|selected| selected.entry),
+            Some(AuthEntry::Subscription(Some("sub".into()))),
+            "{other}"
+        );
+    }
     let snapshot = store.load().unwrap();
     let profiles = snapshot.profiles(CATEGORY_LLM, PROVIDER_ANTHROPIC).unwrap();
     assert_eq!(
@@ -218,8 +227,45 @@ async fn acp_stream_moves_only_the_exhausted_model_to_the_next_credential() {
             .keys()
             .map(String::as_str)
             .collect::<Vec<_>>(),
-        vec!["claude-sonnet-5"]
+        vec!["model:claude-sonnet-5"]
     );
+}
+
+/// The API's model listing gives every model a display name, so credential
+/// routing has to key on the model ID for a model-scoped cooldown to apply.
+#[tokio::test]
+async fn a_model_scoped_refusal_switches_a_model_with_a_display_name() {
+    let (provider, mut model, _) = provider(&["sub:sub", "api_key"]);
+    model.display_name = Some("Claude Sonnet 5".into());
+    let attempt = provider.resolve(&model.id.name).await.unwrap();
+    let events = provider
+        .with_acp_fallback(&model, attempt, model_refused("claude-sonnet-5"))
+        .collect::<Vec<_>>()
+        .await;
+    assert_eq!(
+        events.last().unwrap().as_ref().unwrap_err().kind,
+        StreamErrorKind::CredentialChanged
+    );
+
+    // The rebuilt request goes to the API key, not back to the refused login.
+    let query = ChatQuery {
+        thread: Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events: ConversationStream::new_test().with_turn("test"),
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
+    };
+    let context = QueryContext {
+        root: "/work/project".into(),
+        mcp_endpoint: None,
+        invocation: None,
+    };
+    let stream = provider.start_query(&model, query, context).await.unwrap();
+    assert!(matches!(stream.execution, ToolExecution::Caller));
 }
 
 #[tokio::test]
