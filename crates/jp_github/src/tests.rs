@@ -1165,6 +1165,13 @@ async fn repo_list_check_run_annotations_parses_levels() {
                 "annotation_level": "failure",
                 "title": null,
                 "message": "unresolved link to `layout::site`"
+            }, {
+                "path": "src/lib.rs",
+                "start_line": 20,
+                "end_line": 20,
+                "annotation_level": null,
+                "title": null,
+                "message": null
             }]));
         })
         .await;
@@ -1176,11 +1183,74 @@ async fn repo_list_check_run_annotations_parses_levels() {
         .await
         .expect("list annotations");
 
-    assert_eq!(annotations.len(), 1);
+    assert_eq!(annotations.len(), 2);
     assert_eq!(annotations[0].path, "src/lib.rs");
     assert_eq!(annotations[0].start_line, 13);
-    assert_eq!(annotations[0].annotation_level, AnnotationLevel::Failure);
-    assert_eq!(annotations[0].message, "unresolved link to `layout::site`");
+    assert_eq!(
+        annotations[0].annotation_level,
+        Some(AnnotationLevel::Failure)
+    );
+    assert_eq!(
+        annotations[0].message.as_deref(),
+        Some("unresolved link to `layout::site`")
+    );
+    // GitHub's schema lets both be null; such an annotation must not fail the
+    // whole response.
+    assert_eq!(annotations[1].annotation_level, None);
+    assert_eq!(annotations[1].message, None);
+    mock.assert();
+}
+
+#[tokio::test]
+async fn repo_combined_status_parses_each_context() {
+    use crate::models::checks::StatusState;
+
+    let server = MockServer::start_async().await;
+    let mock = server
+        .mock_async(|when, then| {
+            when.method(GET)
+                .path("/repos/acme/widgets/commits/abc123/status")
+                .query_param("per_page", "100");
+            then.status(200).json_body(json!({
+                "state": "pending",
+                "total_count": 2,
+                "statuses": [
+                    {
+                        "context": "merge-when-green",
+                        "state": "pending",
+                        "description": "Waiting for label: merge-when-green",
+                        "target_url": "https://github.com/acme/widgets/actions/runs/1"
+                    },
+                    {
+                        "context": "external",
+                        "state": "some_new_state",
+                        "description": null,
+                        "target_url": null
+                    }
+                ]
+            }));
+        })
+        .await;
+
+    let client = test_client(&server.base_url(), None);
+    let status = client
+        .repos("acme", "widgets")
+        .combined_status("abc123")
+        .await
+        .expect("combined status");
+
+    assert_eq!(status.total_count, 2);
+    let [gate, external] = status.statuses.as_slice() else {
+        panic!("expected two statuses, got {:?}", status.statuses);
+    };
+    assert_eq!(gate.context, "merge-when-green");
+    assert_eq!(gate.state, StatusState::Pending);
+    assert_eq!(
+        gate.description.as_deref(),
+        Some("Waiting for label: merge-when-green")
+    );
+    assert_eq!(external.state, StatusState::Unknown);
+    assert_eq!(external.target_url, None);
     mock.assert();
 }
 

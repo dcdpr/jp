@@ -12,19 +12,24 @@ fan_out = { concurrency = 4 }
 summary = "Read the CI status of a pull request, and the log of one of its jobs."
 
 description = """
-Without `job`, lists the check runs on the pull request's head commit, failed
-first, then pending, then passed. A check whose job reported errors or warnings
-through a problem matcher carries them as annotations: file, line, and the first
-line of the message. GitHub keeps at most 50 annotations per job.
+Without `job`, lists the check runs on the pull request's head commit, then its
+commit statuses (gates such as `merge-when-green` and services such as
+Coveralls report through the statuses API, not as check runs), each failed
+first, then pending, then passed. The `failed`, `pending`, and `passed` counts
+cover both. A check whose job reported errors or warnings through a problem
+matcher carries them as annotations: file, line, and the first line of the
+message. GitHub keeps at most 50 annotations per job.
 
 With `job`, downloads that job's log and returns the compiler diagnostics in it
 (`error:` and `warning:` blocks, panics, and runner errors), followed by the
-last 40 lines of the log. Use it when the annotations don't say enough, or when
-a job failed without any.
+last 40 lines of the log and a link to the full log. Use it when the annotations
+don't say enough, or when a job failed without any. Reading a log needs
+`JP_GITHUB_TOKEN` or `GITHUB_TOKEN`: GitHub refuses anonymous requests for
+logs, even on a public repository.
 
 Listing makes one request per check that has annotations, so it costs more of
-the rate limit than most tools. Set `JP_GITHUB_TOKEN` or `GITHUB_TOKEN` to
-avoid GitHub's limit of 60 anonymous requests an hour.
+the rate limit than most tools. Set a token to avoid GitHub's limit of 60
+anonymous requests an hour.
 """
 
 examples = """
@@ -69,5 +74,7 @@ type = "string"
 summary = "Check name or ID of the job whose log to read."
 description = """
 The `name` or `id` of a check in the listing, such as `docs` or
-`test (windows)`. Only GitHub Actions jobs have a log.
+`test (windows)`. Only GitHub Actions jobs have a log; commit statuses don't.
+When two checks share a name (two workflows can each have a job called
+`changes`), pass the `id`.
 """

@@ -1141,11 +1141,34 @@ impl ReposHandler {
             .await
     }
 
+    /// Fetch the latest status of each context reported on `reference` (a sha,
+    /// branch, or tag) through the commit statuses API, up to 100.
+    ///
+    /// Compare [`models::checks::CombinedStatus::total_count`] with the
+    /// statuses returned to tell whether more pages exist.
+    // qual:api
+    // Called from `.config/jp/tools`, which rustqual doesn't analyse
+    // (T-0yh5j3r item 17).
+    pub async fn combined_status(&self, reference: &str) -> Result<models::checks::CombinedStatus> {
+        let query = [("per_page".to_owned(), "100".to_owned())];
+
+        self.client
+            .get_json(
+                &format!(
+                    "/repos/{}/{}/commits/{reference}/status",
+                    self.owner, self.repo
+                ),
+                &query,
+            )
+            .await
+    }
+
     /// Download the plain-text log of GitHub Actions job `id`.
     ///
     /// GitHub answers with a redirect to a download URL that expires after a
     /// minute, which the client follows.
-    /// A private repository needs a token with read access to it.
+    /// GitHub refuses anonymous requests with a 403, even for a public
+    /// repository.
     // qual:api
     // Called from `.config/jp/tools`, which rustqual doesn't analyse
     // (T-0yh5j3r item 17).

@@ -2,11 +2,12 @@ use std::cmp::Ordering;
 
 use chrono::{DateTime, Utc};
 use jp_github::models::checks::{
-    Annotation, AnnotationLevel, CheckConclusion, CheckRun, CheckRuns, CheckStatus,
+    Annotation, AnnotationLevel, CheckConclusion, CheckRun, CheckRuns, CheckStatus, CombinedStatus,
+    Status, StatusState,
 };
 
-use super::{auth_optional, handle_404, parse_repo};
-use crate::{Result, to_xml, util::truncate};
+use super::{auth_optional, handle_404, parse_repo, read_token};
+use crate::{Error, Result, to_xml, util::truncate};
 
 /// Cap for the diagnostics a job's log contributes to the result.
 const MAX_DIAGNOSTIC_BYTES: usize = 32_000;
@@ -17,11 +18,23 @@ const MAX_DIAGNOSTIC_BYTES: usize = 32_000;
 /// failure and the runner reports the exit code.
 const TAIL_LINES: usize = 40;
 
+/// GitHub refuses anonymous requests for a job's log, even on a public
+/// repository.
+const LOG_NEEDS_TOKEN: &str = "Reading a job's log needs a GitHub token: set `JP_GITHUB_TOKEN` or \
+                               `GITHUB_TOKEN`. GitHub refuses anonymous requests for logs, even \
+                               on a public repository.";
+
 pub(crate) async fn github_pr_checks(
     repository: Option<String>,
     number: u64,
     job: Option<String>,
 ) -> Result<String> {
+    // Checked before any request, so the caller doesn't spend rate limit on a
+    // lookup that ends in a 403.
+    if job.is_some() && read_token().is_none() {
+        return Err(LOG_NEEDS_TOKEN.into());
+    }
+
     auth_optional().await?;
 
     let (owner, repo) = parse_repo(repository)?;
@@ -39,9 +52,10 @@ pub(crate) async fn github_pr_checks(
 
     let repos = client.repos(&owner, &repo);
     let runs = repos.list_check_runs(&sha).await?;
+    let statuses = repos.combined_status(&sha).await?;
 
     if let Some(job) = job {
-        let run = find_run(&runs.check_runs, &job)?;
+        let run = find_run(&runs.check_runs, &statuses.statuses, &job)?;
         if !run.is_actions_job() {
             return Err(format!(
                 "`{}` is not a GitHub Actions job, so it has no log. See {}",
@@ -56,7 +70,7 @@ pub(crate) async fn github_pr_checks(
         let log = repos
             .job_logs(run.id)
             .await
-            .map_err(|e| handle_404(e, format!("The log of `{}` is not available", run.name)))?;
+            .map_err(|e| log_error(e, &run.name))?;
         return Ok(summarize_log(run, &log));
     }
 
@@ -69,21 +83,67 @@ pub(crate) async fn github_pr_checks(
         annotations.push(repos.list_check_run_annotations(run.id).await?);
     }
 
-    format_checks(number, &sha, runs, annotations)
+    format_checks(number, &sha, runs, statuses, annotations)
+}
+
+fn log_error(error: jp_github::Error, name: &str) -> Error {
+    match &error {
+        jp_github::Error::GitHub { source, .. } if source.status_code.as_u16() == 403 => format!(
+            "GitHub refused the log of `{name}`: {}. The token may lack read access to the \
+             repository's Actions.",
+            source.message
+        )
+        .into(),
+        _ => handle_404(error, format!("The log of `{name}` is not available")),
+    }
 }
 
 /// The check run `job` names, by ID or by name.
-fn find_run<'a>(runs: &'a [CheckRun], job: &str) -> Result<&'a CheckRun> {
-    let by_id = job.parse::<u64>().ok();
-    if let Some(run) = runs
-        .iter()
-        .find(|run| Some(run.id) == by_id || run.name == job)
+///
+/// An ID wins over a name.
+/// A name several check runs share is refused with their IDs, since two
+/// workflows can each have a job of that name.
+fn find_run<'a>(runs: &'a [CheckRun], statuses: &[Status], job: &str) -> Result<&'a CheckRun> {
+    if let Ok(id) = job.parse::<u64>()
+        && let Some(run) = runs.iter().find(|run| run.id == id)
     {
         return Ok(run);
     }
 
+    let named: Vec<&CheckRun> = runs.iter().filter(|run| run.name == job).collect();
+    match named.as_slice() {
+        [run] => return Ok(run),
+        [] => {}
+        many => {
+            let ids = many
+                .iter()
+                .map(|run| run.id.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            return Err(format!(
+                "`{job}` names {} checks on the pull request's head commit: {ids}. Pass one of \
+                 these IDs as `job`.",
+                many.len()
+            )
+            .into());
+        }
+    }
+
+    if let Some(status) = statuses.iter().find(|status| status.context == job) {
+        return Err(format!(
+            "`{job}` is a commit status, not a job, so it has no log. See {}",
+            status
+                .target_url
+                .as_deref()
+                .filter(|url| !url.is_empty())
+                .unwrap_or("its status on GitHub")
+        )
+        .into());
+    }
+
     let mut names: Vec<&str> = runs.iter().map(|run| run.name.as_str()).collect();
     names.sort_unstable();
+    names.dedup();
     Err(format!(
         "No check named `{job}` on the pull request's head commit. Its checks: {}",
         names
@@ -104,6 +164,14 @@ enum Outcome {
 }
 
 impl Outcome {
+    fn of_status(state: StatusState) -> Self {
+        match state {
+            StatusState::Success => Self::Passed,
+            StatusState::Pending => Self::Pending,
+            StatusState::Error | StatusState::Failure | StatusState::Unknown => Self::Failed,
+        }
+    }
+
     fn of(run: &CheckRun) -> Self {
         if run.status != CheckStatus::Completed {
             return Self::Pending;
@@ -129,12 +197,15 @@ struct ChecksXml {
     #[serde(skip_serializing_if = "Option::is_none")]
     total_count: Option<u64>,
     check: Vec<CheckXml>,
+    commit_status: Vec<StatusXml>,
 }
 
 #[derive(serde::Serialize)]
 struct CheckXml {
     id: u64,
     name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    html_url: Option<String>,
     status: CheckStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     conclusion: Option<CheckConclusion>,
@@ -148,18 +219,33 @@ struct CheckXml {
 #[derive(serde::Serialize)]
 struct AnnotationXml {
     location: String,
-    level: AnnotationLevel,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    level: Option<AnnotationLevel>,
     #[serde(skip_serializing_if = "Option::is_none")]
     title: Option<String>,
-    message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message: Option<String>,
 }
 
-/// List `runs`, failed first, then pending, then passed, each with its
-/// `annotations` (in the same order as `runs`).
+#[derive(serde::Serialize)]
+struct StatusXml {
+    context: String,
+    state: StatusState,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    target_url: Option<String>,
+}
+
+/// List `runs`, then the commit `statuses`, each failed first, then pending,
+/// then passed.
+/// Each run carries its `annotations` (in the same order as `runs`), and the
+/// tally counts runs and statuses together.
 fn format_checks(
     number: u64,
     sha: &str,
     runs: CheckRuns,
+    statuses: CombinedStatus,
     annotations: Vec<Vec<Annotation>>,
 ) -> Result<String> {
     let count = runs.check_runs.len();
@@ -182,6 +268,7 @@ fn format_checks(
             (outcome, CheckXml {
                 id: run.id,
                 name: run.name,
+                html_url: run.html_url.map(String::from),
                 status: run.status,
                 conclusion: run.conclusion,
                 started_at: run.started_at,
@@ -196,7 +283,27 @@ fn format_checks(
         other => other,
     });
 
-    let tally = |wanted: Outcome| checks.iter().filter(|(o, _)| *o == wanted).count();
+    let mut commit_statuses: Vec<(Outcome, StatusXml)> = statuses
+        .statuses
+        .into_iter()
+        .map(|status| {
+            (Outcome::of_status(status.state), StatusXml {
+                context: status.context,
+                state: status.state,
+                description: status.description.filter(|text| !text.is_empty()),
+                target_url: status.target_url.filter(|url| !url.is_empty()),
+            })
+        })
+        .collect();
+    commit_statuses.sort_by(|(a, a_status), (b, b_status)| match a.cmp(b) {
+        Ordering::Equal => a_status.context.cmp(&b_status.context),
+        other => other,
+    });
+
+    let tally = |wanted: Outcome| {
+        checks.iter().filter(|(o, _)| *o == wanted).count()
+            + commit_statuses.iter().filter(|(o, _)| *o == wanted).count()
+    };
     let (failed, pending, passed) = (
         tally(Outcome::Failed),
         tally(Outcome::Pending),
@@ -213,6 +320,10 @@ fn format_checks(
             .is_ok_and(|count| runs.total_count > count)
             .then_some(runs.total_count),
         check: checks.into_iter().map(|(_, check)| check).collect(),
+        commit_status: commit_statuses
+            .into_iter()
+            .map(|(_, status)| status)
+            .collect(),
     })
 }
 
@@ -263,18 +374,23 @@ fn summarize_log(run: &CheckRun, log: &str) -> String {
         .join("\n\n");
 
     let tail = lines[lines.len().saturating_sub(TAIL_LINES)..].join("\n");
-    let header = format!(
+    let mut header = format!(
         "Log of `{}` (job {}), {} lines.",
         run.name,
         run.id,
         lines.len()
     );
+    if diagnostics.is_empty() {
+        header.push_str(" It has no compiler diagnostics.");
+    }
+    // The excerpt holds only diagnostics and the tail, so a failure reported
+    // some other way (a formatter's diff, say) needs the whole log.
+    if let Some(url) = &run.html_url {
+        header.push_str(&format!("\nFull log: {url}"));
+    }
 
     if diagnostics.is_empty() {
-        return format!(
-            "{header} It has no compiler diagnostics.\n\nLast {TAIL_LINES} \
-             lines:\n```text\n{tail}\n```"
-        );
+        return format!("{header}\n\nLast {TAIL_LINES} lines:\n```text\n{tail}\n```");
     }
 
     format!(

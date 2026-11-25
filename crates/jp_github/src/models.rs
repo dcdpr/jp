@@ -412,15 +412,17 @@ pub mod checks {
 
     /// A problem a check run reported against a line of a file, such as a
     /// compiler error a problem matcher picked out of a job's log.
+    ///
+    /// GitHub's schema allows `annotation_level` and `message` to be null.
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct Annotation {
         /// Path below the repository root.
         pub path: String,
         pub start_line: u64,
         pub end_line: u64,
-        pub annotation_level: AnnotationLevel,
+        pub annotation_level: Option<AnnotationLevel>,
         pub title: Option<String>,
-        pub message: String,
+        pub message: Option<String>,
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
@@ -430,6 +432,42 @@ pub mod checks {
         Warning,
         Failure,
         /// A level this client doesn't know.
+        #[serde(other)]
+        Unknown,
+    }
+
+    /// A commit's statuses, from `GET
+    /// /repos/{owner}/{repo}/commits/{ref}/status`.
+    ///
+    /// Commit statuses are separate from check runs: a workflow or service
+    /// writes them through the statuses API, and they don't appear among a
+    /// commit's check runs.
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct CombinedStatus {
+        /// How many statuses the commit has, across every page.
+        pub total_count: u64,
+        /// The latest status of each context.
+        pub statuses: Vec<Status>,
+    }
+
+    /// The latest status a context reported on a commit.
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct Status {
+        pub context: String,
+        pub state: StatusState,
+        pub description: Option<String>,
+        /// Where the reporter links to, which may be any URL a service chose.
+        pub target_url: Option<String>,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+    #[serde(rename_all = "snake_case")]
+    pub enum StatusState {
+        Error,
+        Failure,
+        Pending,
+        Success,
+        /// A state this client doesn't know.
         #[serde(other)]
         Unknown,
     }
