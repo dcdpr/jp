@@ -57,7 +57,7 @@ Done.
   `untrash` refuses when a live directory exists (`Exists`).
   Both hold the conversation lock, check before moving anything, and move every
   root's copy.
-  `TRASHED.md` reads "Moved here by `jp conversation trash` on <date>.
+  `TRASHED.md` reads "Moved here by `jp conversation trash` on `<date>`.
   Run `jp conversation untrash <id>` to move it back."
   It doesn't contain the auto-trash sentence, so the one-time restore never
   picks it up (tested).
@@ -70,7 +70,7 @@ Done.
   There is no confirmation prompt, since untrash reverses it.
   The command refuses to run under `--no-persist`.
 - **Report hint:** when the load-failure report lists failures, its last line is
-  `Run \`jp conversation trash <ids>\` to move them to the trash.` Directories
+  ``Run `jp conversation trash <ids>` to move them to the trash.`` Directories
   whose name isn't an ID are left out of the command.
 - **Glossary:** added *Trashed Conversation* to W-00dxybc.
 

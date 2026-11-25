@@ -123,8 +123,12 @@ impl FsStorageBackend {
         self.storage.user_or_root_with_path(path)
     }
 
-    /// Acquire the store-wide lock named `resource`, blocking until it is free;
-    /// see [`Storage::lock_store`].
+    /// Acquire the store-wide lock named `resource`, blocking until it is free.
+    ///
+    /// Serializes an operation over the whole store across processes.
+    /// The lock file is not removed on release, which makes blocking
+    /// acquisition safe.
+    /// `resource` must not collide with a conversation ID.
     ///
     /// # Errors
     ///
@@ -241,8 +245,10 @@ impl FsStorageBackend {
             .collect()
     }
 
-    /// Validate all conversation directories across both storage roots without
-    /// modifying them; see [`Storage::validate_conversations`].
+    /// Validate every live conversation directory in both storage roots.
+    ///
+    /// Removes leftover temporary files and import staging directories and
+    /// updates the scan cache, but never moves or deletes a conversation.
     #[must_use]
     pub fn validate_conversations(&self) -> ValidationResult {
         self.storage.validate_conversations()

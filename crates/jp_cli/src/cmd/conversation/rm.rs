@@ -170,6 +170,8 @@ enum Removal {
 ///
 /// Validates all IDs up front so an unknown ID fails before any conversation is
 /// removed.
+///
+/// [`RecoveryBackend::inspect`]: jp_storage::backend::RecoveryBackend::inspect
 fn resolve_literal(ctx: &Ctx, ids: &[ConversationId]) -> Result<Vec<Removal>, cmd::Error> {
     ids.iter()
         .map(|id| match ctx.workspace.acquire_conversation(id) {
@@ -186,6 +188,8 @@ fn resolve_literal(ctx: &Ctx, ids: &[ConversationId]) -> Result<Vec<Removal>, cm
 /// Waits if another process holds the conversation lock.
 /// Returns `Ok(true)` if the conversation was removed, or `Ok(false)` if the
 /// user declined.
+///
+/// [`RecoveryBackend::remove`]: jp_storage::backend::RecoveryBackend::remove
 async fn remove_unloaded(
     ctx: &Ctx,
     id: ConversationId,
