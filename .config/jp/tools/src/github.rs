@@ -9,6 +9,7 @@ mod create_issue_bug;
 mod create_issue_enhancement;
 mod create_issue_rfd_tracking;
 mod issues;
+mod pr_checks;
 mod pr_commits;
 mod pr_diff;
 mod pr_edit;
@@ -21,6 +22,7 @@ use create_issue_bug::github_create_issue_bug;
 use create_issue_enhancement::github_create_issue_enhancement;
 use create_issue_rfd_tracking::github_create_issue_rfd_tracking;
 use issues::github_issues;
+use pr_checks::github_pr_checks;
 use pr_commits::github_pr_commits;
 use pr_diff::github_pr_diff;
 use pr_edit::github_pr_edit;
@@ -146,6 +148,10 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
         }
 
         "pr_commits" => github_pr_commits(t.opt("repository")?, t.req("number")?, t.opt("page")?)
+            .await
+            .map(Into::into),
+
+        "pr_checks" => github_pr_checks(t.opt("repository")?, t.req("number")?, t.opt("job")?)
             .await
             .map(Into::into),
 

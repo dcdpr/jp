@@ -9,9 +9,12 @@ use inquire::InquireError;
 use jp_config::{
     AppConfig, PartialAppConfig, ToPartial,
     assistant::sections::PartialSectionConfig,
-    conversation::tool::{
-        AllowToggle, Enable, PartialCommandConfigOrString, PartialEnableConfig, PartialToolConfig,
-        ResultMode, RunMode, access::PartialEnvRuleConfig,
+    conversation::{
+        attachment::PartialAttachmentConfig,
+        tool::{
+            AllowToggle, Enable, PartialCommandConfigOrString, PartialEnableConfig,
+            PartialToolConfig, ResultMode, RunMode, access::PartialEnvRuleConfig,
+        },
     },
     model::id::{ModelIdConfig, Name, PartialModelIdConfig, ProviderId},
     plugins::command::RunPolicy,
@@ -5528,4 +5531,52 @@ fn test_auth_is_a_no_op_when_the_flag_is_absent() {
 
     assert_eq!(partial.providers.llm.openai.auth, None);
     assert_eq!(partial.providers.llm.anthropic.auth, None);
+}
+
+#[test]
+fn test_attach_rejects_a_url_its_handler_cannot_resolve() {
+    let diff = Url::parse("gh:pull/1/diff").unwrap();
+    let mut partial = PartialAppConfig::default();
+    partial.conversation.attachments.push(diff.clone().into());
+
+    let error = apply_attachments(
+        &mut partial,
+        &[AttachmentUrlOrPath::Url(
+            Url::parse("cmd://printenv?arg=TERM&env=TERM=xterm").unwrap(),
+        )],
+        None,
+    )
+    .unwrap_err();
+
+    assert_eq!(
+        crate::error::error_chain(&error),
+        "Attachment error for cmd://printenv?arg=TERM&env=TERM=xterm: invalid `env` value \
+         `TERM=xterm`: expected the name of an environment variable, such as `TERM`"
+    );
+    assert_eq!(partial.conversation.attachments.to_vec(), vec![
+        PartialAttachmentConfig::Url(diff)
+    ]);
+}
+
+#[test]
+fn test_attach_skips_a_url_the_conversation_already_attaches() {
+    let diff = Url::parse("gh:pull/1/diff").unwrap();
+    let reviews = Url::parse("gh:pull/1/reviews").unwrap();
+    let mut partial = PartialAppConfig::default();
+    partial.conversation.attachments.push(diff.clone().into());
+
+    apply_attachments(
+        &mut partial,
+        &[
+            AttachmentUrlOrPath::Url(diff.clone()),
+            AttachmentUrlOrPath::Url(reviews.clone()),
+        ],
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(partial.conversation.attachments.to_vec(), vec![
+        PartialAttachmentConfig::Url(diff),
+        PartialAttachmentConfig::Url(reviews),
+    ]);
 }

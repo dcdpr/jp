@@ -67,6 +67,12 @@ impl Handler for McpResources {
         "mcp"
     }
 
+    // MCP resource attachments are no longer resolved; keep the stored URL
+    // verbatim.
+    fn canonical(&self, uri: &Url) -> Result<Url, Box<dyn Error + Send + Sync>> {
+        Ok(uri.clone())
+    }
+
     async fn add(
         &mut self,
         uri: &Url,

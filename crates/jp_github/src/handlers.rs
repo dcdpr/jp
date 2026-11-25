@@ -1091,6 +1091,95 @@ impl ReposHandler {
         }
     }
 
+    /// Fetch the first page of the latest check runs on `reference` (a sha,
+    /// branch, or tag), up to 100.
+    ///
+    /// A re-run check replaces its earlier attempts.
+    /// Compare [`models::checks::CheckRuns::total_count`] with the runs
+    /// returned to tell whether more pages exist.
+    // qual:api
+    // Called from `.config/jp/tools`, which rustqual doesn't analyse
+    // (T-0yh5j3r item 17).
+    pub async fn list_check_runs(&self, reference: &str) -> Result<models::checks::CheckRuns> {
+        let query = [
+            ("filter".to_owned(), "latest".to_owned()),
+            ("per_page".to_owned(), "100".to_owned()),
+        ];
+
+        self.client
+            .get_json(
+                &format!(
+                    "/repos/{}/{}/commits/{reference}/check-runs",
+                    self.owner, self.repo
+                ),
+                &query,
+            )
+            .await
+    }
+
+    /// Fetch the annotations for check run `id`, up to 100.
+    ///
+    /// GitHub caps annotations at 50 per GitHub Actions job, so a single page
+    /// returns all of them.
+    // qual:api
+    // Called from `.config/jp/tools`, which rustqual doesn't analyse
+    // (T-0yh5j3r item 17).
+    pub async fn list_check_run_annotations(
+        &self,
+        id: u64,
+    ) -> Result<Vec<models::checks::Annotation>> {
+        let query = [("per_page".to_owned(), "100".to_owned())];
+
+        self.client
+            .get_json(
+                &format!(
+                    "/repos/{}/{}/check-runs/{id}/annotations",
+                    self.owner, self.repo
+                ),
+                &query,
+            )
+            .await
+    }
+
+    /// Fetch the latest status of each context reported on `reference` (a sha,
+    /// branch, or tag) through the commit statuses API, up to 100.
+    ///
+    /// Compare [`models::checks::CombinedStatus::total_count`] with the
+    /// statuses returned to tell whether more pages exist.
+    // qual:api
+    // Called from `.config/jp/tools`, which rustqual doesn't analyse
+    // (T-0yh5j3r item 17).
+    pub async fn combined_status(&self, reference: &str) -> Result<models::checks::CombinedStatus> {
+        let query = [("per_page".to_owned(), "100".to_owned())];
+
+        self.client
+            .get_json(
+                &format!(
+                    "/repos/{}/{}/commits/{reference}/status",
+                    self.owner, self.repo
+                ),
+                &query,
+            )
+            .await
+    }
+
+    /// Download the plain-text log for GitHub Actions job `id`.
+    ///
+    /// Follows GitHub's redirect to a short-lived signed download URL.
+    /// Requires authentication; GitHub returns 403 for anonymous requests, even
+    /// on public repositories.
+    // qual:api
+    // Called from `.config/jp/tools`, which rustqual doesn't analyse
+    // (T-0yh5j3r item 17).
+    pub async fn job_logs(&self, id: u64) -> Result<String> {
+        self.client
+            .get_with_accept(
+                &format!("/repos/{}/{}/actions/jobs/{id}/logs", self.owner, self.repo),
+                "application/vnd.github+json",
+            )
+            .await
+    }
+
     #[must_use]
     pub fn list_collaborators(&self) -> RepoCollaboratorListBuilder {
         RepoCollaboratorListBuilder {

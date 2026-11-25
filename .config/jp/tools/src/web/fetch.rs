@@ -132,11 +132,12 @@ fn github_issue_or_pr_redirect(url: &Url) -> Option<String> {
 
     let tool = match segments.as_slice() {
         [_, _, "issues", _, ..] => "github_issues",
-        // The files-changed and commits tabs map to dedicated tools. Other PR
-        // subpaths (checks, conflicts) fall through to `github_pulls`, where the
-        // metadata+conversation answer is the closest fit.
+        // The files-changed, commits, and checks tabs map to dedicated tools.
+        // Other PR subpaths (conflicts) fall through to `github_pulls`, where
+        // the metadata+conversation answer is the closest fit.
         [_, _, "pull" | "pulls", _, "files", ..] => "github_pr_diff",
         [_, _, "pull" | "pulls", _, "commits", ..] => "github_pr_commits",
+        [_, _, "pull" | "pulls", _, "checks", ..] => "github_pr_checks",
         [_, _, "pull" | "pulls", _, ..] => "github_pulls",
         _ => return None,
     };

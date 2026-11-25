@@ -1,5 +1,7 @@
 use std::{
+    env,
     error::Error,
+    ffi::OsString,
     hash::Hasher,
     ops::{Deref, DerefMut},
 };
@@ -15,6 +17,35 @@ use url::Url;
 
 #[distributed_slice]
 pub static HANDLERS: [fn() -> BoxedHandler] = [..];
+
+/// Names of the environment variables passed to every subprocess an attachment
+/// handler spawns.
+///
+/// `PATH` lets the subprocess find executables, and `HOME` lets it find
+/// user-level configuration.
+/// On Windows, `USERPROFILE` provides the user profile directory and
+/// `SystemRoot` is required to load system libraries.
+pub const BASE_ENV_VARS: &[&str] = if cfg!(windows) {
+    &["PATH", "HOME", "USERPROFILE", "SystemRoot"]
+} else {
+    &["PATH", "HOME"]
+};
+
+/// Query parameter of an attachment URL that names an environment variable to
+/// pass to the spawned subprocess.
+///
+/// Repeat the parameter to pass multiple variables:
+/// `cmd://printenv?arg=TERM&env=TERM`.
+/// Handlers write this canonical spelling when rendering a URL; [`env_names`]
+/// also accepts `envs`, `env[]`, and `envs[]`.
+pub const ENV_PARAM: &str = "env";
+
+/// Accepted query parameter spellings for [`ENV_PARAM`].
+///
+/// Config tables list variable names under `params.envs = ["TERM", "SHELL"]`,
+/// matching `params.args`; `env[]` and `envs[]` match the bracketed spellings
+/// accepted for `arg[]` and `args[]`.
+const ENV_PARAM_SPELLINGS: &[&str] = &[ENV_PARAM, "envs", "env[]", "envs[]"];
 
 /// Finds the first registered attachment handler to handle the given scheme.
 #[must_use]
@@ -121,6 +152,25 @@ pub trait Handler: std::fmt::Debug + DynClone + DynHash + Send + Sync {
     /// The scheme has to be unique across all handlers.
     fn scheme(&self) -> &'static str;
 
+    /// Return the canonical form of `uri`.
+    ///
+    /// Two URLs with the same canonical form resolve to identical attachment
+    /// content, so callers compare canonical URLs to deduplicate attachments.
+    /// Equivalent spellings (shorthands vs. full URLs, parameter aliases, or
+    /// order-independent query values) normalize to a single URL.
+    /// Calling `canonical` on an already-canonical URL returns that URL
+    /// unchanged.
+    ///
+    /// Performs no I/O, so callers can validate and canonicalize a URL before
+    /// resolving or storing it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `uri` is invalid for this handler.
+    /// [`Self::add`] may still reject a URL accepted here for reasons that
+    /// require I/O (such as a missing or oversized file).
+    fn canonical(&self, uri: &Url) -> Result<Url, Box<dyn Error + Send + Sync>>;
+
     /// Add a new attachment, using the given URL.
     ///
     /// The `cwd` parameter is the current working directory, used by handlers
@@ -207,3 +257,64 @@ pub fn percent_encode_str(encoded: &str) -> String {
     percent_encoding::percent_encode(encoded.as_bytes(), percent_encoding::NON_ALPHANUMERIC)
         .to_string()
 }
+
+/// Extract the environment variable names specified by [`ENV_PARAM`] query
+/// parameters in `uri`, sorted and deduplicated.
+///
+/// Accepts the parameter spellings `env`, `envs`, `env[]`, and `envs[]`.
+///
+/// # Errors
+///
+/// Returns an error if a variable name is empty or contains `=` or a NUL byte.
+/// The parameter forwards an existing variable from the parent environment and
+/// cannot assign a new value.
+pub fn env_names(uri: &Url) -> Result<Vec<String>, Box<dyn Error + Send + Sync>> {
+    let mut names = vec![];
+    for (key, name) in uri.query_pairs() {
+        if !ENV_PARAM_SPELLINGS.contains(&key.as_ref()) {
+            continue;
+        }
+
+        if name.is_empty() || name.contains(['=', '\0']) {
+            return Err(format!(
+                "invalid `{key}` value `{name}`: expected the name of an environment variable, \
+                 such as `TERM`"
+            )
+            .into());
+        }
+
+        names.push(name.into_owned());
+    }
+
+    names.sort();
+    names.dedup();
+
+    Ok(names)
+}
+
+/// Build the isolated environment for a subprocess spawned by an attachment
+/// handler.
+///
+/// Includes each variable in [`BASE_ENV_VARS`] and `names` that is set in the
+/// current process.
+/// Variables not in either list are omitted.
+#[must_use]
+pub fn child_env(names: &[String]) -> Vec<(OsString, OsString)> {
+    child_env_with(names, |name| env::var_os(name))
+}
+
+fn child_env_with(
+    names: &[String],
+    lookup: impl Fn(&str) -> Option<OsString>,
+) -> Vec<(OsString, OsString)> {
+    BASE_ENV_VARS
+        .iter()
+        .copied()
+        .chain(names.iter().map(String::as_str))
+        .filter_map(|name| Some((OsString::from(name), lookup(name)?)))
+        .collect()
+}
+
+#[cfg(test)]
+#[path = "lib_tests.rs"]
+mod tests;

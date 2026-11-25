@@ -101,6 +101,10 @@ impl Handler for GithubAttachment {
         "gh"
     }
 
+    fn canonical(&self, uri: &Url) -> Result<Url, Box<dyn Error + Send + Sync>> {
+        canonical_url(&parse_uri(uri)?)
+    }
+
     async fn add(
         &mut self,
         uri: &Url,
@@ -277,6 +281,50 @@ fn parse_uri(uri: &Url) -> Result<ParsedUri, Box<dyn Error + Send + Sync>> {
         no_defaults,
         include_outdated,
     })
+}
+
+/// Normalize `parsed` into its canonical `gh://owner/repo/pull/N/...` URL.
+///
+/// Owner and repository names are lowercased, exclude patterns are sorted and
+/// deduplicated, and query parameters that do not apply to the resource kind
+/// are omitted.
+fn canonical_url(parsed: &ParsedUri) -> Result<Url, Box<dyn Error + Send + Sync>> {
+    let (number, resource) = match parsed.kind {
+        ResourceKind::PullDiff { number } => (number, "diff"),
+        ResourceKind::PullReviews { number } => (number, "reviews"),
+    };
+
+    let mut url = Url::parse(&format!(
+        "gh://{}/{}/pull/{number}/{resource}",
+        parsed.owner.to_lowercase(),
+        parsed.repo.to_lowercase()
+    ))?;
+
+    let mut pairs = vec![];
+    match parsed.kind {
+        ResourceKind::PullDiff { .. } => {
+            let mut excludes = parsed.excludes.clone();
+            excludes.sort();
+            excludes.dedup();
+            pairs.extend(excludes.into_iter().map(|pattern| ("exclude", pattern)));
+
+            if parsed.no_defaults {
+                pairs.push(("no_defaults", "true".to_owned()));
+            }
+        }
+        ResourceKind::PullReviews { .. } => {
+            if parsed.include_outdated {
+                pairs.push(("include_outdated", "true".to_owned()));
+            }
+        }
+    }
+
+    // `query_pairs_mut` adds a trailing `?` even when no pair follows.
+    if !pairs.is_empty() {
+        url.query_pairs_mut().extend_pairs(pairs);
+    }
+
+    Ok(url)
 }
 
 async fn fetch(uri: &Url) -> Result<Attachment, Box<dyn Error + Send + Sync>> {

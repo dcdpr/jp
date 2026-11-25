@@ -132,7 +132,7 @@ use url::Url;
 
 use super::{
     ConversationLoadRequest, Output,
-    attachment::load_conversation_attachments,
+    attachment::{attach_urls, load_conversation_attachments},
     compact_flag::CompactFlag,
     conversation_id::{ConversationIds, FlagIds},
     lock::LockOutcome,
@@ -2410,12 +2410,7 @@ fn apply_attachments(
         .map(|v| v.parse(root))
         .collect::<Result<Vec<_>>>()?;
 
-    partial
-        .conversation
-        .attachments
-        .extend(attachments.into_iter().map(Into::into));
-
-    Ok(())
+    attach_urls(partial, attachments)
 }
 
 /// Apply the CLI reasoning configuration to the partial configuration.

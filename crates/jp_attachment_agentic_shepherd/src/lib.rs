@@ -13,13 +13,19 @@
 //! `issues` is the only namespace today; the grammar is shaped as
 //! `ag://<namespace>/<id>` so more can be added without breaking existing
 //! references.
+//!
+//! The binary runs in an isolated environment containing `PATH` and `HOME`
+//! (plus `USERPROFILE` and `SystemRoot` on Windows).
+//! Pass additional variables from the parent environment with the `env` query
+//! parameter (also accepted as `envs`, `env[]`, or `envs[]`), for example
+//! `ag:592?env=NAME`.
 
 use std::{collections::BTreeSet, error::Error};
 
 use async_trait::async_trait;
 use camino::Utf8Path;
 use jp_attachment::{
-    Attachment, BoxedHandler, HANDLERS, Handler, distributed_slice, linkme, typetag,
+    Attachment, BoxedHandler, HANDLERS, Handler, child_env, distributed_slice, linkme, typetag,
 };
 use serde::{Deserialize, Serialize};
 use tracing::debug;
@@ -56,6 +62,10 @@ pub struct AgenticShepherd {
 impl Handler for AgenticShepherd {
     fn scheme(&self) -> &'static str {
         "ag"
+    }
+
+    fn canonical(&self, uri: &Url) -> Result<Url, Box<dyn Error + Send + Sync>> {
+        Reference::parse(uri)?.to_url()
     }
 
     async fn add(
@@ -110,6 +120,7 @@ fn fetch(
     // attach the name here while we still have it.
     let output = duct::cmd(BINARY, ["--json".to_string(), payload])
         .dir(root)
+        .full_env(child_env(reference.env()))
         .stdout_capture()
         .stderr_capture()
         .unchecked()

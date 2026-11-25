@@ -191,6 +191,8 @@ pub(super) struct BackConfigs {
 impl BackConfigs {
     /// Precompute the config after each [`ConfigDelta`] in `entries`, starting
     /// from `front`.
+    ///
+    /// [`ConfigDelta`]: super::ConfigDelta
     fn new(front: &Arc<PartialAppConfig>, entries: &[InternalEvent]) -> Self {
         let mut after_deltas: Vec<Arc<PartialAppConfig>> = Vec::new();
         for entry in entries {
@@ -220,6 +222,8 @@ impl BackConfigs {
 
     /// Pop the latest delta's config when stepping backward over a
     /// [`ConfigDelta`].
+    ///
+    /// [`ConfigDelta`]: super::ConfigDelta
     fn step_over_delta(&mut self) {
         self.after_deltas.pop();
     }

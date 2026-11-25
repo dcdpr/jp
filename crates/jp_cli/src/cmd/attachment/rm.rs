@@ -2,6 +2,7 @@ use clap::{Arg, ArgAction, ArgMatches, Command, value_parser};
 use jp_config::{Config as _, PartialAppConfig, conversation::attachment::AttachmentConfig};
 use jp_workspace::Workspace;
 
+use super::attachment_identity;
 use crate::{
     IntoPartialAppConfig,
     cli::{CommandArgs, many},
@@ -52,15 +53,20 @@ impl IntoPartialAppConfig for Rm {
     ) -> std::result::Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
         let mut attachments = vec![];
 
+        // Compared by canonical URL, so any spelling of an attachment removes it.
         let to_remove_attachments = self
             .attachments
             .iter()
-            .map(|v| v.parse(workspace.map(Workspace::root)))
-            .collect::<Result<Vec<_>, _>>()?;
+            .map(|v| {
+                Ok(attachment_identity(
+                    &v.parse(workspace.map(Workspace::root))?,
+                ))
+            })
+            .collect::<crate::error::Result<Vec<_>>>()?;
 
         for attachment in partial.conversation.attachments {
             let url = AttachmentConfig::from_partial(attachment.clone(), vec![])?.to_url()?;
-            if !to_remove_attachments.contains(&url) {
+            if !to_remove_attachments.contains(&attachment_identity(&url)) {
                 attachments.push(attachment);
             }
         }

@@ -320,6 +320,159 @@ pub mod commits {
     }
 }
 
+pub mod checks {
+    use super::{DateTime, Deserialize, Serialize, Url, Utc};
+
+    /// A page of check runs for a commit, returned by `GET
+    /// /repos/{owner}/{repo}/commits/{ref}/check-runs`.
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct CheckRuns {
+        /// Total number of check runs across all pages.
+        pub total_count: u64,
+        pub check_runs: Vec<CheckRun>,
+    }
+
+    /// A check run reported on a commit, either a GitHub Actions job or an
+    /// external GitHub App check.
+    ///
+    /// For GitHub Actions jobs, `id` is also the job ID passed to
+    /// [`ReposHandler::job_logs`].
+    ///
+    /// [`ReposHandler::job_logs`]: crate::ReposHandler::job_logs
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct CheckRun {
+        pub id: u64,
+        pub name: String,
+        pub status: CheckStatus,
+        /// Populated once `status` is [`CheckStatus::Completed`].
+        pub conclusion: Option<CheckConclusion>,
+        pub started_at: Option<DateTime<Utc>>,
+        pub completed_at: Option<DateTime<Utc>>,
+        pub html_url: Option<Url>,
+        pub output: CheckRunOutput,
+        /// The GitHub App that created the check run.
+        pub app: Option<CheckApp>,
+    }
+
+    impl CheckRun {
+        /// Return whether this check run was created by GitHub Actions (and
+        /// therefore has an Actions job log).
+        // qual:api
+        // Called from `.config/jp/tools`, which rustqual doesn't analyse
+        // (T-0yh5j3r item 17).
+        #[must_use]
+        pub fn is_actions_job(&self) -> bool {
+            self.app
+                .as_ref()
+                .is_some_and(|app| app.slug == "github-actions")
+        }
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+    #[serde(rename_all = "snake_case")]
+    pub enum CheckStatus {
+        Queued,
+        InProgress,
+        Completed,
+        Waiting,
+        Requested,
+        Pending,
+        #[serde(other)]
+        Unknown,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+    #[serde(rename_all = "snake_case")]
+    pub enum CheckConclusion {
+        Success,
+        Failure,
+        Neutral,
+        Cancelled,
+        Skipped,
+        TimedOut,
+        ActionRequired,
+        Stale,
+        #[serde(other)]
+        Unknown,
+    }
+
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct CheckRunOutput {
+        pub title: Option<String>,
+        pub summary: Option<String>,
+        /// Number of annotations attached to the check run, fetched separately
+        /// via [`ReposHandler::list_check_run_annotations`].
+        ///
+        /// [`ReposHandler::list_check_run_annotations`]: crate::ReposHandler::list_check_run_annotations
+        #[serde(default)]
+        pub annotations_count: u64,
+    }
+
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct CheckApp {
+        pub slug: String,
+    }
+
+    /// A diagnostic annotation attached to a check run at a file and line range
+    /// (for example, a compiler error extracted by a problem matcher).
+    ///
+    /// GitHub's schema permits `annotation_level` and `message` to be `null`.
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct Annotation {
+        /// Repository-relative file path.
+        pub path: String,
+        pub start_line: u64,
+        pub end_line: u64,
+        pub annotation_level: Option<AnnotationLevel>,
+        pub title: Option<String>,
+        pub message: Option<String>,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+    #[serde(rename_all = "snake_case")]
+    pub enum AnnotationLevel {
+        Notice,
+        Warning,
+        Failure,
+        #[serde(other)]
+        Unknown,
+    }
+
+    /// Combined commit statuses returned by `GET
+    /// /repos/{owner}/{repo}/commits/{ref}/status`.
+    ///
+    /// Commit statuses are distinct from check runs: workflows and external
+    /// services publish them via the statuses API, and they do not appear in
+    /// the check-runs endpoint.
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct CombinedStatus {
+        /// Total number of statuses across all pages.
+        pub total_count: u64,
+        /// Latest status for each context.
+        pub statuses: Vec<Status>,
+    }
+
+    /// The latest status reported for a given `context` on a commit.
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct Status {
+        pub context: String,
+        pub state: StatusState,
+        pub description: Option<String>,
+        pub target_url: Option<String>,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+    #[serde(rename_all = "snake_case")]
+    pub enum StatusState {
+        Error,
+        Failure,
+        Pending,
+        Success,
+        #[serde(other)]
+        Unknown,
+    }
+}
+
 pub mod search {
     use super::{Deserialize, Serialize};
 

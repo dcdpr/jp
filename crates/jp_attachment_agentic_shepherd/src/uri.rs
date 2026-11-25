@@ -2,6 +2,7 @@
 
 use std::error::Error;
 
+use jp_attachment::{ENV_PARAM, env_names};
 use serde::{Deserialize, Serialize};
 use url::Url;
 
@@ -35,6 +36,11 @@ impl Namespace {
 pub(crate) struct Reference {
     namespace: Namespace,
     id: String,
+
+    /// Additional environment variables forwarded to the tracker binary beyond
+    /// [`jp_attachment::BASE_ENV_VARS`].
+    #[serde(default)]
+    env: Vec<String>,
 }
 
 impl Reference {
@@ -46,11 +52,17 @@ impl Reference {
         &self.id
     }
 
+    pub(crate) fn env(&self) -> &[String] {
+        &self.env
+    }
+
     /// Parse any supported `ag://` URI spelling into a reference.
     ///
     /// Accepts both the hierarchical (`ag://issues/592`) and opaque
     /// (`ag:issues/592`) forms, the singular and plural namespace spelling, and
     /// the bare-number shorthand (`ag:592`) which defaults to `issues`.
+    /// Each `env` query parameter names an environment variable forwarded to
+    /// the tracker binary (in any spelling accepted by [`env_names`]).
     pub(crate) fn parse(uri: &Url) -> Result<Self, Box<dyn Error + Send + Sync>> {
         if uri.scheme() != SCHEME {
             return Err(format!("expected `{SCHEME}` scheme, got `{}`", uri.scheme()).into());
@@ -92,17 +104,25 @@ impl Reference {
         Ok(Self {
             namespace,
             id: id.to_owned(),
+            env: env_names(uri)?,
         })
     }
 
     /// Render the reference back into its canonical hierarchical URI.
     pub(crate) fn to_url(&self) -> Result<Url, Box<dyn Error + Send + Sync>> {
-        Url::parse(&format!(
+        let mut url = Url::parse(&format!(
             "{SCHEME}://{}/{}",
             self.namespace.as_str(),
             self.id
-        ))
-        .map_err(Into::into)
+        ))?;
+
+        // `query_pairs_mut` adds a trailing `?` even when no pair follows.
+        if !self.env.is_empty() {
+            url.query_pairs_mut()
+                .extend_pairs(self.env.iter().map(|name| (ENV_PARAM, name)));
+        }
+
+        Ok(url)
     }
 }
 

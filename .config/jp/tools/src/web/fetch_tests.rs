@@ -143,11 +143,22 @@ mod github_issue_or_pr_redirect {
     }
 
     #[test]
+    fn pull_checks_url_suggests_github_pr_checks() {
+        // `/pull/N/checks` is the checks tab and routes to the dedicated CI
+        // status tool.
+        let msg = redirect("https://github.com/rust-lang/rust/pull/12345/checks").unwrap();
+        assert!(msg.contains("`github_pr_checks`"));
+        assert!(!msg.contains("`github_pulls`"));
+        assert!(msg.contains(r#""repository": "rust-lang/rust""#));
+        assert!(msg.contains(r#""number": 12345"#));
+    }
+
+    #[test]
     fn pull_other_subpaths_fall_back_to_github_pulls() {
-        // `/checks`, `/conflicts` etc. don't have dedicated tools — the
+        // `/conflicts` etc. don't have dedicated tools; the
         // metadata+conversation answer is the closest fit, so the redirect
         // keeps them on `github_pulls`.
-        let msg = redirect("https://github.com/foo/bar/pull/42/checks").unwrap();
+        let msg = redirect("https://github.com/foo/bar/pull/42/conflicts").unwrap();
         assert!(msg.contains("`github_pulls`"));
         assert!(!msg.contains("`github_pr_diff`"));
     }

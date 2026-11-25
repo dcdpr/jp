@@ -138,6 +138,8 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
                 Checks {
                     checksum_freshness,
                     wiki: t.option_or("wiki_check", false),
+                    docs: t.option_or("doc_check", false),
+                    docs_mergeable_info: t.option_or("doc_mergeable_info", false),
                     qual: t.option_or("qual_check", false),
                     site: t.option_or("site_check", false),
                 },
