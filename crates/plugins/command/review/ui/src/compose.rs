@@ -12,9 +12,11 @@
 //! bar's, which sends a pass, or the comments', which adds a comment.
 //! [`layout::site`] says which, and [`at`] draws the composer there.
 //!
-//! The composer's draft is kept in local storage as it is written, so a tab iOS
-//! reloads opens with it, and saves against the file, version, and bytes it was
-//! written for.
+//! The composer's draft is kept in the tab's session storage as it is written,
+//! so a tab iOS reloads opens with it, and saves against the file, version, and
+//! bytes it was written for.
+//! Each tab keeps its own: one tab saving or discarding leaves another's draft
+//! as it is.
 //!
 //! [`layout::site`]: crate::layout::site
 
@@ -172,8 +174,8 @@ pub(crate) const INLINE: &str = "my-3 cursor-auto rounded-lg border border-line 
                                  whitespace-normal text-ink shadow-sm";
 
 impl Compose {
-    /// The writing state of the review `id`, with the draft local storage kept
-    /// for it, which it keeps there from then on.
+    /// The writing state of the review `id`, with the draft the tab's storage
+    /// kept for it, which it keeps there from then on.
     pub(crate) fn new(id: &str) -> Self {
         let key = composer::key(id);
         let draft = RwSignal::new(dom::stored(&key).as_deref().and_then(composer::decode));

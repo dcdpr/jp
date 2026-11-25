@@ -128,6 +128,17 @@ fn a_pass_request_is_empty_by_default() {
 }
 
 #[test]
+fn a_withdrawal_may_name_its_draft() {
+    pinned(&WithdrawQuery::default(), "{}");
+    pinned(
+        &WithdrawQuery {
+            draft: Some(Draft::Reply),
+        },
+        r#"{"draft":"reply"}"#,
+    );
+}
+
+#[test]
 fn a_stop_may_name_its_pass() {
     pinned(&StopRequest::default(), "{}");
     pinned(&StopRequest { pass: Some(2) }, r#"{"pass":2}"#);

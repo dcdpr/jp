@@ -121,7 +121,7 @@ pub(super) fn seat(page: Page, inline: Memo<Option<Inline>>) {
             // Right under the text it is about, over the line that says how
             // far the file was read when that sits there too.
             let under = bytes.map(|bytes| (bytes, Order::First));
-            seat_under(page, &host, pane, &stage, under);
+            drop(seat_under(page, &host, pane, &stage, under));
             if focus {
                 compose.focus();
             }

@@ -52,7 +52,7 @@ use crate::{
     layout::{self, APPROVED, CHANGED, FOCUS, Inline, PENDING, Site},
     mapping, poll,
     route::{Changes, ReviewView, Route, Span},
-    seat::{self, Order},
+    seat::{self, Order, Seat},
 };
 
 /// What the file is scrolled to once it is drawn.
@@ -197,6 +197,7 @@ pub(crate) fn page(nav: Nav, id: String, seen: RwSignal<Option<String>>) -> impl
     thread::seat(page, inline);
     write::follow_selection(page);
     write::follow_keys(page);
+    write::follow_history(page);
     write::drop_selection(page);
 
     main().child((header::top(page, site), columns(page, inline, site)))
@@ -246,14 +247,14 @@ fn columns(page: Page, inline: Memo<Option<Inline>>, site: Memo<Option<Site>>) -
 /// of the file's text, to the end of `stage`, when `under` is `None`, or none
 /// of the text is drawn.
 ///
-/// Returns whether `host` sits in the file's text.
+/// Returns where `host` sits in the file's text, or `None` when it was parked.
 fn seat_under(
     page: Page,
     host: &Element,
     pane: Option<HtmlDivElement>,
     stage: &Element,
     under: Option<([usize; 2], Order)>,
-) -> bool {
+) -> Option<Seat> {
     let seat = under.zip(pane).and_then(|((bytes, order), pane)| {
         page.file.with_untracked(|file| {
             let source = &file.as_ref()?.as_ref().ok()?.source;
@@ -263,11 +264,11 @@ fn seat_under(
 
     let Some((seat, order)) = seat else {
         seat::park(host, stage);
-        return false;
+        return None;
     };
     seat::take(host, &seat, order);
 
-    true
+    Some(seat)
 }
 
 /// Poll the review for as long as the page shows it, asking again at once when

@@ -688,7 +688,7 @@ fn a_draft_is_edited_and_withdrawn() {
         .unwrap(),
     )
     .unwrap();
-    let withdrawn = withdraw(&workspace.store, first).unwrap();
+    let withdrawn = withdraw(&workspace.store, first, &WithdrawQuery::default()).unwrap();
 
     assert_eq!(body(&edited)["suggestion"], "Line one.");
     assert_eq!(body(&edited)["body"], "Draft.");
@@ -697,7 +697,7 @@ fn a_draft_is_edited_and_withdrawn() {
         json!({ "id": format!("{id}#1"), "withdrawn": "comment" })
     );
     assert_eq!(
-        withdraw(&workspace.store, first),
+        withdraw(&workspace.store, first, &WithdrawQuery::default()),
         Err(ApiError::not_found(format!("{id}#1 was withdrawn.")))
     );
 }
@@ -728,7 +728,7 @@ fn a_sent_comment_takes_a_reply_and_is_resolved() {
     let replied = reply(&workspace.context(), first, &replying).unwrap();
     assert_eq!(body(&replied)["draft_reply"]["body"], "Why?");
 
-    withdraw(&workspace.store, first).unwrap();
+    withdraw(&workspace.store, first, &WithdrawQuery::default()).unwrap();
     let resolved = resolve(&workspace.store, first).unwrap();
     assert_eq!(
         body(&resolved),
@@ -899,6 +899,44 @@ fn an_approval_is_outdated_once_a_line_of_its_passage_changes() {
     assert_eq!(
         approvals[1]["anchor"]["projected"],
         json!({ "version": 2, "range": "4", "bytes": [30, 42] })
+    );
+}
+
+/// An approval is of the text, not of the versions in between: once the text
+/// reads as it did, it is approved again.
+#[test]
+fn an_approval_holds_again_once_its_passage_is_restored() {
+    let (_tmp, workspace) = workspace();
+    let id = started(&workspace);
+    approve(
+        &workspace.context(),
+        id,
+        place(&json!({ "version": 1, "path": "docs/a.md", "range": "3" })),
+    )
+    .unwrap();
+    fs::write(
+        workspace.root.join("docs/a.md"),
+        "# Title\n\nFirst line, changed.\nSecond line.\n",
+    )
+    .unwrap();
+    record_tree(&workspace, id);
+    assert_eq!(
+        shown(&workspace, id)["approvals"][0]["anchor"]["outdated"],
+        true
+    );
+
+    fs::write(workspace.root.join("docs/a.md"), MARKDOWN).unwrap();
+    record_tree(&workspace, id);
+
+    assert_eq!(
+        shown(&workspace, id)["approvals"][0]["anchor"],
+        json!({
+            "version": 1,
+            "path": "docs/a.md",
+            "range": "3",
+            "projected": { "version": 3, "range": "3", "bytes": [9, 20] },
+            "outdated": false
+        })
     );
 }
 

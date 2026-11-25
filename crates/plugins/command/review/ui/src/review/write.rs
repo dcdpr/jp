@@ -4,7 +4,7 @@
 
 use std::{cell::Cell, rc::Rc, time::Duration};
 
-use jp_review_api::{AnchorRequest, Comment, Recorded, State, StopRequest};
+use jp_review_api::{AnchorRequest, Comment, Draft as Drafted, Recorded, State, StopRequest};
 use leptos_dom::helpers::{TimeoutHandle, set_timeout, window_event_listener_untyped};
 use reactive_graph::{
     effect::Effect, owner::on_cleanup, prelude::*, signal::RwSignal, spawn_local,
@@ -94,7 +94,14 @@ fn act(page: Page, action: Action, comment: &Comment) {
                 format!("Withdraw your draft reply to #{number}?")
             };
             if dom::confirm(&question) {
-                write(page, Call::delete(client::comment_url(&id, number)));
+                // The draft the question named, which the server refuses to
+                // withdraw once the comment holds the other.
+                let draft = if action == Action::Withdraw {
+                    Drafted::Comment
+                } else {
+                    Drafted::Reply
+                };
+                write(page, Call::delete(client::withdraw_url(&id, number, draft)));
             }
         }
         Action::Resolve => write(page, Call::post_empty(client::resolve_url(&id, number))),
@@ -522,15 +529,41 @@ fn follow(page: Page, event: &MouseEvent, link: &Element) {
 /// Show the review's file `path` in place of the one shown, at the heading with
 /// the anchor `heading`, or from its start.
 pub(super) fn show_file(page: Page, path: String, heading: Option<String>) {
+    let to = Route::Review(ReviewView {
+        file: Some(path),
+        ..page.view.get_untracked()
+    });
+    page.nav.go_to_heading(to, heading.as_deref());
     match heading {
         // Scrolled to once the file is drawn.
         Some(anchor) => page.reveal.set_value(Some(Reveal::Heading(anchor))),
         None => dom::show_top(),
     }
-    page.nav.go(Route::Review(ReviewView {
-        file: Some(path),
-        ..page.view.get_untracked()
-    }));
+}
+
+/// Scroll to the heading the address names when Back or Forward lands on an
+/// entry with one, once the file it is in is drawn.
+///
+/// A file drawn already is not drawn again, so its heading is scrolled to at
+/// once.
+pub(super) fn follow_history(page: Page) {
+    // Added after the listener of `Nav`, which has set the route by the time
+    // this runs.
+    let listening = window_event_listener_untyped("popstate", move |_| {
+        let Some(anchor) = dom::fragment().filter(|_| !page.gone()) else {
+            return;
+        };
+        let drawn = page.file.with_untracked(|file| {
+            let path = file.as_ref()?.as_ref().ok()?.path.clone();
+            Some(path)
+        });
+        let pane = page.pane.get_untracked();
+        match pane.filter(|_| drawn.is_some() && drawn == page.shown.get_untracked()) {
+            Some(pane) => dom::show_heading(&pane, &anchor),
+            None => page.reveal.set_value(Some(Reveal::Heading(anchor))),
+        }
+    });
+    on_cleanup(move || listening.remove());
 }
 
 /// Take back, on Escape, the nearest thing the reader was offered or shown: the

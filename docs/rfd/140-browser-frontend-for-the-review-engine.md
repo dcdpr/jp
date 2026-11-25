@@ -80,9 +80,11 @@ A desktop browser runs the same app with a wider layout.
   [Commenting](#commenting)).
 - **Suspended tabs.** iOS suspends background tabs and may reload them.
   The client polls as soon as the page becomes visible again, and keeps an
-  unsaved composer in local storage until it is saved or discarded: its kind (a
-  new comment, an edit, or a reply), its target (the file, captured version, and
-  bytes, or the comment number), and its body and replacement text.
+  unsaved composer in the tab's session storage until it is saved or discarded:
+  its kind (a new comment, an edit, or a reply), its target (the file, captured
+  version, and bytes, or the comment number), and its body and replacement
+  text.
+  Each tab keeps its own, so two tabs on one review can't clear each other's.
   A restored composer saves against the version it captured.
   If the target was resolved or withdrawn in the meantime, the API refuses the
   save and the text stays on screen to copy.
@@ -293,6 +295,8 @@ both:
 - **Read to here** draws a line across the file under the block the selection
   ends in: the reviewer has read this far, and no further.
   A file has one such line, which setting it again moves.
+  It names the line read, and says so when it sits under a block that runs
+  past that line, as `jp review read-until` can set it inside one.
 
 ### Passes
 

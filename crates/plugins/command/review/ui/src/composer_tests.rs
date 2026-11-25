@@ -182,10 +182,10 @@ fn a_draft_needs_something_to_say_before_it_saves() {
     assert_eq!(problem(&Draft::pass()), None);
 }
 
-/// Local storage keeps a draft as JSON; text it can't read, such as an older
-/// UI's, is dropped rather than misread.
+/// The tab's storage keeps a draft as JSON; text it can't read, such as an
+/// older UI's, is dropped rather than misread.
 #[test]
-fn a_draft_round_trips_through_local_storage() {
+fn a_draft_round_trips_through_storage() {
     let draft = Draft {
         body: "Name it.".to_owned(),
         ..Draft::suggestion(range())

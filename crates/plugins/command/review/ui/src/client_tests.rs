@@ -69,6 +69,10 @@ fn the_write_endpoints_name_the_review_and_comment() {
         "/api/reviews/R-1h4k2m9/comments/3/resolve"
     );
     assert_eq!(
+        withdraw_url("R-1h4k2m9", 3, Draft::Reply),
+        "/api/reviews/R-1h4k2m9/comments/3?draft=reply"
+    );
+    assert_eq!(
         reopen_comment_url("R-1h4k2m9", 3),
         "/api/reviews/R-1h4k2m9/comments/3/reopen"
     );

@@ -3,8 +3,8 @@
 //!
 //! A draft names everything its request needs (the file, the version, the
 //! bytes, the comment) from the moment the composer opens, so one restored from
-//! the browser's local storage after iOS reloads a tab saves against what it
-//! was written for.
+//! the tab's session storage after iOS reloads it saves against what it was
+//! written for.
 
 use jp_review_api::{
     AnchorRequest, Comment, Draft as Drafted, EditRequest, NewCommentRequest, PassRequest,
@@ -267,20 +267,20 @@ fn anchor(on: &Target) -> Option<AnchorRequest> {
     }
 }
 
-/// Where the composer of the review `id` is kept in local storage.
+/// Where the composer of the review `id` is kept in the tab's storage.
 #[must_use]
 pub fn key(id: &str) -> String {
     format!("jp-review:composer:{id}")
 }
 
-/// `draft` as local storage keeps it.
+/// `draft` as the tab's storage keeps it.
 #[must_use]
 pub fn encode(draft: &Draft) -> String {
     serde_json::to_string(draft).unwrap_or_default()
 }
 
-/// The draft local storage kept as `text`; `None` for text no draft reads from,
-/// such as one an older UI wrote.
+/// The draft the tab's storage kept as `text`; `None` for text no draft reads
+/// from, such as one an older UI wrote.
 #[must_use]
 pub fn decode(text: &str) -> Option<Draft> {
     serde_json::from_str(text).ok()

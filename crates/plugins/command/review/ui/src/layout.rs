@@ -172,16 +172,31 @@ pub fn changed_since<'a>(approvals: &'a [Approval], file: &str, shown: u32) -> V
         .collect()
 }
 
-/// The bytes of the last line of `file` the reviewer read, in the version
-/// shown; `None` when they didn't say how far they read it, or that version
-/// holds none of the lines read.
+/// The last line of a file the reviewer read, in the version shown.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReadLine {
+    /// The line's number: `42`.
+    pub line: String,
+
+    /// The line's bytes, without its line ending.
+    pub bytes: [usize; 2],
+}
+
+/// The last line of `file` the reviewer read, in the version shown; `None` when
+/// they didn't say how far they read it, or that version holds none of the
+/// lines read.
 #[must_use]
-pub fn read_line(read: &[ReadUntil], file: &str) -> Option<[usize; 2]> {
-    read.iter()
+pub fn read_line(read: &[ReadUntil], file: &str) -> Option<ReadLine> {
+    let placed = read
+        .iter()
         .find(|read| read.path == file)?
         .projected
-        .as_ref()?
-        .bytes
+        .as_ref()?;
+
+    Some(ReadLine {
+        line: placed.range.clone()?,
+        bytes: placed.bytes?,
+    })
 }
 
 /// What sits in the text of a file, right under a passage of it.

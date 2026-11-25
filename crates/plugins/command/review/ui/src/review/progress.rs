@@ -14,8 +14,8 @@ use tachys::{
 use super::{Page, seat_under, write};
 use crate::{
     compose::{Mark, PLAIN},
-    layout,
-    seat::Order,
+    layout::{self, ReadLine},
+    seat::{self, Order},
     text,
     widget::{self, Tone},
 };
@@ -28,10 +28,10 @@ const LINE: &str = "my-4 flex cursor-auto items-center gap-2 font-sans text-xs l
 /// The classes of either half of the line, beside what it says.
 const STROKE: &str = "h-px flex-1 bg-accent/40";
 
-/// The bytes of the last line read of the file shown; `None` when the reviewer
-/// didn't say how far they read it, and while the page shows what changed in
-/// the file, or another version than the one the review's marks are placed in.
-fn read_to(page: Page) -> Option<[usize; 2]> {
+/// The last line read of the file shown; `None` when the reviewer didn't say
+/// how far they read it, and while the page shows what changed in the file, or
+/// another version than the one the review's marks are placed in.
+fn read_to(page: Page) -> Option<ReadLine> {
     if page.view.with(|view| view.changes.is_some()) {
         return None;
     }
@@ -56,40 +56,46 @@ fn read_to(page: Page) -> Option<[usize; 2]> {
 /// The line shows only while the element sits in the file's text: a file whose
 /// text before the line read renders as nothing has no block to put it under,
 /// and the end of the file would say the whole of it was read.
+/// It names the line read, and says so when the block it sits under runs past
+/// that line, as a code block or a long paragraph can.
 pub(super) fn read_line(page: Page) -> impl RenderHtml {
     let host = NodeRef::<Div>::new();
-    let read = Memo::new(move |_| read_to(page).is_some());
-    let seated = RwSignal::new(false);
+    let line = Memo::new(move |_| read_to(page).map(|read| read.line));
+    // Whether the element sits in the file's text, and if so whether the block
+    // over it runs past the line read.
+    let seated = RwSignal::new(None::<bool>);
     seat(page, host, seated);
 
     div().node_ref(host).class(PLAIN).child(move || {
-        (read.get() && seated.get()).then(|| {
-            let remove = write::writable(page).then(|| {
-                widget::small_action(Tone::Quiet, "Remove", move || write::forget_read(page))
-            });
+        let (line, within) = (line.get()?, seated.get()?);
+        let label = text::read_until(&line, within);
+        let remove = write::writable(page)
+            .then(|| widget::small_action(Tone::Quiet, "Remove", move || write::forget_read(page)));
 
+        Some(
             div()
                 .class(LINE)
                 .attr("role", "separator")
-                .attr("aria-label", "Read until here")
+                .attr("aria-label", label.clone())
                 .child((
                     span().class(STROKE),
-                    span().child("Read until here"),
+                    span().child(label),
                     remove,
                     span().class(STROKE),
-                ))
-        })
+                )),
+        )
     })
 }
 
 /// Keep the element `host` holds under the last block read of the file shown,
-/// and out of the file's text while there is none, saying in `seated` which.
+/// and out of the file's text while there is none, saying in `seated` which,
+/// and whether that block runs past the line read.
 ///
 /// The last line read may render as nothing, as a blank line does, so the
 /// element goes under the last text rendered from the file up to the end of
 /// that line.
-fn seat(page: Page, host: NodeRef<Div>, seated: RwSignal<bool>) {
-    let bytes = Memo::new(move |_| read_to(page));
+fn seat(page: Page, host: NodeRef<Div>, seated: RwSignal<Option<bool>>) {
+    let bytes = Memo::new(move |_| read_to(page).map(|read| read.bytes));
 
     Effect::new(move |_| {
         let bytes = bytes.get();
@@ -104,7 +110,11 @@ fn seat(page: Page, host: NodeRef<Div>, seated: RwSignal<bool>) {
             if let (Some(host), Some(stage)) = (host.get_untracked(), stage) {
                 // After a comment on the block, which was read too.
                 let under = bytes.map(|[_, end]| ([0, end], Order::Last));
-                seated.set(seat_under(page, &host, pane, &stage, under));
+                let taken = seat_under(page, &host, pane, &stage, under);
+                let within = bytes
+                    .zip(taken)
+                    .map(|([_, end], taken)| seat::end(&taken) > Some(end));
+                seated.set(within);
             }
         }));
     });

@@ -49,7 +49,7 @@ use jp_plugin::{
 };
 use jp_review_api::{
     AnchorRequest, DetailQuery, DiffQuery, EditRequest, FileQuery, NewCommentRequest, NewReview,
-    PassRequest, ReadQuery, ReplyRequest, StopRequest, Stopping,
+    PassRequest, ReadQuery, ReplyRequest, StopRequest, Stopping, WithdrawQuery,
 };
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value};
@@ -749,10 +749,17 @@ async fn edit(
 async fn withdraw(
     State(server): State<Arc<Server>>,
     Path((id, number)): Path<(String, String)>,
+    asked: Result<Query<WithdrawQuery>, QueryRejection>,
 ) -> Response {
-    let withdraw = |workspace: &Workspace, comment| api::withdraw(&workspace.store, comment);
+    let answer = async {
+        let comment = comment_in(&id, &number)?;
+        let asked = query(asked)?;
+        server
+            .work(move |workspace| api::withdraw(&workspace.store, comment, &asked))
+            .await
+    };
 
-    with_comment(&server, &id, &number, withdraw).await
+    server.respond(answer.await)
 }
 
 async fn reply(

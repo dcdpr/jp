@@ -512,13 +512,7 @@ impl Review {
 
         let comment = self.comment_mut(number)?;
         let draft = comment.status() == Status::Draft;
-        match (edit.expects, draft) {
-            (Some(Draft::Comment), false) => {
-                return Err(Refusal::Comment(number, Why::Sent));
-            }
-            (Some(Draft::Reply), true) => return Err(Refusal::Comment(number, Why::Draft)),
-            _ => {}
-        }
+        expected(number, draft, edit.expects)?;
         if draft {
             let content = comment.content.edited(edit);
             content.check()?;
@@ -544,7 +538,10 @@ impl Review {
 
     /// Withdraw a draft comment, retiring its number, or the draft reply on a
     /// sent one.
-    pub fn withdraw(&mut self, number: u32) -> Result<Draft, Refusal> {
+    ///
+    /// Refused when the comment no longer holds the draft `expects` names;
+    /// whichever it holds when `None`.
+    pub fn withdraw(&mut self, number: u32, expects: Option<Draft>) -> Result<Draft, Refusal> {
         self.writable()?;
         let missing = missing(self.last_comment, number);
         let index = self
@@ -553,7 +550,9 @@ impl Review {
             .position(|comment| comment.number == number)
             .ok_or(missing)?;
 
-        if self.comments[index].status() == Status::Draft {
+        let draft = self.comments[index].status() == Status::Draft;
+        expected(number, draft, expects)?;
+        if draft {
             self.comments.remove(index);
             return Ok(Draft::Comment);
         }
@@ -617,6 +616,19 @@ impl Review {
     /// Open a closed review again, returning `false` when it was open already.
     pub fn reopen(&mut self) -> bool {
         self.closed_at.take().is_some()
+    }
+}
+
+/// Refuse a change to comment `number` that was meant for the draft `expects`
+/// names, when the comment holds the other: it is a `draft` or it isn't.
+///
+/// The change was written for that draft, so it is refused rather than applied
+/// to the other one.
+fn expected(number: u32, draft: bool, expects: Option<Draft>) -> Result<(), Refusal> {
+    match (expects, draft) {
+        (Some(Draft::Comment), false) => Err(Refusal::Comment(number, Why::Sent)),
+        (Some(Draft::Reply), true) => Err(Refusal::Comment(number, Why::Draft)),
+        _ => Ok(()),
     }
 }
 

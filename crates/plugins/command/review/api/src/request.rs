@@ -167,6 +167,16 @@ pub enum Format {
     Html,
 }
 
+/// The query of `DELETE /api/reviews/{id}/comments/{n}`, which may be left out.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WithdrawQuery {
+    /// The draft the withdrawal was asked for; it is refused once the comment
+    /// holds another.
+    /// Whichever the comment holds when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub draft: Option<Draft>,
+}
+
 /// The query of `DELETE /api/reviews/{id}/read`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReadQuery {

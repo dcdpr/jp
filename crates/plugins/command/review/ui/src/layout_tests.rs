@@ -343,7 +343,13 @@ fn read(path: &str, bytes: Option<[usize; 2]>) -> ReadUntil {
 fn the_line_read_to_is_the_one_of_the_file_shown() {
     let read = [read("a.md", Some([900, 931])), read("b.md", None)];
 
-    assert_eq!(read_line(&read, "a.md"), Some([900, 931]));
+    assert_eq!(
+        read_line(&read, "a.md"),
+        Some(ReadLine {
+            line: "42".to_owned(),
+            bytes: [900, 931],
+        })
+    );
     assert_eq!(read_line(&read, "b.md"), None, "none of it is left");
     assert_eq!(read_line(&read, "c.md"), None, "not said");
 }

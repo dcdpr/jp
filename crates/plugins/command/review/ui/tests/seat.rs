@@ -139,6 +139,29 @@ fn the_text_up_to_a_blank_line_ends_in_the_block_before_it() {
     assert_eq!(children(&pane), ["DIV.jp-text", "DIV.host", "DIV.jp-text"]);
 }
 
+/// `line one` is bytes 8 to 16 of a fenced block whose text runs to byte 36.
+#[wasm_bindgen_test]
+fn a_line_inside_a_code_block_seats_after_the_block_that_runs_past_it() {
+    let html = concat!(
+        r#"<pre><code class="language-rust"><span data-s="8" data-e="16">line one</span>"#,
+        "\n",
+        r#"<span data-s="17" data-e="25">line two</span>"#,
+        "\n",
+        r#"<span data-s="26" data-e="36">line three</span>"#,
+        "\n</code></pre>",
+    );
+    let source = "```rust\nline one\nline two\nline three\n```\n\nNext\n";
+    let next = r#"<p><span data-s="42" data-e="46">Next</span></p>"#;
+    let pane = pane(&[html, next]);
+    let (_home, host) = host();
+
+    let seat = under(&pane, source, [0, 16]).unwrap();
+    take(&host, &seat, Order::Last);
+
+    assert_eq!(children(&pane), ["DIV.jp-text", "DIV.host", "DIV.jp-text"]);
+    assert_eq!(end(&seat), Some(36), "past the line read, which ends at 16");
+}
+
 #[wasm_bindgen_test]
 fn bytes_with_no_text_drawn_have_no_seat() {
     let pane = pane(&[FIRST, SECOND]);

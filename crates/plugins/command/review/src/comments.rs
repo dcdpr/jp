@@ -179,9 +179,10 @@ pub(crate) fn edit(
 
 /// Withdraw the draft comment `comment`, or the draft reply on it.
 pub(crate) fn withdraw(ctx: &Context<'_>, comment: CommentRef) -> Result<Output, String> {
+    // The command acts on the comment as it is, whichever draft it holds.
     let withdrawn = ctx.store.update(comment.review, |review, _| {
         review
-            .withdraw(comment.number)
+            .withdraw(comment.number, None)
             .map_err(|refusal| refusal.message(comment.review))
     })?;
 

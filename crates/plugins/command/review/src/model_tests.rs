@@ -106,13 +106,13 @@ fn a_withdrawn_comment_retires_its_number() {
         review.add_comment(on_review(body)).unwrap();
     }
 
-    assert_eq!(review.withdraw(3), Ok(Draft::Comment));
+    assert_eq!(review.withdraw(3, None), Ok(Draft::Comment));
     assert_eq!(review.comment(3), Err(refused(3, Why::Withdrawn)));
     assert_eq!(review.comment(9), Err(refused(9, Why::Missing)));
     assert_eq!(review.add_comment(on_review("Four.")), Ok(4));
 
-    review.withdraw(4).unwrap();
-    review.withdraw(2).unwrap();
+    review.withdraw(4, None).unwrap();
+    review.withdraw(2, None).unwrap();
     assert_eq!(review.add_comment(on_review("Five.")), Ok(5));
 }
 
@@ -294,18 +294,44 @@ fn an_edit_is_refused_once_the_comment_holds_another_draft() {
     assert_eq!(review.edit(1, edit(Draft::Reply)), Ok(Draft::Reply));
 }
 
+/// A card left showing the draft comment, while the comment was sent and given
+/// a draft reply elsewhere, would otherwise withdraw the reply.
+#[test]
+fn a_withdrawal_is_refused_once_the_comment_holds_another_draft() {
+    let mut review = review();
+    review.add_comment(on_review("First.")).unwrap();
+
+    assert_eq!(
+        review.withdraw(1, Some(Draft::Reply)),
+        Err(refused(1, Why::Draft))
+    );
+
+    review.comments[0].pass = Some(1);
+    review
+        .reply(1, "Jane".to_owned(), at(3), "Sure?".to_owned())
+        .unwrap();
+
+    assert_eq!(
+        review.withdraw(1, Some(Draft::Comment)),
+        Err(refused(1, Why::Sent))
+    );
+    let comment = review.comment(1).unwrap();
+    assert_eq!(comment.draft_reply.as_ref().unwrap().body, "Sure?");
+    assert_eq!(review.withdraw(1, Some(Draft::Reply)), Ok(Draft::Reply));
+}
+
 #[test]
 fn withdrawing_a_draft_reply_keeps_the_comment() {
     let mut review = review();
     review.add_comment(on_review("First.")).unwrap();
     review.comments[0].pass = Some(1);
 
-    assert_eq!(review.withdraw(1), Err(refused(1, Why::Sent)));
+    assert_eq!(review.withdraw(1, None), Err(refused(1, Why::Sent)));
 
     review
         .reply(1, "Jane".to_owned(), at(3), "Sure?".to_owned())
         .unwrap();
-    assert_eq!(review.withdraw(1), Ok(Draft::Reply));
+    assert_eq!(review.withdraw(1, None), Ok(Draft::Reply));
     assert_eq!(review.comment(1).unwrap().draft_reply, None);
 }
 
@@ -320,7 +346,7 @@ fn resolving_needs_a_sent_comment_without_a_draft_reply() {
 
     assert_eq!(review.resolve(1, at(4)), Err(refused(1, Why::DraftReply)));
 
-    review.withdraw(1).unwrap();
+    review.withdraw(1, None).unwrap();
     assert_eq!(review.resolve(1, at(4)), Ok(Resolution::Resolved));
     assert_eq!(review.resolve(1, at(5)), Ok(Resolution::AlreadyResolved));
     assert_eq!(review.comment(1).unwrap().resolved_at, Some(at(4)));
@@ -451,7 +477,7 @@ fn a_comment_awaits_the_assistant_until_the_assistant_writes_last() {
         .unwrap();
     assert!(waiting(&review));
 
-    review.withdraw(1).unwrap();
+    review.withdraw(1, None).unwrap();
     review.resolve(1, at(4)).unwrap();
     assert!(!waiting(&review));
 }
@@ -559,7 +585,7 @@ fn a_closed_review_refuses_every_change() {
         }),
         Err(Refusal::Closed)
     );
-    assert_eq!(review.withdraw(1), Err(Refusal::Closed));
+    assert_eq!(review.withdraw(1, None), Err(Refusal::Closed));
     assert_eq!(review.resolve(1, at(10)), Err(Refusal::Closed));
 }
 

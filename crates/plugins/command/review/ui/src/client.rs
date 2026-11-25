@@ -7,7 +7,7 @@
 
 use std::ops::Range;
 
-use jp_review_api::ErrorBody;
+use jp_review_api::{Draft, ErrorBody};
 use js_sys::Error;
 use serde::{Serialize, de::DeserializeOwned};
 use wasm_bindgen::{JsCast, JsValue};
@@ -70,6 +70,18 @@ pub fn comments_url(id: &str) -> String {
 #[must_use]
 pub fn comment_url(id: &str, number: u32) -> String {
     format!("/api/reviews/{}/comments/{number}", encode(id))
+}
+
+/// `DELETE /api/reviews/{id}/comments/{number}`, withdrawing `draft`: the
+/// comment, or its draft reply.
+#[must_use]
+pub fn withdraw_url(id: &str, number: u32, draft: Draft) -> String {
+    let draft = match draft {
+        Draft::Comment => "comment",
+        Draft::Reply => "reply",
+    };
+
+    format!("{}?draft={draft}", comment_url(id, number))
 }
 
 /// `POST /api/reviews/{id}/comments/{number}/replies`.

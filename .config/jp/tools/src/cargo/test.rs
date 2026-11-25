@@ -1,4 +1,4 @@
-use std::env;
+use std::{env, error::Error};
 
 use camino::Utf8Path;
 use jp_process::{ProcessOutput, ProcessRunner, SystemProcessRunner};
@@ -27,6 +27,44 @@ const DRIVER_VARIABLES: [&str; 8] = [
     "SAFARIDRIVER_REMOTE",
     "MSEDGEDRIVER_REMOTE",
 ];
+
+/// The code nextest exits with when its filter selected no test, which tells a
+/// run that matched nothing apart from one whose build failed.
+const NO_TESTS_RUN: i32 = 4;
+
+/// Why a tool call failed.
+type Failure = Box<dyn Error + Send + Sync>;
+
+/// How a nextest run went, when it didn't fail outright.
+#[derive(Debug)]
+enum HostRun {
+    /// It ran at least one test.
+    Ran(Outcome),
+
+    /// It built, and its filter selected no test; holds what to report when
+    /// nothing else ran either.
+    NoneMatched(String),
+}
+
+impl HostRun {
+    /// The run as a tool's result, a run that matched nothing being an error.
+    fn into_result(self) -> ToolResult {
+        match self {
+            Self::Ran(outcome) => Ok(outcome),
+            Self::NoneMatched(error) => Err(error.into()),
+        }
+    }
+}
+
+/// How the browser tests went.
+#[derive(Debug, PartialEq, Eq)]
+struct BrowserRun {
+    /// What to report of them.
+    note: String,
+
+    /// How many ran, passing or failing.
+    ran: usize,
+}
 
 /// Cap for a single failing test's captured output.
 ///
@@ -81,26 +119,35 @@ pub(crate) async fn cargo_test(
     checksum_freshness: bool,
     wasm: bool,
 ) -> ToolResult {
-    let browser = wasm.then(|| testname.clone());
-    let outcome = cargo_test_impl(
+    let backtrace = backtrace.unwrap_or(false);
+    if !wasm {
+        return cargo_test_impl(
+            root,
+            rustflags,
+            profile,
+            packages,
+            testname,
+            backtrace,
+            checksum_freshness,
+            &SystemProcessRunner,
+        );
+    }
+
+    let host = host_run(
         root,
         rustflags,
         profile,
         packages,
-        testname,
-        backtrace.unwrap_or(false),
+        testname.clone(),
+        backtrace,
         checksum_freshness,
         &SystemProcessRunner,
     );
-    let Some(testname) = browser else {
-        return outcome;
-    };
-
     let chromedriver = which::which("chromedriver")
         .ok()
         .and_then(|path| path.into_os_string().into_string().ok());
     let chromedriver = chromedriver_for(|name| env::var_os(name).is_some(), chromedriver);
-    let note = wasm_test(
+    let browser = wasm_test(
         root,
         rustflags,
         profile,
@@ -109,7 +156,25 @@ pub(crate) async fn cargo_test(
         chromedriver.as_deref(),
         &SystemProcessRunner,
     );
-    with_note(outcome, note)
+    combine(host, browser)
+}
+
+/// The result of a run of the host's tests and the browser's together.
+///
+/// A name filter can select tests on one side only, as one naming a browser
+/// test does: the run succeeds when a test ran on either side, and fails when
+/// neither ran one.
+fn combine(host: Result<HostRun, Failure>, browser: Option<BrowserRun>) -> ToolResult {
+    let Some(browser) = browser else {
+        return host.and_then(HostRun::into_result);
+    };
+
+    match host {
+        Ok(HostRun::NoneMatched(_)) if browser.ran > 0 => {
+            Ok(format!("No host test matched.\n\n{}\n", browser.note).into())
+        }
+        host => with_note(host.and_then(HostRun::into_result), Some(browser.note)),
+    }
 }
 
 /// The `CHROMEDRIVER` to hand [`WASM_RUNNER`]: `found`, the `chromedriver` on
@@ -153,8 +218,8 @@ fn with_note(outcome: ToolResult, note: Option<String>) -> ToolResult {
 
 /// Run the browser tests of the browser crates among `packages`, or of every
 /// browser crate when `packages` is empty, in a headless browser through
-/// [`WASM_RUNNER`], returning how they went as a note; `None` when there is no
-/// browser crate to test.
+/// [`WASM_RUNNER`], returning how they went; `None` when there is no browser
+/// crate to test.
 ///
 /// Only the integration tests in `tests/` run there: the unit tests of a
 /// browser crate are plain logic, which the host run covers.
@@ -168,11 +233,12 @@ fn wasm_test<R: ProcessRunner>(
     testname: Option<&str>,
     chromedriver: Option<&str>,
     runner: &R,
-) -> Option<String> {
+) -> Option<BrowserRun> {
+    let unrun = |note: String| Some(BrowserRun { note, ran: 0 });
     let crates = match browser_crates(root, packages, runner) {
         Ok(crates) if crates.is_empty() => return None,
         Ok(crates) => crates,
-        Err(reason) => return Some(format!("The browser tests weren't run: {reason}")),
+        Err(reason) => return unrun(format!("The browser tests weren't run: {reason}")),
     };
 
     let scope = cargo_scope(&crates, "--workspace");
@@ -196,30 +262,40 @@ fn wasm_test<R: ProcessRunner>(
     let output = match runner.run_with_env("cargo", &args, root, &env) {
         Ok(output) => output,
         Err(error) => {
-            return Some(format!(
+            return unrun(format!(
                 "The browser tests weren't run: `cargo` couldn't be run: {error}"
             ));
         }
     };
     let (passed, failed) = browser_summary(&output.stdout);
-    if output.status.is_success() {
-        return Some(format!(
-            "Browser tests: {passed} passed, in {}.",
+    let ran = passed + failed;
+    if output.status.is_success() && ran == 0 {
+        return unrun(format!(
+            "No browser test matched, in {}.",
             crates.join(", ")
         ));
+    }
+    if output.status.is_success() {
+        return Some(BrowserRun {
+            note: format!("Browser tests: {passed} passed, in {}.", crates.join(", ")),
+            ran,
+        });
     }
 
     let log = truncate(
         format!("{}\n{}", output.stdout.trim(), output.stderr.trim()).trim(),
         MAX_DIAGNOSTIC_BYTES,
     );
-    Some(format!(
-        "Browser tests: {passed} passed, {failed} failed, in {}. Running them needs \
-         `{WASM_RUNNER}` (`just _install-wasm-bindgen`) and a WebDriver: `chromedriver` on the \
-         `PATH`, or the one `CHROMEDRIVER`, `GECKODRIVER`, or `SAFARIDRIVER` names. The log says \
-         which browser ran.\n```\n{log}\n```",
-        crates.join(", ")
-    ))
+    Some(BrowserRun {
+        note: format!(
+            "Browser tests: {passed} passed, {failed} failed, in {}. Running them needs \
+             `{WASM_RUNNER}` (`just _install-wasm-bindgen`) and a WebDriver: `chromedriver` on \
+             the `PATH`, or the one `CHROMEDRIVER`, `GECKODRIVER`, or `SAFARIDRIVER` names. The \
+             log says which browser ran.\n```\n{log}\n```",
+            crates.join(", ")
+        ),
+        ran,
+    })
 }
 
 /// How many tests passed and failed, summed over each `test result:` line
@@ -243,6 +319,11 @@ fn browser_summary(stdout: &str) -> (usize, usize) {
         })
 }
 
+/// Run the host's tests through nextest, and report them.
+///
+/// # Errors
+///
+/// Fails as [`host_run`] does, and when the filter selected no test.
 fn cargo_test_impl<R: ProcessRunner>(
     root: &Utf8Path,
     rustflags: &str,
@@ -253,6 +334,35 @@ fn cargo_test_impl<R: ProcessRunner>(
     checksum_freshness: bool,
     runner: &R,
 ) -> ToolResult {
+    host_run(
+        root,
+        rustflags,
+        profile,
+        packages,
+        testname,
+        backtrace,
+        checksum_freshness,
+        runner,
+    )
+    .and_then(HostRun::into_result)
+}
+
+/// Run the host's tests through nextest.
+///
+/// # Errors
+///
+/// Fails when nextest can't be run, or ran no test for another reason than its
+/// filter selecting none, as when the build failed.
+fn host_run<R: ProcessRunner>(
+    root: &Utf8Path,
+    rustflags: &str,
+    profile: Option<&str>,
+    packages: &[String],
+    testname: Option<String>,
+    backtrace: bool,
+    checksum_freshness: bool,
+    runner: &R,
+) -> Result<HostRun, Failure> {
     let test_name = testname.unwrap_or_default();
     let scope = cargo_scope(packages, "--workspace");
     // `--profile` selects a nextest profile; the cargo one has its own flag.
@@ -310,11 +420,15 @@ fn cargo_test_impl<R: ProcessRunner>(
     } = parse_run(&stdout);
 
     if ran_tests == 0 {
-        Err(format!(
+        let error = format!(
             "Unable to run any tests. This can be due to compilation issues, or incorrect package \
              or test name:\n\n{}",
             truncate(&stderr, MAX_DIAGNOSTIC_BYTES)
-        ))?;
+        );
+        if status.code() == Some(NO_TESTS_RUN) {
+            return Ok(HostRun::NoneMatched(error));
+        }
+        return Err(error.into());
     }
 
     let mut response =
@@ -346,7 +460,7 @@ fn cargo_test_impl<R: ProcessRunner>(
         ));
     }
 
-    Ok(response.into())
+    Ok(HostRun::Ran(response.into()))
 }
 
 /// What nextest's `libtest-json-plus` output says about a run.

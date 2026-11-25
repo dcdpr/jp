@@ -20,7 +20,8 @@ use jp_plugin::message::OutputFormat;
 use jp_review_api::{
     AnchorRequest, DetailQuery, DetailReply, DiffQuery, EditRequest, ErrorBody, FileQuery,
     FileReply, Format, Heading, Listing, NewCommentRequest, NewReview, PassRequest, ReadQuery,
-    Recorded, ReplyRequest, Resolved, Running, Unapproved, Unread, Unreadable, Withdrawal,
+    Recorded, ReplyRequest, Resolved, Running, Unapproved, Unread, Unreadable, WithdrawQuery,
+    Withdrawal,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -515,13 +516,17 @@ pub(crate) fn edit(
 }
 
 /// `DELETE /api/reviews/{id}/comments/{n}`: withdraw a draft comment, or the
-/// draft reply on a sent one.
-pub(crate) fn withdraw(store: &Store, comment: CommentRef) -> Result<Reply, ApiError> {
+/// draft reply on a sent one, as `query.draft` asks.
+pub(crate) fn withdraw(
+    store: &Store,
+    comment: CommentRef,
+    query: &WithdrawQuery,
+) -> Result<Reply, ApiError> {
     let id = comment.review;
     exists(store, id)?;
     let withdrawn = store.update(id, |review, _| {
         review
-            .withdraw(comment.number)
+            .withdraw(comment.number, query.draft)
             .map_err(|refusal| ApiError::refused(id, &refusal))
     })?;
 

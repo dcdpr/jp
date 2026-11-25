@@ -265,7 +265,9 @@ async fn a_pass_with_nothing_to_send_is_refused_and_leaves_no_lock() {
     let f = fixture();
     f.store
         .update(f.id, |review, _| {
-            review.withdraw(1).map_err(|refusal| refusal.message(f.id))
+            review
+                .withdraw(1, None)
+                .map_err(|refusal| refusal.message(f.id))
         })
         .unwrap();
 

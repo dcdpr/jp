@@ -1,6 +1,6 @@
 //! What the UI reads from and asks of the browser around it: the location, the
-//! history, whether the page shows, the clock, local storage, the part of the
-//! page the reader sees, and what the page is scrolled to.
+//! history, whether the page shows, the clock, the tab's storage, the part of
+//! the page the reader sees, and what the page is scrolled to.
 
 use std::{cell::Cell, future::Future, rc::Rc, time::Duration};
 
@@ -53,13 +53,24 @@ impl Nav {
 
     /// Show `to`, adding it to the history.
     pub(crate) fn go(self, to: Route) {
+        self.go_to_heading(to, None);
+    }
+
+    /// Show `to`, adding it to the history with the anchor of the heading
+    /// `heading` as its fragment, which a reload or a copied address scrolls
+    /// to.
+    pub(crate) fn go_to_heading(self, to: Route, heading: Option<&str>) {
         if self.route.get_untracked() == to {
             return;
+        }
+        let mut href = to.href();
+        if let Some(heading) = heading {
+            href = format!("{href}#{heading}");
         }
         // A history that can't be written to still shows the page; only back
         // misses it.
         if let Ok(history) = window().history() {
-            drop(history.push_state_with_url(&JsValue::NULL, "", Some(&to.href())));
+            drop(history.push_state_with_url(&JsValue::NULL, "", Some(&href)));
         }
         self.route.set(to);
     }
@@ -116,19 +127,22 @@ pub(crate) fn document_listener(name: &'static str, listener: impl Fn(Event) + '
     });
 }
 
-/// What local storage holds under `key`; `None` when nothing is, or the browser
-/// keeps no storage for the page.
+/// What the tab's session storage holds under `key`; `None` when nothing is, or
+/// the browser keeps no storage for the page.
+///
+/// Session storage belongs to one tab and survives its reloads, so two tabs on
+/// the same review keep a draft each.
 pub(crate) fn stored(key: &str) -> Option<String> {
-    window().local_storage().ok()??.get_item(key).ok()?
+    window().session_storage().ok()??.get_item(key).ok()?
 }
 
-/// Keep `value` in local storage under `key`, or remove what is there for
-/// `None`.
+/// Keep `value` in the tab's session storage under `key`, or remove what is
+/// there for `None`.
 ///
 /// A browser refusing to store it, as one in private mode may, loses the draft
 /// on a reload and nothing else.
 pub(crate) fn store(key: &str, value: Option<&str>) {
-    let Ok(Some(storage)) = window().local_storage() else {
+    let Ok(Some(storage)) = window().session_storage() else {
         return;
     };
     drop(match value {

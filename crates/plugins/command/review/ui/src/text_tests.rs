@@ -147,6 +147,17 @@ fn a_time_is_shown_to_the_minute() {
     );
 }
 
+/// A marker under a block that runs past the line read says so, since the lines
+/// under it in that block were not read.
+#[test]
+fn the_read_marker_names_its_line() {
+    assert_eq!(read_until("42", false), "Read until line 42");
+    assert_eq!(
+        read_until("42", true),
+        "Read until line 42, within the block above"
+    );
+}
+
 #[test]
 fn hidden_lines_are_counted_in_words() {
     assert_eq!(hidden(1), "1 changed line not shown");

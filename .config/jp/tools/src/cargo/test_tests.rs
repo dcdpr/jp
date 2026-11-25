@@ -39,7 +39,13 @@ fn passing_browser_tests_are_counted() {
         &runner,
     );
 
-    assert_eq!(note.as_deref(), Some("Browser tests: 3 passed, in a-ui."));
+    assert_eq!(
+        note,
+        Some(BrowserRun {
+            note: "Browser tests: 3 passed, in a-ui.".to_owned(),
+            ran: 3,
+        })
+    );
     let call = &runner.calls()[1];
     assert!(
         call.env.iter().any(
@@ -128,6 +134,8 @@ fn failing_browser_tests_say_what_running_them_needs() {
     )
     .unwrap();
 
+    assert_eq!(note.ran, 3);
+    let note = note.note;
     assert!(
         note.starts_with(
             "Browser tests: 1 passed, 2 failed, in a-ui. Running them needs \
@@ -162,6 +170,118 @@ fn packages_without_a_browser_crate_run_no_browser_tests() {
 
     assert_eq!(note, None);
     assert_eq!(runner.calls().len(), 1);
+}
+
+/// A filter naming no browser test runs nothing there, which says so rather
+/// than reporting zero passed.
+#[test]
+fn a_filter_matching_no_browser_test_says_so() {
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns_success(BROWSER_METADATA)
+        .expect("cargo")
+        .returns_success("test result: ok. 0 passed; 0 failed; 0 ignored; 3 filtered out\n");
+
+    let note = wasm_test(
+        Utf8Path::new("/work"),
+        "-W warnings",
+        None,
+        &[],
+        Some("only_on_the_host"),
+        None,
+        &runner,
+    );
+
+    assert_eq!(
+        note,
+        Some(BrowserRun {
+            note: "No browser test matched, in a-ui.".to_owned(),
+            ran: 0,
+        })
+    );
+}
+
+fn host_run_of(code: i32) -> Result<HostRun, Failure> {
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns(ProcessOutput {
+            stdout: String::new(),
+            stderr: "no tests to run\n".to_owned(),
+            status: ExitCode::from_code(code),
+        });
+
+    host_run(
+        Utf8Path::new("/work"),
+        "-W warnings",
+        None,
+        &[],
+        Some("seated".to_owned()),
+        false,
+        false,
+        &runner,
+    )
+}
+
+/// Nextest exits with 4 when its filter selects no test, and with 101 when the
+/// build fails.
+#[test]
+fn a_host_run_that_matched_nothing_is_told_apart_from_a_failed_build() {
+    assert!(matches!(host_run_of(4), Ok(HostRun::NoneMatched(_))));
+    assert!(host_run_of(101).is_err());
+}
+
+fn browser_passed() -> BrowserRun {
+    BrowserRun {
+        note: "Browser tests: 2 passed, in a-ui.".to_owned(),
+        ran: 2,
+    }
+}
+
+/// A test named that exists only in the browser passes there, and the run
+/// succeeds.
+#[test]
+fn a_run_matching_only_browser_tests_succeeds() {
+    let host = Ok(HostRun::NoneMatched("Unable to run any tests.".to_owned()));
+
+    let result = combine(host, Some(browser_passed()))
+        .unwrap()
+        .into_content()
+        .unwrap();
+
+    assert_eq!(
+        result,
+        "No host test matched.\n\nBrowser tests: 2 passed, in a-ui.\n"
+    );
+}
+
+#[test]
+fn a_failed_host_build_fails_the_run_whatever_the_browser_says() {
+    let host = Err("Unable to run any tests.".into());
+
+    let error = combine(host, Some(browser_passed()))
+        .unwrap_err()
+        .to_string();
+
+    assert_eq!(
+        error,
+        "Unable to run any tests.\n\nBrowser tests: 2 passed, in a-ui."
+    );
+}
+
+#[test]
+fn a_run_matching_nothing_on_either_side_fails() {
+    let host = Ok(HostRun::NoneMatched("Unable to run any tests.".to_owned()));
+    let browser = Some(BrowserRun {
+        note: "No browser test matched, in a-ui.".to_owned(),
+        ran: 0,
+    });
+
+    let error = combine(host, browser).unwrap_err().to_string();
+
+    assert_eq!(
+        error,
+        "Unable to run any tests.\n\nNo browser test matched, in a-ui."
+    );
 }
 
 #[test]
