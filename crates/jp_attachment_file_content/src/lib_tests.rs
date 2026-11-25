@@ -1,8 +1,28 @@
-use camino_tempfile::tempdir;
+#[cfg(unix)]
+use std::os::unix::fs::symlink;
+
+use assert_matches::assert_matches;
+use camino::Utf8PathBuf;
+use camino_tempfile::{Utf8TempDir, tempdir};
 use glob::Pattern;
+use jp_tool::FsAccessError;
 use url::Url;
 
 use super::*;
+
+/// A workspace `ws`, beside a directory `outside` holding `secret.txt`.
+fn workspace_beside_a_secret() -> (Utf8TempDir, Utf8PathBuf) {
+    let tmp = tempdir().unwrap();
+    let ws = tmp.path().join("ws");
+    fs::create_dir(&ws).unwrap();
+    fs::create_dir(tmp.path().join("outside")).unwrap();
+    fs::write(tmp.path().join("outside/secret.txt"), "secret").unwrap();
+    (tmp, ws)
+}
+
+fn path_error(error: Box<dyn Error + Send + Sync>) -> PathError {
+    *error.downcast::<PathError>().unwrap()
+}
 
 #[tokio::test]
 #[test_log::test]
@@ -115,6 +135,51 @@ async fn a_table_path_attaches_that_exact_file() -> Result<(), Box<dyn Error + S
         "Docs/Café Notes.md",
         "notes"
     )]);
+
+    Ok(())
+}
+
+/// A `%` in a table's `path` is part of the file name, not the start of a
+/// percent-encoded character.
+#[tokio::test]
+#[test_log::test]
+async fn a_table_path_with_a_percent_sign_attaches_that_exact_file()
+-> Result<(), Box<dyn Error + Send + Sync>> {
+    let tmp = tempdir()?;
+    fs::write(tmp.path().join("hello%20world.txt"), "literal")?;
+    fs::write(tmp.path().join("hello world.txt"), "decoded")?;
+
+    let mut handler = FileContent::default();
+    let url = handler.table_url("hello%20world.txt")?;
+    handler.add(&url, tmp.path()).await?;
+
+    let attachments = handler.get(tmp.path()).await?;
+    assert_eq!(attachments, vec![Attachment::text(
+        "hello%20world.txt",
+        "literal"
+    )]);
+
+    Ok(())
+}
+
+/// The URLs `list` returns name the patterns they were built from.
+#[tokio::test]
+#[test_log::test]
+async fn listed_urls_round_trip_their_patterns() -> Result<(), Box<dyn Error + Send + Sync>> {
+    let mut handler = FileContent::default();
+    let cwd = Utf8Path::new("/");
+    handler
+        .add(&handler.table_url("100%25 done.md")?, cwd)
+        .await?;
+
+    let mut listed = FileContent::default();
+    for url in handler.list().await? {
+        listed.add(&url, cwd).await?;
+    }
+
+    assert_eq!(listed.includes.iter().collect::<Vec<_>>(), vec![
+        &Pattern::new("/100%25 done.md")?
+    ]);
 
     Ok(())
 }
@@ -388,6 +453,118 @@ async fn test_file_add_rejects_oversized_binary() -> Result<(), Box<dyn Error + 
     );
 
     Ok(())
+}
+
+/// `%2F` decodes to a separator, so an encoded `..` segment is caught after
+/// decoding, before anything outside the workspace is read or stat'ed.
+#[tokio::test]
+#[test_log::test]
+async fn an_encoded_parent_segment_cannot_leave_the_workspace() {
+    let (_tmp, ws) = workspace_beside_a_secret();
+
+    let mut handler = FileContent::default();
+    let url = Url::parse("file:a%2F..%2F..%2Foutside%2Fsecret.txt").unwrap();
+    let error = path_error(handler.add(&url, &ws).await.unwrap_err());
+
+    assert_eq!(error.path, "a/../../outside/secret.txt");
+    assert_matches!(error.reason, FsAccessError::InputEscape(_));
+    assert!(handler.includes.is_empty());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+#[test_log::test]
+async fn a_named_symlink_out_of_the_workspace_is_refused() {
+    let (tmp, ws) = workspace_beside_a_secret();
+    symlink(tmp.path().join("outside/secret.txt"), ws.join("link.txt")).unwrap();
+
+    let mut handler = FileContent::default();
+    let url = Url::parse("file:link.txt").unwrap();
+    let error = path_error(handler.add(&url, &ws).await.unwrap_err());
+
+    assert_eq!(error.path, "link.txt");
+    assert_matches!(error.reason, FsAccessError::Escape(_));
+}
+
+/// The read itself is confined, not only `add`: a handler restored from a
+/// stored conversation reads its includes without going through `add`.
+#[cfg(unix)]
+#[tokio::test]
+#[test_log::test]
+async fn a_stored_include_out_of_the_workspace_is_refused_when_read() {
+    let (tmp, ws) = workspace_beside_a_secret();
+    symlink(tmp.path().join("outside/secret.txt"), ws.join("link.txt")).unwrap();
+
+    let handler = FileContent {
+        includes: BTreeSet::from([Pattern::new("/link.txt").unwrap()]),
+        excludes: BTreeSet::new(),
+    };
+    let error = path_error(handler.get(&ws).await.unwrap_err());
+
+    assert_eq!(error.path, "link.txt");
+    assert_matches!(error.reason, FsAccessError::Escape(_));
+}
+
+/// A glob skips a symlink that leaves the workspace rather than failing, and
+/// keeps the files beside it.
+#[cfg(unix)]
+#[tokio::test]
+#[test_log::test]
+async fn a_glob_skips_symlinks_out_of_the_workspace() {
+    let (tmp, ws) = workspace_beside_a_secret();
+    fs::create_dir(ws.join("docs")).unwrap();
+    fs::write(ws.join("docs/real.md"), "real").unwrap();
+    symlink(
+        tmp.path().join("outside/secret.txt"),
+        ws.join("docs/link.md"),
+    )
+    .unwrap();
+
+    let mut handler = FileContent::default();
+    handler
+        .add(&Url::parse("file:docs/*.md").unwrap(), &ws)
+        .await
+        .unwrap();
+
+    let attachments = handler.get(&ws).await.unwrap();
+    assert_eq!(attachments, vec![Attachment::text("docs/real.md", "real")]);
+}
+
+/// A symlink to a file inside the workspace attaches under the name it was
+/// given.
+#[cfg(unix)]
+#[tokio::test]
+#[test_log::test]
+async fn a_symlink_inside_the_workspace_attaches() {
+    let (_tmp, ws) = workspace_beside_a_secret();
+    fs::write(ws.join("real.md"), "real").unwrap();
+    symlink("real.md", ws.join("alias.md")).unwrap();
+
+    let mut handler = FileContent::default();
+    handler
+        .add(&Url::parse("file:alias.md").unwrap(), &ws)
+        .await
+        .unwrap();
+
+    let attachments = handler.get(&ws).await.unwrap();
+    assert_eq!(attachments, vec![Attachment::text("alias.md", "real")]);
+}
+
+#[tokio::test]
+#[test_log::test]
+async fn a_named_directory_attaches_the_files_under_it() {
+    let (_tmp, ws) = workspace_beside_a_secret();
+    fs::create_dir_all(ws.join("docs/nested")).unwrap();
+    fs::write(ws.join("docs/nested/a.md"), "a").unwrap();
+
+    let mut handler = FileContent::default();
+    handler
+        .add(&Url::parse("file:docs").unwrap(), &ws)
+        .await
+        .unwrap();
+
+    let attachments = handler.get(&ws).await.unwrap();
+    assert_eq!(attachments, vec![Attachment::text("docs/nested/a.md", "a")]);
 }
 
 fn canonical(uri: &str) -> Result<String, String> {

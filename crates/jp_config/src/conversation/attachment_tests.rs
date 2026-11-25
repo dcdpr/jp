@@ -180,6 +180,38 @@ fn a_param_assigned_to_a_url_attachment_keeps_the_rest_of_the_url() {
     );
 }
 
+/// A parameter assigned to a URL attachment keeps it a URL, so the fragment and
+/// the percent-encoding of its path reach the handler as they were written.
+#[test]
+fn a_param_assigned_to_a_url_attachment_keeps_it_a_url() {
+    let mut partial = PartialAppConfig::empty();
+    partial
+        .assign(
+            KvAssignment::try_from_cli(
+                "conversation.attachments:",
+                r#"["file:docs/guide.md#setup", "file:my%20notes.md"]"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+    partial
+        .assign(
+            KvAssignment::try_from_cli("conversation.attachments.0.params.lines", "1-5").unwrap(),
+        )
+        .unwrap();
+    partial
+        .assign(
+            KvAssignment::try_from_cli("conversation.attachments.1.params.exclude", "").unwrap(),
+        )
+        .unwrap();
+
+    assert_eq!(attachments(&partial), [
+        PartialAttachmentConfig::Url("file:///docs/guide.md?lines=1-5#setup".parse().unwrap()),
+        PartialAttachmentConfig::Url("file:///my%20notes.md?exclude=".parse().unwrap()),
+    ]);
+}
+
 /// An object assigned to a listed URL attachment edits it the way it edits a
 /// table: the URL reads as its `type`, `path` and `params`, and the fields the
 /// object does not name keep their values.

@@ -17,13 +17,37 @@ URL parsing lowercases and IDNA-encodes before the handler sees it, so
 host as the first path segment, so existing URIs keep resolving, but logs a
 warning naming the `file:<path>` spelling.
 
-As a config table, `path` is taken exactly as written:
+As a config table, `path` is taken exactly as written, so a `?`, `#` or `%` in
+it is part of the file name:
 
 ```toml
 [[conversation.attachments]]
 type = "file"
 path = "Docs/Notes.md"
 ```
+
+Write exclusions and other options as `params`, not as a query on `path`. A
+table written as
+
+```toml
+[[conversation.attachments]]
+type = "file"
+path = "docs/**?exclude"
+```
+
+names a glob that fails to parse, because `**` must be a whole path component.
+Write it as
+
+```toml
+[[conversation.attachments]]
+type = "file"
+path = "docs/**"
+params = { exclude = "" }
+```
+
+Every path must resolve inside the workspace. A path whose `..` segments climb
+out of it, or that reaches a file outside it through a symlink, is refused when
+named directly, and skipped when a glob matches it.
 
 ## Usage
 

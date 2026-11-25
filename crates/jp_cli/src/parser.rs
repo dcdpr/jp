@@ -76,8 +76,8 @@ impl AttachmentUrlOrPath {
             "URI is not a valid URL, treating as file path."
         );
         let (path, exclude) = match path.as_str().strip_prefix('!') {
-            Some(path) => (path, "?exclude=true"),
-            None => (path.as_str(), ""),
+            Some(path) => (path, true),
+            None => (path.as_str(), false),
         };
 
         // Check if the path falls within the workspace.
@@ -120,8 +120,28 @@ impl AttachmentUrlOrPath {
             )));
         }
 
-        Url::parse(&format!("file:{path}{exclude}")).map_err(Into::into)
+        file_url(&path, exclude)
     }
+}
+
+/// The `file` URL naming the workspace-relative `path`, as an exclusion when
+/// `exclude` is set.
+///
+/// The `file` handler builds it as it builds a `file` table with this `path`,
+/// so the two forms name the same attachment, and a `#`, `?` or `%` in the file
+/// name stays part of it.
+fn file_url(path: &Utf8Path, exclude: bool) -> Result<Url> {
+    let handler = jp_attachment::find_handler_by_scheme("file")
+        .ok_or_else(|| Error::NotFound("Attachment handler", "file".to_owned()))?;
+    let mut url = handler
+        .table_url(path.as_str())
+        .map_err(|error| Error::Attachment(format!("Invalid attachment path {path}: {error}")))?;
+
+    if exclude {
+        url.query_pairs_mut().append_pair("exclude", "true");
+    }
+
+    Ok(url)
 }
 
 impl std::str::FromStr for AttachmentUrlOrPath {

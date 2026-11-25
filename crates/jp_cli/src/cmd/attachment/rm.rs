@@ -154,3 +154,7 @@ fn split(
         missing,
     })
 }
+
+#[cfg(test)]
+#[path = "rm_tests.rs"]
+mod tests;
