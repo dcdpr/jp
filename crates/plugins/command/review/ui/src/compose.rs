@@ -10,7 +10,7 @@
 //! under the passage, in the element the page seats there ([`Compose::host`]);
 //! anything else is written under the button that opened the composer: the top
 //! bar's, which sends a pass, or the comments', which adds a comment.
-//! [`layout::site`] says which, and [`at`] draws the composer there.
+//! [`crate::layout::site`] says which, and [`at`] draws the composer there.
 //!
 //! The active composer draft is persisted in the tab's `sessionStorage` as the
 //! user types so that an iOS tab reload restores it and submits against the

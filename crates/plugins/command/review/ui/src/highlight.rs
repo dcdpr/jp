@@ -125,9 +125,10 @@ pub fn spans(container: &Element) -> Vec<(Element, Span)> {
 
 /// The DOM ranges over the text `spans` show of the bytes `bytes` of `source`.
 ///
-/// Spans set in the same lines of text ([`FLOW`]) share one range, which also
-/// covers what lies between them: a line ending of the source, shown as the
-/// space between two words, belongs to no span.
+/// Spans set in the same lines of text (one paragraph, heading, list item's own
+/// text, table cell, or code block, or one line of a plain-text file) share one
+/// range, which also covers what lies between them: a line ending of the
+/// source, shown as the space between two words, belongs to no span.
 #[must_use]
 pub fn ranges(spans: &[(Element, Span)], source: &str, bytes: [usize; 2]) -> Vec<Range> {
     let plain: Vec<Span> = spans.iter().map(|(_, span)| *span).collect();
