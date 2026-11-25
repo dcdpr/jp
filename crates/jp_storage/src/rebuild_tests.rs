@@ -94,8 +94,8 @@ fn set_dir_modified(dir: &Utf8Path, when: SystemTime) {
     fs::File::open(dir).unwrap().set_modified(when).unwrap();
 }
 
-// Windows opens a directory only with backup semantics, and changes its times
-// only through a handle with the right to write its attributes.
+// On Windows, opening a directory handle to modify its timestamps requires
+// `FILE_FLAG_BACKUP_SEMANTICS` and `FILE_WRITE_ATTRIBUTES`.
 #[cfg(windows)]
 fn set_dir_modified(dir: &Utf8Path, when: SystemTime) {
     use std::os::windows::fs::OpenOptionsExt as _;

@@ -4446,9 +4446,7 @@ fn run_no_persist_editor_query_starts_from_the_saved_draft() {
     };
     let seen_dir = camino_tempfile::tempdir().unwrap();
     let seen = seen_dir.path().join("seen");
-    // Copies the draft file it is given, unchanged. The path is quoted because
-    // the editor command is split as shell words, which drops the backslashes
-    // of a Windows path.
+    // Shell-quote the path so `shlex::split` preserves backslashes on Windows.
     let seen_arg = shlex::try_quote(seen.as_str()).unwrap();
     let (mut ctx, _out, _err, _tmp) =
         editor_ctx(&session, &format!(r#"sh -c 'cp "$1" "$0"' {seen_arg}"#));

@@ -439,8 +439,8 @@ impl RecoveryBackend for FsStorageBackend {
             .into_iter()
             .filter(|entry| !self.storage.is_conversation_locked(&entry.id.to_string()))
             .map(|conversation| {
-                // ID lookups resolve to the live copy, so an archived copy
-                // beside one is shadowed and gets no repair.
+                // ID lookups resolve to the live copy, so an archived copy is
+                // shadowed when a live copy exists and cannot be repaired by ID.
                 let (dirs, archived) = self.stored_dirs(&conversation.id);
                 let shadowed = archived != conversation.archived;
                 let repair = if shadowed {
