@@ -20,6 +20,7 @@ crossbeam-channel = { workspace = true, features = ["std"] }
 glob = { workspace = true }
 ignore = { workspace = true }
 infer = { workspace = true, features = ["std"] }
+relative-path = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }

@@ -11,6 +11,7 @@ use jp_attachment::{
     percent_decode_str, typetag,
 };
 use jp_tool::{FsAccessError, Resolve, ResolvedPath, resolve_path};
+use relative_path::RelativePathBuf;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, trace, warn};
 use url::{Position, Url};
@@ -248,7 +249,9 @@ fn read_walked_entry(entry: Result<DirEntry, ignore::Error>, cwd: &Utf8Path) -> 
     if entry.file_type().is_some_and(|kind| kind.is_dir()) {
         return None;
     }
-    let rel = Utf8Path::from_path(entry.path())?.strip_prefix(cwd).ok()?;
+    // The walk yields platform paths; an attachment is named with `/` on every
+    // platform, as a directly named path already is.
+    let rel = RelativePathBuf::from_path(entry.path().strip_prefix(cwd).ok()?).ok()?;
 
     // The walker does not descend into symlinked directories, but it yields
     // symlinks to files, so resolve each entry against the workspace root. If

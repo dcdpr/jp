@@ -133,10 +133,18 @@ impl AttachmentUrlOrPath {
 ///
 /// [`Handler::table_url`]: jp_attachment::Handler::table_url
 fn file_url(path: &Utf8Path, exclude: bool) -> Result<Url> {
+    // A `file` URL separates segments with `/`, whatever the platform. Only a
+    // relative path is rebuilt; an absolute one, accepted outside a workspace,
+    // is passed on as it is.
+    let path = match RelativePathBuf::from_path(path) {
+        Ok(relative) => relative.into_string(),
+        Err(_) => path.to_string(),
+    };
+
     let handler = jp_attachment::find_handler_by_scheme("file")
         .ok_or_else(|| Error::NotFound("Attachment handler", "file".to_owned()))?;
     let mut url = handler
-        .table_url(path.as_str())
+        .table_url(&path)
         .map_err(|error| Error::Attachment(format!("Invalid attachment path {path}: {error}")))?;
 
     if exclude {
