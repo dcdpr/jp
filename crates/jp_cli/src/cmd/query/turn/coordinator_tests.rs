@@ -335,6 +335,142 @@ fn completed_with_a_message_prints_no_notice() {
     assert_eq!(err.lock().as_str(), HEADER);
 }
 
+/// A provider can only report some things once a response completes, which is
+/// while the last paragraph of that response is still buffered.
+/// The paragraph is committed first, so the notice follows it.
+#[test]
+fn a_provider_notice_follows_the_paragraph_it_arrived_during() {
+    let mut stream = ConversationStream::new_test();
+    let (printer, out, err) = Printer::memory(OutputFormat::Text);
+    let printer = Arc::new(printer);
+    let mut coordinator = TurnCoordinator::new(
+        Arc::clone(&printer),
+        AppConfig::new_test().style,
+        None,
+        None,
+        None,
+    );
+
+    coordinator.start_turn(&mut stream, ChatRequest::from("review it"));
+    coordinator.handle_event(
+        &mut stream,
+        Event::message(0, "I did not repost those findings."),
+    );
+    coordinator.handle_event(
+        &mut stream,
+        Event::Notice("OpenAI dropped 11 reasoning items.".to_owned()),
+    );
+
+    // One worker writes both channels in the order they were queued, so a
+    // paragraph that is on stdout once the notice has been printed was printed
+    // ahead of it.
+    printer.flush();
+    assert_eq!(out.lock().as_str(), "I did not repost those findings.\n\n");
+    assert_eq!(
+        err.lock().as_str(),
+        format!("{HEADER}WARN OpenAI dropped 11 reasoning items.\n")
+    );
+}
+
+/// Nothing renders below a notice that closes the turn's last response, so the
+/// blank line below it is written when that response finishes.
+#[test]
+fn a_provider_notice_ending_the_turn_is_followed_by_a_blank_line() {
+    let mut stream = ConversationStream::new_test();
+    let (printer, out, err) = Printer::memory(OutputFormat::Text);
+    let printer = Arc::new(printer);
+    let mut coordinator = TurnCoordinator::new(
+        Arc::clone(&printer),
+        AppConfig::new_test().style,
+        None,
+        None,
+        None,
+    );
+
+    coordinator.start_turn(&mut stream, ChatRequest::from("review it"));
+    coordinator.handle_event(&mut stream, Event::message(0, "All done."));
+    coordinator.handle_event(&mut stream, Event::flush(0));
+    coordinator.handle_event(
+        &mut stream,
+        Event::Notice("OpenAI dropped 11 reasoning items.".to_owned()),
+    );
+    let outcome = coordinator.handle_event(&mut stream, Event::Finished(FinishReason::Completed));
+
+    assert!(matches!(outcome.action, Action::Done));
+    printer.flush();
+    assert_eq!(out.lock().as_str(), "All done.\n\n");
+    assert_eq!(
+        err.lock().as_str(),
+        format!("{HEADER}WARN OpenAI dropped 11 reasoning items.\n\n")
+    );
+}
+
+/// A response that ends in tool calls is followed by their chrome, which brings
+/// the blank line below the notice with it.
+/// Writing one when the response finishes would leave two.
+#[test]
+fn a_provider_notice_ahead_of_tool_execution_leaves_the_gap_to_the_tools() {
+    let mut stream = ConversationStream::new_test();
+    let (printer, _out, err) = Printer::memory(OutputFormat::Text);
+    let printer = Arc::new(printer);
+    let mut coordinator = TurnCoordinator::new(
+        Arc::clone(&printer),
+        AppConfig::new_test().style,
+        None,
+        None,
+        None,
+    );
+
+    coordinator.start_turn(&mut stream, ChatRequest::from("look it up"));
+    coordinator.handle_event(&mut stream, Event::tool_call_start(0, "call-1", "lookup"));
+    coordinator.handle_event(&mut stream, Event::tool_call_args(0, "{}"));
+    coordinator.handle_event(&mut stream, Event::flush(0));
+    coordinator.handle_event(
+        &mut stream,
+        Event::Notice("OpenAI dropped 11 reasoning items.".to_owned()),
+    );
+    let outcome = coordinator.handle_event(&mut stream, Event::Finished(FinishReason::Completed));
+
+    assert!(matches!(outcome.action, Action::ExecuteTools));
+    printer.flush();
+    assert_eq!(
+        err.lock().as_str(),
+        format!("{HEADER}WARN OpenAI dropped 11 reasoning items.\n")
+    );
+}
+
+/// A notice ahead of the response (a credential switch) sits under the
+/// assistant header, with a blank line between it and the answer.
+#[test]
+fn a_provider_notice_is_set_apart_from_the_response_after_it() {
+    let mut stream = ConversationStream::new_test();
+    let (printer, out, err) = Printer::memory(OutputFormat::Text);
+    let printer = Arc::new(printer);
+    let mut coordinator = TurnCoordinator::new(
+        Arc::clone(&printer),
+        AppConfig::new_test().style,
+        None,
+        None,
+        None,
+    );
+
+    coordinator.start_turn(&mut stream, ChatRequest::from("plan it"));
+    coordinator.handle_event(
+        &mut stream,
+        Event::Notice("subscription limit reached (personal)".to_owned()),
+    );
+    coordinator.handle_event(&mut stream, Event::message(0, "Here is the plan."));
+    coordinator.handle_event(&mut stream, Event::flush(0));
+    coordinator.handle_event(&mut stream, Event::Finished(FinishReason::Completed));
+
+    printer.flush();
+    assert_eq!(
+        err.lock().as_str(),
+        format!("{HEADER}WARN subscription limit reached (personal)\n\n")
+    );
+    assert_eq!(out.lock().as_str(), "Here is the plan.\n\n");
+}
+
 /// Only the response to the latest request counts.
 /// A tool call in the first cycle answers that cycle, and nothing after the
 /// tool results answers the follow-up, so exactly one notice is printed: for

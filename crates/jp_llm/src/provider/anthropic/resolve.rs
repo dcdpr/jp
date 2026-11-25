@@ -19,11 +19,7 @@
 //! Without it either would resolve again and strand the request on a credential
 //! already known to be out.
 
-use std::{
-    collections::HashSet,
-    mem,
-    sync::{Arc, Mutex},
-};
+use std::{collections::HashSet, mem};
 
 use async_anthropic::errors::{UnifiedRateLimit, WindowUtilization};
 use camino::Utf8PathBuf;
@@ -36,7 +32,11 @@ use jp_credentials::{
 use tracing::{debug, warn};
 
 use super::{acp::Error as AcpError, oauth};
-use crate::{credential::Credential, error::StreamError, provider::api_key_chain};
+use crate::{
+    credential::Credential,
+    error::StreamError,
+    provider::{api_key_chain, notices::SeenNotices},
+};
 
 /// Errors from walking the credential chain.
 #[derive(Debug, thiserror::Error)]
@@ -234,21 +234,17 @@ impl Attempt {
         notices.extend(self.switch.take());
         notices
     }
-}
 
-/// Notices one provider has already surfaced.
-///
-/// A notice that restates a standing condition (a credential skipped for the
-/// same reason, a warning threshold already crossed) is shown once per provider
-/// rather than on every request it sends.
-/// Clones share one record.
-#[derive(Debug, Clone, Default)]
-pub(super) struct SeenNotices(Arc<Mutex<HashSet<String>>>);
-
-impl SeenNotices {
-    /// Record `key`, returning whether it had not been seen before.
-    pub(super) fn first(&self, key: &str) -> bool {
-        self.0.lock().expect("poisoned").insert(key.to_owned())
+    /// Log this attempt's notices as warnings, leaving none behind.
+    ///
+    /// For a request with no event stream to yield notices on.
+    /// Nothing is recorded as seen, so a later request through the same
+    /// provider still yields a skip notice logged here.
+    pub(super) fn log_notices(&mut self) {
+        let skips = mem::take(&mut self.notices);
+        for notice in skips.into_iter().chain(self.switch.take()) {
+            warn!("{notice}");
+        }
     }
 }
 

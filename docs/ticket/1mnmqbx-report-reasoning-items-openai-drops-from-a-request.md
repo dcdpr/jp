@@ -126,3 +126,38 @@ repeats on every request (every tool round included) for the rest of the
 conversation.
 That is accurate (each request loses the reasoning again), but noisy.
 Deduplicating by item id would need state on the provider.
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-25T15:26:58Z
+- **Re**: #2
+
+The repetition described as a known trade-off above is gone: a removal is
+reported once per provider.
+A query builds one provider per turn, so a turn reports each removed item once,
+on the first request that loses it, and the next turn reports again.
+
+The state the earlier comment said dedup would need lives on the provider as
+`Openai::seen_notices`.
+`SeenNotices` is in `provider/notices.rs` and is shared with Anthropic, which
+already used it for skipped credentials and quota warnings.
+
+`input_transformation_notices` takes the set and keys each removal on its item
+id rather than on the notice text.
+A later request in the same turn that loses more reasoning reports only the
+items no earlier request reported, so the count in the notice is the number of
+newly removed items, not the running total.
+A reason whose removals have all been reported emits no notice.
+
+Unchanged: every withheld item is still logged at `debug` on every request, so
+the per-request measurement this ticket was filed for is still available from
+the logs.
+`turn_boundary`, `end_user_mismatch`, and `organization_mismatch` stay log-only.
+
+OpenAI's `skipping <credential>` notices go through the same set, since they
+repeated on every request for the same reason.
+Credential switches and reset redemptions are events and are still reported each
+time.
+
+Tests are in `provider/openai/notice_tests.rs`.

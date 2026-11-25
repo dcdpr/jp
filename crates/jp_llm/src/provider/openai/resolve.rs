@@ -17,7 +17,7 @@
 //! what the store cannot: an `api_key` has no stored profile to mark, and a
 //! best-effort write can fail.
 
-use std::collections::HashSet;
+use std::{collections::HashSet, mem};
 
 use chrono::{DateTime, Utc};
 use futures::future::BoxFuture;
@@ -34,7 +34,7 @@ use tracing::{debug, warn};
 use crate::{
     credential::Credential,
     error::{StreamError, StreamErrorKind},
-    provider::{api_key_chain, openai::oauth},
+    provider::{api_key_chain, notices::SeenNotices, openai::oauth},
 };
 
 /// Errors from walking the credential chain.
@@ -209,6 +209,12 @@ pub(super) struct Attempt {
     /// User-facing notices for skipped entries, surfaced as chrome.
     pub notices: Vec<String>,
 
+    /// The notice announcing that a failed request moved onto this credential.
+    ///
+    /// Kept apart from `notices` because a switch is a new event each time it
+    /// happens, while a skip restates the same standing condition.
+    pub switch: Option<String>,
+
     /// Chain entries this request has already tried and had fail.
     ///
     /// Resolution skips them.
@@ -231,6 +237,7 @@ impl Attempt {
             selected: None,
             generation: None,
             notices: vec![],
+            switch: None,
             tried: HashSet::new(),
         }
     }
@@ -238,6 +245,20 @@ impl Attempt {
     /// Whether the request goes to the subscription host rather than the API.
     pub fn is_subscription(&self) -> bool {
         matches!(self.credential, Credential::Bearer(_))
+    }
+
+    /// The notices to surface for this attempt, leaving none behind.
+    ///
+    /// A skip notice `seen` already holds is dropped; the switch notice is
+    /// always kept.
+    pub(super) fn take_notices(&mut self, seen: &SeenNotices) -> Vec<String> {
+        let mut notices: Vec<String> = mem::take(&mut self.notices)
+            .into_iter()
+            .filter(|notice| seen.first(notice))
+            .collect();
+
+        notices.extend(self.switch.take());
+        notices
     }
 }
 
@@ -310,6 +331,7 @@ async fn resolve_skipping(
                     selected: Some(selected),
                     generation,
                     notices,
+                    switch: None,
                     tried,
                 });
             }
@@ -331,6 +353,9 @@ async fn resolve_skipping(
 }
 
 /// Record why the attempt's credential is out and move to the next one.
+///
+/// The returned attempt carries the switch notice, alongside any skip notices
+/// resolution produced.
 ///
 /// Returns `None` when there is no chain to advance or nothing further in it,
 /// which the caller surfaces as the original, now-terminal error.
@@ -375,9 +400,7 @@ pub(super) async fn advance(
             }
         };
 
-    attempt
-        .notices
-        .push(switch_notice(error, selected, attempt.selected.as_ref()));
+    attempt.switch = Some(switch_notice(error, selected, attempt.selected.as_ref()));
 
     Some(attempt)
 }
