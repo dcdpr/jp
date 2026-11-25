@@ -491,7 +491,8 @@ fn parse_tool_calls_mode(s: &str) -> Result<ToolCallsMode, String> {
 }
 
 /// Whether `word` is shaped like a `--reset` value: at least one digit, and
-/// nothing beside digits but the `-`, `.`, and `,` of the list syntax.
+/// nothing beside digits but the `-`, `.`, and `,` of the list syntax and the
+/// whitespace the list parser trims around each item.
 ///
 /// No conversation ID or target keyword has that shape; `.` and `-` are
 /// targets, and hold no digit.
@@ -499,7 +500,7 @@ fn looks_like_compaction_numbers(word: &str) -> bool {
     word.contains(|c: char| c.is_ascii_digit())
         && word
             .chars()
-            .all(|c| c.is_ascii_digit() || matches!(c, '-' | '.' | ','))
+            .all(|c| c.is_ascii_digit() || c.is_ascii_whitespace() || matches!(c, '-' | '.' | ','))
 }
 
 /// Resolve `--reset` specs to the 0-based indices, among the stream's

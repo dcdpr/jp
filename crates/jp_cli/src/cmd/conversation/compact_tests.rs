@@ -556,6 +556,22 @@ fn reset_reports_a_malformed_list_written_as_its_own_word() {
         "error: invalid value '2..-0' for '--reset [<COMPACTIONS>]': from-end offsets are \
          1-based; use `-1` for the last compaction\n\nFor more information, try '--help'.\n"
     );
+
+    // The list parser trims each item, so space after a comma is still a list.
+    assert_eq!(
+        rejection_message(&["--reset", "1, 0", "recent"]),
+        "error: invalid value '1, 0' for '--reset [<COMPACTIONS>]': compaction numbers are \
+         1-based; `0` is not a valid compaction\n\nFor more information, try '--help'.\n"
+    );
+}
+
+// A list with space after its commas parses like one without, as its own word.
+#[test]
+fn reset_reads_a_spaced_list_written_as_its_own_word() {
+    let compact = parse_compact(&["--reset", "1, 3..4", "recent"]);
+
+    assert_eq!(compact.reset, Some(vec![compaction(1), compactions(3, 4)]));
+    assert_eq!(compact.target.ids(), [ConversationTarget::Recent]);
 }
 
 // `--reset="$i"` with `i` unset must not widen into removing every compaction
