@@ -2130,15 +2130,17 @@ shear *FLAGS="--fix": (_install "cargo-shear@" + shear_version)
 typecheck-js:
     npx --yes --package=typescript@5 -- tsc --project crates/plugins/command/serve-web/tsconfig.json
 
-# Source files the coverage report leaves out, on top of what `cargo llvm-cov`
-# leaves out itself (tests, `_tests.rs` files, dependencies).
+# Source files excluded from the host coverage report in addition to
+# `cargo llvm-cov`'s defaults (tests, `*_tests.rs`, and dependencies).
 #
-# The review UI's modules that only run in a browser: the host build compiles
-# them, and no host test can call them. They belong in the report once the
-# browser tests' coverage is measured, which T-1rms9dy tracks; this list goes
-# then. The UI's pure modules stay in, since host tests cover them.
+# These `jp-review-ui` modules depend on browser APIs and only run under
+# `wasm-bindgen-test` in a headless browser, although they compile on the host.
+# Tracked in T-1rms9dy; remove this regex once browser test coverage is merged
+# into the report. Pure UI modules remain included and are covered by host
+# unit tests.
 #
-# LLVM's regex has no lookahead, so each module is named.
+# LLVM's regex engine does not support lookahead, so each browser-only module
+# is listed explicitly.
 coverage_ignore := 'crates/plugins/command/review/ui/src/((app|capture|card|compose|dom|highlight|lib|list|seat|widget)\.rs$|review(\.rs$|/))'
 
 # Generate code coverage into `target/lcov.info`, the way `coverage-ci` does.

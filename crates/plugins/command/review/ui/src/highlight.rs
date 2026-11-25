@@ -123,12 +123,12 @@ pub fn spans(container: &Element) -> Vec<(Element, Span)> {
         .collect()
 }
 
-/// The DOM ranges over the text `spans` show of the bytes `bytes` of `source`.
+/// Return the DOM ranges covering `bytes` of `source` across `spans`.
 ///
-/// Spans set in the same lines of text (one paragraph, heading, list item's own
-/// text, table cell, or code block, or one line of a plain-text file) share one
-/// range, which also covers what lies between them: a line ending of the
-/// source, shown as the space between two words, belongs to no span.
+/// Adjacent spans within the same inline flow container (a paragraph, heading,
+/// list item's direct text, table cell, code block, or plain-text line) are
+/// merged into a single range so that inter-word whitespace from source line
+/// breaks is highlighted continuously.
 #[must_use]
 pub fn ranges(spans: &[(Element, Span)], source: &str, bytes: [usize; 2]) -> Vec<Range> {
     let plain: Vec<Span> = spans.iter().map(|(_, span)| *span).collect();

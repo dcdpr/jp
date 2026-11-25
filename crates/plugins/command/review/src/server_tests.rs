@@ -411,9 +411,6 @@ async fn the_comment_routes_reach_their_comment() {
     assert_eq!((closed, review["status"].clone()), (200, json!("closed")));
 }
 
-/// Every route on what the reviewer approved and read reaches the review, as do
-/// the routes that open a comment and a review again, and a withdrawal naming
-/// its draft.
 #[tokio::test(flavor = "multi_thread")]
 async fn the_progress_and_reopen_routes_reach_their_review() {
     let served = served().await;

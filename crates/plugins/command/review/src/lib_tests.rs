@@ -2158,8 +2158,8 @@ fn serve_opens_the_list_and_tells_open_where_it_listens() {
     );
 }
 
-/// A server holds the store's lock before it listens, and names its address
-/// only then.
+/// The server acquires the store lock before binding its listener and writing
+/// its address file.
 #[test]
 fn open_while_the_server_starts_asks_to_try_again() {
     let root = workspace();

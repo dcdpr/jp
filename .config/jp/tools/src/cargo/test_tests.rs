@@ -280,8 +280,9 @@ fn a_run_matching_nothing_on_either_side_fails() {
     );
 }
 
-/// The filter names a test in a browser crate's `tests/`, which the host build
-/// leaves out: nextest exits with 4, and the browser runs it in Chrome.
+/// When the filter names a test in a browser crate's `tests/` directory
+/// (excluded from the host build), nextest exits with code 4 and the test runs
+/// in headless Chrome.
 #[test]
 fn a_run_of_a_browser_test_alone_succeeds_through_both_halves() {
     let runner = MockProcessRunner::builder()
@@ -337,8 +338,6 @@ fn a_run_of_a_browser_test_alone_succeeds_through_both_halves() {
     );
 }
 
-/// The host tests ran; that the browser crates couldn't be found is said beside
-/// them rather than failing the run.
 #[test]
 fn browser_crates_that_cant_be_found_leave_the_host_run_standing() {
     let runner = MockProcessRunner::builder()

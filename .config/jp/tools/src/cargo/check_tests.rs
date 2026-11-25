@@ -1115,7 +1115,6 @@ fn what_only_the_browser_build_finds_is_reported() {
             ```"});
 }
 
-/// A browser build that fails says so, apart from one that only warns.
 #[test]
 fn a_failed_browser_build_is_reported_as_failed() {
     let (_dir, ctx) = ctx();

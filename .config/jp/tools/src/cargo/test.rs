@@ -139,8 +139,7 @@ pub(crate) async fn cargo_test(
     )
 }
 
-/// Whether a test run runs the browser crates' browser tests too, and with
-/// which `chromedriver`.
+/// Whether to run browser integration tests in addition to host tests.
 #[derive(Debug)]
 enum Browsers {
     Skip,
@@ -307,8 +306,8 @@ fn browser_summary(stdout: &str) -> (usize, usize) {
         })
 }
 
-/// Run host tests via nextest, and the browser tests when `browsers` says to,
-/// failing when neither matches a test.
+/// Run host tests via nextest and optionally browser tests according to
+/// `browsers`, failing if neither side matches any tests.
 fn cargo_test_impl<R: ProcessRunner>(
     root: &Utf8Path,
     rustflags: &str,
