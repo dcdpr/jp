@@ -267,9 +267,14 @@ fn the_json_report_prints_raw_records_even_under_quiet() {
 
     drop(notice(printer, recovery, &failures(&invalid)));
 
+    // JSON escapes a Windows path's backslashes, so they become `/` before the
+    // temporary directory is replaced.
+    let tmp_slashed = tmp.path().as_str().replace('\\', "/");
     assert_eq!(out.lock().as_str(), "");
     assert_eq!(
-        err.lock().replace(tmp.path().as_str(), "[TMP]"),
+        err.lock()
+            .replace(r"\\", "/")
+            .replace(&tmp_slashed, "[TMP]"),
         concat!(
             r#"{"level":"warning","code":"conversation_load_failed","#,
             r#""message":"conversation failed to load","#,

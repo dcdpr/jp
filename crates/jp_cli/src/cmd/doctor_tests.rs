@@ -391,7 +391,7 @@ fn the_json_report_is_one_typed_record_per_problem() {
 }
 
 struct Store {
-    tmp: Utf8TempDir,
+    _tmp: Utf8TempDir,
     fs: Arc<FsStorageBackend>,
     conversations: Utf8PathBuf,
     printer: Printer,
@@ -405,7 +405,7 @@ fn store() -> Store {
     let (printer, out, _err) = Printer::memory(OutputFormat::Text);
 
     Store {
-        tmp,
+        _tmp: tmp,
         fs,
         conversations: storage.join("conversations"),
         printer,
@@ -524,10 +524,15 @@ fn an_archived_copy_beside_a_live_conversation_is_not_removed_by_id() {
 
     run(&s, s.fs.as_ref(), &[], true).unwrap_err();
 
+    // Quoted as the report quotes it: a Windows path needs shell quoting, a
+    // Unix temporary path usually does not.
+    let path = quoted(archived.as_str());
     assert_eq!(
-        s.out.lock().replace(s.tmp.path().as_str(), "[TMP]"),
-        "# Report\n## Archived conversations\n- jp-c17941219991  metadata.json: invalid JSON at \
-         line 1, column 2    rm -r [TMP]/.jp/conversations/.archive/17941219991\n"
+        s.out.lock().as_str(),
+        format!(
+            "# Report\n## Archived conversations\n- jp-c17941219991  metadata.json: invalid JSON \
+             at line 1, column 2    rm -r {path}\n"
+        )
     );
 }
 

@@ -92,7 +92,11 @@ fn json_lists_where_the_conversation_is_stored() {
     ctx.printer.flush();
     let details: serde_json::Value = serde_json::from_str(&out.lock().clone()).unwrap();
 
-    let dir = tmp.path().join(".jp/conversations/10000000");
+    let dir = tmp
+        .path()
+        .join(".jp")
+        .join("conversations")
+        .join("10000000");
     assert_eq!(details["locations"], serde_json::json!([dir.as_str()]));
     assert_eq!(details["status"], serde_json::Value::Null);
 }

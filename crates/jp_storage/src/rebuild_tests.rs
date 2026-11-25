@@ -82,12 +82,33 @@ fn rebuilding_an_archived_conversation_dates_it_by_its_directory() {
     let dir = tmp.path().join("17636257526");
     fs::create_dir_all(&dir).unwrap();
     fs::write(dir.join(EVENTS_FILE), "[]").unwrap();
-    fs::File::open(&dir)
-        .unwrap()
-        .set_modified(SystemTime::from(at(2026, 3, 4, 5)))
-        .unwrap();
+    set_dir_modified(&dir, SystemTime::from(at(2026, 3, 4, 5)));
 
     rebuild_metadata(&dir, &id(), true).unwrap();
 
     assert_eq!(read_metadata(&dir).archived_at, Some(at(2026, 3, 4, 5)));
+}
+
+#[cfg(not(windows))]
+fn set_dir_modified(dir: &Utf8Path, when: SystemTime) {
+    fs::File::open(dir).unwrap().set_modified(when).unwrap();
+}
+
+// Windows opens a directory only with backup semantics, and changes its times
+// only through a handle with the right to write its attributes.
+#[cfg(windows)]
+fn set_dir_modified(dir: &Utf8Path, when: SystemTime) {
+    use std::os::windows::fs::OpenOptionsExt as _;
+
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_FLAG_BACKUP_SEMANTICS, FILE_WRITE_ATTRIBUTES,
+    };
+
+    fs::OpenOptions::new()
+        .access_mode(FILE_WRITE_ATTRIBUTES)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+        .open(dir)
+        .unwrap()
+        .set_modified(when)
+        .unwrap();
 }
