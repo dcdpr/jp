@@ -147,6 +147,26 @@ newer release has fixed.
     helpers in `jp_cli`, `jp_config`, and `jp_ffi` to fail `qual-ci` with new
     `CX-006` findings; renaming it to `Reply::new` cleared them.
     Item 6 may have the same root cause.
+17. **The file walker skips every path with a component starting with `.`.**
+    `collect_rust_files` (`src/adapters/source/filesystem.rs`) drops any file
+    whose path has a component that starts with `.` (other than `.` and `..`),
+    meant to skip `.git` and similar.
+    It also skips workspace members that live under a dot-directory: JP's
+    `.config/jp/tools` crate is never analysed.
+    Its own findings go unreported, and every call it makes is invisible, so a
+    `pub` item in another crate whose only callers are in `tools` is reported as
+    `DRY-002` dead code.
+    `ReposHandler::list_check_runs`, `list_check_run_annotations`,
+    `combined_status`, `job_logs`, and `CheckRun::is_actions_job` in `jp_github`
+    (all called from `.config/jp/tools/src/github/pr_checks.rs`) hit this.
+    `PullsHandler::update`, called only from `tools`, escapes it through item
+    16: other code calls a method named `update`.
+    Propose taking the file set from `cargo metadata` (each workspace member's
+    target source directories) when the analysed path is a workspace, and
+    leaving other exclusions to `exclude_files`, keeping only `target` and
+    `.git` as hard-coded skips.
+    Once `tools` is analysed, check that its existing findings don't trip an
+    `enforced` rule in `qual.toml`.
 
 ## Comments
 

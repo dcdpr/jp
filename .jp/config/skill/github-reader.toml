@@ -13,6 +13,7 @@ The following tools help you with this:
 - github_pulls: Search through the project's pull requests (metadata and conversation).
 - github_pr_diff: Inspect the files changed in a pull request.
 - github_pr_commits: List the commits that make up a pull request.
+- github_pr_checks: Read a pull request's CI status, the errors its jobs reported, and a job's log.
 - github_commit: Read a single commit's metadata and changed files by sha, branch, or tag.
 - github_read_file: Read the contents of a file in the project's repository.
 """
@@ -23,5 +24,6 @@ github_issues = { enable = true, run = "allow", result = "allow", style.inline_r
 github_pulls = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
 github_pr_diff = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
 github_pr_commits = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
+github_pr_checks = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
 github_commit = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }
 github_read_file = { enable = true, run = "allow", result = "allow", style.inline_results = "off", style.results_file_link = "off" }

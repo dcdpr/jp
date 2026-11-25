@@ -1085,3 +1085,203 @@ async fn graphql_surfaces_top_level_errors_as_error() {
     }
     mock.assert();
 }
+
+#[tokio::test]
+async fn repo_list_check_runs_asks_for_the_latest_attempts() {
+    use crate::models::checks::{CheckConclusion, CheckStatus};
+
+    let server = MockServer::start_async().await;
+    let mock = server
+        .mock_async(|when, then| {
+            when.method(GET)
+                .path("/repos/acme/widgets/commits/abc123/check-runs")
+                .query_param("filter", "latest")
+                .query_param("per_page", "100");
+            then.status(200).json_body(json!({
+                "total_count": 2,
+                "check_runs": [
+                    {
+                        "id": 7,
+                        "name": "docs",
+                        "status": "completed",
+                        "conclusion": "failure",
+                        "started_at": "2024-03-01T00:00:00Z",
+                        "completed_at": "2024-03-01T00:05:00Z",
+                        "html_url": "https://github.com/acme/widgets/actions/runs/1/job/7",
+                        "output": { "title": null, "summary": null, "annotations_count": 3 },
+                        "app": { "slug": "github-actions" }
+                    },
+                    {
+                        "id": 8,
+                        "name": "external",
+                        "status": "some_new_status",
+                        "conclusion": null,
+                        "started_at": null,
+                        "completed_at": null,
+                        "html_url": null,
+                        "output": { "title": null, "summary": null },
+                        "app": { "slug": "some-app" }
+                    }
+                ]
+            }));
+        })
+        .await;
+
+    let client = test_client(&server.base_url(), None);
+    let runs = client
+        .repos("acme", "widgets")
+        .list_check_runs("abc123")
+        .await
+        .expect("list check runs");
+
+    assert_eq!(runs.total_count, 2);
+    let [docs, external] = runs.check_runs.as_slice() else {
+        panic!("expected two check runs, got {:?}", runs.check_runs);
+    };
+    assert_eq!(docs.status, CheckStatus::Completed);
+    assert_eq!(docs.conclusion, Some(CheckConclusion::Failure));
+    assert_eq!(docs.output.annotations_count, 3);
+    assert!(docs.is_actions_job());
+    assert_eq!(external.status, CheckStatus::Unknown);
+    assert_eq!(external.output.annotations_count, 0);
+    assert!(!external.is_actions_job());
+    mock.assert();
+}
+
+#[tokio::test]
+async fn repo_list_check_run_annotations_parses_levels() {
+    use crate::models::checks::AnnotationLevel;
+
+    let server = MockServer::start_async().await;
+    let mock = server
+        .mock_async(|when, then| {
+            when.method(GET)
+                .path("/repos/acme/widgets/check-runs/7/annotations")
+                .query_param("per_page", "100");
+            then.status(200).json_body(json!([{
+                "path": "src/lib.rs",
+                "start_line": 13,
+                "end_line": 13,
+                "annotation_level": "failure",
+                "title": null,
+                "message": "unresolved link to `layout::site`"
+            }, {
+                "path": "src/lib.rs",
+                "start_line": 20,
+                "end_line": 20,
+                "annotation_level": null,
+                "title": null,
+                "message": null
+            }]));
+        })
+        .await;
+
+    let client = test_client(&server.base_url(), None);
+    let annotations = client
+        .repos("acme", "widgets")
+        .list_check_run_annotations(7)
+        .await
+        .expect("list annotations");
+
+    assert_eq!(annotations.len(), 2);
+    assert_eq!(annotations[0].path, "src/lib.rs");
+    assert_eq!(annotations[0].start_line, 13);
+    assert_eq!(
+        annotations[0].annotation_level,
+        Some(AnnotationLevel::Failure)
+    );
+    assert_eq!(
+        annotations[0].message.as_deref(),
+        Some("unresolved link to `layout::site`")
+    );
+    // GitHub's schema lets both be null; such an annotation must not fail the
+    // whole response.
+    assert_eq!(annotations[1].annotation_level, None);
+    assert_eq!(annotations[1].message, None);
+    mock.assert();
+}
+
+#[tokio::test]
+async fn repo_combined_status_parses_each_context() {
+    use crate::models::checks::StatusState;
+
+    let server = MockServer::start_async().await;
+    let mock = server
+        .mock_async(|when, then| {
+            when.method(GET)
+                .path("/repos/acme/widgets/commits/abc123/status")
+                .query_param("per_page", "100");
+            then.status(200).json_body(json!({
+                "state": "pending",
+                "total_count": 2,
+                "statuses": [
+                    {
+                        "context": "merge-when-green",
+                        "state": "pending",
+                        "description": "Waiting for label: merge-when-green",
+                        "target_url": "https://github.com/acme/widgets/actions/runs/1"
+                    },
+                    {
+                        "context": "external",
+                        "state": "some_new_state",
+                        "description": null,
+                        "target_url": null
+                    }
+                ]
+            }));
+        })
+        .await;
+
+    let client = test_client(&server.base_url(), None);
+    let status = client
+        .repos("acme", "widgets")
+        .combined_status("abc123")
+        .await
+        .expect("combined status");
+
+    assert_eq!(status.total_count, 2);
+    let [gate, external] = status.statuses.as_slice() else {
+        panic!("expected two statuses, got {:?}", status.statuses);
+    };
+    assert_eq!(gate.context, "merge-when-green");
+    assert_eq!(gate.state, StatusState::Pending);
+    assert_eq!(
+        gate.description.as_deref(),
+        Some("Waiting for label: merge-when-green")
+    );
+    assert_eq!(external.state, StatusState::Unknown);
+    assert_eq!(external.target_url, None);
+    mock.assert();
+}
+
+/// GitHub answers the job-log endpoint with a redirect to the log itself.
+#[tokio::test]
+async fn repo_job_logs_follows_the_redirect_to_the_log() {
+    let server = MockServer::start_async().await;
+    let redirect = server
+        .mock_async(|when, then| {
+            when.method(GET)
+                .path("/repos/acme/widgets/actions/jobs/7/logs");
+            then.status(302)
+                .header("location", server.url("/blobs/job-7.txt"));
+        })
+        .await;
+    let log = server
+        .mock_async(|when, then| {
+            when.method(GET).path("/blobs/job-7.txt");
+            then.status(200)
+                .body("2024-03-01T00:00:00.0000000Z error: boom\n");
+        })
+        .await;
+
+    let client = test_client(&server.base_url(), None);
+    let text = client
+        .repos("acme", "widgets")
+        .job_logs(7)
+        .await
+        .expect("download job log");
+
+    assert_eq!(text, "2024-03-01T00:00:00.0000000Z error: boom\n");
+    redirect.assert();
+    log.assert();
+}
