@@ -18,7 +18,7 @@
         },
         "x86_64-pc-windows-msvc": {
           "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-gui-x86_64-pc-windows-msvc",
-          "sha256": "1287553b0756fde58e4316d31c3952fe55c3f08bfe1e445ee669f1ad1e6d205c"
+          "sha256": "b1b88233ec2d8391460cfe872dd6e1b6da9454dd661fcb2fa53bbff5e973bd60"
         },
         "x86_64-unknown-linux-gnu": {
           "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-gui-x86_64-unknown-linux-gnu",
@@ -43,7 +43,7 @@
         },
         "x86_64-pc-windows-msvc": {
           "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-path-x86_64-pc-windows-msvc",
-          "sha256": "13f4ab91a56962aed648e06ff3ad2d5a654660f4799c12fa5c0b64b21abd3537"
+          "sha256": "1f5848e01f2878ec48524e7eae12fcc0fe42adcc3a4e171d775e9acb2ebf9559"
         },
         "x86_64-unknown-linux-gnu": {
           "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-path-x86_64-unknown-linux-gnu",
@@ -72,19 +72,19 @@
       "binaries": {
         "aarch64-apple-darwin": {
           "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-serve-web-aarch64-apple-darwin",
-          "sha256": "440e200a3d88102922c82ea1b6d69492613978eddf44bd236d277d6a8344e6ab"
+          "sha256": "f9b527d68787410dfe0599d6d30e37a981c1be930dce2a9b6535d1a3261004f5"
         },
         "x86_64-apple-darwin": {
           "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-serve-web-x86_64-apple-darwin",
-          "sha256": "6959861e1361ce6ac653f71770d4cd6c2b8d5894f061f124e393451eb2c2834b"
+          "sha256": "d0f091b6fd5161fcc3b4b9a2ed3bb151092647df5fd99f3cf89bed439ec518d8"
         },
         "x86_64-pc-windows-msvc": {
           "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-serve-web-x86_64-pc-windows-msvc",
-          "sha256": "e82f3b6eb53b1c7d67d02eeffb9490703e89b6e5d382603a76ecb44b2e7c19eb"
+          "sha256": "1593a1f17d51dbb4643d80c3643553b519dcd4600d39f1458eacabdc38f2fcf0"
         },
         "x86_64-unknown-linux-gnu": {
           "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-serve-web-x86_64-unknown-linux-gnu",
-          "sha256": "0135af7c58680e0eb4a65e8ba103bba2dc09729a5180cffd69d9dd8d88c139a6"
+          "sha256": "d23530cc9db7bd2442773f064c4df54411bded09809accac405c0e8c38f176c4"
         }
       }
     }
