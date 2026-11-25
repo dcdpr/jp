@@ -15,6 +15,11 @@ impl Handler for MyAttachmentHandler {
         "my-scheme"
     }
 
+    // Parse and validate the URL, returning its canonical representation.
+    fn canonical(&self, uri: &Url) -> Result<Url, Box<dyn Error>> {
+        Ok(uri.clone())
+    }
+
     fn add(&mut self, uri: &Url) -> Result<(), Box<dyn Error>> {
         let attachment = url_to_attachment(uri);
         self.0.push(attachment);

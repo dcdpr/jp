@@ -3,8 +3,8 @@ use std::{collections::BTreeSet, error::Error};
 use async_trait::async_trait;
 use camino::Utf8Path;
 use jp_attachment::{
-    Attachment, BoxedHandler, HANDLERS, Handler, distributed_slice, linkme, percent_decode_str,
-    percent_encode_str, typetag,
+    Attachment, BoxedHandler, ENV_PARAM, HANDLERS, Handler, child_env, distributed_slice,
+    env_names, linkme, percent_decode_str, percent_encode_str, typetag,
 };
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -25,6 +25,11 @@ struct Command {
     cmd: String,
     args: Vec<String>,
     description: Option<String>,
+
+    /// Additional environment variables forwarded to the command beyond
+    /// [`jp_attachment::BASE_ENV_VARS`].
+    #[serde(default)]
+    env: Vec<String>,
 }
 
 impl Command {
@@ -34,6 +39,12 @@ impl Command {
             .iter()
             .map(|v| format!("arg={}", percent_encode_str(v)))
             .collect::<Vec<_>>();
+
+        query_pairs.extend(
+            self.env
+                .iter()
+                .map(|name| format!("{ENV_PARAM}={}", percent_encode_str(name))),
+        );
 
         if let Some(prefix) = &self.description {
             query_pairs.push(format!("description={}", percent_encode_str(prefix)));
@@ -80,6 +91,10 @@ impl Handler for Commands {
         "cmd"
     }
 
+    fn canonical(&self, uri: &Url) -> Result<Url, Box<dyn Error + Send + Sync>> {
+        uri_to_command(uri)?.to_uri(self.scheme())
+    }
+
     async fn add(
         &mut self,
         uri: &Url,
@@ -118,6 +133,7 @@ impl Handler for Commands {
             // line here while we still have it.
             let output = duct::cmd(command.cmd.as_str(), command.args.as_slice())
                 .dir(root)
+                .full_env(child_env(&command.env))
                 .stdout_capture()
                 .stderr_capture()
                 .unchecked()
@@ -164,6 +180,7 @@ fn uri_to_command(uri: &Url) -> Result<Command, Box<dyn Error + Send + Sync>> {
         cmd: cmd.to_string(),
         args,
         description,
+        env: env_names(uri)?,
     })
 }
 
@@ -183,6 +200,7 @@ fn parse_opaque_command(uri: &Url) -> Result<Command, Box<dyn Error + Send + Syn
         cmd: cmd.clone(),
         args: args.to_vec(),
         description,
+        env: env_names(uri)?,
     })
 }
 

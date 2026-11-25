@@ -48,6 +48,10 @@ impl Handler for HttpContent<Http> {
         "http"
     }
 
+    fn canonical(&self, uri: &Url) -> Result<Url, Box<dyn Error + Send + Sync>> {
+        Ok(canonical_url(uri))
+    }
+
     async fn add(
         &mut self,
         uri: &Url,
@@ -79,6 +83,10 @@ impl Handler for HttpContent<Https> {
         "https"
     }
 
+    fn canonical(&self, uri: &Url) -> Result<Url, Box<dyn Error + Send + Sync>> {
+        Ok(canonical_url(uri))
+    }
+
     async fn add(
         &mut self,
         uri: &Url,
@@ -103,6 +111,18 @@ impl Handler for HttpContent<Https> {
         debug!(id = "https", "Getting https attachment contents.");
         fetch_all(&self.urls).await
     }
+}
+
+/// Strip the URL fragment to produce the canonical request URL.
+///
+/// Fragments are not sent to HTTP servers, and [`Url::parse`] already
+/// lowercases the host, strips default ports, and resolves dot segments.
+/// Query parameter order is preserved because servers may treat it as
+/// significant.
+fn canonical_url(uri: &Url) -> Url {
+    let mut url = uri.clone();
+    url.set_fragment(None);
+    url
 }
 
 async fn fetch_all(urls: &BTreeSet<Url>) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>> {

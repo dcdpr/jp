@@ -161,10 +161,28 @@ impl From<&str> for ResolveError {
     }
 }
 
-/// Validate a `jp://` URI without performing I/O.
-pub fn validate(uri: &Url) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let entry = uri_to_entry(uri)?;
-    validate_entry(&entry)
+/// Validate and canonicalize a `jp://` URI without performing I/O.
+///
+/// Normalizes the selector to its canonical shorthand and omits it when it
+/// equals [`Selector::default`], so `jp://<id>` and `jp://<id>?select=a:-1`
+/// produce the same URL.
+///
+/// # Errors
+///
+/// Returns an error if the URI has an invalid JP ID, an unsupported resource
+/// variant, an unknown query parameter, or an invalid selector.
+pub fn canonical(uri: &Url) -> Result<Url, Box<dyn Error + Send + Sync>> {
+    let mut entry = uri_to_entry(uri)?;
+    validate_entry(&entry)?;
+
+    let selector = parse_selector(&entry.select)?;
+    entry.select = if selector == Selector::default() {
+        String::new()
+    } else {
+        selector.to_string()
+    };
+
+    entry.to_url()
 }
 
 /// Resolve a `jp://` URI against the already-open workspace.

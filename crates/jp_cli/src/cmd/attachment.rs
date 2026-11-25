@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use clap::{ArgMatches, Command};
 use jp_attachment_agentic_shepherd as _;
 use jp_attachment_bear_note as _;
@@ -6,12 +8,13 @@ use jp_attachment_file_content as _;
 use jp_attachment_github as _;
 use jp_attachment_http_content as _;
 use jp_attachment_internal::{
-    ResolveError, resolve as resolve_internal_attachment, validate as validate_internal_attachment,
+    ResolveError, canonical as canonical_internal_attachment,
+    resolve as resolve_internal_attachment,
 };
 use jp_attachment_mcp_resources as _;
-use jp_config::PartialAppConfig;
+use jp_config::{Config as _, PartialAppConfig, conversation::attachment::AttachmentConfig};
 use jp_workspace::Workspace;
-use tracing::{trace, warn};
+use tracing::{debug, trace, warn};
 use url::Url;
 
 use super::Output;
@@ -112,21 +115,83 @@ fn attachment_scheme(uri: &Url) -> &str {
         .map_or(uri.scheme(), |(scheme, _)| scheme)
 }
 
-pub(crate) fn validate_attachment(uri: &Url) -> Result<()> {
-    trace!(%uri, "Validating attachment.");
+/// Validate and canonicalize `uri` via its scheme's attachment handler.
+///
+/// Two attachments with the same canonical URL resolve to the same content.
+/// Performs no I/O, so callers can validate a URL before storing it.
+///
+/// # Errors
+///
+/// Returns an error if no handler is registered for the scheme or if the
+/// handler rejects `uri`.
+pub(crate) fn canonical_attachment(uri: &Url) -> Result<Url> {
+    trace!(%uri, "Canonicalizing attachment.");
 
     let scheme = attachment_scheme(uri);
+    let canonical = if scheme == "jp" {
+        canonical_internal_attachment(uri)
+    } else {
+        let Some(handler) = jp_attachment::find_handler_by_scheme(scheme) else {
+            return Err(Error::NotFound("Attachment handler", scheme.to_string()));
+        };
 
-    if scheme == "jp" {
-        validate_internal_attachment(uri).map_err(|source| Error::AttachmentFailed {
-            uri: uri.clone(),
-            source,
-        })?;
-        return Ok(());
-    }
+        handler.canonical(uri)
+    };
 
-    if jp_attachment::find_handler_by_scheme(scheme).is_none() {
-        return Err(Error::NotFound("Attachment handler", scheme.to_string()));
+    canonical.map_err(|source| Error::AttachmentFailed {
+        uri: uri.clone(),
+        source,
+    })
+}
+
+/// Return the deduplication key for `uri`: its canonical URL, or `uri` verbatim
+/// if canonicalization fails.
+///
+/// Falling back to the raw URL ensures an unresolvable entry is not conflated
+/// with a distinct entry; it still fails when resolved.
+pub(crate) fn attachment_identity(uri: &Url) -> Url {
+    canonical_attachment(uri).unwrap_or_else(|_| uri.clone())
+}
+
+/// Append `urls` to the conversation config, skipping URLs that are already
+/// attached.
+///
+/// Deduplication compares canonical URLs (see [`canonical_attachment`]), so an
+/// equivalent URL spelling or config-table entry is skipped.
+/// Newly attached URLs are stored as written.
+///
+/// # Errors
+///
+/// Returns an error if [`canonical_attachment`] rejects any URL in `urls`,
+/// before modifying `partial`.
+pub(crate) fn attach_urls(
+    partial: &mut PartialAppConfig,
+    urls: impl IntoIterator<Item = Url>,
+) -> Result<()> {
+    let urls = urls
+        .into_iter()
+        .map(|url| Ok((canonical_attachment(&url)?, url)))
+        .collect::<Result<Vec<_>>>()?;
+
+    let attachments = &mut partial.conversation.attachments;
+    let mut attached: Vec<Url> = attachments
+        .iter()
+        .filter_map(|attachment| {
+            AttachmentConfig::from_partial(attachment.clone(), vec![])
+                .ok()?
+                .to_url()
+                .ok()
+        })
+        .map(|url| attachment_identity(&url))
+        .collect();
+
+    for (canonical, url) in urls {
+        if attached.contains(&canonical) {
+            continue;
+        }
+
+        attached.push(canonical);
+        attachments.push(url.into());
     }
 
     Ok(())
@@ -176,28 +241,45 @@ pub(crate) async fn register_attachment(
 /// rather than aborting the whole query.
 /// Every other failure (invalid URI, real I/O error, etc.) is propagated.
 ///
-/// Returns one group per URL, in the order the URLs were given; a skipped
-/// reference yields an empty group, keeping the groups aligned with the input.
+/// Duplicate URLs (including equivalent spellings that normalize to the same
+/// [`attachment_identity`]) are resolved once, at their first position.
+///
+/// Returns one group per input URL in order; a skipped reference or duplicate
+/// URL yields an empty group to keep the output aligned with `urls`.
 pub(crate) async fn load_conversation_attachments(
     ctx: &Ctx,
     urls: Vec<Url>,
 ) -> Result<Vec<Vec<jp_attachment::Attachment>>> {
+    // Stored conversation configs can contain duplicate URLs, and each URL
+    // instantiates its own handler in `register_attachment`, so deduplicate
+    // across the batch here.
+    let mut seen = HashSet::new();
+
     // Handle the missing-conversation case inside each future so the outer
     // `try_join_all` keeps its fail-fast behavior for real errors: a
     // structural failure aborts the batch immediately instead of waiting
     // for slow HTTP/GitHub handlers to finish.
-    let futs = urls.into_iter().map(|url| async move {
-        match register_attachment(ctx, url).await {
-            Ok(atts) => Ok(atts),
-            Err(Error::AttachmentConversationMissing { id, uri }) => {
-                warn!(
-                    %id,
-                    %uri,
-                    "Skipping attachment: referenced conversation is unavailable."
-                );
-                Ok(Vec::new())
+    let futs = urls.into_iter().map(|url| {
+        let repeated = !seen.insert(attachment_identity(&url));
+
+        async move {
+            if repeated {
+                debug!(uri = %url, "Skipping attachment: URL is attached more than once.");
+                return Ok(Vec::new());
             }
-            Err(error) => Err(error),
+
+            match register_attachment(ctx, url).await {
+                Ok(atts) => Ok(atts),
+                Err(Error::AttachmentConversationMissing { id, uri }) => {
+                    warn!(
+                        %id,
+                        %uri,
+                        "Skipping attachment: referenced conversation is unavailable."
+                    );
+                    Ok(Vec::new())
+                }
+                Err(error) => Err(error),
+            }
         }
     });
     futures::future::try_join_all(futs).await

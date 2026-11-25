@@ -28,6 +28,18 @@ fn renders_canonical_url() {
 }
 
 #[test]
+fn keeps_the_environment_variables_a_uri_names() {
+    let reference =
+        Reference::parse(&Url::parse("ag:592?env=AG_DATA_DIR&env=AG_TOKEN").unwrap()).unwrap();
+
+    assert_eq!(reference.env(), ["AG_DATA_DIR", "AG_TOKEN"]);
+    assert_eq!(
+        reference.to_url().unwrap().as_str(),
+        "ag://issues/592?env=AG_DATA_DIR&env=AG_TOKEN"
+    );
+}
+
+#[test]
 fn rejects_unsupported_uris() {
     let cases = [
         "gh://issues/1",      // wrong scheme

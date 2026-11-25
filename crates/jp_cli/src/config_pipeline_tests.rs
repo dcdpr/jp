@@ -628,6 +628,46 @@ fn write_config(root: &Utf8Path, name: &str, content: &str) -> KeyValueOrPath {
 }
 
 #[test]
+fn config_set_with_a_replace_file_replaces_a_conversations_attachments() {
+    let tmp = camino_tempfile::tempdir().unwrap();
+    let file = write_config(tmp.path(), "fix.toml", indoc::indoc! {r#"
+            [conversation.attachments]
+            strategy = "replace"
+            value = ["cmd://printenv?arg=TERM&env=TERM"]
+        "#});
+
+    let mut stored = PartialAppConfig::new_test();
+    for url in ["cmd://printenv?arg=TERM", "gh:pull/1/diff"] {
+        stored
+            .conversation
+            .attachments
+            .push(url.parse::<url::Url>().unwrap().into());
+    }
+    let current = jp_config::util::build(stored).unwrap().to_partial();
+
+    let overrides =
+        build_partial_from_cfg_args(&[file], &PartialAppConfig::empty(), None, None).unwrap();
+    let (delta, unsets) = override_to_record(&current, overrides)
+        .unwrap()
+        .expect("replacing the list changes the config");
+
+    let mut folded = current;
+    folded.merge(&(), delta).expect("folding cannot fail");
+    let partial = empty_pipeline()
+        .partial_with_conversation(folded, &unsets)
+        .unwrap();
+
+    let urls: Vec<String> = jp_config::util::build(partial)
+        .unwrap()
+        .conversation
+        .attachments
+        .iter()
+        .map(|attachment| attachment.to_url().unwrap().to_string())
+        .collect();
+    assert_eq!(urls, ["cmd://printenv?arg=TERM&env=TERM"]);
+}
+
+#[test]
 fn entry_loader_reset_discards_accumulated_state() {
     let tmp = camino_tempfile::tempdir().unwrap();
     let entry = write_config(tmp.path(), "committer.toml", indoc::indoc! {r#"
