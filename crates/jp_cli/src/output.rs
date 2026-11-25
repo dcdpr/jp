@@ -22,14 +22,29 @@ use jp_llm::event::NoticeSink;
 use jp_printer::{OutputFormat, Printer};
 use jp_term::table::{Details, details, details_json, details_markdown, list, list_markdown};
 use serde_json::{Value, to_string, to_string_pretty};
+use tracing::warn;
 
 /// A sink that prints provider notices to stderr as chrome.
 ///
-/// For requests whose events are collected rather than rendered: the notices
-/// land on stderr exactly as a query turn prints them.
+/// For a request the user asked for directly whose events are collected rather
+/// than rendered: the notices land on stderr exactly as a query turn prints
+/// them.
 pub fn notice_sink(printer: &Printer) -> NoticeSink {
     let printer = printer.clone();
     NoticeSink::new(move |notice| printer.eprintln(notice_line(notice)))
+}
+
+/// A sink that logs provider notices from a background request, and prints
+/// nothing.
+///
+/// A background request (an inquiry, title generation, a turn summary, an
+/// implicit compaction) runs on a model other than the one the user is talking
+/// to, so only the main model's notices reach the terminal.
+/// `request` names the background request in the log record.
+pub fn background_notice_sink(request: &'static str) -> NoticeSink {
+    NoticeSink::new(move |notice| {
+        warn!(%notice, request, "Provider notice from a background request.");
+    })
 }
 
 /// Format a provider notice as a line of chrome: `WARN <notice>`.

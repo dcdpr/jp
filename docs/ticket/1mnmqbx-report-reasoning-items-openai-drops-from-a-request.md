@@ -137,6 +137,9 @@ The repetition described as a known trade-off above is gone: a removal is
 reported once per provider.
 A query builds one provider per turn, so a turn reports each removed item once,
 on the first request that loses it, and the next turn reports again.
+Notices from background requests (inquiries, title generation, turn summaries,
+implicit compaction) are logged rather than printed, so only the main model's
+notices reach the terminal.
 
 The state the earlier comment said dedup would need lives on the provider as
 `Openai::seen_notices`.

@@ -19,7 +19,7 @@ use crate::{
         turn_selection::TurnSelection,
     },
     ctx::Ctx,
-    output::{notice_sink, print_json},
+    output::{background_notice_sink, print_json},
 };
 
 /// `jp conversation fork`.
@@ -206,7 +206,7 @@ impl Fork {
                     // Compaction during a fork is an implicit adjunct; only an
                     // explicit `jp c compact` reports compaction details.
                     None,
-                    &notice_sink(&ctx.printer),
+                    &background_notice_sink("fork compaction"),
                 )
                 .await?;
                 for compaction in compactions {

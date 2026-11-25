@@ -33,7 +33,6 @@ use jp_inquire::{
     ReplyEditMode, ReplyOutcome,
     prompt::{PromptBackend, TerminalPromptBackend},
 };
-use jp_llm::event::NoticeSink;
 use jp_plugin::{
     Manifest, PROTOCOL_VERSION,
     message::{
@@ -84,6 +83,7 @@ use crate::{
     config_pipeline::{ConfigPipeline, build_partial_over, config_search_roots},
     ctx::McpServerScope,
     editor::{draft_query_text, draft_revision, report_editor_failure},
+    output::background_notice_sink,
 };
 
 /// Grace period for a stopped turn to finish before it is aborted.
@@ -1612,9 +1612,7 @@ fn resolve_title(
                 events,
                 config,
                 false,
-                // Nobody is watching a terminal for this turn, so tracing is
-                // the only place a notice from the title model can go.
-                NoticeSink::new(|notice| warn!(%notice, "Title generation notice.")),
+                background_notice_sink("title generation"),
             ) {
                 Ok(task) => Some(task),
                 Err(error) => {
@@ -1730,7 +1728,7 @@ fn resolve_turn_summaries(
         return None;
     }
 
-    let notices = NoticeSink::new(|notice| warn!(%notice, "Turn summary notice."));
+    let notices = background_notice_sink("turn summary");
     match TurnSummaryTask::new(conversation, stream, config, notices) {
         Ok(task) => task,
         Err(error) => {

@@ -18,17 +18,18 @@ use jp_config::{
     types::{byte_size::ByteSize, policy_spec::PolicySpec},
 };
 use jp_conversation::{Compaction as StoredEvent, SummarySource as StoredSource, ToolCallPolicy};
-use jp_llm::event::NoticeSink;
 use jp_plugin::message::{
     Compaction, GenerateSummary, StoredCompaction, SummaryCompaction, SummarySource, ToolCallsMode,
 };
 use jp_workspace::ConversationLock;
-use tracing::warn;
 
-use crate::cmd::{
-    self,
-    conversation::compact::{apply_compactions, build_compaction_events, plan_compactions},
-    turn_selection::TurnSelection,
+use crate::{
+    cmd::{
+        self,
+        conversation::compact::{apply_compactions, build_compaction_events, plan_compactions},
+        turn_selection::TurnSelection,
+    },
+    output::background_notice_sink,
 };
 
 /// Apply `compactions` in order to the locked conversation.
@@ -80,7 +81,7 @@ pub(crate) async fn compact(
 
     // Plan all compactions together before generating summaries so overlaps
     // between rules are caught before calling a model.
-    let notices = NoticeSink::new(|notice| warn!(%notice, "Compaction notice."));
+    let notices = background_notice_sink("plugin compaction");
     let built = build_compaction_events(&events, config, &rules, &selection, None, &notices)
         .await
         .map_err(|error| describe(&cmd::Error::from(error)))?;
