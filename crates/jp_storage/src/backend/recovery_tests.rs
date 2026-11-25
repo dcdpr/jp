@@ -1,14 +1,17 @@
 use std::{fs, slice, sync::Arc};
 
-use camino::{Utf8Path, Utf8PathBuf};
+#[cfg(unix)]
+use camino::Utf8Path;
+use camino::Utf8PathBuf;
 use camino_tempfile::{Utf8TempDir, tempdir};
 use jp_conversation::{Conversation, ConversationId};
 use test_log::test;
 
 use super::*;
+#[cfg(unix)]
+use crate::error::Error;
 use crate::{
     backend::{FsStorageBackend, LockBackend as _},
-    error::Error,
     validate::{ConversationPart, StorageLocation, ValidationError},
 };
 
