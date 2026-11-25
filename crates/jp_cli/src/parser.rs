@@ -133,9 +133,8 @@ impl AttachmentUrlOrPath {
 ///
 /// [`Handler::table_url`]: jp_attachment::Handler::table_url
 fn file_url(path: &Utf8Path, exclude: bool) -> Result<Url> {
-    // A `file` URL separates segments with `/`, whatever the platform. Only a
-    // relative path is rebuilt; an absolute one, accepted outside a workspace,
-    // is passed on as it is.
+    // Normalize relative paths to `/` separators on all platforms; pass
+    // absolute paths (accepted when no workspace root is active) unchanged.
     let path = match RelativePathBuf::from_path(path) {
         Ok(relative) => relative.into_string(),
         Err(_) => path.to_string(),

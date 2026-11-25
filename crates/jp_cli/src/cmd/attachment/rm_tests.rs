@@ -6,7 +6,6 @@ use relative_path::RelativePathBuf;
 
 use super::*;
 
-/// File names holding characters a URL reads as delimiters.
 #[cfg(not(windows))]
 const NAMES: [&str; 3] = [
     "reports/Issue #42.md",
@@ -14,8 +13,7 @@ const NAMES: [&str; 3] = [
     "reports/100%25.md",
 ];
 
-/// Windows refuses `?` in a file name, so that case runs on other platforms
-/// only.
+// Windows rejects `?` in file names.
 #[cfg(windows)]
 const NAMES: [&str; 2] = ["reports/Issue #42.md", "reports/100%25.md"];
 
@@ -43,10 +41,10 @@ fn rm_of_a_bare_path_removes_the_file_table_for_it() {
         partial.conversation.attachments.push(file_table(name));
     }
 
-    // `parse` resolves a relative path against the process directory, so the
-    // paths are given absolute, as a shell completing them under the root would.
-    // They are built as paths directly: `from_str` would read a Windows drive
-    // letter as a URL scheme.
+    // `parse` resolves relative paths against the process working directory, so
+    // pass absolute paths under `root`. Construct `AttachmentUrlOrPath::Path`
+    // directly because `from_str` parses a Windows drive letter (`C:\...`) as a
+    // URL scheme.
     let rm = Rm {
         attachments: NAMES
             .iter()

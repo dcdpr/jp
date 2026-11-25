@@ -49,15 +49,14 @@ items = [
     """,
     "Run `cargo_format` and `cargo_check` to format code and doc comments and verify lints.",
     """\
-    CI runs every test on Windows, where `Path` and `Utf8Path` separate components with `\\`, \
-    so `join`, `strip_prefix` and `Display` all produce it there. A path that leaves the \
-    process as text (an attachment name, a URL, a config value, output a test compares) must \
-    be `/`-separated on every platform: convert a relative path with \
-    `relative_path::RelativePathBuf::from_path`, which rebuilds it with `/`, rather than \
-    `to_string()` or `replace('\\\\', \"/\")`. In tests, don't create files whose names Windows \
-    refuses (`?`, `*`, `:`, `<`, `>`, `|`, `\"`), gate symlink tests on `#[cfg(unix)]`, and \
-    don't pass an absolute path through `Url::parse` or anything built on it: `C:\\...` parses \
-    as a URL with scheme `c`. Passing on macOS proves nothing about any of this.\
+    CI runs every test on Windows, where `Path` and `Utf8Path` separate components with `\\` \
+    (so `join`, `strip_prefix`, and `Display` all emit backslashes). Any relative path serialized \
+    as text (such as an attachment source, a URL path, a config value, or test output) must use \
+    `/` separators on every platform: convert it with \
+    `relative_path::RelativePathBuf::from_path`, which normalizes separators to `/`, rather than \
+    `to_string()` or `replace('\\\\', \"/\")`. In tests, avoid file names containing characters \
+    Windows rejects (`?`, `*`, `:`, `<`, `>`, `|`, `\"`), gate symlink tests on `#[cfg(unix)]`, \
+    and do not pass absolute paths to `Url::parse` (where `C:\\...` parses as scheme `c`).\
     """,
 ]
 
