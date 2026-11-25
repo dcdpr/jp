@@ -22,6 +22,7 @@ reasoning.display = "full"
 
 [conversation.tools]
 '*'.run = "allow"
+fs_modify_file.questions.modify_dirty_file.answer = true
 
 [assistant]
 name = "Software Architect"
