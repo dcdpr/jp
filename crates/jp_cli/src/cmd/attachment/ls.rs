@@ -2,6 +2,7 @@ use clap::{ArgMatches, Command};
 use jp_term::table::{DetailItem, Details};
 use jp_workspace::ConversationHandle;
 
+use super::attachment_url;
 use crate::{
     cli::CommandArgs,
     cmd::{ConversationLoadRequest, Output, conversation_id::FlagIds, target::TargetGrammar},
@@ -50,7 +51,7 @@ impl Ls {
 
         let mut items = vec![];
         for attachment in &config.conversation.attachments {
-            items.push(DetailItem::plain(attachment.to_url()?.to_string()));
+            items.push(DetailItem::plain(attachment_url(attachment)?.to_string()));
         }
 
         // Text output replaces an empty list with a message; JSON preserves

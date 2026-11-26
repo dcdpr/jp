@@ -93,8 +93,8 @@ impl AttachmentUrlOrPath {
             "URI is not a valid URL, treating as file path."
         );
         let (path, exclude) = match path.as_str().strip_prefix('!') {
-            Some(path) => (path, "?exclude=true"),
-            None => (path.as_str(), ""),
+            Some(path) => (path, true),
+            None => (path.as_str(), false),
         };
 
         // Check if the path falls within the workspace.
@@ -137,8 +137,37 @@ impl AttachmentUrlOrPath {
             )));
         }
 
-        Url::parse(&format!("file:{path}{exclude}")).map_err(Into::into)
+        file_url(&path, exclude)
     }
+}
+
+/// Build a `file` URL for the workspace-relative `path`, appending
+/// `exclude=true` when `exclude` is set.
+///
+/// Uses the `file` handler's [`Handler::table_url`] so CLI file paths and `type
+/// = "file"` config tables produce identical URLs, and literal `#`, `?`, or `%`
+/// characters in the file name are percent-encoded.
+///
+/// [`Handler::table_url`]: jp_attachment::Handler::table_url
+fn file_url(path: &Utf8Path, exclude: bool) -> Result<Url> {
+    // Normalize relative paths to `/` separators on all platforms; pass
+    // absolute paths (accepted when no workspace root is active) unchanged.
+    let path = match RelativePathBuf::from_path(path) {
+        Ok(relative) => relative.into_string(),
+        Err(_) => path.to_string(),
+    };
+
+    let handler = jp_attachment::find_handler_by_scheme("file")
+        .ok_or_else(|| Error::NotFound("Attachment handler", "file".to_owned()))?;
+    let mut url = handler
+        .table_url(&path)
+        .map_err(|error| Error::Attachment(format!("Invalid attachment path {path}: {error}")))?;
+
+    if exclude {
+        url.query_pairs_mut().append_pair("exclude", "true");
+    }
+
+    Ok(url)
 }
 
 impl std::str::FromStr for AttachmentUrlOrPath {

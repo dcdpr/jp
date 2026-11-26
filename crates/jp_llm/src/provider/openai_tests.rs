@@ -2712,7 +2712,7 @@ mod synthesize_non_streaming_output_item_events {
         ENCRYPTED_CONTENT_KEY, ITEM_ID_KEY, PHASE_KEY, ReasoningState, StreamedArguments,
         map_event, synthesize_non_streaming_output_item_events,
     };
-    use crate::event::Event;
+    use crate::{event::Event, provider::notices::SeenNotices};
 
     fn output_item(value: serde_json::Value) -> types::OutputItem {
         serde_json::from_value(value).unwrap()
@@ -2735,6 +2735,7 @@ mod synthesize_non_streaming_output_item_events {
                     reasoning_enabled,
                     &mut reasoning,
                     &mut arguments,
+                    &SeenNotices::default(),
                 )
             })
             .collect::<std::result::Result<Vec<_>, _>>()
@@ -2913,7 +2914,7 @@ mod map_event {
     use super::super::{
         ENCRYPTED_CONTENT_KEY, ITEM_ID_KEY, ReasoningState, StreamedArguments, map_event,
     };
-    use crate::{event::Event, event_builder::EventBuilder};
+    use crate::{event::Event, event_builder::EventBuilder, provider::notices::SeenNotices};
 
     fn collect(event: types::Event) -> Vec<Event> {
         collect_sequence([event])
@@ -2922,9 +2923,10 @@ mod map_event {
     fn collect_sequence(events: impl IntoIterator<Item = types::Event>) -> Vec<Event> {
         let mut reasoning = ReasoningState::default();
         let mut arguments = StreamedArguments::default();
+        let seen = SeenNotices::default();
         events
             .into_iter()
-            .flat_map(|event| map_event(event, false, true, &mut reasoning, &mut arguments))
+            .flat_map(|event| map_event(event, false, true, &mut reasoning, &mut arguments, &seen))
             .collect::<Result<_, _>>()
             .unwrap()
     }
@@ -3197,6 +3199,7 @@ mod map_event {
             false,
             &mut ReasoningState::default(),
             &mut StreamedArguments::default(),
+            &SeenNotices::default(),
         );
         assert!(events.is_empty());
     }
@@ -3226,6 +3229,7 @@ mod map_event {
             false,
             &mut ReasoningState::default(),
             &mut StreamedArguments::default(),
+            &SeenNotices::default(),
         );
 
         assert!(events.is_empty());
@@ -3310,6 +3314,7 @@ mod map_event {
                 true,
                 &mut reasoning,
                 &mut arguments,
+                &SeenNotices::default(),
             ));
         }
 
@@ -3419,7 +3424,10 @@ mod map_non_streaming_response {
         ENCRYPTED_CONTENT_KEY, ITEM_ID_KEY, ReasoningState, StreamedArguments, map_event,
         map_non_streaming_response,
     };
-    use crate::event::{Event, FinishReason};
+    use crate::{
+        event::{Event, FinishReason},
+        provider::notices::SeenNotices,
+    };
 
     fn response() -> Response {
         serde_json::from_value(json!({
@@ -3439,7 +3447,8 @@ mod map_non_streaming_response {
 
     #[test]
     fn consecutive_items_share_state_across_non_streaming_output() {
-        let events = map_non_streaming_response(response(), false, true).unwrap();
+        let events =
+            map_non_streaming_response(response(), false, true, &SeenNotices::default()).unwrap();
         assert_eq!(events, vec![
             Event::reasoning(0, ""),
             Event::reasoning(0, "First"),
@@ -3486,6 +3495,7 @@ mod map_non_streaming_response {
             true,
             &mut reasoning,
             &mut StreamedArguments::default(),
+            &SeenNotices::default(),
         );
         assert_eq!(
             events.into_iter().collect::<Result<Vec<_>, _>>().unwrap(),
@@ -3523,7 +3533,8 @@ mod map_non_streaming_response {
             removed("rs_3", "model_mismatch"),
         ]));
 
-        let events = map_non_streaming_response(response, false, true).unwrap();
+        let events =
+            map_non_streaming_response(response, false, true, &SeenNotices::default()).unwrap();
 
         assert_eq!(events, vec![
             Event::Notice(
@@ -3551,14 +3562,16 @@ mod map_non_streaming_response {
             removed("rs_3", "organization_mismatch"),
         ]));
 
-        let events = map_non_streaming_response(response, false, true).unwrap();
+        let events =
+            map_non_streaming_response(response, false, true, &SeenNotices::default()).unwrap();
 
         assert_eq!(events, vec![Event::Finished(FinishReason::Completed)]);
     }
 
     #[test]
     fn a_response_without_transformations_reports_nothing() {
-        let events = map_non_streaming_response(response(), false, true).unwrap();
+        let events =
+            map_non_streaming_response(response(), false, true, &SeenNotices::default()).unwrap();
 
         assert!(!events.iter().any(|event| matches!(event, Event::Notice(_))));
     }
@@ -3567,7 +3580,8 @@ mod map_non_streaming_response {
     fn a_null_transformations_field_reports_nothing() {
         let response = response_with_transformations(&serde_json::Value::Null);
 
-        let events = map_non_streaming_response(response, false, true).unwrap();
+        let events =
+            map_non_streaming_response(response, false, true, &SeenNotices::default()).unwrap();
 
         assert_eq!(events, vec![Event::Finished(FinishReason::Completed)]);
     }
@@ -3587,6 +3601,7 @@ mod map_non_streaming_response {
             true,
             &mut ReasoningState::default(),
             &mut StreamedArguments::default(),
+            &SeenNotices::default(),
         );
 
         assert_eq!(

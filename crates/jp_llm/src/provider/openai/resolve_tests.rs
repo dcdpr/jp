@@ -31,6 +31,7 @@ fn attempt_on(entry: AuthEntry, generation: Option<u64>) -> Attempt {
         selected: Some(entry),
         generation,
         notices: vec![],
+        switch: None,
         tried: HashSet::new(),
     }
 }
@@ -563,11 +564,9 @@ async fn test_advance_records_relogin_and_moves_to_the_next_entry() {
     .unwrap();
 
     assert_eq!(next.credential, Credential::Bearer("bearer-2".to_owned()));
-    assert!(
-        next.notices.iter().any(|notice| notice
-            == "subscription (first) rejected, continuing with subscription (second)"),
-        "unexpected notices: {:?}",
-        next.notices
+    assert_eq!(
+        next.switch.as_deref(),
+        Some("subscription (first) rejected, continuing with subscription (second)")
     );
 
     // The refusal is persisted, so a fresh invocation skips the profile too
@@ -948,13 +947,9 @@ async fn test_a_refused_api_key_falls_through_to_a_subscription() {
         next.selected,
         Some(AuthEntry::Subscription(Some("personal".to_owned())))
     );
-    assert!(
-        next.notices
-            .iter()
-            .any(|notice| notice
-                == "api key quota exhausted, continuing with subscription (personal)"),
-        "unexpected notices: {:?}",
-        next.notices
+    assert_eq!(
+        next.switch.as_deref(),
+        Some("api key quota exhausted, continuing with subscription (personal)")
     );
 }
 

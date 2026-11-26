@@ -6,7 +6,7 @@ use jp_config::{
 use jp_workspace::ConversationHandle;
 use url::Url;
 
-use super::{attachment_identity, lock_target, record_overrides};
+use super::{attachment_identity, attachment_url, lock_target, record_overrides};
 use crate::{
     cli::{CommandArgs, many},
     cmd::{ConversationLoadRequest, Output, conversation_id::FlagIds, target::TargetGrammar},
@@ -132,7 +132,7 @@ fn split(
     let mut removed = vec![];
     let mut matched = vec![];
     for attachment in attachments {
-        let url = attachment.to_url()?;
+        let url = attachment_url(&attachment)?;
         let identity = attachment_identity(&url);
         if to_remove.iter().any(|(target, _)| *target == identity) {
             matched.push(identity);

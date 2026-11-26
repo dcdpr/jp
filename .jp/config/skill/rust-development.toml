@@ -48,6 +48,16 @@ items = [
     `path` attribute to specify the file path next to the under-test module.\
     """,
     "Run `cargo_format` and `cargo_check` to format code and doc comments and verify lints.",
+    """\
+    CI runs every test on Windows, where `Path` and `Utf8Path` separate components with `\\` \
+    (so `join`, `strip_prefix`, and `Display` all emit backslashes). Any relative path serialized \
+    as text (such as an attachment source, a URL path, a config value, or test output) must use \
+    `/` separators on every platform: convert it with \
+    `relative_path::RelativePathBuf::from_path`, which normalizes separators to `/`, rather than \
+    `to_string()` or `replace('\\\\', \"/\")`. In tests, avoid file names containing characters \
+    Windows rejects (`?`, `*`, `:`, `<`, `>`, `|`, `\"`), gate symlink tests on `#[cfg(unix)]`, \
+    and do not pass absolute paths to `Url::parse` (where `C:\\...` parses as scheme `c`).\
+    """,
 ]
 
 [[assistant.instructions]]

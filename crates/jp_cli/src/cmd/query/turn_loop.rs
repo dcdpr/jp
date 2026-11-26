@@ -72,7 +72,7 @@ use crate::{
     },
     editor::build_editor_backend,
     error::Error,
-    output::notice_sink,
+    output::background_notice_sink,
     render::metadata::set_rendered_arguments,
     signals::{InterruptNotice, SignalRouter, TurnInterrupt},
 };
@@ -316,7 +316,7 @@ async fn drive_turn(
         model.clone(),
         provider.clone(),
         attachments.to_vec(),
-        notice_sink(&printer),
+        background_notice_sink("inquiry"),
     )
     .await?;
 
@@ -713,7 +713,7 @@ async fn drive_turn(
                                             model.clone(),
                                             provider.clone(),
                                             attachments.to_vec(),
-                                            notice_sink(&printer),
+                                            background_notice_sink("inquiry"),
                                         )
                                         .await?;
 

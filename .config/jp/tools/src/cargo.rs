@@ -29,6 +29,20 @@ use install_tools::cargo_install_tools;
 use test::cargo_test;
 use update::cargo_update;
 
+/// Environment variables that configure Cargo to determine artifact freshness
+/// from file content checksums rather than mtimes, preventing sibling git
+/// worktrees that share a target directory from serving stale artifacts.
+/// Matches CI.
+///
+/// Requires nightly Cargo.
+/// `-Zchecksum-freshness` only unlocks the setting; `build.fingerprint =
+/// "content"` enables it (the default remains `mtime`).
+/// See rust-lang/cargo#14136.
+const CHECKSUM_FRESHNESS_ENV: [(&str, &str); 2] = [
+    ("CARGO_UNSTABLE_CHECKSUM_FRESHNESS", "true"),
+    ("CARGO_BUILD_FINGERPRINT", "content"),
+];
+
 /// Cap for compiler and linter diagnostics embedded in a tool result.
 ///
 /// A single failure in a widely-used macro can produce tens of thousands of

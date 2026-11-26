@@ -121,7 +121,8 @@ impl ResolvedPath {
     }
 }
 
-/// Resolve a tool-call `input` against the workspace `root`.
+/// Resolve a workspace-relative `input`, such as a tool-call path, against the
+/// workspace `root`.
 ///
 /// `input` must be workspace-relative; an empty path is the root.
 /// Symlinks are followed as `mode` says; a target that does not exist yet

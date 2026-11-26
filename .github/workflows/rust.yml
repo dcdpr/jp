@@ -23,8 +23,10 @@ env:
   # Use content checksums instead of file mtimes for cargo's fingerprints.
   # `actions/checkout` rewrites source mtimes on every run, which would
   # otherwise invalidate cached workspace-crate artifacts even when the
-  # content is unchanged. See rust-lang/cargo#14136.
+  # content is unchanged. The unstable flag only unlocks `build.fingerprint`,
+  # which defaults to `mtime`, so both are needed. See rust-lang/cargo#14136.
   CARGO_UNSTABLE_CHECKSUM_FRESHNESS: "true"
+  CARGO_BUILD_FINGERPRINT: content
   # sccache refuses to cache incremental compiles, which cargo uses for
   # workspace members by default, and it hashes every `CARGO_*` variable into
   # its cache keys. rust-cache exports this same value, but the Windows job
