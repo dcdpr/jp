@@ -1,0 +1,28 @@
+[package]
+name = "jp-review-api"
+description = "Request and response types of the JSON HTTP API `jp review serve` answers."
+
+authors.workspace = true
+documentation.workspace = true
+edition.workspace = true
+license-file.workspace = true
+publish.workspace = true
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+chrono = { workspace = true }
+serde = { workspace = true, features = ["std", "derive"] }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true, features = ["std"] }
+serde_json = { workspace = true, features = ["std"] }
+
+[lints]
+workspace = true
+
+[lib]
+name = "jp_review_api"
+path = "src/lib.rs"
+doctest = false

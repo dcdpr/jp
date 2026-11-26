@@ -1,14 +1,14 @@
 use std::{
     collections::{HashMap, HashSet},
     error::Error,
+    future,
     sync::Arc,
 };
 
-use async_trait::async_trait;
 use jp_config::AppConfig;
 use jp_conversation::{ConversationId, ConversationStream, EventId};
 use jp_llm::{
-    Provider,
+    DynProvider,
     event::NoticeSink,
     provider,
     turn_summary::{self, GeneratedTurnSummary, TurnFingerprint, TurnSummaryRequest},
@@ -17,7 +17,7 @@ use jp_workspace::{ConversationLock, LockResult, Workspace};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, trace, warn};
 
-use crate::Task;
+use crate::{DynTask, Task};
 
 /// Background task that generates summaries for completed turns lacking one.
 ///
@@ -27,7 +27,7 @@ use crate::Task;
 /// the turn still has no summary and its transcript fingerprint is unchanged.
 pub struct TurnSummaryTask {
     conversation_id: ConversationId,
-    provider: Arc<dyn Provider>,
+    provider: Arc<dyn DynProvider>,
     request: Option<TurnSummaryRequest>,
     summaries: Vec<GeneratedTurnSummary>,
 }
@@ -198,7 +198,6 @@ impl TurnSummaries {
     }
 }
 
-#[async_trait]
 impl Task for TurnSummaryTask {
     fn name(&self) -> &'static str {
         "turn_summary"
@@ -207,7 +206,7 @@ impl Task for TurnSummaryTask {
     async fn run(
         mut self: Box<Self>,
         token: CancellationToken,
-    ) -> Result<Box<dyn Task>, Box<dyn Error + Send + Sync>> {
+    ) -> Result<Box<dyn DynTask>, Box<dyn Error + Send + Sync>> {
         let id = self.conversation_id;
         jp_macro::select!(
             token.cancelled(),
@@ -226,21 +225,23 @@ impl Task for TurnSummaryTask {
         Ok(self)
     }
 
-    async fn sync(
+    fn sync(
         self: Box<Self>,
         ctx: &mut Workspace,
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+    ) -> impl Future<Output = Result<(), Box<dyn Error + Send + Sync>>> + Send {
         let Self {
             conversation_id,
             summaries,
             ..
         } = *self;
 
-        TurnSummaries {
-            conversation_id,
-            summaries,
-        }
-        .store_in(ctx)
+        future::ready(
+            TurnSummaries {
+                conversation_id,
+                summaries,
+            }
+            .store_in(ctx),
+        )
     }
 }
 

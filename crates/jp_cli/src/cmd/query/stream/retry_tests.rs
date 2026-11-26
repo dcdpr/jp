@@ -433,7 +433,8 @@ async fn partial_content_flushed_on_retry() {
     );
 
     // TurnCoordinator should be reset for a new cycle
-    assert!(turn_coordinator.peek_partial_events().is_empty());
+    assert_eq!(turn_coordinator.peek_partial_events(), [] as [ChatResponse;
+        0]);
 }
 
 #[tokio::test]
@@ -494,7 +495,8 @@ async fn retry_without_partial_content_still_works() {
     });
 
     // No partial content — error happens before any events
-    assert!(turn_coordinator.peek_partial_events().is_empty());
+    assert_eq!(turn_coordinator.peek_partial_events(), [] as [ChatResponse;
+        0]);
 
     let router = detached_router();
     let error = StreamError::transient("503 Service Unavailable");

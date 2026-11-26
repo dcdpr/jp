@@ -1,11 +1,10 @@
 use std::{collections::BTreeSet, error::Error};
 
-use async_trait::async_trait;
 use camino::Utf8Path;
 use grizzly::{BearDb, search::SearchParams};
 use jp_attachment::{
-    Attachment, BoxedHandler, HANDLERS, Handler, distributed_slice, linkme, percent_decode_str,
-    percent_encode_str, typetag,
+    Attachment, BoxedHandler, HANDLERS, Handler, HandlerFuture, distributed_slice, linkme,
+    percent_decode_str, percent_encode_str, typetag,
 };
 use serde::{Deserialize, Serialize};
 use tracing::debug;
@@ -120,7 +119,6 @@ impl From<grizzly::Note> for Note {
 }
 
 #[typetag::serde(name = "bear")]
-#[async_trait]
 impl Handler for BearNotes {
     fn scheme(&self) -> &'static str {
         "bear"
@@ -136,48 +134,52 @@ impl Handler for BearNotes {
         self.query_to_uri(&query)
     }
 
-    async fn add(
-        &mut self,
-        uri: &Url,
-        _cwd: &Utf8Path,
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        self.0.insert(uri_to_query(uri)?);
+    fn add<'a>(&'a mut self, uri: &'a Url, _cwd: &'a Utf8Path) -> HandlerFuture<'a, ()> {
+        Box::pin(async move {
+            self.0.insert(uri_to_query(uri)?);
 
-        Ok(())
+            Ok(())
+        })
     }
 
-    async fn remove(&mut self, uri: &Url) -> Result<(), Box<dyn Error + Send + Sync>> {
-        self.0.remove(&uri_to_query(uri)?);
+    fn remove<'a>(&'a mut self, uri: &'a Url) -> HandlerFuture<'a, ()> {
+        Box::pin(async move {
+            self.0.remove(&uri_to_query(uri)?);
 
-        Ok(())
+            Ok(())
+        })
     }
 
-    async fn list(&self) -> Result<Vec<Url>, Box<dyn Error + Send + Sync>> {
-        let mut uris = vec![];
-        for query in &self.0 {
-            uris.push(self.query_to_uri(query)?);
-        }
-
-        Ok(uris)
-    }
-
-    async fn get(&self, _: &Utf8Path) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>> {
-        let db = BearDb::open().map_err(|e| e.to_string())?;
-
-        let mut attachments = vec![];
-        for query in &self.0 {
-            for note in get_notes(query, &db)? {
-                attachments.push(
-                    Attachment::text(
-                        format!("{}://get/{}", self.scheme(), &note.id),
-                        note.try_to_xml()?,
-                    )
-                    .with_description("A note from the Bear note-taking app."),
-                );
+    fn list(&self) -> HandlerFuture<'_, Vec<Url>> {
+        Box::pin(async move {
+            let mut uris = vec![];
+            for query in &self.0 {
+                uris.push(self.query_to_uri(query)?);
             }
-        }
 
-        Ok(attachments)
+            Ok(uris)
+        })
+    }
+
+    fn get<'a>(&'a self, _: &'a Utf8Path) -> HandlerFuture<'a, Vec<Attachment>> {
+        Box::pin(async move {
+            let db = BearDb::open().map_err(|e| e.to_string())?;
+
+            let mut attachments = vec![];
+            for query in &self.0 {
+                for note in get_notes(query, &db)? {
+                    attachments.push(
+                        Attachment::text(
+                            format!("{}://get/{}", self.scheme(), note.id),
+                            note.try_to_xml()?,
+                        )
+                        .with_description("A note from the Bear note-taking app."),
+                    );
+                }
+            }
+
+            Ok(attachments)
+        })
     }
 }
 

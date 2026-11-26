@@ -1,5 +1,5 @@
-//! Comment and reply CLI commands: `comment`, `reply`, `edit`, `withdraw`, and
-//! `resolve`.
+//! Comment and reply CLI commands: `comment`, `reply`, `edit`, `withdraw`,
+//! `resolve`, and `reopen` for a comment.
 //!
 //! Each command mutates the review via [`Store::update`] under the review's
 //! file lock.
@@ -9,7 +9,7 @@
 
 use chrono::{DateTime, Utc};
 use doc::author;
-use serde::Serialize;
+use jp_review_api::{Resolved, Withdrawal};
 
 use crate::{
     Output, anchor,
@@ -45,7 +45,7 @@ pub(crate) fn comment(
                 created_at: written,
                 content: Content {
                     anchor,
-                    body: body.map(str::trim).unwrap_or_default().to_owned(),
+                    body: body.map_or_default(str::trim).to_owned(),
                     suggestion: replace,
                 },
             })
@@ -63,7 +63,7 @@ pub(crate) fn comment(
 /// Resolve `--at` to an [`Anchor`]: the review as a whole in the latest version
 /// when `at` is `None`, or the specified file/range in a current working-tree
 /// snapshot.
-fn anchor_at(
+pub(crate) fn anchor_at(
     ctx: &Context<'_>,
     review: &mut Review,
     blobs: &Blobs,
@@ -154,10 +154,12 @@ pub(crate) fn edit(
         let anchor = at
             .map(|at| anchor_at(ctx, review, blobs, Some(at), written))
             .transpose()?;
+        // The command acts on the comment as it is, whichever draft it holds.
         let edit = Edit {
             anchor,
             suggestion: replace,
             body: body.map(|body| body.trim().to_owned()),
+            expects: None,
         };
         review
             .edit(comment.number, edit)
@@ -175,24 +177,18 @@ pub(crate) fn edit(
     .into())
 }
 
-/// What `jp -F json review withdraw` prints.
-#[derive(Serialize)]
-pub(crate) struct Withdrawal {
-    pub id: CommentRef,
-    pub withdrawn: Draft,
-}
-
 /// Withdraw the draft comment `comment`, or the draft reply on it.
 pub(crate) fn withdraw(ctx: &Context<'_>, comment: CommentRef) -> Result<Output, String> {
+    // The command acts on the comment as it is, whichever draft it holds.
     let withdrawn = ctx.store.update(comment.review, |review, _| {
         review
-            .withdraw(comment.number)
+            .withdraw(comment.number, None)
             .map_err(|refusal| refusal.message(comment.review))
     })?;
 
     if ctx.format.is_json() {
         return json(&Withdrawal {
-            id: comment,
+            id: comment.to_string(),
             withdrawn,
         });
     }
@@ -202,13 +198,6 @@ pub(crate) fn withdraw(ctx: &Context<'_>, comment: CommentRef) -> Result<Output,
         Draft::Reply => format!("Withdrew the draft reply to {comment}.\n"),
     }
     .into())
-}
-
-/// What resolving one comment did, as `jp -F json review resolve` prints it.
-#[derive(Serialize)]
-pub(crate) struct Resolved {
-    pub id: CommentRef,
-    pub outcome: Resolution,
 }
 
 /// Resolve the `named` comments, or, with `accepted`, every open comment in
@@ -222,6 +211,32 @@ pub(crate) fn resolve(
         Some(id) => resolve_accepted(ctx, id),
         None => resolve_named(ctx, named),
     }
+}
+
+/// Open the resolved comment `comment` again.
+pub(crate) fn reopen(ctx: &Context<'_>, comment: CommentRef) -> Result<Output, String> {
+    let reopened = ctx.store.update(comment.review, |review, _| {
+        reopen_in(review, comment.number).map_err(|refusal| refusal.message(comment.review))
+    })?;
+
+    if ctx.format.is_json() {
+        return show(ctx, comment);
+    }
+
+    Ok(if reopened {
+        format!("Reopened {comment}.\n")
+    } else {
+        format!("{comment} is open already.\n")
+    }
+    .into())
+}
+
+/// Open comment `number` of `review` again, returning `false` when it was open
+/// already.
+pub(crate) fn reopen_in(review: &mut Review, number: u32) -> Result<bool, Refusal> {
+    review.writable()?;
+
+    review.comment_mut(number)?.reopen()
 }
 
 /// Resolve each of `named`, or none of them when one can't be.
@@ -241,18 +256,16 @@ fn resolve_named(ctx: &Context<'_>, named: &[CommentRef]) -> Result<Output, Stri
         let outcomes = ctx.store.update(*id, |review, _| {
             resolve_all(review, numbers, at).map_err(|refusal| refusal.message(*id))
         })?;
-        resolved.extend(
-            numbers
-                .iter()
-                .zip(outcomes)
-                .map(|(number, outcome)| Resolved {
-                    id: CommentRef {
-                        review: *id,
-                        number: *number,
-                    },
-                    outcome,
-                }),
-        );
+        resolved.extend(numbers.iter().zip(outcomes).map(|(number, outcome)| {
+            Resolved {
+                id: CommentRef {
+                    review: *id,
+                    number: *number,
+                }
+                .to_string(),
+                outcome,
+            }
+        }));
     }
 
     report(ctx, &resolved)
@@ -269,7 +282,7 @@ fn resolve_accepted(ctx: &Context<'_>, id: ReviewId) -> Result<Output, String> {
                 .into_iter()
                 .zip(outcomes)
                 .map(|(number, outcome)| Resolved {
-                    id: CommentRef { review: id, number },
+                    id: CommentRef { review: id, number }.to_string(),
                     outcome,
                 })
                 .collect::<Vec<_>>(),

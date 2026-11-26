@@ -193,7 +193,7 @@ fn an_appended_argument_reports_no_path() {
     let mut unsets = Vec::new();
     let delta = prev.delta_with_unsets(next, "", &mut unsets);
 
-    assert!(unsets.is_empty());
+    assert_eq!(unsets, [] as [String; 0]);
     assert_eq!(
         arguments(&delta.providers.mcp["kagi"]),
         Some(&vec!["--b".to_owned()])

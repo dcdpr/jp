@@ -1058,7 +1058,7 @@ async fn commit_staged_changes() {
 
     // After commit, no staged diff remains.
     let diff = git(&root, &["diff", "--cached", "--name-only"]);
-    assert!(diff.trim().is_empty());
+    assert_eq!(diff.trim(), "");
 }
 
 #[tokio::test]

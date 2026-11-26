@@ -7,7 +7,7 @@ use serde_json::json;
 
 use super::*;
 use crate::{
-    model::{Comment, Status},
+    model::{Comment, Reply, Status},
     pass::NewPass,
     snapshot, store,
 };
@@ -258,7 +258,8 @@ fn a_body_longer_than_max_chars_is_refused() {
              words."
         )
     );
-    assert!(comment_of(&stored(root.path(), id), 1).replies.is_empty());
+    assert_eq!(comment_of(&stored(root.path(), id), 1).replies, []
+        as [Reply; 0]);
 }
 
 #[test]

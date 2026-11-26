@@ -527,8 +527,7 @@ fn offered_version(option: &SessionConfigSelectOption, family: &str) -> Vec<u32>
     option
         .name
         .as_deref()
-        .map(|name| version(name, family))
-        .unwrap_or_default()
+        .map_or_default(|name| version(name, family))
 }
 
 /// Pick the preferred model value from `values`: prefers `[1m]` context

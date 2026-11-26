@@ -64,7 +64,7 @@ fn a_bare_rm_removes_everything() {
         panic!("expected `rm`");
     };
 
-    assert!(rm.labels.is_empty());
+    assert_eq!(rm.labels, [] as [String; 0]);
 }
 
 /// The short forms are what a user reaches for after the first few times.
@@ -255,7 +255,7 @@ fn a_set_that_changed_nothing_says_so() {
     );
 
     assert_eq!(chrome, "No labels to apply to jp-c123: Title Here");
-    assert!(lines.is_empty());
+    assert_eq!(lines, [] as [String; 0]);
 }
 
 /// `jp c label add draft` asks for a presence the key already has once it holds
@@ -268,7 +268,7 @@ fn adding_a_bare_label_to_a_key_that_holds_values_says_so() {
     );
 
     assert_eq!(chrome, "No labels to apply to jp-c123: Title Here");
-    assert!(lines.is_empty());
+    assert_eq!(lines, [] as [String; 0]);
 }
 
 /// A key that did not change is still context for one that did, so the reader
@@ -333,7 +333,7 @@ fn a_removal_that_matched_nothing_is_reported_as_such() {
     let (chrome, lines) = report_of(&[], &LabelChange::RemoveAll);
 
     assert_eq!(chrome, "No labels to remove from jp-c123: Title Here");
-    assert!(lines.is_empty());
+    assert_eq!(lines, [] as [String; 0]);
 }
 
 /// Every alias can be declined at its prompt, leaving an `add` with nothing to
@@ -343,7 +343,7 @@ fn an_add_with_nothing_to_apply_says_so() {
     let (chrome, lines) = report_of(&[], &LabelChange::Add(Grouped::new()));
 
     assert_eq!(chrome, "No labels to apply to jp-c123: Title Here");
-    assert!(lines.is_empty());
+    assert_eq!(lines, [] as [String; 0]);
 }
 
 /// The sentence is chrome and the labels are data, so they go to separate

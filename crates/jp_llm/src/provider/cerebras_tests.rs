@@ -1,5 +1,4 @@
 use eventsource_stream::Event as MessageEvent;
-use futures::StreamExt as _;
 use jp_config::assistant::sections::SectionConfig;
 use jp_conversation::{
     ConversationEvent,

@@ -831,7 +831,7 @@ impl Grep {
             Sort::Created => Some(id.timestamp()),
             // A conversation whose metadata can't be read sorts as the epoch
             // rather than dropping out of the ordering.
-            Sort::Activated => Some(metadata().map(|m| m.last_activated_at).unwrap_or_default()),
+            Sort::Activated => Some(metadata().map_or_default(|m| m.last_activated_at)),
             Sort::Updated => metadata().and_then(|m| m.last_event_at),
         }
     }

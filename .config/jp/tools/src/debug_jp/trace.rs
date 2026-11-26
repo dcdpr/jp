@@ -414,10 +414,7 @@ fn run_one(
     // of the system temp dir into the real workspace.
     if !trace_dst.exists() {
         let Some(trace_path) = trace::extract_trace_path(&launch_result.stderr) else {
-            let note = launch_result
-                .note()
-                .map(|n| format!("{n}\n\n"))
-                .unwrap_or_default();
+            let note = launch_result.note().map_or_default(|n| format!("{n}\n\n"));
             return Err(format!(
                 "{note}No trace log was written to {trace_dst}, and jp's stderr contains neither \
                  a `{TRACE_PATH_PREFIX}<path>` line nor a `trace_log` JSON field. jp may have \

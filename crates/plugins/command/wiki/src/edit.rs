@@ -330,10 +330,7 @@ impl Review {
     /// one of the problems, and the reason is what to act on.
     fn explained(&self, pinned: Option<&Pinned>) -> String {
         let mut message = self.problems.join(" ");
-        for (url, why) in pinned
-            .map(|report| report.left.as_slice())
-            .unwrap_or_default()
-        {
+        for (url, why) in pinned.map_or_default(|report| report.left.as_slice()) {
             message.push_str(&format!(" `{url}` couldn't be pinned: {why}."));
         }
 
@@ -428,10 +425,8 @@ fn follow_up(
     let moved = after.parent_id() != before.parent_id();
     let reordered = if archived {
         wiki.order.remove(id)
-    } else if moved {
-        wiki.order.unrank(id)
     } else {
-        false
+        moved && wiki.order.unrank(id)
     };
 
     let order_file = ctx.paths.wiki.join(ORDER_FILE);
@@ -674,20 +669,20 @@ pub(crate) fn in_editor(
     };
 
     loop {
-        if !editing.open(&path).map_err(&restore)? {
+        if !editing.open(&path).map_err(restore)? {
             return Err(restore(format!(
                 "The editor exited with an error; {id} is unchanged."
             )));
         }
 
-        let edited = store::read(&path).map_err(&restore)?;
+        let edited = store::read(&path).map_err(restore)?;
         if edited == before.source {
             return Ok(format!("{}: unchanged\n", ctx.paths.show(&path)).into());
         }
 
         let (after, pinned) =
-            pin_snapshot(ctx, &before, Page::read(id, path.clone(), edited)).map_err(&restore)?;
-        let review = review(ctx, &wiki, &library, &before, &after).map_err(&restore)?;
+            pin_snapshot(ctx, &before, Page::read(id, path.clone(), edited)).map_err(restore)?;
+        let review = review(ctx, &wiki, &library, &before, &after).map_err(restore)?;
         if review.problems.is_empty() {
             return kept(ctx, wiki, &before, &after, pinned, review);
         }

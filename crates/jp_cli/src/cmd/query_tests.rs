@@ -1,7 +1,11 @@
+#![expect(
+    clippy::unused_async_trait_impl,
+    reason = "test doubles implement async traits synchronously"
+)]
+
 use std::{future, sync::Arc};
 
 use assert_matches::assert_matches;
-use async_trait::async_trait;
 use camino_tempfile::Utf8TempDir;
 use chrono::{DateTime, Utc};
 use indexmap::IndexMap;
@@ -27,16 +31,13 @@ use jp_conversation::{
 };
 use jp_inquire::{InlineOption, ReplyEditMode, ReplyOutcome, prompt::MockPromptBackend};
 use jp_llm::{
-    Error as LlmError, EventStream, Provider, model::ModelDetails, provider::mock::MockProvider,
+    DynProvider, Error as LlmError, EventStream, model::ModelDetails, provider::mock::MockProvider,
     query::ChatQuery,
 };
 use jp_mcp::{Startup, StartupSet, id::McpServerId, server::tool_definitions};
 use jp_printer::{OutputFormat, Printer, SharedBuffer};
 use jp_storage::{
-    backend::{
-        ConversationFilter, FsStorageBackend, LoadBackend, NullLockBackend, NullPersistBackend,
-        ReadOnlySessionBackend,
-    },
+    backend::{ConversationFilter, FsStorageBackend, LoadBackend},
     load::projected_conversation_ids,
 };
 use jp_workspace::{
@@ -62,6 +63,7 @@ use crate::{
     cli::flag::{ArgPrompts, Parsed, SettleError},
     cmd::{
         Commands,
+        compact_flag::CompactSpec,
         target::{ConversationTarget, PickerFilter},
     },
     config_pipeline::ConfigPipeline,
@@ -663,7 +665,7 @@ async fn an_interrupt_during_the_model_lookup_stops_the_turn_before_it_runs() {
         .unwrap();
 
     let asked = Arc::new(Notify::new());
-    let provider: Arc<dyn Provider> = Arc::new(UnansweredLookup {
+    let provider: Arc<dyn DynProvider> = Arc::new(UnansweredLookup {
         asked: Arc::clone(&asked),
     });
 
@@ -712,7 +714,7 @@ async fn a_client_abort_during_the_model_lookup_ends_the_turn_as_aborted() {
         .unwrap();
 
     let asked = Arc::new(Notify::new());
-    let provider: Arc<dyn Provider> = Arc::new(UnansweredLookup {
+    let provider: Arc<dyn DynProvider> = Arc::new(UnansweredLookup {
         asked: Arc::clone(&asked),
     });
 
@@ -760,8 +762,7 @@ struct UnansweredLookup {
     asked: Arc<Notify>,
 }
 
-#[async_trait]
-impl Provider for UnansweredLookup {
+impl jp_llm::Provider for UnansweredLookup {
     async fn model_details(&self, _name: &Name) -> LlmResult<ModelDetails> {
         self.asked.notify_one();
         future::pending().await
@@ -795,7 +796,7 @@ fn turn_inputs(
     router: &SignalRouter,
     mcp_servers: StartupSet,
     interrupts: TurnInterrupts,
-    stubbed_provider: Option<Arc<dyn Provider>>,
+    stubbed_provider: Option<Arc<dyn DynProvider>>,
 ) -> TurnInputs {
     TurnInputs {
         config,
@@ -822,7 +823,7 @@ async fn run_mock_turn(
     prompt: &str,
     response: &str,
 ) {
-    let provider: Arc<dyn Provider> = Arc::new(MockProvider::with_message(response));
+    let provider: Arc<dyn DynProvider> = Arc::new(MockProvider::with_message(response));
     let model = provider
         .model_details(&cfg.assistant.model.id.resolved().name)
         .await
@@ -1369,6 +1370,32 @@ fn test_tool_use_forces_a_disabled_tool_for_one_turn() {
     assert!(
         !effective(&partial, "explicitly_disabled_tool").state,
         "the force is invocation-scoped: the tool stays disabled in the config"
+    );
+}
+
+/// `jp q -a` refuses a retired MCP resource URI the same way `jp attachment
+/// add` does, rather than storing one that fails every later query.
+#[test]
+fn query_attachment_flag_refuses_a_retired_mcp_attachment() {
+    let uri = "mcp+github-mcp-server+repo://owner/name";
+    let query = Query {
+        attachments: vec![AttachmentUrlOrPath::Url(Url::parse(uri).unwrap())],
+        ..Default::default()
+    };
+
+    let error =
+        IntoPartialAppConfig::apply_cli_config(&query, None, PartialAppConfig::default(), None)
+            .expect_err("a retired attachment is refused");
+
+    assert_eq!(error.to_string(), format!("Attachment error for {uri}"));
+    assert_eq!(
+        std::error::Error::source(error.as_ref())
+            .map(ToString::to_string)
+            .as_deref(),
+        Some(
+            "MCP resource attachments are retired and can no longer be added: \
+             `mcp+github-mcp-server+repo://owner/name`"
+        )
     );
 }
 
@@ -2524,76 +2551,6 @@ async fn a_conversation_keeps_the_default_plugin_policy_it_was_created_under() {
     );
 }
 
-/// A backend with user-local storage and a conversation directory in it,
-/// holding the draft `jp query` would have composed.
-///
-/// The temp dir comes back so the caller keeps it alive.
-fn draft_fixture() -> (FsStorageBackend, ConversationId, Utf8PathBuf, Utf8TempDir) {
-    let tmp = camino_tempfile::tempdir().unwrap();
-    let fs = FsStorageBackend::new(&tmp.path().join(".jp"))
-        .unwrap()
-        .with_user_storage(&tmp.path().join("user"), None, "abc")
-        .unwrap();
-
-    let id = make_id(1_700_000_000);
-    let dir = fs.build_conversation_dir(&id, None, true);
-    std::fs::create_dir_all(&dir).unwrap();
-
-    let path = dir.join(editor::QUERY_FILENAME);
-    std::fs::write(&path, "the request this turn sent").unwrap();
-
-    (fs, id, path, tmp)
-}
-
-/// A draft replaced while the turn ran belongs to whoever wrote it: a plugin
-/// through `write_draft`, or another `jp` process.
-/// A successful turn removes the request it sent, not text it never saw.
-#[test]
-fn cleanup_keeps_a_draft_written_after_the_request() {
-    let (fs, id, path, _tmp) = draft_fixture();
-    let at_send = draft_fingerprint(Some(&fs), &id);
-
-    std::fs::write(&path, "the follow-up typed during the turn").unwrap();
-
-    cleanup_query_message_file(
-        Some(&fs),
-        &id,
-        DraftRemoval::IfUnchanged(at_send.as_deref()),
-    );
-
-    assert_eq!(
-        std::fs::read_to_string(&path).unwrap(),
-        "the follow-up typed during the turn"
-    );
-}
-
-#[test]
-fn cleanup_removes_the_draft_the_turn_sent() {
-    let (fs, id, path, _tmp) = draft_fixture();
-    let at_send = draft_fingerprint(Some(&fs), &id);
-
-    cleanup_query_message_file(
-        Some(&fs),
-        &id,
-        DraftRemoval::IfUnchanged(at_send.as_deref()),
-    );
-
-    assert!(!path.exists(), "the request that was sent is cleaned up");
-}
-
-/// An emptied editor buffer discards the draft it was seeded from, whatever it
-/// now holds.
-#[test]
-fn cleanup_any_removes_a_replaced_draft() {
-    let (fs, id, path, _tmp) = draft_fixture();
-
-    std::fs::write(&path, "something else entirely").unwrap();
-
-    cleanup_query_message_file(Some(&fs), &id, DraftRemoval::Any);
-
-    assert!(!path.exists());
-}
-
 #[test]
 fn resolve_new_title_uses_leading_heading() {
     assert_eq!(
@@ -3075,21 +3032,21 @@ fn query_words(query: &Query) -> &[String] {
 fn bare_quote_uses_the_blockquote_prefix() {
     let query = parse_query(&["--quote"]).unwrap();
     assert_eq!(query.quote, Some(true));
-    assert!(query_words(&query).is_empty());
+    assert_eq!(query_words(&query), [] as [String; 0]);
 }
 
 #[test]
 fn quote_true_is_the_same_as_a_bare_quote() {
     let query = parse_query(&["--quote=true"]).unwrap();
     assert_eq!(query.quote, Some(true));
-    assert!(query_words(&query).is_empty());
+    assert_eq!(query_words(&query), [] as [String; 0]);
 }
 
 #[test]
 fn quote_false_still_quotes_but_drops_the_prefix() {
     let query = parse_query(&["--quote=false"]).unwrap();
     assert_eq!(query.quote, Some(false));
-    assert!(query_words(&query).is_empty());
+    assert_eq!(query_words(&query), [] as [String; 0]);
 }
 
 #[test]
@@ -3102,11 +3059,11 @@ fn quote_is_absent_when_not_given() {
 fn quote_takes_an_unattached_bool() {
     let query = parse_query(&["--quote", "false"]).unwrap();
     assert_eq!(query.quote, Some(false));
-    assert!(query_words(&query).is_empty());
+    assert_eq!(query_words(&query), [] as [String; 0]);
 
     let query = parse_query(&["--quote", "true"]).unwrap();
     assert_eq!(query.quote, Some(true));
-    assert!(query_words(&query).is_empty());
+    assert_eq!(query_words(&query), [] as [String; 0]);
 }
 
 #[test]
@@ -4094,21 +4051,11 @@ fn stored_conversation_ids(root: &Utf8Path) -> Vec<ConversationId> {
     test_backend(root).load_conversation_ids(ConversationFilter::default())
 }
 
-/// Assert the store holds nothing for the next run's sanitization to repair.
-///
-/// A directory left behind without its managed files is indexed as a
-/// conversation and then trashed as corrupt, which an id assertion alone does
-/// not catch: the id is there either way.
-fn assert_store_needs_no_repair(root: &Utf8Path) {
-    let report = test_backend(root)
-        .sanitize()
-        .expect("sanitization succeeds");
+/// Assert that every conversation directory in the store passes validation.
+fn assert_store_holds_only_conversations(root: &Utf8Path) {
+    let result = test_backend(root).validate_conversations();
 
-    assert!(
-        !report.has_repairs(),
-        "sanitization repaired: {:?}",
-        report.trashed
-    );
+    assert!(result.invalid.is_empty(), "invalid: {:?}", result.invalid);
 }
 
 /// Run `jp query <args>` to completion, without `parse_query`'s `--no-edit`:
@@ -4141,7 +4088,7 @@ fn run_empty_editor_query_stores_no_conversation() {
     assert_eq!(out.lock().as_str(), "Query is empty, ignoring.\n");
     assert_eq!(err.lock().as_str(), "");
     assert_eq!(stored_conversation_ids(tmp.path()), []);
-    assert_store_needs_no_repair(tmp.path());
+    assert_store_holds_only_conversations(tmp.path());
     assert_eq!(ctx.workspace.session_active_conversation(&session), None);
 }
 
@@ -4160,7 +4107,7 @@ fn run_empty_titled_query_stores_no_conversation() {
 
     assert_eq!(out.lock().as_str(), "Query is empty, ignoring.\n");
     assert_eq!(stored_conversation_ids(tmp.path()), []);
-    assert_store_needs_no_repair(tmp.path());
+    assert_store_holds_only_conversations(tmp.path());
 }
 
 // A bare `--fork` keeps every turn, and a value keeps that many trailing turns.
@@ -4227,7 +4174,7 @@ fn run_empty_expiring_query_stores_no_conversation() {
 
     assert_eq!(out.lock().as_str(), "Query is empty, ignoring.\n");
     assert_eq!(stored_conversation_ids(tmp.path()), []);
-    assert_store_needs_no_repair(tmp.path());
+    assert_store_holds_only_conversations(tmp.path());
 }
 
 // A `--fork` query builds the fork before the request is composed, because the
@@ -4252,7 +4199,7 @@ fn run_empty_forking_query_leaves_only_the_source() {
 
     assert_eq!(out.lock().as_str(), "Query is empty, ignoring.\n");
     assert_eq!(stored_conversation_ids(tmp.path()), [source_id]);
-    assert_store_needs_no_repair(tmp.path());
+    assert_store_holds_only_conversations(tmp.path());
 }
 
 // `--compact` is staged against the stream the request is composed against, so
@@ -4292,7 +4239,7 @@ fn run_empty_compacting_query_stores_no_compaction() {
         .unwrap();
     assert_eq!(stored.compactions().count(), 0);
 
-    assert_store_needs_no_repair(tmp.path());
+    assert_store_holds_only_conversations(tmp.path());
 }
 
 // Not only the empty query: any failure before the turn starts leaves the
@@ -4312,7 +4259,7 @@ fn run_failing_before_the_turn_stores_no_conversation() {
     assert_eq!(error.message.as_deref(), Some("Editor error"));
 
     assert_eq!(stored_conversation_ids(tmp.path()), []);
-    assert_store_needs_no_repair(tmp.path());
+    assert_store_holds_only_conversations(tmp.path());
 }
 
 // Under `--no-persist`, a failed inline query does not write a recovery draft
@@ -4328,14 +4275,10 @@ fn run_failing_no_persist_query_leaves_no_conversation_directory() {
     let fs = Arc::new(test_backend(root));
     let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
 
-    // Use the same no-op persistence, lock, and read-only session backends that
-    // `load_workspace` configures for `--no-persist`.
-    let workspace = Workspace::in_memory(root).with_backend(Arc::clone(&fs));
-    let sessions = Arc::new(ReadOnlySessionBackend::new(workspace.sessions().clone()));
-    let workspace = workspace
-        .with_persist(Arc::new(NullPersistBackend))
-        .with_locker(Arc::new(NullLockBackend))
-        .with_sessions(sessions);
+    // The workspace as `load_workspace` opens it for `--no-persist`.
+    let workspace = Workspace::in_memory(root)
+        .with_backend(Arc::clone(&fs))
+        .without_persistence();
 
     let mut config = config_with_model(ProviderId::Test, "mock");
     config.assistant.request.max_retries = 0;
@@ -4345,10 +4288,7 @@ fn run_failing_no_persist_query_leaves_no_conversation_directory() {
         workspace,
         Some(fs),
         Runtime::new().unwrap(),
-        Globals {
-            persist: false,
-            ..Globals::default()
-        },
+        Globals::default(),
         config,
         Some(session),
         printer,
@@ -4361,18 +4301,16 @@ fn run_failing_no_persist_query_leaves_no_conversation_directory() {
         .user_storage_path()
         .unwrap()
         .join("conversations");
-    let dirs: Vec<String> = std::fs::read_dir(&user_conversations)
-        .map(|entries| {
-            entries
-                .map(|entry| entry.unwrap())
-                .filter(|entry| entry.path().is_dir())
-                .map(|entry| entry.file_name().to_string_lossy().into_owned())
-                .collect()
-        })
-        .unwrap_or_default();
+    let dirs: Vec<String> = std::fs::read_dir(&user_conversations).map_or_default(|entries| {
+        entries
+            .map(|entry| entry.unwrap())
+            .filter(|entry| entry.path().is_dir())
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect()
+    });
     assert_eq!(dirs, Vec::<String>::new());
 
-    assert_store_needs_no_repair(root);
+    assert_store_holds_only_conversations(root);
 }
 
 // A run that renames the conversation composes its draft in the directory the
@@ -4433,6 +4371,135 @@ fn run_renaming_query_keeps_the_composed_draft() {
     let storage = FsStorageBackend::new(&tmp.path().join(".jp")).unwrap();
     let metadata = storage.load_conversation_metadata(&id).unwrap();
     assert_eq!(metadata.title.as_deref(), Some("New"));
+}
+
+#[test]
+fn run_new_query_stores_the_conversation_before_the_draft() {
+    let session = Session {
+        id: SessionId::new("jp-cli-draft-order-test").unwrap(),
+        source: SessionSource::env("JP_SESSION"),
+    };
+    let (mut ctx, _out, _err, tmp) = editor_ctx(
+        &session,
+        r#"sh -c 'LC_ALL=C ls "$(dirname "$1")" > "$1"' jp-editor"#,
+    );
+
+    let error = run_query(&mut ctx, &["--new"]).unwrap_err();
+    assert_eq!(error.message.as_deref(), Some("Stream error"));
+
+    let [id] = <[ConversationId; 1]>::try_from(stored_conversation_ids(tmp.path())).unwrap();
+    let dir = test_backend(tmp.path())
+        .find_user_local_conversation_dir(&id)
+        .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(dir.join(editor::QUERY_FILENAME)).unwrap(),
+        "QUERY_MESSAGE.md\nbase_config.json\nevents.json\nmetadata.json\n"
+    );
+    assert_store_holds_only_conversations(tmp.path());
+}
+
+#[test]
+fn run_no_persist_editor_query_writes_no_draft() {
+    let session = Session {
+        id: SessionId::new("jp-cli-no-persist-editor-test").unwrap(),
+        source: SessionSource::env("JP_SESSION"),
+    };
+    let (ctx, _out, _err, tmp) = editor_ctx(
+        &session,
+        r#"sh -c 'printf "typed request\n" > "$1"' jp-editor"#,
+    );
+    let mut ctx = no_persist(ctx);
+
+    let error = run_query(&mut ctx, &["--new"]).unwrap_err();
+    assert_eq!(error.message.as_deref(), Some("Stream error"));
+
+    let backend = test_backend(tmp.path());
+    let user = backend.user_storage_path().unwrap();
+    assert!(!user.join("conversations").exists());
+    assert_eq!(stored_conversation_ids(tmp.path()), []);
+}
+
+fn conversation_with_saved_draft(ctx: &mut Ctx, draft: &str) -> (ConversationId, Utf8PathBuf) {
+    let id = make_id(1_700_000_000);
+    ctx.workspace.create_conversation_with_id(
+        id,
+        Conversation::default().with_last_activated_at(ctx.now()),
+        ctx.config(),
+    );
+    let handle = ctx.workspace.acquire_conversation(&id).unwrap();
+    let lock = ctx.workspace.test_lock(handle);
+    lock.as_mut()
+        .update_events(|events| events.start_turn(ChatRequest::from("seeded question")));
+    drop(lock);
+
+    let path = ctx
+        .fs_backend
+        .as_deref()
+        .unwrap()
+        .find_user_local_conversation_dir(&id)
+        .expect("the stored conversation has a user-local directory")
+        .join(editor::QUERY_FILENAME);
+    std::fs::write(&path, draft).unwrap();
+
+    (id, path)
+}
+
+#[test]
+fn run_no_persist_empty_editor_query_keeps_the_saved_draft() {
+    let session = Session {
+        id: SessionId::new("jp-cli-no-persist-empty-draft-test").unwrap(),
+        source: SessionSource::env("JP_SESSION"),
+    };
+    let (mut ctx, out, _err, _tmp) = editor_ctx(&session, r#"sh -c ': > "$1"' jp-editor"#);
+    let (id, draft) = conversation_with_saved_draft(&mut ctx, "saved request\n");
+    let mut ctx = no_persist(ctx);
+
+    let source = ctx.workspace.acquire_conversation(&id).unwrap();
+    let query = query_from(&["--edit"]).unwrap();
+    Runtime::new()
+        .unwrap()
+        .block_on(query.run(&mut ctx, Some(source), false))
+        .unwrap();
+    ctx.printer.flush();
+
+    assert_eq!(out.lock().as_str(), "Query is empty, ignoring.\n");
+    assert_eq!(std::fs::read_to_string(&draft).unwrap(), "saved request\n");
+}
+
+#[test]
+fn run_no_persist_editor_query_starts_from_the_saved_draft() {
+    let session = Session {
+        id: SessionId::new("jp-cli-no-persist-seeded-draft-test").unwrap(),
+        source: SessionSource::env("JP_SESSION"),
+    };
+    let seen_dir = camino_tempfile::tempdir().unwrap();
+    let seen = seen_dir.path().join("seen");
+    // Shell-quote the path so `shlex::split` preserves backslashes on Windows.
+    let seen_arg = shlex::try_quote(seen.as_str()).unwrap();
+    let (mut ctx, _out, _err, _tmp) =
+        editor_ctx(&session, &format!(r#"sh -c 'cp "$1" "$0"' {seen_arg}"#));
+    let (id, draft) = conversation_with_saved_draft(&mut ctx, "saved request\n");
+    let mut ctx = no_persist(ctx);
+
+    let source = ctx.workspace.acquire_conversation(&id).unwrap();
+    let query = query_from(&["--edit"]).unwrap();
+    let error = Runtime::new()
+        .unwrap()
+        .block_on(query.run(&mut ctx, Some(source), false))
+        .unwrap_err();
+    assert_eq!(error.message.as_deref(), Some("Stream error"));
+
+    // The draft file also holds config-dependent sections after the request,
+    // so only its start is checked.
+    let shown = std::fs::read_to_string(&seen).unwrap();
+    assert!(shown.starts_with("saved request\n"), "{shown}");
+    assert_eq!(std::fs::read_to_string(&draft).unwrap(), "saved request\n");
+}
+
+fn no_persist(mut ctx: Ctx) -> Ctx {
+    let workspace = std::mem::replace(&mut ctx.workspace, Workspace::in_memory("/unused"));
+    ctx.workspace = workspace.without_persistence();
+    ctx
 }
 
 // The other side of the deferral for `--tmp`: a query that does go ahead stores
@@ -5083,7 +5150,7 @@ fn a_word_after_compact_that_is_no_spec_starts_the_query() {
     let query = parse_query(&["-k", "what", "did", "we", "decide"]).unwrap();
 
     assert!(query.compact.use_config_rules);
-    assert!(query.compact.specs.is_empty());
+    assert_eq!(query.compact.specs, [] as [CompactSpec; 0]);
     assert_eq!(query.query, words(&["what", "did", "we", "decide"]));
 }
 

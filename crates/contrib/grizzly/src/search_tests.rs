@@ -204,7 +204,7 @@ fn search_includes_archived_but_suppresses_content() {
     assert_eq!(m.title, "Archived Note");
     assert_eq!(m.total_hits, 2);
     // But none of its content is rendered.
-    assert!(m.line_hits.is_empty());
+    assert_eq!(m.line_hits, [] as [usize; 0]);
     assert!(m.snippet.is_none());
 }
 
@@ -599,7 +599,7 @@ fn title_only_match_previews_first_content_line() {
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].note_id, "note-3");
     assert_eq!(results[0].total_hits, 0);
-    assert!(results[0].line_hits.is_empty());
+    assert_eq!(results[0].line_hits, [] as [usize; 0]);
     let snippet = results[0]
         .snippet
         .as_ref()
@@ -629,7 +629,7 @@ fn extract_returns_no_snippet_for_empty_content() {
     let (line_hits, total_hits, snippet) =
         extract_hits_and_snippet("", &["anything".into()], 20, 200);
 
-    assert!(line_hits.is_empty());
+    assert_eq!(line_hits, [] as [usize; 0]);
     assert_eq!(total_hits, 0);
     assert!(snippet.is_none());
 }

@@ -109,8 +109,7 @@ pub async fn download(config: Config) -> Result<PathBuf, Error> {
     let etag = head
         .headers()
         .get(ETAG)
-        .map(|h| h.to_str().unwrap_or_default())
-        .unwrap_or_default()
+        .map_or_default(|h| h.to_str().unwrap_or_default())
         .replace('"', "");
 
     let destination = config
@@ -253,7 +252,7 @@ async fn rewrite_urls(root: &Path, client: &reqwest::Client) -> Result<(), Error
                     .is_some_and(|ext| ext == "js" || ext == "css" || ext == "svg" || ext == "png")
             {
                 let response = client
-                    .get(format!("{}/{}", DOCS_RS, &path))
+                    .get(format!("{DOCS_RS}/{path}"))
                     .send()
                     .await?
                     .error_for_status()?;
@@ -277,10 +276,7 @@ async fn rewrite_urls(root: &Path, client: &reqwest::Client) -> Result<(), Error
                 let path_til_root =
                     (0..i.saturating_sub(1)).fold(String::new(), |acc, _| format!("../{acc}"));
 
-                data = data.replace(
-                    &format!(r#""/{}""#, &path),
-                    &format!("{path_til_root}/{path}"),
-                );
+                data = data.replace(&format!(r#""/{path}""#), &format!("{path_til_root}/{path}"));
             }
         }
 

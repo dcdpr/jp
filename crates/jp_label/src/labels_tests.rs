@@ -5,8 +5,7 @@ use crate::Selector;
 fn values<'a>(labels: &'a Labels, key: &str) -> Vec<&'a str> {
     labels
         .get(key)
-        .map(|values| values.iter().map(String::as_str).collect())
-        .unwrap_or_default()
+        .map_or_default(|values| values.iter().map(String::as_str).collect())
 }
 
 // Token rendering, token reading, and selector matching: the surface tickets

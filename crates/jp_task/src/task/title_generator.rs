@@ -1,6 +1,5 @@
-use std::error::Error;
+use std::{error::Error, future};
 
-use async_trait::async_trait;
 use jp_config::{AppConfig, model::ModelConfig, providers::llm::LlmProviderConfig};
 use jp_conversation::{ConversationId, ConversationStream};
 use jp_llm::{
@@ -12,7 +11,7 @@ use jp_workspace::Workspace;
 use tokio_util::sync::CancellationToken;
 use tracing::{trace, warn};
 
-use crate::Task;
+use crate::{DynTask, Task};
 
 #[derive(Debug)]
 pub struct TitleGeneratorTask {
@@ -102,7 +101,6 @@ impl TitleGeneratorTask {
     }
 }
 
-#[async_trait]
 impl Task for TitleGeneratorTask {
     fn name(&self) -> &'static str {
         "title_generator"
@@ -111,7 +109,7 @@ impl Task for TitleGeneratorTask {
     async fn run(
         mut self: Box<Self>,
         token: CancellationToken,
-    ) -> Result<Box<dyn Task>, Box<dyn Error + Send + Sync>> {
+    ) -> Result<Box<dyn DynTask>, Box<dyn Error + Send + Sync>> {
         let id = self.conversation_id;
         jp_macro::select!(
             token.cancelled(),
@@ -133,10 +131,20 @@ impl Task for TitleGeneratorTask {
         Ok(self)
     }
 
-    async fn sync(
+    fn sync(
         self: Box<Self>,
         ctx: &mut Workspace,
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+    ) -> impl Future<Output = Result<(), Box<dyn Error + Send + Sync>>> + Send {
+        future::ready(self.store_title(ctx))
+    }
+}
+
+impl TitleGeneratorTask {
+    /// Write the generated title to the conversation, and to the terminal title
+    /// when the invocation ran on a terminal.
+    ///
+    /// Skips the conversation when another process holds its lock.
+    fn store_title(&self, ctx: &mut Workspace) -> Result<(), Box<dyn Error + Send + Sync>> {
         if let Ok(handle) = ctx.acquire_conversation(&self.conversation_id) {
             // Lock the conversation before writing the title. The query's
             // lock has been released by the time task sync runs.

@@ -1,9 +1,13 @@
+#![expect(
+    clippy::unused_async_trait_impl,
+    reason = "test doubles implement async traits synchronously"
+)]
+
 use std::{
     io,
     time::{Duration, Instant},
 };
 
-use async_trait::async_trait;
 use camino::Utf8PathBuf;
 use camino_tempfile::Utf8TempDir;
 use jp_config::{
@@ -31,8 +35,11 @@ use crate::{
     access::approvals::ApprovalStore,
     cmd::query::{
         tool::{
-            executor::mock::{MockExecutor, ScriptedFanOut, TestExecutorSource},
-            inquiry::MockInquiryBackend,
+            executor::{
+                Executor,
+                mock::{MockExecutor, ScriptedFanOut, TestExecutorSource},
+            },
+            inquiry::{InquiryBackend, MockInquiryBackend},
             mcp_executor::TerminalExecutorSource,
         },
         turn::TurnCoordinator,
@@ -451,7 +458,7 @@ async fn drive(
     coordinator: &mut ToolCoordinator,
     requests: Vec<ToolCallRequest>,
     prompts: Arc<dyn PromptBackend>,
-    inquiries: Arc<dyn InquiryBackend>,
+    inquiries: Arc<dyn DynInquiryBackend>,
     turn_state: &mut TurnState,
     conv: &mut ConversationMut,
     printer: &Arc<Printer>,
@@ -507,7 +514,6 @@ struct EditableExecutor {
     permission_info: PermissionInfo,
 }
 
-#[async_trait]
 impl Executor for EditableExecutor {
     fn tool_id(&self) -> &str {
         &self.tool_id
@@ -534,7 +540,7 @@ impl Executor for EditableExecutor {
     ) -> ExecutorResult {
         ExecutorResult::Completed(ToolCallResponse {
             id: self.tool_id.clone(),
-            result: Ok(format!("deleted {}", self.arguments()["path"])),
+            result: Ok(format!("deleted {}", Executor::arguments(self)["path"])),
         })
     }
 }
@@ -651,7 +657,7 @@ fn fanned_out_source(
                             run_mode: RunMode::Ask,
                             arguments: Value::Object(Map::new()),
                         }),
-                ) as Box<dyn Executor>
+                ) as Box<dyn DynExecutor>
             })
             .collect();
         CallExecutors {
@@ -757,7 +763,6 @@ struct Disconnected {
     after: Option<Arc<Notify>>,
 }
 
-#[async_trait]
 impl Executor for Disconnected {
     fn tool_id(&self) -> &str {
         &self.tool_id
@@ -1194,7 +1199,7 @@ async fn a_fanned_out_calls_description_holds_each_operation_once_in_order() {
                     MockExecutor::completed(&request.id, &request.name, "ran")
                         .for_operation(op)
                         .with_formatted(description),
-                ) as Box<dyn Executor>
+                ) as Box<dyn DynExecutor>
             })
             .collect(),
         fan_out: Some(Arc::new(ScriptedFanOut(ToolCallResponse {
@@ -1843,7 +1848,6 @@ impl AskingFormatter {
     }
 }
 
-#[async_trait]
 impl Executor for AskingFormatter {
     fn formatted_arguments(&self) -> Option<String> {
         let answer = self.answer.lock().unwrap();
@@ -1906,7 +1910,6 @@ struct SilentAssistant {
     asked: std::sync::Mutex<Vec<CancellationToken>>,
 }
 
-#[async_trait]
 impl InquiryBackend for SilentAssistant {
     async fn inquire(
         &self,
@@ -2000,7 +2003,7 @@ async fn a_remembered_no_while_a_later_call_asks(
     let (answer, answers) = std::sync::mpsc::channel();
     let prompts: Arc<dyn PromptBackend> = Arc::new(HeldPromptBackend::new(answers));
     let assistant = Arc::new(SilentAssistant::default());
-    let inquiry_backend: Arc<dyn InquiryBackend> = assistant.clone();
+    let inquiry_backend: Arc<dyn DynInquiryBackend> = assistant.clone();
     let (printer, _stdout, stderr) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
     let style = jp_config::AppConfig::new_test().style;

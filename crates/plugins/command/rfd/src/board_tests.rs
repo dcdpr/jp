@@ -2,7 +2,7 @@ use camino_tempfile::Utf8TempDir;
 use serde_json::{Value, json};
 
 use super::*;
-use crate::{priority::PRIORITY_FILE, tests::jp_root};
+use crate::{links::LinkedTicket, priority::PRIORITY_FILE, tests::jp_root};
 
 /// An RFD document carrying `fields` in its metadata block.
 fn rfd(heading: &str, fields: &[(&str, &str)]) -> String {
@@ -342,7 +342,7 @@ fn load_without_tickets_reads_none() {
     let Loaded { board, warnings } = load(root.path(), &dir, None).unwrap();
 
     assert!(warnings.is_empty(), "{warnings:?}");
-    assert!(entry(&board, "042").tickets.is_empty());
+    assert_eq!(entry(&board, "042").tickets, [] as [LinkedTicket; 0]);
 }
 
 /// A new project has no drafts, no board file, and maybe no tickets yet, and

@@ -1,0 +1,406 @@
+/*
+ * The review UI's stylesheet, as Tailwind CSS reads it: `just build-ui`
+ * compiles it into the bundle's `style.css`, adding the utility classes the
+ * views in `src/` name.
+ *
+ * The views carry their own classes. What is here is what a class on an
+ * element can't say: the colors, which follow the system's light or dark
+ * scheme; the rendered Markdown of a file or a comment, whose elements the
+ * server wrote; and the highlights drawn over a file's text.
+ *
+ * The colors, the fonts, and the measures of a file's text are those of the
+ * documentation site, VitePress's default theme with the project's brand
+ * color, so a file reads here as its page does there.
+ */
+
+@import "tailwindcss" source(none);
+@source "./src";
+
+@theme {
+  /* The site's stacks. Inter is used where the reader has it installed. */
+  --font-sans:
+    "Inter", -apple-system, BlinkMacSystemFont, sans-serif, "Apple Color Emoji", "Segoe UI Emoji",
+    "Segoe UI Symbol", "Noto Color Emoji";
+  --font-mono:
+    ui-monospace, "Menlo", "Monaco", "Consolas", "Liberation Mono", "Courier New", monospace;
+
+  /* From this width, a file's outline shows beside it. */
+  --breakpoint-toc: 72rem;
+
+  /* The page, and what sits on it. */
+  --color-canvas: var(--jp-canvas);
+  --color-surface: var(--jp-surface);
+  --color-raised: var(--jp-raised);
+  --color-line: var(--jp-line);
+
+  /* Text. */
+  --color-ink: var(--jp-ink);
+  --color-muted: var(--jp-muted);
+
+  /* What can be pressed, and what it says once pressed. */
+  --color-accent: var(--jp-accent);
+  --color-on-accent: var(--jp-on-accent);
+  --color-danger: var(--jp-danger);
+  --color-warn: var(--jp-warn);
+
+  /* A draft comment, and the two sides of a diff. */
+  --color-draft: var(--jp-draft);
+  --color-added: var(--jp-added);
+  --color-removed: var(--jp-removed);
+}
+
+:root {
+  color-scheme: light dark;
+
+  --jp-canvas: #ffffff;
+  --jp-surface: #f6f6f7;
+  --jp-raised: rgba(142, 150, 170, 0.14);
+  --jp-code: #f6f6f7;
+  --jp-line: #e2e2e3;
+  --jp-ink: #3c3c43;
+  --jp-muted: #67676c;
+  --jp-accent: #646cff;
+  --jp-on-accent: #ffffff;
+  --jp-danger: #b8272c;
+  --jp-warn: rgba(234, 179, 8, 0.14);
+  --jp-draft: #915930;
+  --jp-added: #18794e;
+  --jp-removed: #b8272c;
+
+  --jp-mark-draft: rgba(255, 196, 0, 0.35);
+  --jp-mark-open: rgba(100, 108, 255, 0.18);
+  --jp-mark-resolved: rgba(110, 110, 115, 0.18);
+  --jp-mark-approved: rgba(24, 121, 78, 0.16);
+  --jp-mark-changed: rgba(48, 170, 80, 0.28);
+  --jp-mark-pending: rgba(175, 82, 222, 0.28);
+  --jp-mark-focus: rgba(100, 108, 255, 0.42);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --jp-canvas: #1b1b1f;
+    --jp-surface: #202127;
+    --jp-raised: rgba(101, 117, 133, 0.16);
+    --jp-code: #161618;
+    --jp-line: #2e2e32;
+    --jp-ink: #dfdfd6;
+    --jp-muted: #98989f;
+    --jp-accent: #646cff;
+    --jp-on-accent: #ffffff;
+    --jp-danger: #f66f81;
+    --jp-warn: rgba(234, 179, 8, 0.16);
+    --jp-draft: #f9b44e;
+    --jp-added: #3dd68c;
+    --jp-removed: #f66f81;
+
+    --jp-mark-draft: rgba(255, 196, 0, 0.3);
+    --jp-mark-open: rgba(100, 108, 255, 0.3);
+    --jp-mark-resolved: rgba(161, 161, 166, 0.2);
+    --jp-mark-approved: rgba(61, 214, 140, 0.18);
+    --jp-mark-changed: rgba(76, 200, 110, 0.28);
+    --jp-mark-pending: rgba(191, 90, 242, 0.32);
+    --jp-mark-focus: rgba(100, 108, 255, 0.55);
+  }
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-canvas font-sans text-ink;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
+      env(safe-area-inset-left);
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+  }
+}
+
+@layer components {
+  /*
+   * Rendered Markdown: `.jp-text` is one block of a file, and `.jp-body` a
+   * comment or a reply. Each block of a file is an element of its own, and the
+   * margins of neighbouring blocks collapse through them.
+   */
+  .jp-text,
+  .jp-body {
+    overflow-wrap: anywhere;
+  }
+
+  .jp-text {
+    font-size: 16px;
+    line-height: 28px;
+  }
+
+  /*
+   * What a file's text and a comment's share. What sits in a file's text
+   * without being part of it, as a comment under its passage does
+   * (`.jp-plain`), is styled by its own classes, and nothing in it is matched
+   * here.
+   */
+  :is(.jp-text, .jp-body) :not(:where(.jp-plain *)) {
+    &:where(h1, h2, h3, h4, h5, h6) {
+      font-weight: 600;
+    }
+
+    &:where(ul) {
+      list-style: disc;
+      padding-left: 1.25rem;
+    }
+
+    &:where(ol) {
+      list-style: decimal;
+      padding-left: 1.25rem;
+    }
+
+    &:where(a) {
+      color: var(--jp-accent);
+      font-weight: 500;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+
+    &:where(strong) {
+      font-weight: 600;
+    }
+
+    &:where(code) {
+      @apply font-mono;
+      font-size: 0.875em;
+      padding: 3px 6px;
+      border-radius: 4px;
+      color: var(--jp-accent);
+      background: var(--jp-raised);
+    }
+
+    &:where(pre) {
+      @apply font-mono;
+      overflow-x: auto;
+      padding: 20px 24px;
+      border-radius: 8px;
+      color: var(--jp-muted);
+      background: var(--jp-code);
+      font-size: 0.875em;
+      line-height: 1.7;
+    }
+
+    &:where(blockquote) {
+      padding-left: 16px;
+      border-left: 2px solid var(--jp-line);
+      color: var(--jp-muted);
+    }
+
+    &:where(table) {
+      display: block;
+      overflow-x: auto;
+      border-collapse: collapse;
+    }
+
+    &:where(tr) {
+      border-top: 1px solid var(--jp-line);
+    }
+
+    &:where(tr:nth-child(2n)) {
+      background: var(--jp-surface);
+    }
+
+    &:where(th, td) {
+      padding: 8px 16px;
+      border: 1px solid var(--jp-line);
+      font-size: 14px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    &:where(th) {
+      color: var(--jp-muted);
+      background: var(--jp-surface);
+      font-weight: 600;
+    }
+
+    &:where(hr) {
+      border: 0;
+      border-top: 1px solid var(--jp-line);
+    }
+
+    &:where(img) {
+      max-width: 100%;
+    }
+
+    &:where(.markdown-alert) {
+      padding: 16px 16px 8px;
+      border-radius: 8px;
+      color: var(--jp-muted);
+      background: var(--jp-raised);
+      font-size: 14px;
+      line-height: 24px;
+    }
+
+    &:where(.markdown-alert-title) {
+      margin: 0;
+      font-weight: 600;
+    }
+  }
+
+  /* A file's text, with the measures the documentation site gives a page. */
+  .jp-text :not(:where(.jp-plain *)) {
+    &:where(h1, h2, h3, h4, h5, h6) {
+      /* Where a link to the heading scrolls it to: clear of the top bar. */
+      scroll-margin-top: 4rem;
+    }
+
+    &:where(h1) {
+      font-size: 28px;
+      line-height: 40px;
+      letter-spacing: -0.02em;
+    }
+
+    &:where(h2) {
+      margin: 48px 0 16px;
+      padding-top: 24px;
+      border-top: 1px solid var(--jp-line);
+      font-size: 24px;
+      line-height: 32px;
+      letter-spacing: -0.02em;
+    }
+
+    &:where(h3) {
+      margin: 32px 0 0;
+      font-size: 20px;
+      line-height: 28px;
+      letter-spacing: -0.01em;
+    }
+
+    &:where(h4, h5, h6) {
+      margin: 24px 0 0;
+      font-size: 18px;
+      line-height: 24px;
+      letter-spacing: -0.01em;
+    }
+
+    &:where(p, ul, ol, blockquote, pre, hr, .markdown-alert) {
+      margin: 16px 0;
+    }
+
+    &:where(table) {
+      margin: 20px 0;
+    }
+
+    &:where(li + li) {
+      margin-top: 8px;
+    }
+  }
+
+  @media (min-width: 48rem) {
+    .jp-text :where(h1):not(:where(.jp-plain *)) {
+      font-size: 32px;
+    }
+  }
+
+  /* A comment, which is set smaller and closer. */
+  .jp-body :not(:where(.jp-plain *)) {
+    &:where(h1, h2, h3, h4, h5, h6) {
+      margin: 12px 0 4px;
+      font-size: 1.05em;
+    }
+
+    &:where(p, ul, ol, blockquote, pre, table, hr, .markdown-alert) {
+      margin: 8px 0;
+    }
+
+    &:where(pre) {
+      padding: 10px 12px;
+    }
+
+    &:where(li + li) {
+      margin-top: 4px;
+    }
+  }
+
+  /* These name an element outright, to win over the rules above. */
+  :is(.jp-text, .jp-body) li > :where(ul, ol):not(:where(.jp-plain *)) {
+    margin: 8px 0 0;
+  }
+
+  :is(.jp-text, .jp-body) blockquote > :where(p):not(:where(.jp-plain *)) {
+    margin: 0;
+  }
+
+  :is(.jp-text, .jp-body) pre :where(code):not(:where(.jp-plain *)) {
+    padding: 0;
+    color: inherit;
+    background: none;
+    font-size: 1em;
+  }
+
+  :is(.jp-text, .jp-body) :is(h1, h2, h3, h4) > :where(code):not(:where(.jp-plain *)) {
+    font-size: 0.9em;
+  }
+
+  .jp-body > :first-child {
+    margin-top: 0;
+  }
+
+  .jp-body > :last-child {
+    margin-bottom: 0;
+  }
+
+  /* A line of a file rendered as plain text, which keeps its spacing. */
+  .jp-line {
+    @apply font-mono;
+    min-height: 1.7em;
+    font-size: 14px;
+    line-height: 1.7;
+    white-space: pre-wrap;
+  }
+
+  /* Where lines were removed, in a changes view. */
+  .jp-removed-before::before,
+  .jp-removed-after::after {
+    content: "";
+    display: inline-block;
+    width: 0;
+    height: 1.1em;
+    margin: 0 0.15em;
+    border-left: 3px solid var(--jp-removed);
+    vertical-align: text-bottom;
+  }
+
+  /* Set for one frame on a block whose highlights changed. Safari doesn't
+     redraw text a highlight stopped covering; moving the block onto a layer
+     of its own and back redraws all of it. */
+  .jp-repaint {
+    transform: translateZ(0);
+  }
+}
+
+/* Highlights, drawn without changing the file's DOM. */
+
+::highlight(jp-draft) {
+  background-color: var(--jp-mark-draft);
+}
+
+::highlight(jp-open) {
+  background-color: var(--jp-mark-open);
+}
+
+::highlight(jp-resolved) {
+  background-color: var(--jp-mark-resolved);
+}
+
+::highlight(jp-approved) {
+  background-color: var(--jp-mark-approved);
+}
+
+::highlight(jp-changed) {
+  background-color: var(--jp-mark-changed);
+}
+
+::highlight(jp-pending) {
+  background-color: var(--jp-mark-pending);
+}
+
+::highlight(jp-focus) {
+  background-color: var(--jp-mark-focus);
+}

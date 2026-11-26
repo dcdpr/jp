@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::Duration};
+use std::{collections::BTreeSet, sync::Arc, time::Duration};
 
 use camino_tempfile::{Utf8TempDir, tempdir};
 use chrono::{DateTime, Utc};
@@ -15,6 +15,7 @@ use jp_conversation::{
     ByteSize, Compaction, Conversation, ConversationId, ConversationStream, PolicySpec,
     ReasoningPolicy, SummaryPolicy, SummarySource, ToolCallPolicy,
     event::{ChatResponse, ToolCallRequest, ToolCallResponse},
+    position::{Position, PositionSpec},
 };
 use jp_llm::event::NoticeSink;
 use jp_printer::{OutputFormat, Printer, SharedBuffer};
@@ -25,13 +26,16 @@ use tokio::runtime::Runtime;
 
 use super::{
     Compact, IntoPartialAppConfig as _, TimelineSegment, TurnSelection, build_compaction_events,
-    existing_segments, plan_rule_ranges, resolve_reset_index, segments_for_compactions,
+    existing_segments, plan_rule_ranges, reset_lines, resolve_reset, segments_for_compactions,
     timeline_lines,
 };
 use crate::{
-    Globals,
+    Cli, Globals,
     cli::parse_args,
-    cmd::{conversation_id::ConversationIds as _, target::ConversationTarget},
+    cmd::{
+        self, compact_flag::CompactSpec, conversation, conversation_id::ConversationIds as _,
+        target::ConversationTarget,
+    },
     ctx::Ctx,
 };
 
@@ -68,7 +72,7 @@ fn bare_compact_flag_parses_without_a_value() {
     // Bare `--compact` (no value) means "apply config rules".
     let compact = parse_compact(&["--compact"]);
     assert!(compact.compact_flag.use_config_rules);
-    assert!(compact.compact_flag.specs.is_empty());
+    assert_eq!(compact.compact_flag.specs, [] as [CompactSpec; 0]);
 }
 
 #[test]
@@ -333,34 +337,287 @@ fn reset_conflicts_with_selection_flags() {
     assert!(parse_args::<Compact>(&["--reset", "--dry-run"]).is_ok());
 }
 
+/// The `--reset` value naming the single compaction `n`.
+fn compaction(n: usize) -> PositionSpec {
+    PositionSpec::Single(Position::Absolute(n))
+}
+
+/// The `--reset` value naming compactions `from` through `to`.
+fn compactions(from: usize, to: usize) -> PositionSpec {
+    PositionSpec::Range(Some(Position::Absolute(from)), Some(Position::Absolute(to)))
+}
+
+/// The message clap renders for `args` it rejects.
+fn rejection_message(args: &[&str]) -> String {
+    parse_args::<Compact>(args)
+        .unwrap_err()
+        .render()
+        .to_string()
+}
+
 #[test]
-fn reset_takes_an_optional_compaction_index() {
-    assert_eq!(parse_compact(&["--reset"]).reset, Some(None));
-    assert_eq!(parse_compact(&["--reset=2"]).reset, Some(Some(2)));
+fn reset_takes_an_optional_list_of_compaction_numbers() {
     assert_eq!(parse_compact(&[]).reset, None);
 
-    // The index requires `=`, so a bare `--reset` followed by a conversation
-    // target still targets the conversation instead of swallowing it as the
-    // index.
+    // Written bare, it names every compaction event.
+    assert_eq!(
+        parse_compact(&["--reset"]).reset,
+        Some(vec![PositionSpec::ALL])
+    );
+
+    assert_eq!(
+        parse_compact(&["--reset=2"]).reset,
+        Some(vec![compaction(2)])
+    );
+    assert_eq!(
+        parse_compact(&["--reset=1,2"]).reset,
+        Some(vec![compaction(1), compaction(2)])
+    );
+    assert_eq!(
+        parse_compact(&["--reset=1..5"]).reset,
+        Some(vec![compactions(1, 5)])
+    );
+    assert_eq!(
+        parse_compact(&["--reset=1,3..5"]).reset,
+        Some(vec![compaction(1), compactions(3, 5)])
+    );
+}
+
+#[test]
+fn reset_reads_a_value_written_as_its_own_word() {
+    assert_eq!(
+        parse_compact(&["--reset", "1,3..5"]).reset,
+        Some(vec![compaction(1), compactions(3, 5)])
+    );
+
+    // `..` is every compaction event, the same as the bare flag.
+    assert_eq!(
+        parse_compact(&["--reset", ".."]).reset,
+        Some(vec![PositionSpec::ALL])
+    );
+
+    // A conversation target after the value is still the target.
+    let compact = parse_compact(&["--reset", "2", "recent"]);
+    assert_eq!(compact.reset, Some(vec![compaction(2)]));
+    assert_eq!(compact.target.ids(), [ConversationTarget::Recent]);
+}
+
+#[test]
+fn reset_counts_a_negative_number_from_the_end() {
+    assert_eq!(
+        parse_compact(&["--reset", "-1"]).reset,
+        Some(vec![PositionSpec::LAST])
+    );
+    assert_eq!(
+        parse_compact(&["--reset=-3..-1"]).reset,
+        Some(vec![PositionSpec::Range(
+            Some(Position::FromEnd(3)),
+            Some(Position::FromEnd(1))
+        )])
+    );
+}
+
+/// Ranges and lists starting with a negative offset (`-3..-1`, `-3,-1`) are not
+/// single numbers, so clap does not accept them via `allow_negative_numbers`
+/// alone; `attach_from_end_values` attaches them to `--reset`.
+#[test]
+fn reset_reads_a_value_starting_from_the_end_as_its_own_word() {
+    let from_end =
+        |from, to| PositionSpec::Range(Some(Position::FromEnd(from)), Some(Position::FromEnd(to)));
+
+    assert_eq!(
+        parse_compact(&["--reset", "-3..-1"]).reset,
+        Some(vec![from_end(3, 1)])
+    );
+    assert_eq!(
+        parse_compact(&["--reset", "-3,-1"]).reset,
+        Some(vec![
+            PositionSpec::Single(Position::FromEnd(3)),
+            PositionSpec::LAST
+        ])
+    );
+
+    // A conversation target after the value is still the target.
+    let compact = parse_cli_compact(&["--reset", "-3..-1", "recent"]);
+    assert_eq!(compact.reset, Some(vec![from_end(3, 1)]));
+    assert_eq!(compact.target.ids(), [ConversationTarget::Recent]);
+}
+
+// A flag after a bare `--reset` is a flag: `--reset --dry-run` previews removing
+// every compaction event, and removes none.
+#[test]
+fn reset_does_not_take_a_following_flag_as_its_value() {
+    let compact = parse_compact(&["--reset", "--dry-run"]);
+
+    assert_eq!(compact.reset, Some(vec![PositionSpec::ALL]));
+    assert!(compact.dry_run);
+    assert_eq!(compact.target.ids(), []);
+}
+
+// A word that is not a compaction list is treated as a conversation target,
+// leaving `--reset` bare.
+#[test]
+fn reset_gives_a_word_that_is_no_compaction_list_to_the_targets() {
     let compact = parse_compact(&["--reset", "recent"]);
-    assert_eq!(compact.reset, Some(None));
+    assert_eq!(compact.reset, Some(vec![PositionSpec::ALL]));
     assert_eq!(compact.target.ids(), [ConversationTarget::Recent]);
 
-    // Indices are 1-based, so `0` names nothing.
-    assert_eq!(rejection(&["--reset=0"]), ErrorKind::ValueValidation);
-    assert_eq!(rejection(&["--reset=x"]), ErrorKind::ValueValidation);
+    let id = "jp-c17000000000";
+    let compact = parse_compact(&["--reset", id]);
+    assert_eq!(compact.reset, Some(vec![PositionSpec::ALL]));
+    assert_eq!(compact.target.ids(), [ConversationTarget::parse(id)]);
+
+    // `.` and `-` are targets made of the list syntax's own characters.
+    let compact = parse_compact(&["--reset", "."]);
+    assert_eq!(compact.reset, Some(vec![PositionSpec::ALL]));
+    assert_eq!(compact.target.ids(), [ConversationTarget::parse(".")]);
+
+    let compact = parse_compact(&["--reset", "-"]);
+    assert_eq!(compact.reset, Some(vec![PositionSpec::ALL]));
+    assert_eq!(compact.target.ids(), [ConversationTarget::Stdin]);
+}
+
+/// Parse `jp conversation compact <args>` through the root command, the way a
+/// real invocation is read.
+fn parse_cli_compact(args: &[&str]) -> Compact {
+    let argv = ["jp", "conversation", "compact"].iter().chain(args);
+    let cli = Cli::try_parse_from(argv).unwrap();
+
+    let cmd::Commands::Conversation(conversation) = cli.command else {
+        panic!("`jp conversation` was not read as a conversation command");
+    };
+    let conversation::Commands::Compact(compact) = conversation.command else {
+        panic!("`jp conversation compact` was not read as a compact command");
+    };
+
+    compact
+}
+
+// Distinguishing `--reset recent` from `--reset=recent` requires `Spelling` to
+// be threaded from `Cli` down to `Compact`.
+#[test]
+fn reset_gives_its_word_to_the_targets_on_the_real_command_line() {
+    let compact = parse_cli_compact(&["--reset", "recent"]);
+    assert_eq!(compact.reset, Some(vec![PositionSpec::ALL]));
+    assert_eq!(compact.target.ids(), [ConversationTarget::Recent]);
+
+    let compact = parse_cli_compact(&["--reset", "1,3..5", "recent"]);
+    assert_eq!(compact.reset, Some(vec![compaction(1), compactions(3, 5)]));
+    assert_eq!(compact.target.ids(), [ConversationTarget::Recent]);
+}
+
+// The word keeps its place among the targets, so the targets combine as if it
+// had been written as one.
+#[test]
+fn reset_gives_its_word_back_at_the_place_it_was_written() {
+    let compact = parse_compact(&[
+        "jp-c17000000000",
+        "--reset",
+        "jp-c17000000001",
+        "jp-c17000000002",
+    ]);
+
+    assert_eq!(compact.reset, Some(vec![PositionSpec::ALL]));
+    assert_eq!(compact.target.ids(), [
+        ConversationTarget::parse("jp-c17000000000"),
+        ConversationTarget::parse("jp-c17000000001"),
+        ConversationTarget::parse("jp-c17000000002"),
+    ]);
+}
+
+// An attached value (`--reset=recent`) always belongs to the flag, so a
+// non-list value is rejected rather than treated as a conversation target.
+#[test]
+fn reset_keeps_an_attached_value_for_itself() {
+    assert_eq!(
+        rejection_message(&["--reset=recent"]),
+        "error: invalid value 'recent' for '--reset [<COMPACTIONS>]': invalid compaction number \
+         `recent`\n\nFor more information, try '--help'.\n"
+    );
+}
+
+// A malformed list is never a conversation to search for: that reading leaves
+// the flag bare, which removes every compaction event.
+#[test]
+fn reset_reports_a_malformed_list_written_as_its_own_word() {
+    assert_eq!(
+        rejection_message(&["--reset", "0"]),
+        "error: invalid value '0' for '--reset [<COMPACTIONS>]': compaction numbers are 1-based; \
+         `0` is not a valid compaction\n\nFor more information, try '--help'.\n"
+    );
+    assert_eq!(
+        rejection_message(&["--reset", "1,"]),
+        "error: invalid value '1,' for '--reset [<COMPACTIONS>]': empty compaction number in \
+         '1,'\n\nFor more information, try '--help'.\n"
+    );
+    assert_eq!(
+        rejection_message(&["--reset", "2..-0", "recent"]),
+        "error: invalid value '2..-0' for '--reset [<COMPACTIONS>]': from-end offsets are \
+         1-based; use `-1` for the last compaction\n\nFor more information, try '--help'.\n"
+    );
+
+    // The list parser trims each item, so space after a comma is still a list.
+    assert_eq!(
+        rejection_message(&["--reset", "1, 0", "recent"]),
+        "error: invalid value '1, 0' for '--reset [<COMPACTIONS>]': compaction numbers are \
+         1-based; `0` is not a valid compaction\n\nFor more information, try '--help'.\n"
+    );
+}
+
+// Each word below is the only target candidate, so a fallback to the picker
+// would parse rather than be hidden behind the error for combining targets.
+#[test]
+fn reset_reports_a_malformed_list_with_no_other_target() {
+    // `..=` is Rust's inclusive range; the list syntax has only `..`.
+    assert_eq!(
+        rejection_message(&["--reset", "1..=3"]),
+        "error: invalid value '1..=3' for '--reset [<COMPACTIONS>]': invalid compaction number \
+         `=3`\n\nFor more information, try '--help'.\n"
+    );
+    assert_eq!(
+        rejection_message(&["--reset", "+0"]),
+        "error: invalid value '+0' for '--reset [<COMPACTIONS>]': invalid compaction number \
+         `+0`\n\nFor more information, try '--help'.\n"
+    );
+
+    // The list parser trims Unicode whitespace, here a no-break space.
+    assert_eq!(
+        rejection_message(&["--reset", "1,\u{a0}0"]),
+        "error: invalid value '1,\u{a0}0' for '--reset [<COMPACTIONS>]': compaction numbers are \
+         1-based; `0` is not a valid compaction\n\nFor more information, try '--help'.\n"
+    );
+}
+
+// A list with space after its commas parses like one without, as its own word.
+#[test]
+fn reset_reads_a_spaced_list_written_as_its_own_word() {
+    let compact = parse_compact(&["--reset", "1, 3..4", "recent"]);
+
+    assert_eq!(compact.reset, Some(vec![compaction(1), compactions(3, 4)]));
+    assert_eq!(compact.target.ids(), [ConversationTarget::Recent]);
 }
 
 // `--reset="$i"` with `i` unset must not widen into removing every compaction
 // event, which is what a bare `--reset` does.
 #[test]
-fn reset_rejects_an_empty_index() {
-    let error = parse_args::<Compact>(&["--reset="]).unwrap_err();
-
+fn reset_rejects_an_empty_value() {
     assert_eq!(
-        error.render().to_string(),
-        "error: invalid value '' for '--reset[=<INDEX>]': invalid compaction index ''\n\nFor more \
-         information, try '--help'.\n"
+        rejection_message(&["--reset="]),
+        "error: invalid value '' for '--reset [<COMPACTIONS>]': empty compaction number in \
+         ''\n\nFor more information, try '--help'.\n"
+    );
+    assert_eq!(
+        rejection_message(&["--reset", ""]),
+        "error: invalid value '' for '--reset [<COMPACTIONS>]': empty compaction number in \
+         ''\n\nFor more information, try '--help'.\n"
+    );
+}
+
+#[test]
+fn reset_cannot_be_repeated() {
+    assert_eq!(
+        rejection(&["--reset=1", "--reset=3"]),
+        ErrorKind::ArgumentConflict
     );
 }
 
@@ -372,28 +629,276 @@ fn summary_rejects_an_empty_text() {
     assert_eq!(parse_compact(&["--summary"]).summary, Some(None));
 }
 
-#[test]
-fn reset_index_addresses_compactions_in_stream_order() {
-    let mut stream = ConversationStream::new_test();
-    for t in 0..6 {
-        stream.start_turn(format!("turn {t}"));
-    }
-    stream.add_compaction(Compaction::new(0, 1));
-    stream.add_compaction(Compaction::new(2, 4));
+/// Six turns under four compaction events: two mechanical ones that a third,
+/// wider one shadows, and a summary.
+fn compacted_stream() -> ConversationStream {
+    let mut stream = stream_of(6);
+    stream.add_compaction(Compaction::new(0, 1).with_reasoning(ReasoningPolicy::Strip));
+    stream.add_compaction(Compaction::new(0, 3).with_tool_calls(ToolCallPolicy::Omit));
+    stream.add_compaction(
+        Compaction::new(0, 4)
+            .with_reasoning(ReasoningPolicy::Strip)
+            .with_tool_calls(ToolCallPolicy::Strip {
+                request: true,
+                response: true,
+            }),
+    );
+    stream.add_compaction(Compaction::new(1, 2).with_summary(SummaryPolicy::generated("gist")));
+    stream
+}
 
-    // The label carries 1-based turn numbers, matching `jp conversation show`.
+/// The 0-based indices `--reset=<value>` selects among the compaction events of
+/// `stream`.
+fn reset_indices(stream: &ConversationStream, value: &str) -> Result<BTreeSet<usize>, String> {
+    let flag = format!("--reset={value}");
+    let specs = parse_compact(&[flag.as_str()]).reset.unwrap();
+
+    resolve_reset(stream, &specs).map_err(|error| error.describe("compaction"))
+}
+
+#[test]
+fn reset_numbers_address_compactions_in_stream_order() {
+    let stream = compacted_stream();
+
+    assert_eq!(reset_indices(&stream, "1"), Ok(BTreeSet::from([0])));
     assert_eq!(
-        resolve_reset_index(&stream, 1),
-        Ok((0, "turns 1..2".to_owned()))
+        reset_indices(&stream, "1,3..4"),
+        Ok(BTreeSet::from([0, 2, 3]))
     );
     assert_eq!(
-        resolve_reset_index(&stream, 2),
-        Ok((1, "turns 3..5".to_owned()))
+        reset_indices(&stream, ".."),
+        Ok(BTreeSet::from([0, 1, 2, 3]))
+    );
+
+    // A from-end number counts back from the newest compaction event.
+    assert_eq!(reset_indices(&stream, "-1"), Ok(BTreeSet::from([3])));
+    assert_eq!(reset_indices(&stream, "-2.."), Ok(BTreeSet::from([2, 3])));
+
+    // An event named twice is selected once.
+    assert_eq!(
+        reset_indices(&stream, "1..3,2..4,2"),
+        Ok(BTreeSet::from([0, 1, 2, 3]))
+    );
+}
+
+#[test]
+fn reset_rejects_a_number_that_names_no_compaction() {
+    let stream = compacted_stream();
+
+    assert_eq!(
+        reset_indices(&stream, "5"),
+        Err("compaction 5 out of range (conversation has 4 compactions)".to_owned())
+    );
+
+    // One bad item fails the whole list, so nothing is half-selected.
+    assert_eq!(
+        reset_indices(&stream, "1,2..9"),
+        Err("compaction 9 out of range (conversation has 4 compactions)".to_owned())
     );
     assert_eq!(
-        resolve_reset_index(&stream, 3),
-        Err("compaction 3 out of range (conversation has 2 compaction event(s))".to_owned())
+        reset_indices(&stream, "-5"),
+        Err("compaction -5 out of range (conversation has 4 compactions)".to_owned())
     );
+    assert_eq!(
+        reset_indices(&stream, "3..1"),
+        Err("range 3..1 is not valid: compaction 1 comes before compaction 3".to_owned())
+    );
+}
+
+// A bare `--reset` on a conversation that was never compacted has nothing to
+// do, which is not an error; a number there names nothing.
+#[test]
+fn reset_of_a_conversation_without_compactions() {
+    let stream = stream_of(3);
+
+    assert_eq!(reset_indices(&stream, ".."), Ok(BTreeSet::new()));
+    assert_eq!(
+        reset_indices(&stream, "1"),
+        Err("compaction 1 out of range (conversation has 0 compactions)".to_owned())
+    );
+}
+
+#[test]
+fn reset_reports_each_compaction_as_show_lists_it() {
+    let stream = compacted_stream();
+
+    assert_eq!(reset_lines(&stream, &BTreeSet::from([0, 2, 3]), false), [
+        "Removed compaction 1: turns 1..2 (2 total, reasoning).",
+        "Removed compaction 3: turns 1..5 (5 total, reasoning + tools).",
+        "Removed compaction 4: turns 2..3 (2 total, summary).",
+    ]);
+    assert_eq!(reset_lines(&stream, &BTreeSet::from([1]), true), [
+        "Would remove compaction 2: turns 1..4 (4 total, tools omitted)."
+    ]);
+    assert_eq!(reset_lines(&stream, &BTreeSet::new(), false), [
+        "No compaction events to remove."
+    ]);
+}
+
+/// A `Ctx` over a workspace stored in a tempdir, printing to memory.
+///
+/// The tempdir is returned so it outlives the ctx, whose workspace points into
+/// it.
+fn stored_ctx() -> (Ctx, SharedBuffer, Utf8TempDir) {
+    let tmp = tempdir().unwrap();
+    let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let fs = Arc::new(
+        FsStorageBackend::new(&tmp.path().join(".jp"))
+            .unwrap()
+            .with_user_storage(&tmp.path().join("user"), None, "abc")
+            .unwrap(),
+    );
+    let workspace = Workspace::in_memory(tmp.path()).with_backend(fs);
+
+    let ctx = Ctx::new(
+        crate::bootstrap::ExecutionContext::for_workspace(&workspace),
+        workspace,
+        None,
+        Runtime::new().unwrap(),
+        Globals::default(),
+        AppConfig::new_test(),
+        None,
+        printer,
+    );
+
+    (ctx, out, tmp)
+}
+
+/// Store a conversation holding the events and compaction events of `stream`.
+///
+/// The ctx clock advances a second afterwards, so the next conversation gets an
+/// id of its own.
+fn store_conversation(ctx: &mut Ctx, stream: &ConversationStream) -> ConversationId {
+    let id = ConversationId::try_from(ctx.now()).unwrap();
+    ctx.workspace.create_conversation_with_id(
+        id,
+        Conversation::default().with_last_activated_at(ctx.now()),
+        ctx.config(),
+    );
+
+    let lock = ctx
+        .workspace
+        .test_lock(ctx.workspace.acquire_conversation(&id).unwrap());
+    lock.as_mut().update_events(|events| {
+        // `extend` copies conversation events only, so the compaction events
+        // are added one by one.
+        events.extend(stream.iter().cloned());
+        for compaction in stream.compactions() {
+            events.add_compaction(compaction.clone());
+        }
+    });
+    drop(lock);
+
+    ctx.set_now(ctx.now() + Duration::from_secs(1));
+    id
+}
+
+/// The turn ranges of the compaction events stored for `id`, in stream order.
+fn stored_compactions(ctx: &Ctx, id: &ConversationId) -> Vec<(usize, usize)> {
+    let handle = ctx.workspace.acquire_conversation(id).unwrap();
+    ctx.workspace
+        .events(&handle)
+        .unwrap()
+        .compactions()
+        .map(|c| (c.from_turn, c.to_turn))
+        .collect()
+}
+
+#[test]
+fn reset_removes_only_the_listed_compactions() {
+    let (mut ctx, out, _tmp) = stored_ctx();
+    let id = store_conversation(&mut ctx, &compacted_stream());
+
+    let handle = ctx.workspace.acquire_conversation(&id).unwrap();
+    runtime()
+        .block_on(parse_compact(&["--reset=1..3"]).run(&mut ctx, vec![handle]))
+        .unwrap();
+    ctx.printer.flush();
+
+    // The summary survives: every number was resolved before the first event
+    // was removed, so `3` still meant the third event once two were gone.
+    assert_eq!(stored_compactions(&ctx, &id), [(1, 2)]);
+    assert_eq!(
+        *out.lock(),
+        "Removed compaction 1: turns 1..2 (2 total, reasoning).\nRemoved compaction 2: turns 1..4 \
+         (4 total, tools omitted).\nRemoved compaction 3: turns 1..5 (5 total, reasoning + \
+         tools).\n"
+    );
+}
+
+#[test]
+fn bare_reset_removes_every_compaction() {
+    let (mut ctx, out, _tmp) = stored_ctx();
+    let id = store_conversation(&mut ctx, &compacted_stream());
+
+    let handle = ctx.workspace.acquire_conversation(&id).unwrap();
+    runtime()
+        .block_on(parse_compact(&["--reset"]).run(&mut ctx, vec![handle]))
+        .unwrap();
+    ctx.printer.flush();
+
+    assert_eq!(stored_compactions(&ctx, &id), []);
+    assert_eq!(
+        *out.lock(),
+        "Removed compaction 1: turns 1..2 (2 total, reasoning).\nRemoved compaction 2: turns 1..4 \
+         (4 total, tools omitted).\nRemoved compaction 3: turns 1..5 (5 total, reasoning + \
+         tools).\nRemoved compaction 4: turns 2..3 (2 total, summary).\n"
+    );
+}
+
+#[test]
+fn reset_dry_run_removes_nothing() {
+    let (mut ctx, out, _tmp) = stored_ctx();
+    let id = store_conversation(&mut ctx, &compacted_stream());
+
+    let handle = ctx.workspace.acquire_conversation(&id).unwrap();
+    runtime()
+        .block_on(parse_compact(&["--reset=-1", "--dry-run"]).run(&mut ctx, vec![handle]))
+        .unwrap();
+    ctx.printer.flush();
+
+    assert_eq!(stored_compactions(&ctx, &id), [
+        (0, 1),
+        (0, 3),
+        (0, 4),
+        (1, 2)
+    ]);
+    assert_eq!(
+        *out.lock(),
+        "Would remove compaction 4: turns 2..3 (2 total, summary).\n"
+    );
+}
+
+/// A number that names no compaction event of a later target must not leave an
+/// earlier target reset, and the error names that target.
+#[test]
+fn reset_out_of_range_on_a_later_target_removes_nothing() {
+    let (mut ctx, _out, _tmp) = stored_ctx();
+    let id_a = store_conversation(&mut ctx, &compacted_stream());
+
+    let mut one_compaction = stream_of(3);
+    one_compaction.add_compaction(Compaction::new(0, 1).with_reasoning(ReasoningPolicy::Strip));
+    let id_b = store_conversation(&mut ctx, &one_compaction);
+
+    let handle_a = ctx.workspace.acquire_conversation(&id_a).unwrap();
+    let handle_b = ctx.workspace.acquire_conversation(&id_b).unwrap();
+    let error = runtime()
+        .block_on(parse_compact(&["--reset=2"]).run(&mut ctx, vec![handle_a, handle_b]))
+        .unwrap_err();
+
+    assert_eq!(
+        error.message.as_deref(),
+        Some("compaction 2 out of range (conversation jp-c10 has 1 compaction)")
+    );
+
+    // A is the assertion that matters: `2` names one of its four compaction
+    // events, so only the preflight keeps it untouched.
+    assert_eq!(stored_compactions(&ctx, &id_a), [
+        (0, 1),
+        (0, 3),
+        (0, 4),
+        (1, 2)
+    ]);
 }
 
 fn runtime() -> tokio::runtime::Runtime {

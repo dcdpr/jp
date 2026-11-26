@@ -23,9 +23,11 @@ This parent ticket reverses the auto-trash decision of RFD 052:
 - **Report loudly and carry on.** Unloadable conversations are reported on
   stderr after the command's output.
   The command runs normally on the valid conversations.
-- **Trashing is a user action.** `jp conversation trash` / `untrash` and `jp
-  conversation repair` act only when asked.
+- **Fixing is a user action.** `jp conversation repair` and `jp conversation rm`
+  act only when asked, and `rm` reaches conversations that fail to load.
   `jp doctor` lists problems and suggests fixes.
+  There is no trash: a conversation you want out of the way is removed, or moved
+  out of the conversations directory by hand.
 - **Invalid conversations stop at the edges.** They are caught where the store
   is scanned, and never enter the conversation index or reach core code.
   Defensive handling must not spread through the codebase.

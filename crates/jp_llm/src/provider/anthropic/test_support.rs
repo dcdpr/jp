@@ -23,7 +23,7 @@ use crate::{
     error::Result,
     model::{ModelDetails, ReasoningDetails},
     provider::{
-        ApiTestRoute, Provider, ProviderTestRoute, ProviderTestSupport, first_stored_profile,
+        ApiTestRoute, DynProvider, ProviderTestRoute, ProviderTestSupport, first_stored_profile,
         number_ids, replay_credential_env,
     },
     query::ChatQuery,
@@ -193,7 +193,7 @@ impl ProviderTestRoute for SubscriptionTestRoute {
         &self,
         config: &LlmProviderConfig,
         recording: bool,
-    ) -> result::Result<Box<dyn Provider>, String> {
+    ) -> result::Result<Box<dyn DynProvider>, String> {
         // A replayed cassette answers without authenticating, so the token only
         // has to exist. Reading the store on replay would make the suite
         // depend on the machine running it.
@@ -214,7 +214,7 @@ impl ProviderTestRoute for SubscriptionTestRoute {
         config.subscription_flow = SubscriptionFlow::Direct;
 
         Anthropic::new(&config)
-            .map(|provider| Box::new(provider) as Box<dyn Provider>)
+            .map(|provider| Box::new(provider) as Box<dyn DynProvider>)
             .map_err(|error| error.to_string())
     }
 

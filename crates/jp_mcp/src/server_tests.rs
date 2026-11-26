@@ -1,6 +1,10 @@
+#![expect(
+    clippy::unused_async_trait_impl,
+    reason = "test doubles implement async traits synchronously"
+)]
+
 use std::{fs, sync::Arc};
 
-use async_trait::async_trait;
 use camino::Utf8PathBuf;
 use camino_tempfile::{Utf8TempDir, tempdir};
 use jp_config::{
@@ -25,7 +29,6 @@ use crate::{
 
 struct EchoArguments;
 
-#[async_trait]
 impl BuiltinTool for EchoArguments {
     async fn execute(&self, arguments: &Value, _answers: &IndexMap<String, Value>) -> Outcome {
         Outcome::Success {
@@ -663,7 +666,6 @@ async fn test_execute_local_exposes_invocation_ids_in_context() {
 /// A built-in that reports it ran, so dispatch can be observed.
 struct ReachedBuiltin;
 
-#[async_trait::async_trait]
 impl builtin::BuiltinTool for ReachedBuiltin {
     async fn execute(&self, _: &Value, _: &IndexMap<String, Value>) -> jp_tool::Outcome {
         "reached".into()

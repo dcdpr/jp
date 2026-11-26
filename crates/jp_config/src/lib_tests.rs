@@ -1,5 +1,4 @@
 use assert_matches::assert_matches;
-use schematic::PartialConfig as _;
 use test_log::test;
 
 use super::*;

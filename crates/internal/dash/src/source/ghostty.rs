@@ -119,9 +119,7 @@ pub fn focus(id: &str) -> Result<(), Error> {
 /// Open a Ghostty tab in `dir` (in a window other than the dashboard's) and
 /// bring it to the front, optionally running `command` on startup.
 pub fn open_tab(dir: &Utf8Path, command: Option<&str>) -> Result<(), Error> {
-    let input = command
-        .map(|command| format!("{command}\n"))
-        .unwrap_or_default();
+    let input = command.map_or_default(|command| format!("{command}\n"));
 
     // Pass dynamic values via `argv` rather than interpolating them into the script.
     stdout(

@@ -1,15 +1,15 @@
-use std::{error::Error, time::Duration};
+use std::{error::Error, pin::pin, time::Duration};
 
 use jp_workspace::Workspace;
 use tokio::task::{JoinError, JoinSet};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, trace, warn};
 
-use crate::Task;
+use crate::{DynTask, Task};
 
 #[derive(Debug, Default)]
 pub struct TaskHandler {
-    tasks: JoinSet<Result<Box<dyn Task>, Box<dyn Error + Send + Sync>>>,
+    tasks: JoinSet<Result<Box<dyn DynTask>, Box<dyn Error + Send + Sync>>>,
     /// Soft-cancellation signal.
     /// Firing it asks each task's `run()` to return promptly; well-behaved
     /// tasks then proceed to their `sync()` phase under [`TaskHandler::sync`].
@@ -35,11 +35,11 @@ impl TaskHandler {
     }
 
     pub fn spawn(&mut self, task: impl Task) {
-        let name = task.name();
+        let name = Task::name(&task);
         debug!(name, "Spawning task.");
         let token = self.cancel_token.child_token();
         self.tasks.spawn(async move {
-            let mut task = Box::new(task).run(token);
+            let mut task = pin!(Task::run(Box::new(task), token));
             let now = tokio::time::Instant::now();
             loop {
                 jp_macro::select!(
@@ -67,7 +67,7 @@ impl TaskHandler {
             return Ok(());
         }
 
-        let mut tasks: Vec<Box<dyn Task>> = Vec::new();
+        let mut tasks: Vec<Box<dyn DynTask>> = Vec::new();
         self.wait_for_tasks(timeout, &mut tasks, false).await;
 
         // Grace window for stragglers that didn't observe the soft
@@ -87,7 +87,7 @@ impl TaskHandler {
     async fn wait_for_tasks(
         &mut self,
         timeout: Duration,
-        tasks: &mut Vec<Box<dyn Task>>,
+        tasks: &mut Vec<Box<dyn DynTask>>,
         shutdown: bool,
     ) {
         let timeout = tokio::time::sleep(timeout);
@@ -131,8 +131,8 @@ impl TaskHandler {
 
 #[expect(clippy::type_complexity)]
 fn handle_task_completion(
-    result: Result<Result<Box<dyn Task>, Box<dyn Error + Send + Sync>>, JoinError>,
-    tasks: &mut Vec<Box<dyn Task>>,
+    result: Result<Result<Box<dyn DynTask>, Box<dyn Error + Send + Sync>>, JoinError>,
+    tasks: &mut Vec<Box<dyn DynTask>>,
 ) {
     match result {
         Ok(Ok(task)) => tasks.push(task),

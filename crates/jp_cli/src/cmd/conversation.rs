@@ -4,7 +4,7 @@ use jp_workspace::{ConversationHandle, Workspace};
 
 use super::{ConversationLoadRequest, Output};
 use crate::{
-    cli::{CommandArgs, subcommand_of, unread_subcommand},
+    cli::{CommandArgs, Spelling, subcommand_of, unread_subcommand},
     ctx::{Ctx, IntoPartialAppConfig},
 };
 
@@ -123,6 +123,13 @@ impl CommandArgs for Conversation {
     }
 
     fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
+        Self::from_spelled_matches(matches, &Spelling::default())
+    }
+
+    fn from_spelled_matches(
+        matches: &ArgMatches,
+        spelling: &Spelling,
+    ) -> Result<Self, clap::Error> {
         let command = match subcommand_of(matches)? {
             ("rm", sub) => Commands::Remove(rm::Rm::from_matches(sub)?),
             ("ls", sub) => Commands::List(ls::Ls::from_matches(sub)?),
@@ -130,7 +137,9 @@ impl CommandArgs for Conversation {
             ("use", sub) => Commands::Use(use_::Use::from_matches(sub)?),
             ("edit", sub) => Commands::Edit(edit::Edit::from_matches(sub)?),
             ("fork", sub) => Commands::Fork(fork::Fork::from_matches(sub)?),
-            ("compact", sub) => Commands::Compact(compact::Compact::from_matches(sub)?),
+            ("compact", sub) => {
+                Commands::Compact(compact::Compact::from_spelled_matches(sub, spelling)?)
+            }
             ("title", sub) => Commands::Title(title::Title::from_matches(sub)?),
             ("grep", sub) => Commands::Grep(grep::Grep::from_matches(sub)?),
             ("label", sub) => Commands::Label(label::Label::from_matches(sub)?),
@@ -159,9 +168,9 @@ impl Conversation {
             Commands::Print(args) => args.run(ctx, &handles),
             Commands::Path(args) => args.run(ctx, handles),
             Commands::List(args) => args.run(ctx, &handles),
-            Commands::Use(args) => args.run(ctx, handles),
+            Commands::Use(args) => args.run(ctx, handles).await,
             Commands::Archive(args) => args.run(ctx, handles).await,
-            Commands::Unarchive(args) => args.run(ctx),
+            Commands::Unarchive(args) => args.run(ctx).await,
         }
     }
 

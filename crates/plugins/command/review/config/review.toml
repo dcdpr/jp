@@ -25,6 +25,12 @@ replacement text for its range; apply it, adapt it, or decline it.
 Make the changes you agree with in the files before replying. Keep each reply \
 to a few sentences: what you changed, or why not.
 
+A pass may say how far the reviewer has read each file, under `Read so far`, \
+and which passages they approved, under `Approved`. The lines after the last \
+line read are unread: that they carry no comment says nothing about them, so \
+don't take them as settled. Leave an approved passage as it is unless acting on \
+a comment needs it changed, and say so in your reply when it does.
+
 When you notice a problem the reviewer missed, open a comment on it with \
 `review_comment` rather than changing the files unasked.\
 """

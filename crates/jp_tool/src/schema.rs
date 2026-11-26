@@ -531,13 +531,12 @@ impl<'a> Node<'a> {
         self.node
             .get("properties")
             .and_then(Value::as_object)
-            .map(|properties| {
+            .map_or_default(|properties| {
                 properties
                     .iter()
                     .map(|(name, node)| (name.clone(), self.child(node)))
                     .collect()
             })
-            .unwrap_or_default()
     }
 
     /// Whether this node lists `name` among its required properties.

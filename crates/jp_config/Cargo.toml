@@ -5,7 +5,6 @@ authors.workspace = true
 description.workspace = true
 documentation.workspace = true
 edition.workspace = true
-homepage.workspace = true
 license-file.workspace = true
 publish.workspace = true
 readme.workspace = true
@@ -49,6 +48,8 @@ url = { workspace = true, features = ["serde"] }
 which = { workspace = true, features = ["real-sys"] }
 
 [dev-dependencies]
+jp_test = { workspace = true }
+
 assert_matches = { workspace = true }
 camino-tempfile = { workspace = true }
 indoc = { workspace = true }

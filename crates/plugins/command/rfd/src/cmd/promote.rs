@@ -17,7 +17,7 @@ use camino::Utf8Path;
 use doc::references::{self, Rule, markdown_files};
 use regex::Regex;
 
-use super::{is_draft, parse, stem};
+use super::{draft_tokens, is_draft, parse, stem};
 use crate::{
     Output,
     document::{Document, NoMetadata, cited, reference_label},
@@ -33,10 +33,6 @@ static PARENT_LINK: LazyLock<Regex> =
 /// A reference definition one directory up: `[RFD 001]: ../001-x.md`.
 static PARENT_DEFINITION: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?m)^(\[[^\]]*\]:[ ]*)\.\./").expect("valid regex"));
-
-/// A draft id, which counts as a mention only standing alone.
-static DRAFT_TOKEN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"D[0-9]{2}").expect("valid regex"));
 
 /// The relationship fields a promotion reads, each with the field the other RFD
 /// carries back.
@@ -224,21 +220,6 @@ fn drop_draft_back_links(document: &mut Document) -> bool {
     }
 
     dropped
-}
-
-/// The draft ids `line` mentions standing alone.
-fn draft_tokens(line: &str) -> Vec<String> {
-    let word = |c: char| c.is_ascii_alphanumeric() || c == '_';
-
-    DRAFT_TOKEN
-        .find_iter(line)
-        .filter(|found| {
-            let before = line[..found.start()].chars().next_back();
-            let after = line[found.end()..].chars().next();
-            !before.is_some_and(word) && !after.is_some_and(word)
-        })
-        .map(|found| found.as_str().to_owned())
-        .collect()
 }
 
 /// Strip one `../` from the document's link targets, inline and by reference:

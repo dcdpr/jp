@@ -5,7 +5,6 @@ name = "overwrite"
 authors.workspace = true
 documentation.workspace = true
 edition.workspace = true
-homepage.workspace = true
 license-file.workspace = true
 publish.workspace = true
 readme.workspace = true
@@ -16,7 +15,10 @@ version.workspace = true
 camino = { workspace = true }
 
 [dev-dependencies]
+jp_test = { workspace = true }
+
 camino-tempfile = { workspace = true }
+serial_test = { workspace = true }
 
 [lints]
 workspace = true

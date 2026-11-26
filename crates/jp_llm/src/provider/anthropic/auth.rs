@@ -8,12 +8,11 @@
 use std::{error::Error as StdError, time::Duration};
 
 use async_anthropic::bearer;
-use async_trait::async_trait;
 use camino::Utf8Path;
 use serde::Deserialize;
 
 use super::acp;
-use crate::credential::{AccountIdentity, ExternalAuth, ProviderAuth};
+use crate::credential::{AccountIdentity, DynExternalAuth, ExternalAuth, ProviderAuth};
 
 /// The Claude CLI bootstrap endpoint.
 ///
@@ -31,9 +30,8 @@ const BOOTSTRAP_TIMEOUT: Duration = Duration::from_secs(30);
 #[derive(Debug, Clone, Copy)]
 pub struct AnthropicAuth;
 
-#[async_trait]
 impl ProviderAuth for AnthropicAuth {
-    fn external_auth(&self) -> Option<&dyn ExternalAuth> {
+    fn external_auth(&self) -> Option<&dyn DynExternalAuth> {
         Some(self)
     }
 
@@ -82,7 +80,6 @@ fn bootstrap_client() -> Result<reqwest::Client, reqwest::Error> {
         .build()
 }
 
-#[async_trait]
 impl ExternalAuth for AnthropicAuth {
     fn directory_name(&self) -> &'static str {
         "claude"

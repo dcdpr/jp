@@ -53,7 +53,7 @@ fn parses_no_file_changes() {
     let raw = format!("{header}{STAT_SEPARATOR}\n");
 
     let show = parse_show_output(&raw).unwrap();
-    assert!(show.files.is_empty());
+    assert_eq!(show.files, [] as [FileStat; 0]);
 }
 
 #[test]

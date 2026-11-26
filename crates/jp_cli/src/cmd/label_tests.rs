@@ -230,7 +230,7 @@ fn removing_a_pair_takes_one_value_and_leaves_the_rest() {
         before: IndexSet::from(["jp_config".to_owned(), "jp_llm".to_owned()]),
         after: IndexSet::from(["jp_config".to_owned()]),
     }]);
-    assert!(applied.missing.is_empty());
+    assert_eq!(applied.missing, [] as [(String, Option<String>); 0]);
 }
 
 #[test]
@@ -272,7 +272,7 @@ fn remove_all_takes_every_label() {
             after: IndexSet::new(),
         },
     ]);
-    assert!(applied.missing.is_empty());
+    assert_eq!(applied.missing, [] as [(String, Option<String>); 0]);
 }
 
 /// Removing something the conversation doesn't carry is not an error — removal
@@ -311,7 +311,7 @@ fn a_removal_that_matched_nothing_reports_no_change() {
         &LabelChange::Remove(resolved(&["crate=jp_llm"], false).grouped_for_removal()),
     );
 
-    assert!(applied.changes.is_empty());
+    assert_eq!(applied.changes, [] as [Change; 0]);
     assert_eq!(applied.missing, [(
         "crate".to_owned(),
         Some("jp_llm".to_owned())

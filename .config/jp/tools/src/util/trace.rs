@@ -118,13 +118,10 @@ fn parse_line(line: &str) -> Option<TraceEvent> {
     let level = Level::parse(&raw.level)?;
 
     let mut fields = raw.fields.unwrap_or_default();
-    let message = fields
-        .shift_remove("message")
-        .map(|v| match v {
-            Value::String(s) => s,
-            other => other.to_string(),
-        })
-        .unwrap_or_default();
+    let message = fields.shift_remove("message").map_or_default(|v| match v {
+        Value::String(s) => s,
+        other => other.to_string(),
+    });
 
     let spans = raw
         .spans

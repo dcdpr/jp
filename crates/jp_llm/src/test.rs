@@ -80,88 +80,6 @@ fn assert_tool_calls_match_schema(tools: &[ToolDefinition], events: &[TestEvent]
     }
 }
 
-// This module is the test harness itself, so its own tests live here rather
-// than in the sibling `_tests.rs` file the crate uses for production modules.
-#[cfg(test)]
-mod harness_tests {
-    use jp_conversation::event::ToolCallRequest;
-    use serde_json::{Map, json};
-
-    use super::*;
-
-    fn tool_call(arguments: Map<String, serde_json::Value>) -> TestEvent {
-        TestEvent::Flushed(ConversationEvent::new(
-            EventKind::ToolCallRequest(ToolCallRequest::new(
-                "call_1".to_owned(),
-                "run_me".to_owned(),
-                arguments,
-            )),
-            Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
-        ))
-    }
-
-    fn run_me() -> Vec<ToolDefinition> {
-        vec![ToolDefinition {
-            name: "run_me".to_owned(),
-            docs: ToolDocs::default(),
-            parameters: json!({
-                "type": "object",
-                "properties": { "foo": { "type": "string" } },
-                "required": []
-            }),
-        }]
-    }
-
-    #[test]
-    fn a_declared_argument_passes() {
-        let arguments = json!({
-          "foo": "x"
-        })
-        .as_object()
-        .cloned()
-        .unwrap();
-
-        assert_tool_calls_match_schema(&run_me(), &[tool_call(arguments)]);
-    }
-
-    /// The shape a provider produces when the schema never reached the model: a
-    /// well-formed call naming an argument the tool does not have.
-    #[test]
-    #[should_panic(expected = "undeclared argument")]
-    fn an_invented_argument_fails() {
-        let arguments = json!({
-          "command": "ls"
-        })
-        .as_object()
-        .cloned()
-        .unwrap();
-
-        assert_tool_calls_match_schema(&run_me(), &[tool_call(arguments)]);
-    }
-
-    // One variable per route, so pointing one self-hosted provider at a remote
-    // server leaves every other provider recording against its own endpoint.
-    #[test]
-    fn each_route_reads_its_own_upstream_variable() {
-        assert_eq!(
-            upstream_env(ProviderId::Vllm, ProviderTestMode::Api),
-            "JP_TEST_UPSTREAM_VLLM"
-        );
-        assert_eq!(
-            upstream_env(ProviderId::Llamacpp, ProviderTestMode::Api),
-            "JP_TEST_UPSTREAM_LLAMACPP"
-        );
-        assert_eq!(
-            upstream_env(ProviderId::Openai, ProviderTestMode::Api),
-            "JP_TEST_UPSTREAM_OPENAI"
-        );
-        assert_eq!(
-            upstream_env(ProviderId::Openai, ProviderTestMode::Subscription),
-            "JP_TEST_UPSTREAM_OPENAI_SUBSCRIPTION"
-        );
-    }
-}
-
 /// An entry in the per-request event log used for snapshot testing.
 ///
 /// Captures the output of the streaming pipeline (flushed `ConversationEvent`s)
@@ -1015,4 +933,86 @@ pub(crate) fn fixture_attachment(path: impl AsRef<Path>) -> Attachment {
 /// Owned by each provider, so the harness never carries a catalog of its own.
 pub(crate) fn test_model_details(id: ProviderId) -> ModelDetails {
     provider_test_support(id).api().model()
+}
+
+// This module is the test harness itself, so its own tests live here rather
+// than in the sibling `_tests.rs` file the crate uses for production modules.
+#[cfg(test)]
+mod harness_tests {
+    use jp_conversation::event::ToolCallRequest;
+    use serde_json::{Map, json};
+
+    use super::*;
+
+    fn tool_call(arguments: Map<String, serde_json::Value>) -> TestEvent {
+        TestEvent::Flushed(ConversationEvent::new(
+            EventKind::ToolCallRequest(ToolCallRequest::new(
+                "call_1".to_owned(),
+                "run_me".to_owned(),
+                arguments,
+            )),
+            Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
+        ))
+    }
+
+    fn run_me() -> Vec<ToolDefinition> {
+        vec![ToolDefinition {
+            name: "run_me".to_owned(),
+            docs: ToolDocs::default(),
+            parameters: json!({
+                "type": "object",
+                "properties": { "foo": { "type": "string" } },
+                "required": []
+            }),
+        }]
+    }
+
+    #[test]
+    fn a_declared_argument_passes() {
+        let arguments = json!({
+          "foo": "x"
+        })
+        .as_object()
+        .cloned()
+        .unwrap();
+
+        assert_tool_calls_match_schema(&run_me(), &[tool_call(arguments)]);
+    }
+
+    /// The shape a provider produces when the schema never reached the model: a
+    /// well-formed call naming an argument the tool does not have.
+    #[test]
+    #[should_panic(expected = "undeclared argument")]
+    fn an_invented_argument_fails() {
+        let arguments = json!({
+          "command": "ls"
+        })
+        .as_object()
+        .cloned()
+        .unwrap();
+
+        assert_tool_calls_match_schema(&run_me(), &[tool_call(arguments)]);
+    }
+
+    // One variable per route, so pointing one self-hosted provider at a remote
+    // server leaves every other provider recording against its own endpoint.
+    #[test]
+    fn each_route_reads_its_own_upstream_variable() {
+        assert_eq!(
+            upstream_env(ProviderId::Vllm, ProviderTestMode::Api),
+            "JP_TEST_UPSTREAM_VLLM"
+        );
+        assert_eq!(
+            upstream_env(ProviderId::Llamacpp, ProviderTestMode::Api),
+            "JP_TEST_UPSTREAM_LLAMACPP"
+        );
+        assert_eq!(
+            upstream_env(ProviderId::Openai, ProviderTestMode::Api),
+            "JP_TEST_UPSTREAM_OPENAI"
+        );
+        assert_eq!(
+            upstream_env(ProviderId::Openai, ProviderTestMode::Subscription),
+            "JP_TEST_UPSTREAM_OPENAI_SUBSCRIPTION"
+        );
+    }
 }

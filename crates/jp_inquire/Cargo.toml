@@ -3,7 +3,6 @@ authors.workspace = true
 description.workspace = true
 documentation.workspace = true
 edition.workspace = true
-homepage.workspace = true
 license-file.workspace = true
 name = "jp_inquire"
 publish.workspace = true

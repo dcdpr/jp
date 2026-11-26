@@ -15,14 +15,14 @@ fn get_note_by_id() {
 fn trashed_notes_excluded() {
     let db = BearDb::in_memory().unwrap();
     let notes = db.get_notes(&["note-4"]).unwrap();
-    assert!(notes.is_empty());
+    assert_eq!(notes, [] as [Note; 0]);
 }
 
 #[test]
 fn missing_note_returns_empty() {
     let db = BearDb::in_memory().unwrap();
     let notes = db.get_notes(&["nonexistent"]).unwrap();
-    assert!(notes.is_empty());
+    assert_eq!(notes, [] as [Note; 0]);
 }
 
 #[test]

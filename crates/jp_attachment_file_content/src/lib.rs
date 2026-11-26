@@ -1,11 +1,10 @@
 use std::{borrow::Cow, collections::BTreeSet, error::Error, fs};
 
-use async_trait::async_trait;
 use camino::Utf8Path;
 use glob::Pattern;
 use ignore::{WalkBuilder, WalkState, overrides::OverrideBuilder};
 use jp_attachment::{
-    Attachment, BoxedHandler, HANDLERS, Handler, distributed_slice, linkme, typetag,
+    Attachment, BoxedHandler, HANDLERS, Handler, HandlerFuture, distributed_slice, linkme, typetag,
 };
 use serde::{Deserialize, Serialize};
 use tracing::{debug, trace, warn};
@@ -29,7 +28,6 @@ pub struct FileContent {
 }
 
 #[typetag::serde(name = "file_content")]
-#[async_trait]
 impl Handler for FileContent {
     fn scheme(&self) -> &'static str {
         "file"
@@ -44,164 +42,171 @@ impl Handler for FileContent {
         Ok(url)
     }
 
-    async fn add(&mut self, uri: &Url, cwd: &Utf8Path) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let pattern = uri_to_pattern(uri)?;
-        let is_exclude = uri.query_pairs().any(|(k, _)| k == "exclude");
+    fn add<'a>(&'a mut self, uri: &'a Url, cwd: &'a Utf8Path) -> HandlerFuture<'a, ()> {
+        Box::pin(async move {
+            let pattern = uri_to_pattern(uri)?;
+            let is_exclude = uri.query_pairs().any(|(k, _)| k == "exclude");
 
-        // For concrete file paths (no globs), validate size upfront so the
-        // user gets an immediate error rather than a silent skip at query time.
-        if !is_exclude && !pattern.as_str().contains(['*', '?', '[']) {
-            let rel = pattern.as_str().trim_start_matches('/');
-            let path = cwd.join(rel);
-            if path.is_file() {
-                let size = std::fs::metadata(&path)?.len();
-                if size > MAX_BINARY_SIZE {
-                    return Err(format!(
-                        "File '{rel}' is too large ({size} bytes, limit is {MAX_BINARY_SIZE} \
-                         bytes)."
-                    )
-                    .into());
+            // For concrete file paths (no globs), validate size upfront so the
+            // user gets an immediate error rather than a silent skip at query time.
+            if !is_exclude && !pattern.as_str().contains(['*', '?', '[']) {
+                let rel = pattern.as_str().trim_start_matches('/');
+                let path = cwd.join(rel);
+                if path.is_file() {
+                    let size = std::fs::metadata(&path)?.len();
+                    if size > MAX_BINARY_SIZE {
+                        return Err(format!(
+                            "File '{rel}' is too large ({size} bytes, limit is {MAX_BINARY_SIZE} \
+                             bytes)."
+                        )
+                        .into());
+                    }
                 }
             }
-        }
 
-        if is_exclude {
-            self.includes.remove(&pattern);
-            self.excludes.insert(pattern);
-        } else {
+            if is_exclude {
+                self.includes.remove(&pattern);
+                self.excludes.insert(pattern);
+            } else {
+                self.excludes.remove(&pattern);
+                self.includes.insert(pattern);
+            }
+
+            Ok(())
+        })
+    }
+
+    fn remove<'a>(&'a mut self, uri: &'a Url) -> HandlerFuture<'a, ()> {
+        Box::pin(async move {
+            let pattern = uri_to_pattern(uri)?;
+
             self.excludes.remove(&pattern);
-            self.includes.insert(pattern);
-        }
+            self.includes.remove(&pattern);
 
-        Ok(())
+            Ok(())
+        })
     }
 
-    async fn remove(&mut self, uri: &Url) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let pattern = uri_to_pattern(uri)?;
+    fn list(&self) -> HandlerFuture<'_, Vec<Url>> {
+        Box::pin(async move {
+            let mut uris = vec![];
 
-        self.excludes.remove(&pattern);
-        self.includes.remove(&pattern);
+            for pattern in &self.includes {
+                uris.push(pattern_to_uri(pattern)?);
+            }
 
-        Ok(())
+            for pattern in &self.excludes {
+                let mut uri = pattern_to_uri(pattern)?;
+                uri.query_pairs_mut().append_pair("exclude", "");
+                uris.push(uri);
+            }
+
+            Ok(uris)
+        })
     }
 
-    async fn list(&self) -> Result<Vec<Url>, Box<dyn Error + Send + Sync>> {
-        let mut uris = vec![];
+    fn get<'a>(&'a self, cwd: &'a Utf8Path) -> HandlerFuture<'a, Vec<Attachment>> {
+        Box::pin(async move {
+            debug!(id = self.scheme(), "Getting file attachment contents.");
 
-        for pattern in &self.includes {
-            uris.push(pattern_to_uri(pattern)?);
-        }
+            if self.includes.is_empty() {
+                trace!("No include patterns specified, returning empty content.");
+                return Ok(vec![]);
+            }
 
-        for pattern in &self.excludes {
-            let mut uri = pattern_to_uri(pattern)?;
-            uri.query_pairs_mut().append_pair("exclude", "");
-            uris.push(uri);
-        }
+            let mut attachments = Vec::with_capacity(self.includes.len());
 
-        Ok(uris)
-    }
-
-    async fn get(&self, cwd: &Utf8Path) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>> {
-        debug!(id = self.scheme(), "Getting file attachment contents.");
-
-        if self.includes.is_empty() {
-            trace!("No include patterns specified, returning empty content.");
-            return Ok(vec![]);
-        }
-
-        let mut attachments = Vec::with_capacity(self.includes.len());
-
-        // Any includes that are paths without glob patterns are always
-        // included, so we can skip any expensive tree walking for `.ignore`
-        // files nor do we care about `self.excludes`.
-        //
-        // We also check if the path is a directory, as those will have to use
-        // globbing and respect `.ignore` files.
-        let (includes, paths): (Vec<_>, Vec<_>) = self
-            .includes
-            .iter()
-            .partition(|p| p.as_str().contains(['*', '?', '[']) || cwd.join(p.as_str()).is_dir());
-
-        attachments.extend(paths.into_iter().filter_map(|pattern| {
-            let pattern = sanitize_pattern(pattern.as_str(), cwd);
-            let path = cwd.join(pattern.as_ref());
-            build_attachment(&path, cwd)
-        }));
-
-        if includes.is_empty() {
-            return Ok(attachments);
-        }
-
-        let mut builder = OverrideBuilder::new(cwd);
-        for pattern in includes {
-            let pattern = sanitize_pattern(pattern.as_str(), cwd);
-
-            // We are hiding hidden files or directories by default (see
-            // `hidden(true)`). If you were to add a pattern such as
-            // `/.foo/bar.txt`, then that file would still be ignored, because
-            // `/.foo` is a hidden directory and is not recursed. To fix this,
-            // we need to explicitly add the initial hidden directory, e.g.
-            // `/.foo`.
+            // Any includes that are paths without glob patterns are always
+            // included, so we can skip any expensive tree walking for `.ignore`
+            // files nor do we care about `self.excludes`.
             //
-            // The alternative is to never hide hidden files and directories by
-            // default, but that causes significant performance issues as we
-            // would traverse `.git` and other large hidden directories.
-            //
-            // We could just keep track of a large list of "potentially large"
-            // hidden directory patterns such as `.git` or `.hg`, but that would
-            // require ongoing maintenance and would be a bit of a hack.
-            //
-            // This too is a hack, but a more dynamic one that should hopefully
-            // work in most common cases, but either way, hopefully we can find
-            // a better solution in the future.
-            if pattern.starts_with('.')
+            // We also check if the path is a directory, as those will have to use
+            // globbing and respect `.ignore` files.
+            let (includes, paths): (Vec<_>, Vec<_>) = self.includes.iter().partition(|p| {
+                p.as_str().contains(['*', '?', '[']) || cwd.join(p.as_str()).is_dir()
+            });
+
+            attachments.extend(paths.into_iter().filter_map(|pattern| {
+                let pattern = sanitize_pattern(pattern.as_str(), cwd);
+                let path = cwd.join(pattern.as_ref());
+                build_attachment(&path, cwd)
+            }));
+
+            if includes.is_empty() {
+                return Ok(attachments);
+            }
+
+            let mut builder = OverrideBuilder::new(cwd);
+            for pattern in includes {
+                let pattern = sanitize_pattern(pattern.as_str(), cwd);
+
+                // We are hiding hidden files or directories by default (see
+                // `hidden(true)`). If you were to add a pattern such as
+                // `/.foo/bar.txt`, then that file would still be ignored, because
+                // `/.foo` is a hidden directory and is not recursed. To fix this,
+                // we need to explicitly add the initial hidden directory, e.g.
+                // `/.foo`.
+                //
+                // The alternative is to never hide hidden files and directories by
+                // default, but that causes significant performance issues as we
+                // would traverse `.git` and other large hidden directories.
+                //
+                // We could just keep track of a large list of "potentially large"
+                // hidden directory patterns such as `.git` or `.hg`, but that would
+                // require ongoing maintenance and would be a bit of a hack.
+                //
+                // This too is a hack, but a more dynamic one that should hopefully
+                // work in most common cases, but either way, hopefully we can find
+                // a better solution in the future.
+                if pattern.starts_with('.')
                 // We only want to add the initial hidden directory if it's
                 // actually a directory, not a file.
                 && let Some((dir, _)) = pattern.split_once('.').and_then(|(_, dir)| dir.split_once('/'))
-            {
-                builder.add(&format!(".{dir}/"))?;
+                {
+                    builder.add(&format!(".{dir}/"))?;
+                }
+
+                builder.add(pattern.as_ref())?;
             }
+            for p in &self.excludes {
+                builder.add(&format!("!{p}"))?;
+            }
+            let overrides = builder.build()?;
 
-            builder.add(pattern.as_ref())?;
-        }
-        for p in &self.excludes {
-            builder.add(&format!("!{p}"))?;
-        }
-        let overrides = builder.build()?;
+            let (tx, rx) = crossbeam_channel::unbounded();
+            WalkBuilder::new(cwd)
+                .standard_filters(false)
+                .hidden(true)
+                .overrides(overrides)
+                .follow_links(false)
+                .build_parallel()
+                .run(|| {
+                    let tx = tx.clone();
+                    Box::new(move |entry| {
+                        let Ok(entry) = entry else {
+                            return WalkState::Continue;
+                        };
+                        let Some(path) = Utf8Path::from_path(entry.path()) else {
+                            return WalkState::Continue;
+                        };
+                        if path.is_dir() {
+                            return WalkState::Continue;
+                        }
 
-        let (tx, rx) = crossbeam_channel::unbounded();
-        WalkBuilder::new(cwd)
-            .standard_filters(false)
-            .hidden(true)
-            .overrides(overrides)
-            .follow_links(false)
-            .build_parallel()
-            .run(|| {
-                let tx = tx.clone();
-                Box::new(move |entry| {
-                    let Ok(entry) = entry else {
-                        return WalkState::Continue;
-                    };
-                    let Some(path) = Utf8Path::from_path(entry.path()) else {
-                        return WalkState::Continue;
-                    };
-                    if path.is_dir() {
-                        return WalkState::Continue;
-                    }
+                        let Some(attachment) = build_attachment(path, cwd) else {
+                            return WalkState::Continue;
+                        };
 
-                    let Some(attachment) = build_attachment(path, cwd) else {
-                        return WalkState::Continue;
-                    };
+                        let _result = tx.send(attachment);
 
-                    let _result = tx.send(attachment);
+                        WalkState::Continue
+                    })
+                });
 
-                    WalkState::Continue
-                })
-            });
-
-        drop(tx);
-        attachments.extend(rx);
-        return Ok(attachments);
+            drop(tx);
+            attachments.extend(rx);
+            Ok(attachments)
+        })
     }
 }
 

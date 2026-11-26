@@ -91,9 +91,8 @@ fn extract(
     let toc = bundle.toc()?;
     let run = toc.first_run();
     let summary = run.and_then(|r| r.info.summary.as_ref());
-    let mut tables: Vec<String> = run
-        .map(|r| r.tables.iter().map(|t| t.schema.clone()).collect())
-        .unwrap_or_default();
+    let mut tables: Vec<String> =
+        run.map_or_default(|r| r.tables.iter().map(|t| t.schema.clone()).collect());
     tables.sort_unstable();
     tables.dedup();
 

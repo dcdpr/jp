@@ -6,6 +6,10 @@
 //! matches back into a [`Cli`].
 //! Each subcommand declares and reads its own arguments; see [`Commands`].
 //!
+//! clap treats a word starting with `-` as a flag.
+//! A value starting with a from-end position (`--reset -3..-1`) is attached to
+//! its option before clap rejects it; see [`match_argv`].
+//!
 //! A flag whose value is optional is declared through [`flag`], which decides
 //! whether a word after it is its value or the start of the free text.
 //!
@@ -19,11 +23,12 @@ use std::{ffi::OsString, num::NonZeroUsize, str::FromStr as _};
 use clap::{
     Arg, ArgAction, ArgMatches, Command,
     builder::{BoolValueParser, TypedValueParser as _},
+    error::ErrorKind,
     value_parser,
 };
 
-use self::flag::Parsed;
 pub(crate) use self::spelling::Spelling;
+use self::{flag::Parsed, spelling::attach_from_end_values};
 use crate::{
     CliFormat, KeyValueOrPath, LogFormat,
     cmd::{Commands, workspace::target::WorkspaceTarget},
@@ -51,6 +56,26 @@ pub(crate) trait CommandArgs: Sized {
     /// Returns an error when a value cannot be used, or no subcommand was given
     /// where one is required.
     fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error>;
+
+    /// Read the arguments back from `matches`, using `spelling` to distinguish
+    /// attached from space-separated option values.
+    ///
+    /// A command overrides this when one of its flags takes an optional value
+    /// that may be a positional argument instead, which only `spelling` can
+    /// disambiguate.
+    /// Every other command reads the same arguments with or without `spelling`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when a value is invalid, or no subcommand was given
+    /// where one is required.
+    fn from_spelled_matches(
+        matches: &ArgMatches,
+        spelling: &Spelling,
+    ) -> Result<Self, clap::Error> {
+        let _ = spelling;
+        Self::from_matches(matches)
+    }
 }
 
 /// The subcommand `matches` selected, or the error for a missing one.
@@ -92,8 +117,7 @@ where
 {
     matches
         .get_many::<T>(id)
-        .map(|values| values.cloned().collect())
-        .unwrap_or_default()
+        .map_or_default(|values| values.cloned().collect())
 }
 
 /// The error for a subcommand name a command declares but does not read.
@@ -124,11 +148,52 @@ impl<A: CommandArgs, B: CommandArgs> CommandArgs for (A, B) {
 /// reports reading them back.
 #[cfg(test)]
 pub(crate) fn parse_args<T: CommandArgs>(args: &[&str]) -> Result<T, clap::Error> {
-    let argv = ["test"].into_iter().chain(args.iter().copied());
+    let argv = ["test"].iter().chain(args).map(OsString::from).collect();
     let mut cmd = T::augment(Command::new("test"));
-    let matches = cmd.try_get_matches_from_mut(argv)?;
+    let (matches, spelling) = match_argv(&mut cmd, argv)?;
 
-    T::from_matches(&matches).map_err(|error| error.format(&mut cmd))
+    T::from_spelled_matches(&matches, &spelling).map_err(|error| error.format(&mut cmd))
+}
+
+/// Match `argv` against `cmd`, and record how each option's value was written.
+///
+/// `argv` starts with the program name.
+/// `cmd` is fully built when this returns.
+///
+/// When clap rejects `argv` for an unknown argument, each value starting with a
+/// from-end position is attached to the preceding option
+/// ([`attach_from_end_values`]), and the rewritten `argv` is matched instead.
+/// A command line clap accepts as written is never rewritten.
+///
+/// # Errors
+///
+/// Returns clap's error for arguments that do not match `cmd`, including the
+/// help and version requests clap reports as errors.
+/// If `argv` was rewritten, returns the error from matching the rewritten
+/// arguments.
+fn match_argv(
+    cmd: &mut Command,
+    argv: Vec<OsString>,
+) -> Result<(ArgMatches, Spelling), clap::Error> {
+    let (matches, argv) = match cmd.try_get_matches_from_mut(&argv) {
+        Ok(matches) => (matches, argv),
+        Err(error) if error.kind() == ErrorKind::UnknownArgument => {
+            // A failed match builds only the subcommands it reached, and the
+            // walk reads the options of each command it descends into.
+            cmd.build();
+            let Some(argv) = attach_from_end_values(cmd, &argv) else {
+                return Err(error);
+            };
+
+            (cmd.try_get_matches_from_mut(&argv)?, argv)
+        }
+        Err(error) => return Err(error),
+    };
+
+    cmd.build();
+    let spelling = Spelling::of(cmd, &matches, &argv);
+
+    Ok((matches, spelling))
 }
 
 /// A parsed `jp` invocation.
@@ -165,12 +230,10 @@ impl Cli {
         I: IntoIterator<Item = T>,
         T: Into<OsString> + Clone,
     {
-        let argv: Vec<OsString> = argv.into_iter().map(Into::into).collect();
+        let argv = argv.into_iter().map(Into::into).collect();
 
         let mut cmd = Self::command();
-        let matches = cmd.try_get_matches_from_mut(&argv)?;
-        cmd.build();
-        let spelling = Spelling::of(&cmd, &matches, &argv);
+        let (matches, spelling) = match_argv(&mut cmd, argv)?;
 
         // An error from reading the matches back carries no usage line of its
         // own; formatting it against the subcommand gives it the same chrome as
@@ -236,43 +299,44 @@ impl RootOpts {
 }
 
 /// The options every `jp` command accepts, before or after its name.
-#[derive(Debug, Default)]
+///
+/// [`Default`] gives the options of a command run with no global flags.
+#[derive(Debug)]
 pub(crate) struct Globals {
     /// `--cfg` values, in the order given.
     pub(crate) config: Vec<KeyValueOrPath>,
-
-    /// `--no-cfg`.
     pub(crate) no_config: bool,
-
     /// How many times `-v` was given.
     pub(crate) verbose: u8,
-
-    /// `--quiet`.
     pub(crate) quiet: bool,
-
-    /// `--no-interactive`.
     pub(crate) no_interactive: bool,
-
-    /// `--format`.
     pub(crate) format: CliFormat,
-
-    /// Whether to persist changes; `--no-persist` turns it off.
+    /// Whether to persist changes (`false` when `--no-persist` is passed).
     pub(crate) persist: bool,
-
-    /// `--workspace`.
     pub(crate) workspace: Option<WorkspaceTarget>,
-
-    /// `--width`.
     pub(crate) width: Option<u16>,
-
-    /// `--log-format`.
     pub(crate) log_format: LogFormat,
-
-    /// `--log-file`.
     pub(crate) log_file: Option<String>,
-
-    /// `--log`.
     pub(crate) log: Option<String>,
+}
+
+impl Default for Globals {
+    fn default() -> Self {
+        Self {
+            config: vec![],
+            no_config: false,
+            verbose: 0,
+            quiet: false,
+            no_interactive: false,
+            format: CliFormat::default(),
+            persist: true,
+            workspace: None,
+            width: None,
+            log_format: LogFormat::default(),
+            log_file: None,
+            log: None,
+        }
+    }
 }
 
 impl Globals {
@@ -324,10 +388,10 @@ impl Globals {
                 .long_help(
                     "Suppress chrome: progress indicators, status lines, and tool call \
                      headers.\n\nCommand output and the assistant's response still go to stdout, \
-                     and a failing run still reports its error. Redirect them (`>/dev/null`, \
-                     `2>/dev/null`) to drop those as well.\n\nTracing written to stderr by `-v` \
-                     or `--log-file=-` is suppressed too. The trace log file still records the \
-                     run in full.",
+                     and a failing run still reports its error. Conversations that fail to load \
+                     are still reported. Redirect them (`>/dev/null`, `2>/dev/null`) to drop \
+                     those as well.\n\nTracing written to stderr by `-v` or `--log-file=-` is \
+                     suppressed too. The trace log file still records the run in full.",
                 ),
         ))
         .arg(global(
@@ -456,8 +520,7 @@ impl Globals {
         Self {
             config: matches
                 .get_many("config")
-                .map(|values| values.cloned().collect())
-                .unwrap_or_default(),
+                .map_or_default(|values| values.cloned().collect()),
             no_config: matches.get_flag("no_config"),
             verbose: matches.get_count("verbose"),
             quiet: matches.get_flag("quiet"),

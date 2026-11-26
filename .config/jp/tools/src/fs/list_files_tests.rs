@@ -441,7 +441,7 @@ async fn suppressed_path_is_skipped_with_a_note() {
          it."
         .to_owned()
     ]);
-    assert!(listed(files).is_empty());
+    assert_eq!(listed(files), [] as [String; 0]);
 }
 
 #[tokio::test]
@@ -468,7 +468,7 @@ async fn suppress_pattern_covers_files_inside_the_named_directory() {
          provide it."
             .to_owned()
     ]);
-    assert!(listed(files).is_empty());
+    assert_eq!(listed(files), [] as [String; 0]);
 }
 
 #[tokio::test]
@@ -495,7 +495,7 @@ async fn suppress_patterns_match_at_any_depth() {
          user to provide it."
             .to_owned()
     ]);
-    assert!(listed(files).is_empty());
+    assert_eq!(listed(files), [] as [String; 0]);
 }
 
 #[cfg(unix)]
@@ -526,7 +526,7 @@ async fn an_in_workspace_symlink_cannot_dodge_suppression() {
          provide it."
             .to_owned()
     ]);
-    assert!(listed(files).is_empty());
+    assert_eq!(listed(files), [] as [String; 0]);
 }
 
 #[tokio::test]
@@ -670,7 +670,7 @@ async fn explicitly_named_file_respects_extension_filter() {
     .await
     .unwrap();
 
-    assert!(listed(files).is_empty());
+    assert_eq!(listed(files), [] as [String; 0]);
 }
 
 #[tokio::test]
@@ -690,8 +690,8 @@ async fn test_empty_list() {
 
     // A prefix that names nothing is a filter that matches nothing. There is no
     // `.ignore` rule involved, so the result carries no note.
-    assert!(files.notes().is_empty());
-    assert!(files.into_files().is_empty());
+    assert_eq!(files.notes(), [] as [String; 0]);
+    assert_eq!(files.into_files(), [] as [String; 0]);
 }
 
 #[test]

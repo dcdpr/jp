@@ -1,4 +1,5 @@
 use assert_matches::assert_matches;
+use camino::Utf8PathBuf;
 use camino_tempfile::Utf8TempDir;
 use jp_tool::{AccessPolicy, Action, EnvRule, FsRule};
 use pretty_assertions::assert_eq;
@@ -70,8 +71,8 @@ fn commands_become_one_script_under_strict_mode() {
     assert_eq!(plan.script, "set -euo pipefail\necho one\necho two\n");
     assert_eq!(plan.image, DEFAULT_IMAGE);
     assert_eq!(plan.install, None);
-    assert!(plan.mounts.is_empty());
-    assert!(plan.envs.is_empty());
+    assert_eq!(plan.mounts, [] as [(Utf8PathBuf, String); 0]);
+    assert_eq!(plan.envs, [] as [(String, String); 0]);
 }
 
 #[test]

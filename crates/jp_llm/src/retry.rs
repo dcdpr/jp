@@ -6,7 +6,7 @@ use futures::StreamExt as _;
 use tracing::{debug, warn};
 
 use crate::{
-    Provider, StreamError, StreamErrorKind,
+    DynProvider, StreamError, StreamErrorKind,
     error::Result,
     event::{Event, NoticeSink},
     model::ModelDetails,
@@ -77,7 +77,7 @@ impl RetryConfig {
 /// went on to succeed, so it is delivered before the outcome is known, and
 /// reaches the user even when this returns an error.
 pub async fn collect_with_retry(
-    provider: &dyn Provider,
+    provider: &dyn DynProvider,
     model: &ModelDetails,
     query: ChatQuery,
     config: &RetryConfig,

@@ -96,6 +96,7 @@ impl Host {
             conversation: CONVERSATION.to_owned(),
             outcome,
             data: None,
+            answer: None,
         }));
     }
 
@@ -135,6 +136,20 @@ pub(crate) fn http(
     headers: &[(&str, &str)],
     body: &str,
 ) -> (u16, Value) {
+    let (status, _, body) = http_text(address, method, path, headers, body);
+
+    (status, serde_json::from_str(&body).unwrap())
+}
+
+/// [`http`], returning the answer's status, `Content-Type`, and body as they
+/// are.
+pub(crate) fn http_text(
+    address: SocketAddr,
+    method: &str,
+    path: &str,
+    headers: &[(&str, &str)],
+    body: &str,
+) -> (u16, String, String) {
     let mut stream = TcpStream::connect(address).unwrap();
     stream
         .set_read_timeout(Some(Duration::from_secs(10)))
@@ -162,6 +177,14 @@ pub(crate) fn http(
     stream.read_to_string(&mut response).unwrap();
     let (head, body) = response.split_once("\r\n\r\n").unwrap();
     let status = head.split(' ').nth(1).unwrap().parse().unwrap();
+    let content_type = head
+        .lines()
+        .find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            name.eq_ignore_ascii_case("content-type")
+                .then(|| value.trim().to_owned())
+        })
+        .unwrap_or_default();
 
-    (status, serde_json::from_str(body).unwrap())
+    (status, content_type, body.to_owned())
 }

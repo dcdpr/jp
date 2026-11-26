@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 use camino::Utf8Path;
 use jp_process::{ProcessOutput, ProcessRunner, SystemProcessRunner};
 use jp_tool::{Capability, Outcome};
+use serde::Deserialize;
 use serde_json::Value;
 
 use crate::{
@@ -142,6 +143,7 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
                     docs_mergeable_info: t.option_or("doc_mergeable_info", false),
                     qual: t.option_or("qual_check", false),
                     site: t.option_or("site_check", false),
+                    wasm: t.option_or("wasm_check", false),
                 },
             )
             .await
@@ -166,6 +168,7 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
                 t.opt("testname")?,
                 t.opt("backtrace")?,
                 checksum_freshness,
+                t.option_or("wasm_test", false),
             )
             .await
         }
@@ -190,7 +193,7 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
 /// An unset argument and an empty array both return no packages, which every
 /// subcommand reads as the whole workspace.
 fn packages(arg: Option<OneOrMany<String>>) -> Vec<String> {
-    arg.map(OneOrMany::into_vec).unwrap_or_default()
+    arg.map_or_default(OneOrMany::into_vec)
 }
 
 /// Cargo flags that scope a run to `packages`: one `--package=<name>` per
@@ -201,6 +204,66 @@ fn cargo_scope(packages: &[String], workspace_flag: &str) -> Vec<String> {
     }
 
     packages.iter().map(|v| format!("--package={v}")).collect()
+}
+
+/// The target browser crates compile for.
+const WASM_TARGET: &str = "wasm32-unknown-unknown";
+
+/// The part of `cargo metadata --no-deps` that marks a browser crate.
+#[derive(Debug, Deserialize)]
+struct WasmMetadata {
+    packages: Vec<WasmPackage>,
+}
+
+#[derive(Debug, Deserialize)]
+struct WasmPackage {
+    name: String,
+
+    /// The package's `[package.metadata]`; a browser crate's holds `jp.wasm =
+    /// true`.
+    #[serde(default)]
+    metadata: Value,
+}
+
+/// The browser crates of the workspace at `root`, those among `packages` when
+/// it names any.
+///
+/// # Errors
+///
+/// Returns why `cargo metadata` couldn't say which they are.
+fn browser_crates<R: ProcessRunner>(
+    root: &Utf8Path,
+    packages: &[String],
+    runner: &R,
+) -> Result<Vec<String>, String> {
+    let output = runner
+        .run(
+            "cargo",
+            &["metadata", "--no-deps", "--format-version=1"],
+            root,
+        )
+        .map_err(|error| format!("`cargo` couldn't be run: {error}"))?;
+    if !output.success() {
+        return Err(format!("`cargo metadata` failed: {}", output.stderr.trim()));
+    }
+
+    browser_packages(&output.stdout, packages)
+}
+
+/// The packages `metadata`, the output of `cargo metadata`, marks as browser
+/// crates with `[package.metadata.jp] wasm = true`, those among `packages` when
+/// it names any.
+fn browser_packages(metadata: &str, packages: &[String]) -> Result<Vec<String>, String> {
+    let metadata: WasmMetadata = serde_json::from_str(metadata)
+        .map_err(|error| format!("`cargo metadata` printed output that can't be read: {error}"))?;
+
+    Ok(metadata
+        .packages
+        .into_iter()
+        .filter(|package| package.metadata.pointer("/jp/wasm") == Some(&Value::Bool(true)))
+        .filter(|package| packages.is_empty() || packages.contains(&package.name))
+        .map(|package| package.name)
+        .collect())
 }
 
 /// Comfort flags that scope a run to `packages`: a `--package <name>` pair per

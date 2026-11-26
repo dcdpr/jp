@@ -1,8 +1,14 @@
+#![cfg_attr(
+    unix,
+    expect(
+        clippy::unused_async_trait_impl,
+        reason = "test doubles implement async traits synchronously"
+    )
+)]
+
 #[cfg(unix)]
 use std::task::Poll;
 
-#[cfg(unix)]
-use async_trait::async_trait;
 use camino_tempfile::{Utf8TempDir, tempdir};
 #[cfg(unix)]
 use chrono::Utc;
@@ -23,7 +29,7 @@ use jp_inquire::InlineOption;
 use jp_llm::turn_summary::{GeneratedTurnSummary, transcripts};
 #[cfg(unix)]
 use jp_llm::{
-    Error as LlmError, EventStream, Provider, error::StreamError, event::Event,
+    DynProvider, Error as LlmError, EventStream, error::StreamError, event::Event,
     model::ModelDetails, provider::mock::MockProvider, query::ChatQuery,
 };
 #[cfg(unix)]
@@ -33,6 +39,7 @@ use jp_plugin::{
     registry::{PluginKind, RegistryPlugin},
 };
 use jp_storage::backend::{FsStorageBackend, PersistBackend as _};
+use jp_test::env_var::EnvVarGuard;
 use relative_path::RelativePathBuf;
 use serde_json::json;
 use serial_test::serial;
@@ -41,7 +48,7 @@ use tokio::sync::{Notify, oneshot};
 use super::*;
 #[cfg(unix)]
 use crate::signals::testing::test_router;
-use crate::{Globals, editor::CUT_MARKER, env_testing::EnvVarGuard, shutdown::until_shutdown};
+use crate::{Globals, editor::CUT_MARKER, shutdown::until_shutdown};
 
 /// A workspace no request in these tests reaches into, so it needs no storage.
 fn bare_workspace() -> Workspace {
@@ -2058,6 +2065,7 @@ fn a_structured_query_replies_with_the_last_turns_data() {
             conversation: "123".to_owned(),
             outcome: QueryOutcome::Finished,
             data: Some(json!({"turn": 2})),
+            answer: None,
         })
     );
 }
@@ -2156,6 +2164,7 @@ fn a_query_without_a_schema_replies_without_data() {
             conversation: "123".to_owned(),
             outcome: QueryOutcome::Finished,
             data: None,
+            answer: None,
         })
     );
 }
@@ -2178,6 +2187,67 @@ fn a_stopped_structured_query_replies_with_its_data_and_its_outcome() {
             conversation: "123".to_owned(),
             outcome: QueryOutcome::Stopped,
             data: Some(json!({"turn": 1})),
+            answer: None,
+        })
+    );
+}
+
+/// The answer is the turn's own last message, never an earlier turn's.
+#[test]
+fn a_query_replies_with_the_last_message_of_its_turn() {
+    let mut events = stream_of(vec![ChatResponse::message("First turn.")]);
+    let before = last_request_id(&events);
+    events.start_turn(ChatRequest::from("Review this"));
+    events
+        .current_turn_mut()
+        .add_chat_response(ChatResponse::message("Looking at it."))
+        .add_chat_response(ChatResponse::reasoning("Two points to make."))
+        .add_chat_response(ChatResponse::message("Done: two points."))
+        .add_chat_response(ChatResponse::message("  \n"))
+        .build()
+        .unwrap();
+
+    assert_eq!(
+        completed(
+            None,
+            "123".to_owned(),
+            QueryOutcome::Finished,
+            &events,
+            before.as_ref(),
+            None,
+        ),
+        HostToPlugin::QueryComplete(QueryCompleteResponse {
+            id: None,
+            conversation: "123".to_owned(),
+            outcome: QueryOutcome::Finished,
+            data: None,
+            answer: Some("Done: two points.".to_owned()),
+        })
+    );
+}
+
+/// A turn stopped before it started wrote nothing, so the message last in the
+/// conversation belongs to an earlier turn.
+#[test]
+fn a_query_stopped_before_its_turn_started_has_no_answer() {
+    let events = stream_of(vec![ChatResponse::message("First turn.")]);
+    let before = last_request_id(&events);
+
+    assert_eq!(
+        completed(
+            None,
+            "123".to_owned(),
+            QueryOutcome::Stopped,
+            &events,
+            before.as_ref(),
+            None,
+        ),
+        HostToPlugin::QueryComplete(QueryCompleteResponse {
+            id: None,
+            conversation: "123".to_owned(),
+            outcome: QueryOutcome::Stopped,
+            data: None,
+            answer: None,
         })
     );
 }
@@ -2521,8 +2591,7 @@ struct ParkedProvider {
 }
 
 #[cfg(unix)]
-#[async_trait]
-impl Provider for ParkedProvider {
+impl jp_llm::Provider for ParkedProvider {
     async fn model_details(&self, name: &Name) -> Result<ModelDetails, LlmError> {
         Ok(ModelDetails::empty(ModelIdConfig {
             provider: ProviderId::Test,
@@ -2559,7 +2628,7 @@ impl Provider for ParkedProvider {
 /// the notification fires.
 #[cfg(unix)]
 fn reply_to_query(
-    provider: Arc<dyn Provider>,
+    provider: Arc<dyn DynProvider>,
     follow_up: &str,
     press_once_parked: Option<Arc<Notify>>,
 ) -> String {
@@ -2632,6 +2701,18 @@ echo '{{"type":"exit","code":0}}'
     fs::read_to_string(&reply).expect("the plugin received a reply to its query")
 }
 
+/// `reply`, the host's answer to a query, without its `answer`.
+///
+/// A plugin's interrupt races the provider's first message, so whether the
+/// stopped turn holds one depends on which arrives first.
+#[cfg(unix)]
+fn without_answer(reply: &str) -> Value {
+    let mut reply: Value = serde_json::from_str(reply).unwrap();
+    reply.as_object_mut().unwrap().remove("answer");
+
+    reply
+}
+
 #[cfg(unix)]
 #[test]
 fn a_turn_that_finishes_is_reported_as_finished() {
@@ -2639,7 +2720,7 @@ fn a_turn_that_finishes_is_reported_as_finished() {
 
     assert_eq!(
         reply,
-        r#"{"type":"query_complete","id":"q","conversation":"jp-c17000000000","outcome":"finished"}"#
+        r#"{"type":"query_complete","id":"q","conversation":"jp-c17000000000","outcome":"finished","answer":"Done."}"#
     );
 }
 
@@ -2657,8 +2738,13 @@ fn a_turn_the_plugin_stops_is_reported_as_stopped() {
     );
 
     assert_eq!(
-        reply,
-        r#"{"type":"query_complete","id":"q","conversation":"jp-c17000000000","outcome":"stopped"}"#
+        without_answer(&reply),
+        json!({
+            "type": "query_complete",
+            "id": "q",
+            "conversation": "jp-c17000000000",
+            "outcome": "stopped"
+        })
     );
 }
 
@@ -2674,9 +2760,11 @@ fn a_turn_stopped_at_the_hosts_terminal_is_reported_as_stopped() {
 
     let reply = reply_to_query(provider, "", Some(parked));
 
+    // The stop lands once the provider has streamed its partial message, which
+    // the stopped turn keeps.
     assert_eq!(
         reply,
-        r#"{"type":"query_complete","id":"q","conversation":"jp-c17000000000","outcome":"stopped"}"#
+        r#"{"type":"query_complete","id":"q","conversation":"jp-c17000000000","outcome":"stopped","answer":"Partial"}"#
     );
 }
 
@@ -2694,8 +2782,13 @@ fn a_turn_the_plugin_aborts_is_reported_as_aborted() {
     );
 
     assert_eq!(
-        reply,
-        r#"{"type":"query_complete","id":"q","conversation":"jp-c17000000000","outcome":"aborted"}"#
+        without_answer(&reply),
+        json!({
+            "type": "query_complete",
+            "id": "q",
+            "conversation": "jp-c17000000000",
+            "outcome": "aborted"
+        })
     );
 }
 
@@ -3044,7 +3137,7 @@ fn a_describe_answer_is_compared_with_the_manifest_field_by_field() {
         command: vec!["titles".to_owned()],
     };
 
-    assert!(manifest_differences(&manifest, &manifest).is_empty());
+    assert_eq!(manifest_differences(&manifest, &manifest), [] as [&str; 0]);
     assert_eq!(
         manifest_differences(&manifest, &Manifest {
             protocol: 2,

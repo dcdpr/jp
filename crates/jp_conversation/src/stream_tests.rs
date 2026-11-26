@@ -1,6 +1,6 @@
 use chrono::{TimeZone as _, Timelike as _};
 use jp_config::{
-    PartialAppConfig, PartialConfig as _, PartialConfigDelta as _,
+    PartialAppConfig, PartialConfigDelta as _,
     conversation::tool::{PartialToolConfig, RunMode, ToolSource, access::FsRuleConfig},
     model::id::{
         ModelIdConfig, Name, PartialModelIdConfig, PartialModelIdOrAliasConfig, ProviderId,
@@ -186,7 +186,7 @@ fn a_delta_that_only_clears_is_recorded() {
         vec!["providers.mcp.bookworm.arguments".to_owned()],
     ));
 
-    assert!(resolved_arguments(&stream).is_empty());
+    assert_eq!(resolved_arguments(&stream), [] as [String; 0]);
 }
 
 /// A stream that never cleared anything reports nothing, deltas or not.
@@ -198,7 +198,7 @@ fn config_unsets_is_empty_without_a_clearing_delta() {
         server_arguments_partial(&["run"]),
     ));
 
-    assert!(stream.config_unsets().unwrap().is_empty());
+    assert_eq!(stream.config_unsets().unwrap(), [] as [String; 0]);
 }
 
 #[test]
@@ -592,7 +592,7 @@ fn a_delta_without_unsets_loads_with_none() {
         panic!("expected an apply");
     };
 
-    assert!(apply.unsets.is_empty());
+    assert_eq!(apply.unsets, [] as [String; 0]);
     assert_eq!(apply.delta.style.code.color, Some(false));
 }
 
@@ -951,7 +951,7 @@ fn test_to_parts_from_parts_roundtrip() {
 
     // Empty stream roundtrips.
     let (base_config, events) = stream.to_parts().unwrap();
-    assert!(events.is_empty());
+    assert_eq!(events, [] as [Value; 0]);
     let stream2 = ConversationStream::from_parts(base_config, events, &PartialAppConfig::empty())
         .unwrap()
         .with_created_at(stream.created_at);
@@ -1287,7 +1287,7 @@ fn test_pending_inquiries_leave_out_earlier_turns() {
     stream.push(question("call_1.confirm", 2));
     stream.push(answer("call_1.confirm", 3));
 
-    assert!(stream.pending_inquiries().is_empty());
+    assert_eq!(stream.pending_inquiries(), [] as [&ConversationEvent; 0]);
 }
 
 #[test]
@@ -2452,32 +2452,71 @@ fn test_compaction_not_counted_by_is_empty() {
     );
 }
 
+/// The turn ranges of the stream's compaction events, in stream order.
+fn compaction_ranges(stream: &ConversationStream) -> Vec<(usize, usize)> {
+    stream
+        .compactions()
+        .map(|c| (c.from_turn, c.to_turn))
+        .collect()
+}
+
 #[test]
-fn test_remove_compaction_by_index() {
+fn test_remove_compactions_where_removes_the_selected_events() {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn(ChatRequest::from("hello"));
+    stream.add_compaction(make_compaction(0, 1));
+    stream.add_compaction(make_compaction(2, 3));
+    stream.add_compaction(make_compaction(4, 5));
+    stream.add_compaction(make_compaction(6, 7));
+    let len_before = stream.len();
+
+    // Every index is judged against the stream as it was before the call, so
+    // removing the first event does not shift the others.
+    let removed = stream.remove_compactions_where(|index, _| index == 0 || index == 2);
+
+    let removed: Vec<_> = removed.iter().map(|c| (c.from_turn, c.to_turn)).collect();
+    assert_eq!(removed, vec![(0, 1), (4, 5)]);
+    assert_eq!(compaction_ranges(&stream), vec![(2, 3), (6, 7)]);
+    assert_eq!(
+        stream.len(),
+        len_before,
+        "conversation events are untouched"
+    );
+}
+
+#[test]
+fn test_remove_compactions_where_passes_each_event_to_the_predicate() {
     let mut stream = ConversationStream::new_test();
     stream.start_turn(ChatRequest::from("hello"));
     stream.add_compaction(make_compaction(0, 1));
     stream.add_compaction(make_compaction(2, 3));
     stream.add_compaction(make_compaction(4, 5));
 
-    let removed = stream.remove_compaction(1).expect("second compaction");
+    let removed = stream.remove_compactions_where(|_, compaction| compaction.from_turn >= 2);
 
-    assert_eq!((removed.from_turn, removed.to_turn), (2, 3));
-    let remaining: Vec<_> = stream
-        .compactions()
-        .map(|c| (c.from_turn, c.to_turn))
-        .collect();
-    assert_eq!(remaining, vec![(0, 1), (4, 5)]);
+    assert_eq!(removed.len(), 2);
+    assert_eq!(compaction_ranges(&stream), vec![(0, 1)]);
 }
 
 #[test]
-fn test_remove_compaction_out_of_range_is_a_no_op() {
+fn test_remove_compactions_where_nothing_is_selected_is_a_no_op() {
     let mut stream = ConversationStream::new_test();
     stream.start_turn(ChatRequest::from("hello"));
     stream.add_compaction(make_compaction(0, 1));
 
-    assert!(stream.remove_compaction(1).is_none());
-    assert_eq!(stream.compactions().count(), 1);
+    assert_eq!(stream.remove_compactions_where(|_, _| false), vec![]);
+    assert_eq!(compaction_ranges(&stream), vec![(0, 1)]);
+}
+
+#[test]
+fn test_remove_compactions_where_everything_is_selected_removes_them_all() {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn(ChatRequest::from("hello"));
+    stream.add_compaction(make_compaction(0, 1));
+    stream.add_compaction(make_compaction(2, 3));
+
+    assert_eq!(stream.remove_compactions_where(|_, _| true).len(), 2);
+    assert_eq!(stream.compactions().count(), 0);
 }
 
 #[test]
@@ -3521,7 +3560,7 @@ fn trimming_the_last_turn_of_a_stream_without_turn_markers_removes_its_events() 
     let request = stream.trim_last_turn();
 
     assert_eq!(request.map(|r| r.content), Some("q0".to_owned()));
-    assert!(entry_labels(&stream).is_empty());
+    assert_eq!(entry_labels(&stream), [] as [String; 0]);
 }
 
 #[test]

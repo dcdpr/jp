@@ -19,7 +19,6 @@ use tokio::{
     task::JoinHandle,
     time::{advance, timeout},
 };
-use tracing::instrument::WithSubscriber as _;
 use tracing_subscriber::{layer::SubscriberExt as _, registry};
 
 use super::{super::recorded_tests::UsageCapture, *};

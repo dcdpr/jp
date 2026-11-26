@@ -539,7 +539,7 @@ fn test_kv_assignment_try_vec_of_nested() {
     let mut v = vec![PartialTest::default()];
     let kv = KvAssignment::try_from_cli(":", "[]").unwrap();
     kv.try_vec_of_nested(&mut v).unwrap();
-    assert!(v.is_empty());
+    assert_eq!(v, [] as [PartialTest; 0]);
 
     let mut v = vec![PartialTest {
         one: None,

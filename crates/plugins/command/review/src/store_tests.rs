@@ -44,6 +44,30 @@ fn comment(review: &mut Review, body: &str) -> u32 {
         .unwrap()
 }
 
+/// A store has one server: the first to claim it holds it until it lets go, and
+/// its address is what the others find.
+#[test]
+fn a_store_is_served_by_one_server_at_a_time() {
+    let dir = Utf8TempDir::new().unwrap();
+    let store = Store::new(dir.path().join("reviews"));
+    assert_eq!(store.server(), Ok(None), "a store not yet made has none");
+
+    let Ok(Serving::Claimed(lock)) = store.claim_server() else {
+        panic!("the first server claims the store");
+    };
+    assert_eq!(store.server(), Ok(Some(String::new())), "no address yet");
+    store.serving_at("http://127.0.0.1:3001").unwrap();
+
+    assert_eq!(store.server(), Ok(Some("http://127.0.0.1:3001".to_owned())));
+    assert!(matches!(
+        store.claim_server(),
+        Ok(Serving::Running(address)) if address == "http://127.0.0.1:3001"
+    ));
+
+    drop(lock);
+    assert_eq!(store.server(), Ok(None), "the address left behind is stale");
+}
+
 #[test]
 fn a_new_review_is_a_directory_named_by_its_id() {
     let dir = Utf8TempDir::new().unwrap();

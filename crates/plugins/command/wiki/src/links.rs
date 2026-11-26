@@ -169,10 +169,7 @@ fn mentions_in(text: &str, line: usize) -> Vec<Mention> {
                     (Named::Wiki, format!("W-{}", body.as_str()))
                 }
                 (Some(_), Some(body), _) => (Named::Ticket, format!("T-{}", body.as_str())),
-                (_, _, rfd) => (
-                    Named::Rfd,
-                    rfd.map(|id| id.as_str().to_owned()).unwrap_or_default(),
-                ),
+                (_, _, rfd) => (Named::Rfd, rfd.map_or_default(|id| id.as_str().to_owned())),
             };
 
             Mention {

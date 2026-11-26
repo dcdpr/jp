@@ -1,16 +1,18 @@
-use std::{fmt, fs, time::SystemTime};
+use std::{fmt, fs, io, time::SystemTime};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use jp_conversation::ConversationId;
 use rayon::prelude::*;
+use serde::de::IgnoredAny;
 use tracing::{debug, trace};
 
+pub use crate::location::StorageLocation;
 use crate::{
-    BASE_CONFIG_FILE, CONVERSATIONS_DIR, EVENTS_FILE, IMPORT_STAGING_PREFIX, METADATA_FILE,
-    Storage, dir_entries,
+    ARCHIVE_DIR, BASE_CONFIG_FILE, CONVERSATIONS_DIR, EVENTS_FILE, IMPORT_STAGING_PREFIX,
+    METADATA_FILE, Storage, dir_entries,
+    error::Error,
     scan::{DirStamps, EventsSummary, SCAN_CACHE_FILE, ScanCache, ScannedDir},
-    trash::trash_conversation,
-    value::{cleanup_tmp_files, has_tmp_files},
+    value::{cleanup_tmp_files, has_tmp_files, tmp_files},
 };
 
 /// Result of validating all conversation directories across storage roots.
@@ -21,15 +23,30 @@ pub struct ValidationResult {
 
     /// Conversations that failed one or more validation checks.
     pub invalid: Vec<InvalidConversation>,
+
+    /// Directories under `conversations/` whose name is not a conversation ID.
+    pub unrecognized: Vec<Utf8PathBuf>,
+}
+
+/// Output of [`Storage::diagnose_conversations`].
+#[derive(Debug, Default)]
+pub(crate) struct ConversationsDiagnosis {
+    /// Conversation directories that fail validation, sorted by path.
+    pub(crate) invalid: Vec<InvalidConversation>,
+
+    /// Directories under `conversations/` whose name is not a conversation ID,
+    /// sorted by path.
+    pub(crate) unrecognized: Vec<Utf8PathBuf>,
+
+    /// Orphaned `.tmp` files and import staging directories left behind by
+    /// interrupted writes, sorted by path.
+    pub(crate) leftovers: Vec<Utf8PathBuf>,
 }
 
 /// A conversation directory that passed validation.
 #[derive(Debug)]
 pub struct ValidConversation {
-    /// The parsed conversation ID.
     pub id: ConversationId,
-
-    /// The directory name on disk.
     pub dirname: String,
 }
 
@@ -37,54 +54,153 @@ pub struct ValidConversation {
 #[derive(Debug)]
 pub struct InvalidConversation {
     /// The conversations root this entry lives under.
-    ///
-    /// Callers pass this back to [`trash_invalid_conversation`].
     pub(crate) conversations_dir: Utf8PathBuf,
 
-    /// What went wrong.
+    pub id: ConversationId,
+    pub archived: bool,
     pub error: ValidationError,
-
-    /// The directory name on disk.
     pub dirname: String,
 }
 
-/// The reason a conversation directory failed validation.
-#[derive(Debug, thiserror::Error)]
+/// Reason a stored conversation failed validation.
+///
+/// Display output uses the part location's [`StorageLocation::label`] (its file
+/// name on the filesystem backend).
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ValidationError {
-    /// The directory name could not be parsed as a [`ConversationId`].
-    #[error("invalid directory name")]
-    InvalidDirname,
-
-    /// The per-conversation metadata file is missing.
-    #[error("missing {METADATA_FILE}")]
-    MissingMetadata,
-
-    /// The per-conversation metadata file exists but is not valid JSON or is
-    /// not a JSON object.
-    #[error("{METADATA_FILE}: {source}")]
-    CorruptMetadata {
-        /// The underlying parse error.
-        source: Box<dyn std::error::Error + Send + Sync>,
+    /// A required conversation file (`metadata.json` or `events.json`) is
+    /// missing.
+    #[error("missing {}", .location.label())]
+    Missing {
+        part: ConversationPart,
+        location: StorageLocation,
     },
 
-    /// The per-conversation base config file exists but is not valid JSON.
-    #[error("{BASE_CONFIG_FILE}: {source}")]
-    CorruptBaseConfig {
-        /// The underlying parse error.
-        source: Box<dyn std::error::Error + Send + Sync>,
+    /// A conversation part exists but could not be read or parsed.
+    #[error("{}: {error}", .location.label())]
+    Unreadable {
+        part: ConversationPart,
+        location: StorageLocation,
+        #[source]
+        error: ReadError,
     },
+}
 
-    /// The per-conversation events file is missing.
-    #[error("missing {EVENTS_FILE}")]
-    MissingEvents,
+impl ValidationError {
+    #[must_use]
+    pub const fn part(&self) -> ConversationPart {
+        match self {
+            Self::Missing { part, .. } | Self::Unreadable { part, .. } => *part,
+        }
+    }
 
-    /// The per-conversation events file exists but is not a valid JSON array or
-    /// its elements are missing required structural fields.
-    #[error("{EVENTS_FILE}: {source}")]
-    CorruptEvents {
-        /// The underlying parse error.
-        source: Box<dyn std::error::Error + Send + Sync>,
+    #[must_use]
+    pub const fn location(&self) -> &StorageLocation {
+        match self {
+            Self::Missing { location, .. } | Self::Unreadable { location, .. } => location,
+        }
+    }
+}
+
+/// A part of a stored conversation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConversationPart {
+    Metadata,
+    BaseConfig,
+    Events,
+}
+
+impl ConversationPart {
+    /// Stable machine-readable identifier for this part.
+    #[must_use]
+    pub const fn code(self) -> &'static str {
+        match self {
+            Self::Metadata => "metadata",
+            Self::BaseConfig => "base_config",
+            Self::Events => "events",
+        }
+    }
+
+    /// On-disk file name for this part.
+    pub(crate) const fn file_name(self) -> &'static str {
+        match self {
+            Self::Metadata => METADATA_FILE,
+            Self::BaseConfig => BASE_CONFIG_FILE,
+            Self::Events => EVENTS_FILE,
+        }
+    }
+}
+
+/// Reason an existing conversation part could not be read or parsed.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ReadError {
+    /// The part could not be read from storage (for example, due to a
+    /// permission error).
+    #[error("{0}")]
+    Unavailable(String),
+
+    /// The part's content could not be parsed.
+    #[error("{}{}", malformed(*format), at(*position))]
+    Malformed {
+        /// Data format name shown in error messages (such as `"JSON"`).
+        format: Option<&'static str>,
+
+        message: String,
+
+        /// 1-based line and column of the parse error, for text formats.
+        position: Option<Position>,
     },
+}
+
+/// 1-based line and column position in a text file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Position {
+    pub line: usize,
+    pub column: usize,
+}
+
+fn malformed(format: Option<&str>) -> String {
+    format.map_or_else(
+        || "malformed".to_owned(),
+        |format| format!("invalid {format}"),
+    )
+}
+
+fn at(position: Option<Position>) -> String {
+    position.map_or_else(String::new, |p| {
+        format!(" at line {}, column {}", p.line, p.column)
+    })
+}
+
+impl From<io::Error> for ReadError {
+    fn from(error: io::Error) -> Self {
+        Self::Unavailable(error.to_string())
+    }
+}
+
+impl From<serde_json::Error> for ReadError {
+    fn from(error: serde_json::Error) -> Self {
+        Self::Malformed {
+            format: Some("JSON"),
+            message: error.to_string(),
+            position: Some(Position {
+                line: error.line(),
+                column: error.column(),
+            }),
+        }
+    }
+}
+
+impl InvalidConversation {
+    #[must_use]
+    pub fn path(&self) -> Utf8PathBuf {
+        self.conversations_dir.join(&self.dirname)
+    }
+
+    #[must_use]
+    pub fn location(&self) -> StorageLocation {
+        StorageLocation::of_path(&self.path())
+    }
 }
 
 impl fmt::Display for InvalidConversation {
@@ -97,11 +213,13 @@ impl Storage {
     /// Scan all conversation directories and check structural integrity.
     ///
     /// This is a lightweight check that runs on every startup.
-    /// For each directory entry it verifies:
+    /// A directory whose name does not parse as a [`ConversationId`] is not a
+    /// conversation, and is listed in [`ValidationResult::unrecognized`]
+    /// without being checked.
+    /// For every other directory it verifies:
     ///
-    /// 1. The directory name parses as a [`ConversationId`].
-    /// 2. A `metadata.json` file exists and is valid JSON.
-    /// 3. An `events.json` file exists and is a JSON array where each element
+    /// 1. A `metadata.json` file exists and is valid JSON.
+    /// 2. An `events.json` file exists and is a JSON array where each element
     ///    contains `timestamp` and `type` fields.
     ///
     /// Field values are skipped via [`IgnoredAny`] without allocating.
@@ -131,15 +249,7 @@ impl Storage {
     fn validate_conversations_at(&self, scan_started: SystemTime) -> ValidationResult {
         trace!("Validating conversations.");
 
-        let cache_path = self
-            .user
-            .as_ref()
-            .map(|user| user.join(CONVERSATIONS_DIR))
-            .filter(|dir| dir.is_dir())
-            .map(|dir| dir.join(SCAN_CACHE_FILE));
-        if let Some(path) = &cache_path {
-            self.scan.load(path);
-        }
+        let cache_path = self.load_scan_cache();
 
         let mut result = ValidationResult::default();
         let mut scanned = Vec::new();
@@ -171,6 +281,102 @@ impl Storage {
         );
 
         result
+    }
+
+    /// Validate live and archived conversation directories and collect leftover
+    /// temporary files without modifying the store.
+    ///
+    /// Unlike [`Self::validate_conversations`], this method checks archived
+    /// conversations, returns orphaned `.tmp` files and import staging
+    /// directories instead of deleting them, and reads the scan cache without
+    /// updating it on disk.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a conversations or archive directory exists but
+    /// cannot be listed.
+    pub(crate) fn diagnose_conversations(&self) -> Result<ConversationsDiagnosis, Error> {
+        trace!("Diagnosing conversations.");
+        self.load_scan_cache();
+
+        let mut validation = ValidationResult::default();
+        let mut leftovers = vec![];
+        for root in [Some(&self.root), self.user.as_ref()].into_iter().flatten() {
+            let conversations_dir = root.join(CONVERSATIONS_DIR);
+            if !listable(&conversations_dir)? {
+                continue;
+            }
+
+            leftovers.extend(leftovers_in(&conversations_dir));
+            validate_root(&conversations_dir, &self.scan, &mut validation, &mut vec![]);
+        }
+
+        let mut invalid = validation.invalid;
+        invalid.extend(self.validate_archive()?);
+        invalid.sort_by_key(InvalidConversation::path);
+        let mut unrecognized = validation.unrecognized;
+        unrecognized.sort();
+        leftovers.sort();
+
+        Ok(ConversationsDiagnosis {
+            invalid,
+            unrecognized,
+            leftovers,
+        })
+    }
+
+    /// Validate archived conversation directories without modifying the store.
+    ///
+    /// Reads the scan cache without writing to it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if an archive directory exists but cannot be listed.
+    pub(crate) fn validate_archive(&self) -> Result<Vec<InvalidConversation>, Error> {
+        let mut archive = ValidationResult::default();
+        for root in [Some(&self.root), self.user.as_ref()].into_iter().flatten() {
+            let archive_dir = root.join(CONVERSATIONS_DIR).join(ARCHIVE_DIR);
+            if listable(&archive_dir)? {
+                validate_root(&archive_dir, &self.scan, &mut archive, &mut vec![]);
+            }
+        }
+
+        Ok(archive.invalid)
+    }
+
+    /// Return the IDs of conversations under `conversations_dir` that pass
+    /// [`Self::validate_conversations`].
+    ///
+    /// Uses and updates the in-memory scan cache, but does not clean up
+    /// leftover temporary files or staging directories.
+    pub(crate) fn valid_conversation_ids(
+        &self,
+        conversations_dir: &Utf8Path,
+    ) -> Vec<ConversationId> {
+        let scan_started = SystemTime::now();
+        self.load_scan_cache();
+
+        let mut result = ValidationResult::default();
+        let mut scanned = Vec::new();
+        validate_root(conversations_dir, &self.scan, &mut result, &mut scanned);
+        self.scan.extend(scanned, scan_started);
+
+        result.valid.into_iter().map(|valid| valid.id).collect()
+    }
+
+    /// Load the persisted scan cache into memory, and return where it lives.
+    ///
+    /// `None` without user-local storage, which is where the cache is kept.
+    fn load_scan_cache(&self) -> Option<Utf8PathBuf> {
+        let path = self
+            .user
+            .as_ref()
+            .map(|user| user.join(CONVERSATIONS_DIR))
+            .filter(|dir| dir.is_dir())
+            .map(|dir| dir.join(SCAN_CACHE_FILE))?;
+
+        self.scan.load(&path);
+        Some(path)
     }
 
     /// Remove leftover import staging directories from one `conversations/`
@@ -232,8 +438,8 @@ impl Storage {
                 continue;
             }
 
-            // Unparseable directory names cannot be locked and will be trashed
-            // by `validate_root`.
+            // A directory whose name is not a conversation ID cannot be
+            // locked, and is not JP's to clean up.
             let Ok(id) = ConversationId::try_from_dirname(entry.file_name()) else {
                 continue;
             };
@@ -248,13 +454,45 @@ impl Storage {
     }
 }
 
-/// Trash a conversation that failed validation.
+/// Collect leftover import staging directories and orphaned `.tmp` files under
+/// `conversations_dir`.
 ///
-/// Moves the conversation directory to `.trash/` and writes a `TRASHED.md`
-/// explaining the error.
-pub(crate) fn trash_invalid_conversation(entry: &InvalidConversation) -> crate::error::Result<()> {
-    let error_msg = entry.error.to_string();
-    trash_conversation(&entry.conversations_dir, &entry.dirname, &error_msg)
+/// Ignores directories whose name does not parse as a [`ConversationId`].
+fn leftovers_in(conversations_dir: &Utf8Path) -> Vec<Utf8PathBuf> {
+    let mut leftovers = vec![];
+    for entry in dir_entries(conversations_dir) {
+        if !entry.file_type().is_ok_and(|ft| ft.is_dir()) {
+            continue;
+        }
+
+        let name = entry.file_name();
+        if let Some(dirname) = name.strip_prefix(IMPORT_STAGING_PREFIX) {
+            if ConversationId::try_from_dirname(dirname).is_ok() {
+                leftovers.push(entry.into_path());
+            }
+        } else if ConversationId::try_from_dirname(name).is_ok() {
+            leftovers.extend(tmp_files(entry.path()));
+        }
+    }
+
+    leftovers
+}
+
+/// Return `true` if `dir` exists and can be listed, or `false` if it does not
+/// exist.
+///
+/// # Errors
+///
+/// Returns [`Error::ReadFailed`] if `dir` exists but cannot be listed.
+fn listable(dir: &Utf8Path) -> Result<bool, Error> {
+    match dir.read_dir_utf8() {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(source) => Err(Error::ReadFailed {
+            path: dir.to_owned(),
+            source,
+        }),
+    }
 }
 
 /// Validate every conversation directory under `conversations_dir`.
@@ -271,17 +509,32 @@ fn validate_root(
 
     let entries: Vec<_> = dir_entries(conversations_dir)
         .filter(|entry| {
-            entry.file_type().ok().is_some_and(|ft| ft.is_dir())
-                && !entry.file_name().starts_with('.')
+            entry.file_type().is_ok_and(|ft| ft.is_dir()) && !entry.file_name().starts_with('.')
         })
         .collect();
 
-    let outcomes: Vec<_> = entries
+    let mut named = vec![];
+    for entry in entries {
+        match ConversationId::try_from_dirname(entry.file_name()) {
+            Ok(id) => named.push((entry, id)),
+            Err(_) => result.unrecognized.push(entry.into_path()),
+        }
+    }
+
+    let outcomes: Vec<_> = named
         .par_iter()
-        .map(|entry| validate_entry(conversations_dir, entry.file_name(), entry.path(), cache))
+        .map(|(entry, id)| {
+            validate_entry(
+                conversations_dir,
+                entry.file_name(),
+                *id,
+                entry.path(),
+                cache,
+            )
+        })
         .collect();
 
-    for (entry, outcome) in entries.into_iter().zip(outcomes) {
+    for ((entry, _), outcome) in named.into_iter().zip(outcomes) {
         match outcome {
             Ok((valid, scan)) => {
                 result.valid.push(valid);
@@ -294,91 +547,117 @@ fn validate_root(
     }
 }
 
-/// Validate a single conversation directory entry.
+/// Validate the conversation files in `dir` without modifying the filesystem.
 ///
-/// Returns [`ScannedDir`] alongside the result when `metadata.json` and
-/// `events.json` both have valid file stamps.
+/// # Errors
+///
+/// Returns the [`ValidationError`] if any required file is missing or invalid.
+pub fn validate_conversation_dir(dir: &Utf8Path) -> Result<(), ValidationError> {
+    check_files(dir, &ScanCache::default()).map(|_| ())
+}
+
+/// Return `true` if `dir` is missing `metadata.json` and all other conversation
+/// files are valid.
+pub(crate) fn missing_only_metadata(dir: &Utf8Path) -> bool {
+    !dir.join(METADATA_FILE).exists() && check_contents(dir).is_ok()
+}
+
+/// Validate a single conversation directory entry named for `id`.
 fn validate_entry(
     conversations_dir: &Utf8Path,
     dirname: &str,
+    id: ConversationId,
     entry_path: &Utf8Path,
     cache: &ScanCache,
 ) -> Result<(ValidConversation, Option<ScannedDir>), InvalidConversation> {
-    let id = ConversationId::try_from_dirname(dirname).map_err(|_| InvalidConversation {
-        conversations_dir: conversations_dir.to_path_buf(),
-        error: ValidationError::InvalidDirname,
-        dirname: dirname.to_owned(),
-    })?;
-    let valid = ValidConversation {
-        id,
-        dirname: dirname.to_owned(),
-    };
+    match check_files(entry_path, cache) {
+        Ok(scan) => Ok((
+            ValidConversation {
+                id,
+                dirname: dirname.to_owned(),
+            },
+            scan,
+        )),
+        Err(error) => Err(InvalidConversation {
+            conversations_dir: conversations_dir.to_path_buf(),
+            id,
+            archived: conversations_dir.file_name() == Some(ARCHIVE_DIR),
+            error,
+            dirname: dirname.to_owned(),
+        }),
+    }
+}
 
+/// Check the conversation files in `dir`.
+///
+/// Returns [`ScannedDir`] when `metadata.json` and `events.json` both have
+/// valid file stamps.
+fn check_files(dir: &Utf8Path, cache: &ScanCache) -> Result<Option<ScannedDir>, ValidationError> {
     // Capture file stamps before reading any files so a mid-check write keeps
     // the older stamp and is re-read on the next scan.
-    let stamps = DirStamps::of(entry_path);
-    if let Some(scan) = cache.get(entry_path, &stamps) {
-        return Ok((valid, Some(scan)));
+    let stamps = DirStamps::of(dir);
+    if let Some(scan) = cache.get(dir, &stamps) {
+        return Ok(Some(scan));
     }
 
-    let metadata_path = entry_path.join(METADATA_FILE);
+    let metadata_path = dir.join(METADATA_FILE);
     if !metadata_path.is_file() {
-        return Err(InvalidConversation {
-            conversations_dir: conversations_dir.to_path_buf(),
-            error: ValidationError::MissingMetadata,
-            dirname: dirname.to_owned(),
-        });
+        return Err(missing(dir, ConversationPart::Metadata));
     }
-    validate_metadata(&metadata_path).map_err(|source| InvalidConversation {
-        conversations_dir: conversations_dir.to_path_buf(),
-        error: ValidationError::CorruptMetadata { source },
-        dirname: dirname.to_owned(),
-    })?;
+    validate_metadata(&metadata_path)
+        .map_err(|error| unreadable(dir, ConversationPart::Metadata, error))?;
 
+    let summary = check_contents(dir)?;
+    Ok(stamps.scanned(summary))
+}
+
+/// Check the conversation files in `dir` other than the metadata, and summarize
+/// the events.
+fn check_contents(dir: &Utf8Path) -> Result<EventsSummary, ValidationError> {
     // base_config.json is optional for backward compat (old conversations have
     // the base config packed into events.json), but if it exists it must be
     // valid JSON.
-    let base_config_path = entry_path.join(BASE_CONFIG_FILE);
+    let base_config_path = dir.join(BASE_CONFIG_FILE);
     if base_config_path.is_file() {
-        validate_json_file(&base_config_path).map_err(|source| InvalidConversation {
-            conversations_dir: conversations_dir.to_path_buf(),
-            error: ValidationError::CorruptBaseConfig { source },
-            dirname: dirname.to_owned(),
-        })?;
+        validate_json_file(&base_config_path)
+            .map_err(|error| unreadable(dir, ConversationPart::BaseConfig, error))?;
     }
 
-    let events_path = entry_path.join(EVENTS_FILE);
+    let events_path = dir.join(EVENTS_FILE);
     if !events_path.is_file() {
-        return Err(InvalidConversation {
-            conversations_dir: conversations_dir.to_path_buf(),
-            error: ValidationError::MissingEvents,
-            dirname: dirname.to_owned(),
-        });
+        return Err(missing(dir, ConversationPart::Events));
     }
-    let summary = validate_events(&events_path).map_err(|source| InvalidConversation {
-        conversations_dir: conversations_dir.to_path_buf(),
-        error: ValidationError::CorruptEvents { source },
-        dirname: dirname.to_owned(),
-    })?;
-
-    Ok((valid, stamps.scanned(summary)))
+    validate_events(&events_path).map_err(|error| unreadable(dir, ConversationPart::Events, error))
 }
 
-/// Confirm `metadata.json` is a valid JSON object.
+fn missing(dir: &Utf8Path, part: ConversationPart) -> ValidationError {
+    ValidationError::Missing {
+        part,
+        location: StorageLocation::of_path(&dir.join(part.file_name())),
+    }
+}
+
+fn unreadable(dir: &Utf8Path, part: ConversationPart, error: ReadError) -> ValidationError {
+    ValidationError::Unreadable {
+        part,
+        location: StorageLocation::of_path(&dir.join(part.file_name())),
+        error,
+    }
+}
+
+/// Confirm `metadata.json` is valid JSON.
 ///
-/// Uses [`IgnoredAny`] to skip all field values — no allocations, no schema
-/// checks.
+/// Uses [`IgnoredAny`] to skip all field values without allocating or checking
+/// the schema.
 /// Content validation happens at load time.
 ///
 /// [`IgnoredAny`]: serde::de::IgnoredAny
-fn validate_metadata(path: &Utf8Path) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+fn validate_metadata(path: &Utf8Path) -> Result<(), ReadError> {
     validate_json_file(path)
 }
 
 /// Confirm a file is valid JSON.
-fn validate_json_file(path: &Utf8Path) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    use serde::de::IgnoredAny;
-
+fn validate_json_file(path: &Utf8Path) -> Result<(), ReadError> {
     let buf = fs::read(path)?;
     serde_json::from_slice::<IgnoredAny>(&buf)?;
     Ok(())
@@ -392,9 +671,7 @@ fn validate_json_file(path: &Utf8Path) -> Result<(), Box<dyn std::error::Error +
 /// `type` is the tag for the flattened `EventKind` enum on events, and an
 /// explicit `"config_delta"` tag on config deltas.
 /// This confirms the structural shape without materializing any event data.
-fn validate_events(
-    path: &Utf8Path,
-) -> Result<EventsSummary, Box<dyn std::error::Error + Send + Sync>> {
+pub(crate) fn validate_events(path: &Utf8Path) -> Result<EventsSummary, ReadError> {
     let buf = fs::read(path)?;
     Ok(EventsSummary::parse(&buf)?)
 }

@@ -19,6 +19,14 @@ fn persistence_is_on_unless_turned_off() {
     assert!(!parse(&["-P", "conversation", "ls"]).globals.persist);
 }
 
+#[test]
+fn the_default_globals_are_those_of_a_command_with_no_global_flags() {
+    assert_eq!(
+        format!("{:?}", Globals::default()),
+        format!("{:?}", parse(&["conversation", "ls"]).globals)
+    );
+}
+
 // Global options are accepted on either side of the subcommand.
 #[test]
 fn a_global_option_after_the_subcommand_is_read() {
@@ -82,6 +90,117 @@ fn no_subcommand_is_an_error() {
         error.kind(),
         clap::error::ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
     );
+}
+
+/// The message `jp <args>` is rejected with.
+fn rejection(args: &[&str]) -> String {
+    let Err(error) = Cli::try_parse_from(iter_argv(args)) else {
+        panic!("`jp {}` must not parse", args.join(" "));
+    };
+
+    error.render().to_string()
+}
+
+// The shell splits the command line into words, and each word is read whole:
+// `-n-tfoo` is the flag `-n` followed by an unknown flag `--`, never `-n` and
+// `-tfoo`.
+#[test]
+fn a_dash_inside_a_word_does_not_start_another_flag() {
+    assert!(Cli::try_parse_from(iter_argv(&["query", "-n", "-tfoo"])).is_ok());
+
+    assert_eq!(
+        rejection(&["query", "-n-tfoo"]),
+        "error: unexpected argument '--' found\n\n  tip: to pass '--' as a value, use '-- \
+         --'\n\nUsage: jp query [OPTIONS] [QUERY]...\n\nFor more information, try '--help'.\n"
+    );
+}
+
+// A word starting with `-` and a digit is always a value, never a flag, whether
+// or not `=` joins it to the option.
+#[test]
+fn a_from_end_value_is_its_options_as_a_word_of_its_own() {
+    for args in [
+        &["conversation", "compact", "--reset", "-3..-1"][..],
+        &["conversation", "compact", "--reset=-3..-1"][..],
+        &["conversation", "print", "--turn", "-3,-1"][..],
+        &[
+            "conversation",
+            "print",
+            "--turn",
+            "-3..",
+            "--keep-last",
+            "-2",
+        ][..],
+    ] {
+        assert!(
+            Cli::try_parse_from(iter_argv(args)).is_ok(),
+            "`jp {}` should parse",
+            args.join(" ")
+        );
+    }
+}
+
+// Once attached to its option, an invalid from-end value reports the option's
+// parse error rather than an unknown-flag error.
+#[test]
+fn a_from_end_value_its_option_rejects_reports_the_options_error() {
+    assert_eq!(
+        rejection(&["conversation", "compact", "--reset", "-3..x"]),
+        "error: invalid value '-3..x' for '--reset [<COMPACTIONS>]': invalid compaction number \
+         `x`\n\nFor more information, try '--help'.\n"
+    );
+}
+
+// After a boolean flag that takes no value, a `-<digit>` word has no option to
+// attach to and is rejected by clap as an unknown flag.
+#[test]
+fn a_from_end_value_after_a_flag_without_a_value_is_an_unknown_flag() {
+    assert_eq!(
+        rejection(&["conversation", "compact", "--dry-run", "-3..-1"]),
+        "error: unexpected argument '-3' found\n\n  tip: to pass '-3' as a value, use '-- \
+         -3'\n\nUsage: jp conversation compact [OPTIONS] [id]...\n\nFor more information, try \
+         '--help'.\n"
+    );
+}
+
+/// Append each short flag of `cmd` and its subcommands that is a digit, as
+/// `<command path> -<digit>`.
+fn digit_shorts(cmd: &Command, path: &str, found: &mut Vec<String>) {
+    for arg in cmd.get_arguments() {
+        let aliases = arg.get_all_short_aliases().unwrap_or_default();
+        for short in arg.get_short().into_iter().chain(aliases) {
+            if short.is_ascii_digit() {
+                found.push(format!("{path} -{short}"));
+            }
+        }
+    }
+
+    for sub in cmd.get_subcommands() {
+        digit_shorts(sub, &format!("{path} {}", sub.get_name()), found);
+    }
+}
+
+// Treating a `-<digit>` word as an option value is sound only if no short flag
+// is a digit.
+#[test]
+fn no_flag_starts_with_a_digit() {
+    let mut cmd = Cli::command();
+    cmd.build();
+
+    let mut found = vec![];
+    digit_shorts(&cmd, "jp", &mut found);
+
+    assert_eq!(found, Vec::<String>::new());
+}
+
+// A plugin reads its own arguments, so none of them is rewritten.
+#[test]
+fn a_plugin_commands_from_end_value_is_left_as_written() {
+    let Commands::External(args) = parse(&["serve", "web", "--port", "-3..-1"]).command else {
+        panic!("an unknown subcommand is a plugin's");
+    };
+
+    assert_eq!(args, ["serve", "web", "--port", "-3..-1"]);
 }
 
 // An error raised while reading a subcommand's arguments back gets the same

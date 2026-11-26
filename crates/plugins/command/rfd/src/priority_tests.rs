@@ -72,7 +72,7 @@ fn a_malformed_board_file_reads_as_an_empty_board() {
         let priority = board(&raw);
 
         assert_eq!(priority, Priority::default(), "{raw}");
-        assert!(priority.order().is_empty());
+        assert_eq!(priority.order(), [] as [&str; 0]);
     }
 }
 

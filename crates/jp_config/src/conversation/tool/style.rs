@@ -465,11 +465,19 @@ impl Default for TruncateLines {
     }
 }
 
+impl FromStr for TruncateLines {
+    type Err = ParseIntError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        s.parse().map(|lines| Self { lines })
+    }
+}
+
 impl TryFrom<&str> for TruncateLines {
     type Error = ParseIntError;
 
     fn try_from(s: &str) -> Result<Self, Self::Error> {
-        s.parse().map(|lines| Self { lines })
+        s.parse()
     }
 }
 

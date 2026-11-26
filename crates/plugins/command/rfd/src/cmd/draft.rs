@@ -1,18 +1,19 @@
-//! `jp rfd draft`: a new draft from its category's template, or from a ticket.
+//! `jp rfd draft`: create a new draft from a category template or a ticket.
 //!
-//! A draft takes the first free slot in the drafts directory, `D05`, and its
-//! file is named after its title: `D05-my-feature.md`.
-//! The template is the project's own, `000-<category>-template.md` in the RFD
-//! directory, which `jp rfd init` writes; its `RFD NNN: TITLE` heading,
-//! `AUTHOR`, and `DATE` placeholders are filled in, and its `Category` set.
+//! A draft is assigned the first slot (`D05`) that has no file in `drafts/` and
+//! is not referenced in any RFD, draft, ticket, or priority board entry.
+//! Its file is named after its title (`D05-my-feature.md`).
+//! The template is `000-<category>-template.md` in the RFD directory (created
+//! by `jp rfd init`), with its `RFD NNN: TITLE` heading, `AUTHOR`, and `DATE`
+//! placeholders filled in and its `Category` metadata field set.
 
 use std::{fs, io};
 
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
 use doc::references::markdown_files;
 use ticket::{TicketId, store};
 
-use super::{alternatives, capitalized};
+use super::{alternatives, capitalized, uncited_draft_slot};
 use crate::{
     Output,
     document::Document,
@@ -30,9 +31,15 @@ pub(crate) struct Draft<'a> {
     pub date: &'a str,
 }
 
-/// A ticket a draft is seeded from.
+/// Ticket metadata used to seed a draft.
 struct Seed<'a> {
     ticket: TicketId,
+    file: &'a Utf8Path,
+
+    /// Existing `Promoted to` RFD ID on the ticket, which the new draft
+    /// replaces.
+    promoted_to: Option<RfdId>,
+
     description: &'a str,
 }
 
@@ -45,9 +52,12 @@ pub(crate) fn draft(
     categories: &[String],
     draft: &Draft<'_>,
 ) -> Result<Output, String> {
-    let (_, file) = create(paths, categories, draft, None)?;
+    let (_, file, cited) = create(paths, categories, draft, None)?;
 
-    Ok(format!("Created {}\n", paths.show(&file)).into())
+    let mut output = Output::from(format!("Created {}\n", paths.show(&file)));
+    output.warnings.extend(cited);
+
+    Ok(output)
 }
 
 /// Write a new draft seeded from `ticket`'s title and description, then record
@@ -114,9 +124,16 @@ pub(crate) fn from_ticket(
     let seeded = Draft { title, ..*draft };
     let seed = Seed {
         ticket,
+        file: &ticket_file,
+        promoted_to: parsed
+            .metadata
+            .promoted_to
+            .as_deref()
+            .and_then(|promoted| promoted.parse().ok()),
         description: &parsed.description,
     };
-    let (id, file) = create(paths, categories, &seeded, Some(&seed))?;
+    let (id, file, cited) = create(paths, categories, &seeded, Some(&seed))?;
+    output.warnings.extend(cited);
 
     let promoted = store::promote(&paths.tickets, &paths.formatting, ticket, &id.to_string())
         .map_err(|error| error.to_string())?;
@@ -129,13 +146,18 @@ pub(crate) fn from_ticket(
     Ok(output)
 }
 
-/// Check the request and write the draft, returning its id and path.
+/// Validate the request and write the draft file, returning its ID, path, and
+/// an optional warning listing dangling draft references.
+///
+/// The RFD ID in the seed ticket's `Promoted to` field is omitted from the
+/// warning for that ticket because `from_ticket` overwrites that field with the
+/// new draft ID.
 fn create(
     paths: &Paths,
     categories: &[String],
     draft: &Draft<'_>,
     seed: Option<&Seed<'_>>,
-) -> Result<(RfdId, Utf8PathBuf), String> {
+) -> Result<(RfdId, Utf8PathBuf, Option<String>), String> {
     let category = draft.category.trim().to_lowercase();
     if !categories.contains(&category) {
         return Err(format!(
@@ -161,7 +183,10 @@ fn create(
         Err(error) => return Err(format!("{template_path}: {error}")),
     };
 
-    let id = id::next_draft_slot(&paths.rfds)?;
+    let (id, cited) = uncited_draft_slot(
+        paths,
+        seed.and_then(|seed| Some((seed.file, seed.promoted_to?))),
+    )?;
     let mut text = fill(&template, id, title, &category, draft.author, draft.date)
         .map_err(|problem| format!("{}: {problem}", paths.show(&template_path)))?;
     if let Some(seed) = seed {
@@ -174,7 +199,7 @@ fn create(
     let file = drafts.join(format!("{id}-{}.md", id::slug(title)));
     paths.create(&file, &text)?;
 
-    Ok((id, file))
+    Ok((id, file, cited))
 }
 
 /// The text of a new draft: `template` with its placeholders filled in and its

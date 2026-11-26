@@ -56,8 +56,7 @@ impl Symbols {
             .iter()
             .filter(|scope| scope.start <= line && line <= scope.end)
             .max_by_key(|scope| scope.depth)
-            .map(|scope| scope.path.clone())
-            .unwrap_or_default()
+            .map_or_default(|scope| scope.path.clone())
     }
 
     /// Return `true` if the file has a named item whose path is `symbol`.
@@ -206,8 +205,7 @@ fn type_name(ty: &Type) -> String {
 fn last_segment(path: &Path) -> String {
     path.segments
         .last()
-        .map(|segment| segment.ident.to_string())
-        .unwrap_or_default()
+        .map_or_default(|segment| segment.ident.to_string())
 }
 
 #[cfg(test)]

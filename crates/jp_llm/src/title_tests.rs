@@ -454,13 +454,13 @@ fn extract_titles_valid() {
 #[test]
 fn extract_titles_missing_key() {
     let data = json!({"other": "value"});
-    assert!(extract_titles(&data).is_empty());
+    assert_eq!(extract_titles(&data), [] as [String; 0]);
 }
 
 #[test]
 fn extract_titles_wrong_type() {
     let data = json!({"titles": "not an array"});
-    assert!(extract_titles(&data).is_empty());
+    assert_eq!(extract_titles(&data), [] as [String; 0]);
 }
 
 #[test]

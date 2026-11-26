@@ -20,7 +20,7 @@ pub mod service;
 mod upstream;
 use std::{fmt, sync::Arc};
 
-pub use builtin::BuiltinTool;
+pub use builtin::{BuiltinTool, DynBuiltinTool};
 use camino::Utf8Path;
 pub use command::{AdmittedPlugin, CommandPlugins, PluginInit};
 use command::{CommandToolCall, init_line, parse_plugin_output, plugin_stderr};

@@ -7,7 +7,11 @@
 //! [`resolve`] finds the file an id names, and refuses when no file or more
 //! than one does.
 
-use std::{collections::HashSet, error, fmt, fs, io, str::FromStr};
+use std::{
+    collections::{BTreeSet, HashSet},
+    error, fmt, fs, io,
+    str::FromStr,
+};
 
 use camino::{Utf8Path, Utf8PathBuf};
 
@@ -21,7 +25,7 @@ const MAX_NUMBER: u16 = 999;
 const MAX_SLOT: u8 = 99;
 
 /// An RFD's identifier.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum RfdId {
     /// A permanent number, `001` to `999`.
     ///
@@ -284,15 +288,15 @@ fn taken(dir: &Utf8Path) -> Result<HashSet<RfdId>, String> {
     Ok(taken)
 }
 
-/// The first draft slot no file in the drafts directory of the RFD directory
-/// `dir` takes.
-pub(crate) fn next_draft_slot(dir: &Utf8Path) -> Result<RfdId, String> {
+/// Return the first draft slot that has no file in `dir/drafts/` and is not in
+/// `reserved`.
+pub(crate) fn next_draft_slot(dir: &Utf8Path, reserved: &BTreeSet<RfdId>) -> Result<RfdId, String> {
     let taken = taken(&dir.join(DRAFTS_DIR))?;
 
     (1..=MAX_SLOT)
         .map(RfdId::Draft)
-        .find(|id| !taken.contains(id))
-        .ok_or_else(|| "No draft slots available (D01-D99 all in use).".to_owned())
+        .find(|id| !taken.contains(id) && !reserved.contains(id))
+        .ok_or_else(|| "No draft slots available (D01-D99 all in use or cited).".to_owned())
 }
 
 /// The first permanent number no file in the RFD directory `dir` takes: the

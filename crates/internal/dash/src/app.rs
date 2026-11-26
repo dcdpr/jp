@@ -181,9 +181,9 @@ impl Feeds {
         model::rows(
             self.worktrees.data.as_deref().unwrap_or_default(),
             self.terminals.data.as_deref().unwrap_or_default(),
-            jp.map(|jp| jp.runs.as_slice()).unwrap_or_default(),
-            jp.map(|jp| jp.sessions.as_slice()).unwrap_or_default(),
-            jp.map(|jp| jp.recent.as_slice()).unwrap_or_default(),
+            jp.map_or_default(|jp| jp.runs.as_slice()),
+            jp.map_or_default(|jp| jp.sessions.as_slice()),
+            jp.map_or_default(|jp| jp.recent.as_slice()),
             self.prs.data.as_deref().unwrap_or_default(),
         )
     }

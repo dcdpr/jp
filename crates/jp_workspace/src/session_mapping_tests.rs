@@ -561,7 +561,7 @@ fn session_overviews_prefer_the_migrated_mapping_listed_before_its_legacy_file()
 #[test]
 fn all_active_conversation_ids_empty_when_no_sessions() {
     let (_tmp, ws, _fs) = setup();
-    assert!(ws.all_active_conversation_ids().is_empty());
+    assert_eq!(ws.all_active_conversation_ids(), [] as [ConversationId; 0]);
 }
 
 #[test]

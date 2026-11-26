@@ -674,35 +674,5 @@ fn trace_to_tmpfile(prefix: &str, value: &impl serde::Serialize) -> String {
 }
 
 #[cfg(test)]
-pub(crate) struct EnvVarGuard {
-    name: String,
-    original_value: Option<String>,
-}
-
-#[cfg(test)]
-impl EnvVarGuard {
-    pub fn set(name: &str, value: &str) -> Self {
-        let name = name.to_string();
-        let original_value = std::env::var(&name).ok();
-        unsafe { std::env::set_var(&name, value) };
-        Self {
-            name,
-            original_value,
-        }
-    }
-}
-
-#[cfg(test)]
-impl Drop for EnvVarGuard {
-    fn drop(&mut self) {
-        if let Some(ref original) = self.original_value {
-            unsafe { std::env::set_var(&self.name, original) };
-        } else {
-            unsafe { std::env::remove_var(&self.name) };
-        }
-    }
-}
-
-#[cfg(test)]
 #[path = "util_tests.rs"]
 mod tests;

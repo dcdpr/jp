@@ -77,7 +77,7 @@ fn citations_are_read_across_wrapped_lines_in_order() {
 
     assert_eq!(header.citations("Extends"), ["001", "100"]);
     assert_eq!(header.citations("Requires"), ["072", "D05", "077"]);
-    assert!(header.citations("Required by").is_empty());
+    assert_eq!(header.citations("Required by"), [] as [String; 0]);
 }
 
 /// A line at the margin continues the field above it, as markdown reads a list

@@ -274,8 +274,7 @@ fn open<'a>(ctx: &'a Context, t: &Tool) -> Result<Session<'a>, String> {
         .options
         .get("server_log")
         .and_then(Value::as_str)
-        .map(rust_analyzer::log_env)
-        .unwrap_or_default();
+        .map_or_default(rust_analyzer::log_env);
 
     let mut server = Server::start(
         &command,
@@ -1315,8 +1314,7 @@ impl<'a> Session<'a> {
 
         let source = self.source(&file)?;
         let found = outline::at(&source.items, position)
-            .map(|index| outline::children_named(&source.items, index, &name.ident))
-            .unwrap_or_default();
+            .map_or_default(|index| outline::children_named(&source.items, index, &name.ident));
 
         match found.as_slice() {
             [only] => Ok((file, source.items[*only].selection.start)),
@@ -1357,8 +1355,7 @@ impl<'a> Session<'a> {
             .map_err(|failure| failure.to_string())?;
 
         Ok(found
-            .map(GotoResponse::into_locations)
-            .unwrap_or_default()
+            .map_or_default(GotoResponse::into_locations)
             .into_iter()
             .find_map(|location| Some((file_path(&location.uri).ok()?, location.range.start))))
     }
@@ -1374,8 +1371,7 @@ impl<'a> Session<'a> {
             .request::<Value>("textDocument/hover", &position_params(file, position)?)
             .map_err(|failure| failure.to_string())?;
         let parts = hover_text(&hover)
-            .map(|text| rust_analyzer::parse_hover(&text, render::SIGNATURE_LINES))
-            .unwrap_or_default();
+            .map_or_default(|text| rust_analyzer::parse_hover(&text, render::SIGNATURE_LINES));
 
         let qualified = match parts.container {
             Some(container) => {
@@ -1403,9 +1399,11 @@ impl<'a> Session<'a> {
         }
 
         let source = self.source(file)?;
-        Ok(outline::at(&source.items, position)
-            .map(|index| outline::doc_paragraph(&source.items[index], &source.lines, DOC_LINES))
-            .unwrap_or_default())
+        Ok(
+            outline::at(&source.items, position).map_or_default(|index| {
+                outline::doc_paragraph(&source.items[index], &source.lines, DOC_LINES)
+            }),
+        )
     }
 
     /// Return the source snippet of the item at `position` if its file is in
@@ -1457,8 +1455,7 @@ impl<'a> Session<'a> {
                 &position_params(file, position)?,
             )
             .map_err(|failure| failure.to_string())?
-            .map(GotoResponse::into_locations)
-            .unwrap_or_default())
+            .map_or_default(GotoResponse::into_locations))
     }
 
     /// Find references to the symbol at `position`.

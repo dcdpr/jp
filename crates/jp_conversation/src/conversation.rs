@@ -214,7 +214,7 @@ impl ConversationId {
 
     /// Create a directory name from the conversation id.
     pub fn to_dirname(&self, title: Option<&str>) -> String {
-        let len = title.map(str::len).unwrap_or_default();
+        let len = title.map_or_default(str::len);
         let title = title
             .unwrap_or_default()
             .trim()

@@ -24,7 +24,7 @@ use jp_conversation::{ConversationStream, event::ChatRequest, thread::ThreadBuil
 use serde_json::{Map, Value, json};
 
 use crate::{
-    Provider,
+    DynProvider,
     error::Result,
     event::NoticeSink,
     event_builder,
@@ -129,7 +129,7 @@ pub fn resolve_model(
 /// Returns an error if the thread cannot be built or the provider request fails
 /// after exhausting its retries.
 pub async fn generate(
-    provider: &dyn Provider,
+    provider: &dyn DynProvider,
     details: &ModelDetails,
     request: TitleRequest,
 ) -> Result<Vec<String>> {
@@ -183,8 +183,7 @@ pub async fn generate(
 
     Ok(event_builder::structured_data(events)
         .as_ref()
-        .map(extract_titles)
-        .unwrap_or_default())
+        .map_or_default(extract_titles))
 }
 
 /// Rebuild `events` so `model` is the only assistant model the request sees.
@@ -299,13 +298,12 @@ pub fn title_instructions(count: usize, rejected: &[String]) -> Vec<SectionConfi
 pub fn extract_titles(data: &Value) -> Vec<String> {
     data.get("titles")
         .and_then(Value::as_array)
-        .map(|arr| {
+        .map_or_default(|arr| {
             arr.iter()
                 .filter_map(Value::as_str)
                 .map(str::to_owned)
                 .collect()
         })
-        .unwrap_or_default()
 }
 
 #[cfg(test)]

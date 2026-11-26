@@ -62,7 +62,7 @@ fn a_draft_is_its_template_filled_in() {
     .unwrap();
 
     assert_eq!(output.text, "Created docs/rfd/drafts/D01-my-feature.md\n");
-    assert!(output.warnings.is_empty());
+    assert_eq!(output.warnings, [] as [String; 0]);
     assert_eq!(
         workspace.read("docs/rfd/drafts/D01-my-feature.md"),
         "\
@@ -95,6 +95,71 @@ fn a_draft_takes_the_first_free_slot() {
     let output = draft(&workspace.paths, &categories(), &request("design", "Next")).unwrap();
 
     assert_eq!(output.text, "Created docs/rfd/drafts/D02-next.md\n");
+}
+
+/// Skip any slot still cited in another document, because promoting a draft
+/// rewrites every citation of its ID and would redirect stale citations to the
+/// new RFD.
+#[test]
+fn a_draft_skips_a_slot_another_document_still_cites() {
+    let workspace = workspace();
+    workspace.write("docs/rfd/drafts/D01-taken.md", "# RFD D01: Taken\n");
+    workspace.write(
+        "docs/ticket/02wt0kx-old.md",
+        "See [RFD D02] and [the sketch](../rfd/drafts/D03-sketch.md).\n\nNot D056, xD04, or \
+         D04_x.\n",
+    );
+    workspace.write("docs/rfd/042-published.md", "Built on RFD D02.\n");
+
+    let output = draft(&workspace.paths, &categories(), &request("design", "Next")).unwrap();
+
+    assert_eq!(output.text, "Created docs/rfd/drafts/D04-next.md\n");
+    assert_eq!(output.warnings, ["Warning: draft ids cited with no draft \
+                                  file to match; their slots are skipped \
+                                  until the citations are fixed:\n  D02 \
+                                  in docs/rfd/042-published.md\n  D02 in \
+                                  docs/ticket/02wt0kx-old.md\n  D03 in \
+                                  docs/ticket/02wt0kx-old.md"]);
+}
+
+/// Promotion rewrites `RFD D02` even when followed by a letter or `_`, so
+/// non-standalone `RFD Dnn` citations also reserve their slots.
+#[test]
+fn a_draft_skips_a_slot_cited_inside_a_word() {
+    let workspace = workspace();
+    workspace.write("docs/rfd/drafts/D01-taken.md", "# RFD D01: Taken\n");
+    workspace.write(
+        "docs/ticket/02wt0kx-old.md",
+        "See _RFD D02_ and the RFD D03s, but not RFD D045.\n",
+    );
+
+    let output = draft(&workspace.paths, &categories(), &request("design", "Next")).unwrap();
+
+    assert_eq!(output.text, "Created docs/rfd/drafts/D04-next.md\n");
+    assert_eq!(output.warnings, ["Warning: draft ids cited with no draft \
+                                  file to match; their slots are skipped \
+                                  until the citations are fixed:\n  D02 \
+                                  in docs/ticket/02wt0kx-old.md\n  D03 \
+                                  in docs/ticket/02wt0kx-old.md"]);
+}
+
+/// Promotion rewrites a draft's priority board entry to its permanent number,
+/// so a stale draft entry on the board also reserves its slot.
+#[test]
+fn a_draft_skips_a_slot_the_board_still_ranks() {
+    let workspace = workspace();
+    workspace.board(
+        r#"{ "planned": [{ "milestone": null, "ids": ["D01", "042"] }], "backlog": ["D02"] }"#,
+    );
+
+    let output = draft(&workspace.paths, &categories(), &request("design", "Next")).unwrap();
+
+    assert_eq!(output.text, "Created docs/rfd/drafts/D03-next.md\n");
+    assert_eq!(output.warnings, ["Warning: draft ids cited with no draft \
+                                  file to match; their slots are skipped \
+                                  until the citations are fixed:\n  D01 \
+                                  in docs/rfd/.priority.json\n  D02 in \
+                                  docs/rfd/.priority.json"]);
 }
 
 /// The category is written as the metadata spells it, whatever the template
@@ -326,6 +391,38 @@ fn a_ticket_naming_a_missing_rfd_is_seeded_again() {
             .read(&ticket_path)
             .contains("- **Promoted to**: D01\n")
     );
+}
+
+/// Only the seed ticket's `Promoted to` field (which the command overwrites) is
+/// omitted from the warning; dangling citations in the ticket's description are
+/// still reported.
+#[test]
+fn a_seed_tickets_own_citations_are_reported() {
+    let workspace = workspace();
+    workspace.write(
+        "docs/ticket/02wt0kx-ship-the-widget.md",
+        &ticket(
+            "Ship the Widget",
+            "Todo",
+            &[("Promoted to", "D07")],
+            "Builds on RFD D09.",
+        ),
+    );
+
+    let output = from_ticket(
+        &workspace.paths,
+        &categories(),
+        TICKET.parse().unwrap(),
+        &request("design", ""),
+    )
+    .unwrap();
+
+    assert_eq!(output.warnings, [
+        "T-02wt0kx names D07, but no such RFD exists; seeding a new draft.",
+        "Warning: draft ids cited with no draft file to match; their slots are skipped until the \
+         citations are fixed:\n  D09 in docs/ticket/02wt0kx-ship-the-widget.md",
+    ]);
+    assert!(workspace.exists("docs/rfd/drafts/D01-ship-the-widget.md"));
 }
 
 /// A run interrupted after writing the draft and before closing the ticket left

@@ -4,6 +4,10 @@ use chrono::{DateTime, TimeZone as _, Utc};
 use jp_config::AppConfig;
 use jp_conversation::{Conversation, Labels};
 use jp_printer::{OutputFormat, Printer};
+use jp_storage::{
+    backend::StoredConversation,
+    validate::{ConversationPart, Position, ReadError, StorageLocation, ValidationError},
+};
 use jp_workspace::{ConversationLock, LockResult, Workspace};
 use tokio::runtime::Runtime;
 
@@ -59,11 +63,12 @@ fn only_the_irreversible_action_cautions_the_user() {
 /// raised and this is the only thing that can end a bulk run part-way through.
 #[test]
 fn esc_declines_but_ctrl_c_ends_the_run() {
-    assert!(decide(Ok('y')).unwrap(), "y accepts");
-    assert!(!decide(Ok('n')).unwrap(), "n declines");
-    assert!(
-        !decide(Err(InquireError::OperationCanceled)).unwrap(),
-        "Esc declines"
+    assert_eq!(decide(Ok('y')).unwrap(), Answer::Yes);
+    assert_eq!(decide(Ok('n')).unwrap(), Answer::No);
+    assert_eq!(
+        decide(Err(InquireError::OperationCanceled)).unwrap(),
+        Answer::No,
+        "Esc declines this one only"
     );
 
     let error = decide(Err(InquireError::OperationInterrupted))
@@ -73,6 +78,81 @@ fn esc_declines_but_ctrl_c_ends_the_run() {
     };
     assert_eq!(error.code.get(), 130, "the shell's status for a SIGINT");
     assert_eq!(error.message, None, "Ctrl-C needs no diagnostic");
+}
+
+#[test]
+fn the_capitals_answer_for_every_remaining_conversation() {
+    assert_eq!(decide(Ok('Y')).unwrap(), Answer::YesToAll);
+    assert_eq!(decide(Ok('N')).unwrap(), Answer::NoToAll);
+}
+
+#[test]
+fn yes_and_no_to_all_are_offered_only_when_more_follow() {
+    let prompt = ConversationAction::Remove.prompt();
+    let keys = |more| {
+        options(&prompt, more)
+            .into_iter()
+            .map(|option| option.key)
+            .collect::<String>()
+    };
+
+    assert_eq!(keys(true), "yYnN");
+    assert_eq!(keys(false), "yn");
+}
+
+fn never_asked(_more: bool) -> std::result::Result<Answer, ()> {
+    panic!("asked a question the answers already settled")
+}
+
+#[test]
+fn yes_answers_only_this_conversation() {
+    let mut answers = Answers::default();
+    let mut asked = vec![];
+
+    for more in [true, true, false] {
+        let accepted = answers
+            .decide(more, |more| {
+                asked.push(more);
+                Ok::<_, ()>(Answer::Yes)
+            })
+            .unwrap();
+        assert!(accepted);
+    }
+
+    assert_eq!(asked, [true, true, false]);
+    assert_eq!(answers.rest(), None);
+}
+
+#[test]
+fn yes_to_all_answers_every_remaining_conversation_without_asking() {
+    let mut answers = Answers::default();
+
+    let first = answers.decide(true, |_| Ok::<_, ()>(Answer::YesToAll));
+    let second = answers.decide(true, never_asked);
+    let last = answers.decide(false, never_asked);
+
+    assert_eq!((first, second, last), (Ok(true), Ok(true), Ok(true)));
+    assert_eq!(answers.rest(), Some(true));
+}
+
+#[test]
+fn no_to_all_declines_every_remaining_conversation_without_asking() {
+    let mut answers = Answers::default();
+
+    let first = answers.decide(true, |_| Ok::<_, ()>(Answer::NoToAll));
+    let second = answers.decide(false, never_asked);
+
+    assert_eq!((first, second), (Ok(false), Ok(false)));
+    assert_eq!(answers.rest(), Some(false));
+}
+
+#[test]
+fn answers_that_start_at_yes_to_all_never_ask() {
+    let mut answers = Answers::yes_to_all();
+
+    let accepted = answers.decide(true, never_asked);
+
+    assert_eq!(accepted, Ok(true));
 }
 
 /// A terminal that cannot be read is a broken prompt, not a choice the user
@@ -222,6 +302,109 @@ fn details_report_an_unpinned_conversation_as_unpinned() {
     );
 }
 
+fn stored(
+    title: Option<&str>,
+    state: std::result::Result<(), ValidationError>,
+) -> StoredConversation {
+    StoredConversation {
+        id: make_id(1000),
+        locations: vec![StorageLocation::new("/ws/.jp/conversations/10000")],
+        state,
+        title: title.map(str::to_owned),
+        repair: None,
+        archived: false,
+    }
+}
+
+#[test]
+fn unloaded_details_show_the_title_status_and_every_location() {
+    let mut conversation = stored(
+        Some("Fix the loader"),
+        Err(ValidationError::Unreadable {
+            part: ConversationPart::Metadata,
+            location: StorageLocation::labelled(
+                "/ws/.jp/conversations/10000/metadata.json",
+                "metadata.json",
+            ),
+            error: ReadError::Malformed {
+                format: Some("JSON"),
+                message: "expected ident at line 1 column 2".to_owned(),
+                position: Some(Position { line: 1, column: 2 }),
+            },
+        }),
+    );
+    conversation
+        .locations
+        .push(StorageLocation::new("/user/conversations/10000-a-title"));
+
+    let expected = [
+        "Removing conversation jp-c10000",
+        "",
+        "        ID  jp-c10000",
+        "     Title  Fix the loader",
+        "    Status  unable to load: metadata.json: invalid JSON at line 1, column 2",
+        " Locations",
+        "            1. /ws/.jp/conversations/10000",
+        "            2. /user/conversations/10000-a-title",
+    ];
+    assert_eq!(
+        unloaded_details(&conversation, false).to_string(),
+        expected.join("\n")
+    );
+}
+
+#[test]
+fn unloaded_details_leave_out_what_is_not_known() {
+    let expected = [
+        "Removing conversation jp-c10000",
+        "",
+        "        ID  jp-c10000",
+        " Locations",
+        "            1. /ws/.jp/conversations/10000",
+    ];
+    assert_eq!(
+        unloaded_details(&stored(None, Ok(())), false).to_string(),
+        expected.join("\n")
+    );
+}
+
+#[test]
+fn unloaded_details_show_a_title_as_plain_text() {
+    let expected = [
+        "Removing conversation jp-c10000",
+        "",
+        "        ID  jp-c10000",
+        "     Title  Fix[2J the loader",
+        " Locations",
+        "            1. /ws/.jp/conversations/10000",
+    ];
+    assert_eq!(
+        unloaded_details(&stored(Some("Fix\x1b[2J the\r loader"), Ok(())), false).to_string(),
+        expected.join("\n")
+    );
+}
+
+#[test]
+fn an_unloaded_removal_nobody_can_confirm_fails() {
+    let id = make_id(1000);
+    let mut ctx = test_ctx(id, Conversation::default());
+    ctx.term.interactive = false;
+
+    let error = confirm_unloaded_removal(&ctx, &stored(None, Ok(())), false)
+        .expect_err("a removal nobody can confirm must not be assumed");
+    let crate::error::Error::Command(error) = error else {
+        panic!("expected a command error, got: {error}");
+    };
+
+    assert_eq!(
+        error.message.as_deref(),
+        Some(
+            "removing conversation jp-c10000 needs a confirmation and nobody is available to give \
+             one; pass --no-confirm to remove it without asking"
+        )
+    );
+}
+
 fn test_ctx(id: ConversationId, conversation: Conversation) -> Ctx {
     let workspace = workspace_with(id, conversation);
     let (printer, _, _) = Printer::memory(OutputFormat::TextPretty);
@@ -255,7 +438,7 @@ fn a_prompt_nobody_can_answer_fails_and_names_the_way_through() {
     };
 
     let message = |action| {
-        let error = confirm_conversation_action(&ctx, action, &lock, None)
+        let error = confirm_conversation_action(&ctx, action, &lock, None, false)
             .expect_err("an action nobody can confirm must not be assumed either way");
         let crate::error::Error::Command(error) = error else {
             panic!("expected a command error, got: {error}");
