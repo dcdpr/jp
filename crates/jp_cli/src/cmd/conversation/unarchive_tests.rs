@@ -4,7 +4,7 @@ use std::{
     time::Duration,
 };
 
-use camino_tempfile::Utf8TempDir;
+use camino_tempfile::{Utf8TempDir, tempdir};
 use jp_config::AppConfig;
 use jp_conversation::{Conversation, ConversationId};
 use jp_printer::{OutputFormat, Printer};
@@ -13,7 +13,9 @@ use jp_workspace::Workspace;
 use tokio::runtime::Runtime;
 
 use super::*;
-use crate::{Globals, bootstrap::ExecutionContext, cmd::target::ConversationTarget};
+use crate::{
+    Globals, bootstrap::ExecutionContext, cli::parse_args, cmd::target::ConversationTarget,
+};
 
 fn id() -> ConversationId {
     ConversationId::try_from_dirname("17941219991").unwrap()
@@ -94,4 +96,44 @@ fn fails_on_a_held_conversation_when_nobody_can_wait() {
         Some("Timed out waiting for lock on conversation jp-c17941219991")
     );
     assert!(ctx.workspace.acquire_conversation(&id()).is_err());
+}
+
+/// Regression: a duplicate ID caused the second iteration to see the
+/// conversation as already unarchived and print a "not archived, skipping"
+/// warning.
+#[test]
+fn a_repeated_id_is_unarchived_once() {
+    let tmp = tempdir().unwrap();
+    let (printer, out, _) = Printer::memory(OutputFormat::Text);
+    let fs = Arc::new(FsStorageBackend::new(&tmp.path().join(".jp")).unwrap());
+    let workspace = Workspace::in_memory(tmp.path()).with_backend(fs);
+    let mut ctx = Ctx::new(
+        ExecutionContext::for_workspace(&workspace),
+        workspace,
+        None,
+        Runtime::new().unwrap(),
+        Globals::default(),
+        AppConfig::new_test(),
+        None,
+        printer,
+    );
+
+    let id = ConversationId::try_from(ctx.now()).unwrap();
+    ctx.workspace
+        .create_conversation_with_id(id, Conversation::default(), ctx.config());
+    let handle = ctx.workspace.acquire_conversation(&id).unwrap();
+    let mut conv = ctx.workspace.test_lock(handle).into_mut();
+    conv.update_metadata(|_| {});
+    conv.flush().unwrap();
+    drop(conv);
+    let handle = ctx.workspace.acquire_conversation(&id).unwrap();
+    let lock = ctx.workspace.test_lock(handle);
+    ctx.workspace.archive_conversation(lock.into_mut()).unwrap();
+
+    let id_arg = id.to_string();
+    let cmd = parse_args::<Unarchive>(&[&id_arg, &id_arg]).unwrap();
+    Runtime::new().unwrap().block_on(cmd.run(&mut ctx)).unwrap();
+    ctx.printer.flush();
+
+    assert_eq!(*out.lock(), format!("Conversation {id} unarchived.\n"));
 }

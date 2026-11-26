@@ -5,9 +5,13 @@ use chrono::{DateTime, Utc};
 use clap::error::ErrorKind;
 use jp_config::{
     AppConfig, PartialAppConfig,
-    conversation::compaction::{
-        CompactionConfig, CompactionRuleConfig, PartialCompactionConfig,
-        PartialCompactionRuleConfig, PartialSummaryConfig, ReasoningMode, RuleBound, ToolCallsMode,
+    conversation::{
+        DefaultConversationId,
+        compaction::{
+            CompactionConfig, CompactionRuleConfig, PartialCompactionConfig,
+            PartialCompactionRuleConfig, PartialSummaryConfig, ReasoningMode, RuleBound,
+            ToolCallsMode,
+        },
     },
     model::{PartialModelConfig, id::PartialModelIdOrAliasConfig},
 };
@@ -33,8 +37,11 @@ use crate::{
     Cli, Globals,
     cli::parse_args,
     cmd::{
-        self, compact_flag::CompactSpec, conversation, conversation_id::ConversationIds as _,
-        target::ConversationTarget,
+        self,
+        compact_flag::CompactSpec,
+        conversation,
+        conversation_id::ConversationIds as _,
+        target::{ConversationTarget, resolve_request},
     },
     ctx::Ctx,
 };
@@ -1141,6 +1148,53 @@ fn an_empty_plan_on_a_later_target_compacts_nothing() {
         0,
         "a refused multi-target run must not leave the earlier target compacted"
     );
+}
+
+/// Regression: a duplicate ID gave `compact` two handles to the same
+/// conversation, so `--reset=1` removed compaction 1 and then the second
+/// compaction after it shifted to index 1.
+#[test]
+fn a_repeated_id_resets_one_compaction() {
+    let (mut ctx, _out, _tmp) = preview_ctx();
+    let id = preview_id();
+    ctx.workspace
+        .create_conversation_with_id(id, Conversation::default(), ctx.config());
+    let lock = ctx
+        .workspace
+        .test_lock(ctx.workspace.acquire_conversation(&id).unwrap());
+    lock.as_mut().update_events(|e| {
+        e.extend(stream_of(6).iter().cloned());
+        e.add_compaction(Compaction::new(0, 1));
+        e.add_compaction(Compaction::new(2, 4));
+    });
+    drop(lock);
+
+    let id_arg = id.to_string();
+    let cmd = parse_compact(&[&id_arg, &id_arg, "--reset=1"]);
+    let handles = resolve_request(
+        &cmd.conversation_load_request(),
+        &ctx.workspace,
+        None,
+        DefaultConversationId::Ask,
+        false,
+        false,
+    )
+    .unwrap()
+    .handles;
+    Runtime::new()
+        .unwrap()
+        .block_on(cmd.run(&mut ctx, handles))
+        .unwrap();
+
+    let handle = ctx.workspace.acquire_conversation(&id).unwrap();
+    let remaining: Vec<_> = ctx
+        .workspace
+        .events(&handle)
+        .unwrap()
+        .compactions()
+        .map(|c| (c.from_turn, c.to_turn))
+        .collect();
+    assert_eq!(remaining, vec![(2, 4)]);
 }
 
 /// Three turns is the first size the defaults can satisfy, so the error must

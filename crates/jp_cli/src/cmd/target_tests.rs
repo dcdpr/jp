@@ -457,6 +457,51 @@ fn a_picker_without_a_user_fails_instead_of_prompting() {
     );
 }
 
+/// A repeated ID would hand the command two handles to one conversation, and
+/// the command would act on it once per handle.
+#[test]
+fn repeated_ids_resolve_to_one_handle_each_in_first_seen_order() {
+    let mut ws = Workspace::in_memory(Utf8PathBuf::new());
+    let config = Arc::new(AppConfig::new_test());
+    let a = make_id(2000);
+    let b = make_id(1000);
+    ws.create_conversation_with_id(a, Conversation::default(), Arc::clone(&config));
+    ws.create_conversation_with_id(b, Conversation::default(), config);
+
+    let targets = PositionalIds::<true, true>::from_targets(vec![
+        ConversationTarget::Id(a),
+        ConversationTarget::Id(a),
+        ConversationTarget::Id(b),
+        ConversationTarget::Id(a),
+    ]);
+    let ids: Vec<_> = resolve_request(
+        &ConversationLoadRequest::explicit_or_session(&targets),
+        &ws,
+        None,
+        DefaultConversationId::Ask,
+        false,
+        false,
+    )
+    .unwrap()
+    .handles
+    .iter()
+    .map(ConversationHandle::id)
+    .collect();
+
+    // `a` has a newer timestamp than `b`, so preserving `[a, b]` confirms
+    // deduplication keeps input order rather than sorting by ID.
+    assert_eq!(ids, vec![a, b]);
+}
+
+#[test]
+fn dedup_ids_keeps_the_first_occurrence_of_each_id() {
+    let (a, b, c) = (make_id(3), make_id(1), make_id(2));
+
+    assert_eq!(dedup_ids(vec![a, b, a, c, b, a]), vec![a, b, c]);
+    assert_eq!(dedup_ids(vec![a, b, c]), vec![a, b, c]);
+    assert_eq!(dedup_ids(vec![]), Vec::<ConversationId>::new());
+}
+
 /// Only Esc, Ctrl-C, and EOF are the user declining.
 /// Anything else is the prompt itself breaking, and must keep its cause so the
 /// run is reported as a failure rather than a choice.
