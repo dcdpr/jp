@@ -400,6 +400,59 @@ fn rm_removes_a_file_attachment_whose_file_is_gone() {
     assert_eq!(*err.lock(), "");
 }
 
+/// File names holding characters a URL reads as delimiters, and the URL each is
+/// stored and reported as.
+#[cfg(not(windows))]
+const DELIMITER_NAMES: [(&str, &str); 3] = [
+    ("reports/Issue #42.md", "file:///reports/Issue%20%2342.md"),
+    ("reports/what?.md", "file:///reports/what%3F.md"),
+    ("reports/100%25.md", "file:///reports/100%2525.md"),
+];
+
+// Windows rejects `?` in paths.
+#[cfg(windows)]
+const DELIMITER_NAMES: [(&str, &str); 2] = [
+    ("reports/Issue #42.md", "file:///reports/Issue%20%2342.md"),
+    ("reports/100%25.md", "file:///reports/100%2525.md"),
+];
+
+/// A path given on the command line names the same attachment as a `file` table
+/// with that `path`, including characters a URL reads as delimiters.
+#[test]
+fn rm_of_a_bare_path_removes_the_file_table_for_it() {
+    let id = make_id(1_700_000_035);
+    let mut config = AppConfig::new_test();
+    config.conversation.attachments = DELIMITER_NAMES
+        .iter()
+        .map(|(name, _)| table("file", name, &[]))
+        .collect();
+    let (mut ctx, out, err, tmp) = persisted_ctx(id, config);
+    let rt = ctx.handle().clone();
+
+    // `parse_unchecked` resolves a relative path against the process directory,
+    // so the paths are given absolute, under the workspace root. They are built
+    // as paths directly: `from_str` reads a Windows drive letter as a URL scheme.
+    let handle = ctx.workspace.acquire_conversation(&id).unwrap();
+    let rm = rm::Rm {
+        attachments: DELIMITER_NAMES
+            .iter()
+            .map(|(name, _)| AttachmentUrlOrPath::Path(tmp.path().join(name).as_str().into()))
+            .collect(),
+        target: FlagIds::default(),
+    };
+    rt.block_on(rm.run(&mut ctx, vec![handle])).unwrap();
+    ctx.printer.flush();
+
+    let removed = DELIMITER_NAMES
+        .iter()
+        .map(|(_, url)| format!("Removed {url} from conversation {id}\n"))
+        .collect::<Vec<_>>()
+        .concat();
+    assert_eq!(stored_urls(&ctx, &id), Vec::<String>::new());
+    assert_eq!(*out.lock(), removed);
+    assert_eq!(*err.lock(), "");
+}
+
 /// Removing an attachment that is not on the conversation records no delta and
 /// reports the unmatched URL on stderr.
 #[test]

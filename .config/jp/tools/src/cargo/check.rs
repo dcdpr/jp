@@ -5,7 +5,10 @@ use indoc::indoc;
 use jp_process::{ProcessOutput, ProcessRunner, SystemProcessRunner};
 use serde::Deserialize;
 
-use super::{MAX_DIAGNOSTIC_BYTES, WASM_TARGET, browser_crates, cargo_scope, comfort_scope};
+use super::{
+    CHECKSUM_FRESHNESS_ENV, MAX_DIAGNOSTIC_BYTES, WASM_TARGET, browser_crates, cargo_scope,
+    comfort_scope,
+};
 use crate::util::{ToolResult, error, truncate};
 
 /// Run clippy and comfort over `packages` (or the whole workspace when
@@ -65,11 +68,7 @@ fn cargo_check_impl<R: ProcessRunner>(
 
     let mut env = vec![("RUSTFLAGS", rustflags)];
     if checks.checksum_freshness {
-        // Use content checksums instead of file mtimes for cargo's freshness
-        // checks, so that sibling checkouts (git worktrees) sharing a target
-        // dir cannot serve each other's stale artifacts. Matches CI. Requires
-        // nightly cargo. See rust-lang/cargo#14136.
-        env.push(("CARGO_UNSTABLE_CHECKSUM_FRESHNESS", "true"));
+        env.extend(CHECKSUM_FRESHNESS_ENV);
     }
 
     let mut args = vec!["clippy", "--color=never"];
