@@ -46,7 +46,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tracing::{debug, info, warn};
 
 use super::{
-    PendingStreamTrim, build_sections, build_thread,
+    PendingStreamTrim,
     interrupt::{
         InterruptAction, LoopAction, StreamingInterruptResult, TurnInterrupts,
         apply_streaming_interrupt, handle_llm_event, handle_streaming_interrupt, reply_edit_mode,
@@ -64,6 +64,7 @@ use super::{
         unresponded_requests,
     },
     turn::{Action, CommittedEvent, TurnCoordinator, TurnEnding, TurnPhase, TurnState},
+    turn_start::{build_sections, build_thread},
 };
 use crate::{
     cmd::{
