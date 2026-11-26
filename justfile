@@ -400,15 +400,15 @@ install $JP_INSTALL="1":
 # Install every binary this workspace ships, built with the release profile.
 #
 # Installs `jp`, `jp-tools`, `bookworm`, `comfort`, `grizzly`, `dash`, `qual`,
-# and every command plugin under `crates/plugins/command/`, so a new plugin is
-# picked up without changing this recipe. Each one is rebuilt, whether or not it
-# is installed.
+# and every command plugin under `crates/plugins/command/`. Each binary is
+# rebuilt, whether or not an older copy is already installed.
 #
-# Plugins listed in the registry (`[package.metadata.jp-registry]`) go to JP's
-# plugin directory, the others to `~/.cargo/bin`; see `_install-registry-plugin`.
+# Plugins listed in the registry (`[package.metadata.jp-registry]`) are
+# installed into JP's plugin directory; the remaining plugins go to
+# `~/.cargo/bin` (see `_install-registry-plugin`).
 #
-# Left out: test fixtures (the `*_probe` binaries), `build-registry`, which only
-# the registry recipes run, and the macOS app.
+# Omitted: test fixtures (the `*_probe` binaries), `build-registry` (which only
+# the registry recipes run), and the macOS app.
 [group('build')]
 [group('main')]
 install-all:
@@ -2291,7 +2291,7 @@ plugin-build-local: _install-jp (plugin-build "")
 # `build-ui`, and embedded through `JP_<PLUGIN>_UI`; a plain `cargo install`
 # serves a placeholder page in its place.
 #
-# PROFILE is the cargo profile to build with, `dev` unless given.
+# PROFILE is the cargo profile to build with (defaults to `dev`).
 [group('plugins')]
 install-plugin PLUGIN PROFILE="dev":
     #!/usr/bin/env sh
@@ -2998,13 +2998,14 @@ _install-serve-web: (_install-registry-plugin "serve-web")
 
 # Build a registry command plugin, `jp-<PLUGIN>`, into JP's plugin directory.
 #
-# Not `cargo install`, unlike the other plugins. A registry plugin may already
-# have a released build that `jp` installed into its plugin directory, and a
-# second `jp-<PLUGIN>` in `~/.cargo/bin` would share its name: `jp` refuses to
-# run either of two binaries with one name. Writing the local build over the
-# installed one is what lets a checkout win.
+# Uses `cargo build` and overwrites the binary in JP's plugin directory rather
+# than `cargo install` into `~/.cargo/bin`. A registry plugin may already have a
+# released build in the plugin directory, and `jp` refuses to run a plugin when
+# two binaries with the same name exist on `$PATH` and in the plugin directory.
+# Overwriting the plugin directory copy lets the local checkout replace an
+# installed release.
 #
-# PROFILE is the cargo profile to build with, `dev` unless given.
+# PROFILE is the cargo profile to build with (defaults to `dev`).
 #
 # Deliberately ignores `JP_NO_INSTALL`: that variable exists to stop recipes from
 # rebuilding `jp` itself, and this recipe's only job is to build the plugin.
