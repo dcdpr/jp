@@ -439,34 +439,36 @@ impl ConversationStream {
             .count()
     }
 
-    /// Remove all compaction events from the stream.
+    /// Remove the compaction events `select` accepts, returning them in stream
+    /// order.
     ///
-    /// Returns the number of compaction events removed.
-    pub fn remove_compactions(&mut self) -> usize {
-        let before = self.events.len();
-        self.events
-            .retain(|e| !matches!(&e.payload, EventPayload::Compaction(_)));
-        before - self.events.len()
-    }
+    /// `select` is called once per compaction event, with the event and its
+    /// 0-based index among the stream's compaction events.
+    /// The index counts every compaction event in the stream as it is when the
+    /// call starts, so removing one event does not shift the index of a later
+    /// one.
+    pub fn remove_compactions_where(
+        &mut self,
+        mut select: impl FnMut(usize, &Compaction) -> bool,
+    ) -> Vec<Compaction> {
+        let mut removed = Vec::new();
+        let mut index = 0;
 
-    /// Remove a single compaction event, addressed by its 0-based position
-    /// among the compaction events in the stream.
-    ///
-    /// Returns the removed event, or `None` when the stream holds fewer
-    /// compaction events than that (in which case the stream is unchanged).
-    pub fn remove_compaction(&mut self, index: usize) -> Option<Compaction> {
-        let position = self
-            .events
-            .iter()
-            .enumerate()
-            .filter(|(_, event)| matches!(&event.payload, EventPayload::Compaction(_)))
-            .map(|(position, _)| position)
-            .nth(index)?;
+        self.events.retain(|event| {
+            let EventPayload::Compaction(compaction) = &event.payload else {
+                return true;
+            };
 
-        match self.events.remove(position).payload {
-            EventPayload::Compaction(compaction) => Some(compaction),
-            _ => unreachable!("position points at a compaction event"),
-        }
+            let selected = select(index, compaction);
+            index += 1;
+            if selected {
+                removed.push(compaction.clone());
+            }
+
+            !selected
+        });
+
+        removed
     }
 
     /// Returns an iterator over the [`Compaction`] events in the stream.

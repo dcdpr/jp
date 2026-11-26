@@ -14,6 +14,7 @@ use jp_config::{
     },
     types::{byte_size::ByteSize, policy_spec::PolicySpec},
 };
+use jp_conversation::position::{Position, PositionSpec};
 
 use crate::cli::{
     CommandArgs,
@@ -337,56 +338,44 @@ fn parse_policy_options<'a>(
     Ok(over)
 }
 
-/// Parse one DSL range bound: a positive integer is a 1-based absolute turn
-/// index, a negative integer counts back from the last turn (`-1`).
-fn parse_dsl_bound(s: &str) -> Result<RuleBound, String> {
-    if let Some(rest) = s.strip_prefix('-') {
-        let n: usize = rest
-            .parse()
-            .map_err(|_| format!("invalid bound '-{rest}'"))?;
-        if n == 0 {
-            return Err("from-end offsets are 1-based; use `-1` for the last turn".to_owned());
-        }
-        Ok(RuleBound::FromEnd(n - 1))
-    } else {
-        let n: usize = s.parse().map_err(|_| format!("invalid bound '{s}'"))?;
-        if n == 0 {
-            return Err("turn indices are 1-based; `0` is not a valid turn".to_owned());
-        }
-        Ok(RuleBound::Absolute(n))
+/// Convert a 1-based DSL turn [`Position`] into a [`RuleBound`].
+///
+/// `RuleBound::Absolute` holds the 1-based number as written, while
+/// `RuleBound::FromEnd` holds a 0-based offset from the last turn.
+fn dsl_bound(position: Position) -> RuleBound {
+    match position {
+        Position::Absolute(n) => RuleBound::Absolute(n),
+        Position::FromEnd(n) => RuleBound::FromEnd(n.saturating_sub(1)),
     }
 }
 
+/// Parse a DSL range: `FROM..TO` with either side optional, or a single turn
+/// position.
+///
+/// Both ends are inclusive: a positive bound is a 1-based absolute turn, a
+/// negative bound counts from the end.
 fn parse_dsl_range(s: &str) -> Result<DslRange, String> {
-    // Explicit range: FROM..TO (either side may be empty). Both ends are
-    // inclusive: a positive bound is a 1-based absolute turn, a negative bound
-    // counts from the end.
-    if let Some((left, right)) = s.split_once("..") {
-        let from = if left.is_empty() {
-            None
-        } else {
-            Some(parse_dsl_bound(left)?)
-        };
-        let to = if right.is_empty() {
-            None
-        } else {
-            Some(parse_dsl_bound(right)?)
-        };
-        return Ok(DslRange { from, to });
-    }
+    let spec = s
+        .parse::<PositionSpec>()
+        .map_err(|error| error.describe("turn"))?;
 
-    // Single-number shorthand: positive `N` = `N..` (compact from turn N on),
-    // negative `-N` = `..-N` (compact through the Nth turn from the end).
-    match parse_dsl_bound(s)? {
-        bound @ RuleBound::FromEnd(_) => Ok(DslRange {
+    Ok(match spec {
+        // Single-number shorthand: positive `N` = `N..` (compact from turn N
+        // on), negative `-N` = `..-N` (compact through the Nth turn from the
+        // end).
+        PositionSpec::Single(position @ Position::FromEnd(_)) => DslRange {
             from: None,
-            to: Some(bound),
-        }),
-        bound => Ok(DslRange {
-            from: Some(bound),
+            to: Some(dsl_bound(position)),
+        },
+        PositionSpec::Single(position) => DslRange {
+            from: Some(dsl_bound(position)),
             to: None,
-        }),
-    }
+        },
+        PositionSpec::Range(from, to) => DslRange {
+            from: from.map(dsl_bound),
+            to: to.map(dsl_bound),
+        },
+    })
 }
 
 #[cfg(test)]
