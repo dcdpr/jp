@@ -220,15 +220,65 @@ fn create(path: &Path) -> std::io::Result<fs::File> {
 ///
 /// # Errors
 ///
-/// Returns an error when the file is absent, unreadable, or holds a line that
-/// is not a framed message.
+/// Returns an error when the file is absent, unreadable, holds a line that is
+/// not a framed message, or was recorded against a release other than the
+/// pinned one (see [`check_versions`]).
 #[cfg(test)]
 pub(super) fn read(name: &str) -> Result<Vec<Framed>, String> {
     let path = fixture(name);
     let contents = fs::read_to_string(&path)
         .map_err(|error| format!("Recording not found at {}: {error}", path.display()))?;
 
-    parse(&contents).map_err(|error| format!("{}: {error}", path.display()))
+    let script = parse(&contents).map_err(|error| format!("{}: {error}", path.display()))?;
+    check_versions(&script).map_err(|error| format!("{}: {error}", path.display()))?;
+    Ok(script)
+}
+
+/// Check that a recording was made against the pinned adapter and Claude Code.
+///
+/// The adapter reports its version in every `initialize` answer, so a recording
+/// without one is rejected.
+/// Claude Code reports its version in the `system/init` SDK message, which only
+/// a connection that sent a prompt carries; a recording without one is checked
+/// against the adapter version alone.
+///
+/// # Errors
+///
+/// Returns an error naming the recorded and pinned version on a mismatch.
+#[cfg(test)]
+fn check_versions(script: &[Framed]) -> Result<(), String> {
+    let mut adapter_seen = false;
+    for entry in script.iter().filter(|entry| entry.from == Side::Agent) {
+        let recorded = [
+            (
+                entry.message.pointer("/result/agentInfo/version"),
+                "claude-agent-acp",
+                super::ADAPTER_VERSION,
+            ),
+            (
+                entry.message.pointer("/params/message/claude_code_version"),
+                "Claude Code",
+                super::CLAUDE_VERSION,
+            ),
+        ];
+        for (version, name, pinned) in recorded {
+            let Some(version) = version.and_then(Value::as_str) else {
+                continue;
+            };
+            if version != pinned {
+                return Err(format!(
+                    "recorded with {name} {version}, but JP pins {pinned}; record it again with \
+                     `RECORD=1`"
+                ));
+            }
+            adapter_seen |= name == "claude-agent-acp";
+        }
+    }
+
+    if !adapter_seen {
+        return Err("no `initialize` answer reports the adapter version".to_owned());
+    }
+    Ok(())
 }
 
 /// Split a recording into one script per connection, in connection order.

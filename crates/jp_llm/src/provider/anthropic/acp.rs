@@ -386,10 +386,16 @@ pub(super) async fn logout(directory: &Utf8Path) -> Result<(), Error> {
     Ok(())
 }
 
+/// The `claude-agent-acp` release the ACP flow is qualified against.
+pub(super) const ADAPTER_VERSION: &str = "0.102.0";
+
+/// The Claude Code release bundled with [`ADAPTER_VERSION`].
+pub(super) const CLAUDE_VERSION: &str = "2.1.321";
+
 fn qualify_versions(adapter: &[u8], claude: &[u8]) -> Result<(), Error> {
     for (check, output, expected) in [
-        (Check::AdapterVersion, adapter, "0.102.0"),
-        (Check::ClaudeVersion, claude, "2.1.321"),
+        (Check::AdapterVersion, adapter, ADAPTER_VERSION),
+        (Check::ClaudeVersion, claude, CLAUDE_VERSION),
     ] {
         let actual = str::from_utf8(output)
             .map_err(|source| Error::Encoding { check, source })?

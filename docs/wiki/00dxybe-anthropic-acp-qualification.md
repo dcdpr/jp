@@ -10,8 +10,8 @@
   pinned `claude-agent-acp` release: prerequisites, usage accounting, and the
   live cache comparison.
 
-The ACP subscription flow accepts `claude-agent-acp` 0.76.0 with Claude Code
-2.1.257.
+The ACP subscription flow accepts `claude-agent-acp` 0.102.0 with Claude Code
+2.1.321.
 Model availability is decided by the runtime, not a JP allowlist.
 The cache qualification fixture uses `claude-opus-5`; that choice does not
 restrict ordinary queries.
@@ -25,7 +25,7 @@ They do not prove live cache hits or subscription allowance savings.
 A live run needs `claude-agent-acp` on `PATH` and an active Pro or Max login:
 
 ```sh
-npm install --global --include=optional @agentclientprotocol/claude-agent-acp@0.76.0
+npm install --global --include=optional @agentclientprotocol/claude-agent-acp@0.102.0
 claude-agent-acp --cli auth login --claudeai
 claude-agent-acp --cli auth status --json
 ```
