@@ -8,17 +8,19 @@ use std::{
 
 use jp_config::{
     AppConfig,
+    conversation::tool::style::{InlineResults, LinkStyle, ParametersStyle},
     style::{
         Sanitization,
         reasoning::{ReasoningDisplayConfig, TruncateChars},
     },
     types::color::Color,
 };
-use jp_conversation::event::ChatResponse;
-use jp_printer::{OutputFormat, Printer};
-use serde_json::json;
+use jp_conversation::event::{ChatResponse, ToolCallResponse};
+use jp_printer::{ErrChannel, OutputFormat, Printer};
+use serde_json::{Map, json};
 
 use super::*;
+use crate::render::ToolRenderer;
 
 /// Build a `TurnView` configured with `display` for reasoning, wired to a fresh
 /// separator flag that starts already owed (as if a tool result preceded it).
@@ -252,4 +254,129 @@ fn invisible_tool_call_is_transparent_to_the_reasoning_region() {
         "the region survives the invisible tool call, so the next visible tool call still \
          continues it"
     );
+}
+
+/// The assistant header a live view writes to stderr.
+const HEADER: &str =
+    "\n── jp ──────────────────────────────────────────────────────────────────────────\n\n";
+
+/// A notice that arrives between two tool calls has one blank line above it and
+/// one below.
+///
+/// The view and the tool renderer are wired the way the turn loop wires them:
+/// the notice writes the line above itself, and the next tool header writes the
+/// line below.
+#[test]
+fn a_notice_between_tool_calls_has_a_blank_line_on_both_sides() {
+    let (printer, _out, err) = Printer::memory(OutputFormat::Text);
+    let printer = Arc::new(printer);
+    let style = AppConfig::new_test().style;
+    let mut view = TurnView::new(printer.clone(), style.clone(), None, None, RenderFlow::Live);
+    let tools = ToolRenderer::new(ErrChannel::new(printer.clone()), style);
+    view.set_tool_separator(tools.separator_flag());
+    view.set_tool_drawn(tools.drawn_flag());
+
+    view.enter_tool_call_region(true);
+    tools.render_tool_call("git_show", &Map::new(), &ParametersStyle::Off);
+    view.render_notice("OpenAI dropped 11 reasoning items.");
+    view.enter_tool_call_region(true);
+    tools.render_tool_call("fs_grep_files", &Map::new(), &ParametersStyle::Off);
+    printer.flush();
+
+    assert_eq!(
+        *err.lock(),
+        format!(
+            "{HEADER}Calling tool git_show\n\nWARN OpenAI dropped 11 reasoning items.\n\nCalling \
+             tool fs_grep_files\n"
+        )
+    );
+}
+
+/// Two notices in a row share the blank line between them.
+#[test]
+fn consecutive_notices_are_one_blank_line_apart() {
+    let (printer, _out, err) = Printer::memory(OutputFormat::Text);
+    let printer = Arc::new(printer);
+    let style = AppConfig::new_test().style;
+    let mut view = TurnView::new(printer.clone(), style, None, None, RenderFlow::Live);
+
+    view.render_notice("skipping subscription (personal)");
+    view.render_notice("continuing with api_key");
+    printer.flush();
+
+    assert_eq!(
+        *err.lock(),
+        format!("{HEADER}WARN skipping subscription (personal)\n\nWARN continuing with api_key\n")
+    );
+}
+
+/// A tool result and a notice each owe a blank line to the tool header after
+/// them.
+/// A notice between the two is one blank line from each, not two.
+#[test]
+fn a_notice_after_a_tool_result_is_one_blank_line_from_its_neighbours() {
+    let (printer, _out, err) = Printer::memory(OutputFormat::Text);
+    let printer = Arc::new(printer);
+    let style = AppConfig::new_test().style;
+    let mut view = TurnView::new(printer.clone(), style.clone(), None, None, RenderFlow::Live);
+    let tools = ToolRenderer::new(ErrChannel::new(printer.clone()), style);
+    view.set_tool_separator(tools.separator_flag());
+    view.set_tool_drawn(tools.drawn_flag());
+
+    view.enter_tool_call_region(true);
+    tools.render_tool_call("lookup", &Map::new(), &ParametersStyle::Off);
+    tools.render_result(
+        &ToolCallResponse {
+            id: "call-1".into(),
+            result: Ok("done".into()),
+        },
+        &InlineResults::Full,
+        &LinkStyle::Off,
+    );
+    view.render_notice("continuing with api_key");
+    view.enter_tool_call_region(true);
+    tools.render_tool_call("lookup", &Map::new(), &ParametersStyle::Off);
+    printer.flush();
+
+    assert_eq!(
+        *err.lock(),
+        format!(
+            "{HEADER}Calling tool lookup\n\ndone\n\nWARN continuing with api_key\n\nCalling tool \
+             lookup\n"
+        )
+    );
+}
+
+/// A notice is not part of the reasoning above it: the gap between the two is
+/// unshaded, and so is a prompt taken afterwards.
+#[test]
+fn a_notice_ends_the_reasoning_region() {
+    let mut style = AppConfig::new_test().style;
+    style.reasoning.display = ReasoningDisplayConfig::Full;
+    style.reasoning.background = Some(Color::Ansi256(236));
+
+    let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    let mut view = TurnView::new(printer.clone(), style, None, None, RenderFlow::Live);
+
+    view.render_chat_response_chunk(&ChatResponse::reasoning("Picking a title.\n\n"));
+    view.render_notice("continuing with api_key");
+    printer.flush();
+
+    assert_eq!(
+        *out.lock(),
+        concat!(
+            "\x1b[48;5;236mPicking a title.\x1b[48;5;236m\x1b[K\x1b[0m\n",
+            // The gap above the notice, without the reasoning background.
+            "\n",
+        )
+    );
+    out.lock().clear();
+
+    {
+        let mut prompt = printer.prompt_writer();
+        write!(prompt, "Interrupted").unwrap();
+    }
+    printer.flush();
+    assert_eq!(*out.lock(), "Interrupted");
 }

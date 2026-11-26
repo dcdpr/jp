@@ -43,6 +43,7 @@ use self::resolve::Route;
 use super::{
     CONTINUE_MESSAGE, Provider,
     lookup::{self, MODEL_LOOKUP_TIMEOUT},
+    notices::SeenNotices,
     output_schema_is_open, trace_to_tmpfile,
 };
 use crate::{
@@ -201,7 +202,7 @@ pub struct Anthropic {
     /// A skipped credential or a crossed warning threshold stays true for every
     /// request a turn sends, so each is shown once rather than on every
     /// tool-call cycle.
-    seen_notices: resolve::SeenNotices,
+    seen_notices: SeenNotices,
 }
 
 impl Anthropic {
@@ -231,7 +232,7 @@ impl Anthropic {
             store,
             fixed_credential: None,
             client_cache: http::Clients::default(),
-            seen_notices: resolve::SeenNotices::default(),
+            seen_notices: SeenNotices::default(),
         };
 
         // No model is named at construction, so only account-scoped cooldowns
@@ -437,9 +438,7 @@ impl Provider for Anthropic {
         let mut attempt = self.resolve(name).await?;
 
         loop {
-            for notice in attempt.take_notices(&self.seen_notices) {
-                warn!("{notice}");
-            }
+            attempt.log_notices();
 
             if let Route::Acp(directory) = attempt.route {
                 let model = acp::model_details(name);
@@ -473,9 +472,7 @@ impl Provider for Anthropic {
         let mut attempt = self.resolve("").await?;
 
         'attempt: loop {
-            for notice in attempt.take_notices(&self.seen_notices) {
-                warn!("{notice}");
-            }
+            attempt.log_notices();
 
             if let Route::Acp(directory) = attempt.route {
                 acp::inspect(directory.as_deref()).await?;

@@ -22,7 +22,7 @@ use crate::{
     model::ModelDetails,
     provider::{
         ApiTestRoute, DynProvider, ProviderTestRoute, ProviderTestSupport, first_stored_profile,
-        replay_credential_env,
+        notices::SeenNotices, replay_credential_env,
     },
     query::ChatQuery,
 };
@@ -43,6 +43,7 @@ impl Openai {
             reset_interval: RESET_RETRY_INTERVAL,
             pending_redemption: Arc::new(Mutex::new(None)),
             client_cache: Arc::new(Mutex::new(None)),
+            seen_notices: SeenNotices::default(),
         }
     }
 
@@ -202,6 +203,19 @@ impl ProviderTestRoute for SubscriptionTestRoute {
 
 /// Read one HTTP request's target and body from `socket`.
 pub(crate) async fn read_request(socket: &mut TcpStream) -> (String, String) {
+    let (head, body) = read_raw_request(socket).await;
+    let target = head
+        .split_whitespace()
+        .nth(1)
+        .unwrap_or_default()
+        .to_owned();
+
+    (target, body)
+}
+
+/// Read one HTTP request's head (request line and headers) and body from
+/// `socket`.
+pub(crate) async fn read_raw_request(socket: &mut TcpStream) -> (String, String) {
     let mut raw = vec![];
     let mut chunk = [0u8; 1024];
 
@@ -224,12 +238,7 @@ pub(crate) async fn read_request(socket: &mut TcpStream) -> (String, String) {
             .unwrap_or(0);
 
         if body.len() >= length || read == 0 {
-            let target = head
-                .split_whitespace()
-                .nth(1)
-                .unwrap_or_default()
-                .to_owned();
-            return (target, body.to_owned());
+            return (head.to_owned(), body.to_owned());
         }
     }
 }
