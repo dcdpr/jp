@@ -225,6 +225,9 @@ publish = false
 [workspace.lints.rust]
 future_incompatible = { level = "warn", priority = -1 }
 let_underscore = { level = "warn", priority = -1 }
+# Apple's linker reports an `__eh_frame` larger than 16MB on debug builds of `jp`,
+# which is harmless: <https://github.com/rust-lang/rust/issues/159105>.
+linker_messages = "allow"
 missing_docs = "allow" # Temporary
 nonstandard_style = { level = "warn", priority = -1 }
 rust_2018_compatibility = { level = "warn", priority = -1 }

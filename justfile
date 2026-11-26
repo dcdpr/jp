@@ -141,7 +141,7 @@ serve-web-watch *ARGS:
         exit 1
     fi
 
-    jp="$(cargo metadata --format-version 1 | jq -r .build_directory)/debug/jp"
+    jp="$(cargo metadata --format-version 1 | jq -r .target_directory)/debug/jp"
 
     # A tree that does not compile is not a reason to refuse to start. The loop
     # below waits for the watcher to report a build that does, which is the state
@@ -396,6 +396,41 @@ _restart-serve-web PORT:
 [group('main')]
 install $JP_INSTALL="1":
     @just quiet_flag="" _install-jp
+
+# Install every binary this workspace ships, built with the release profile.
+#
+# Installs `jp`, `jp-tools`, `bookworm`, `comfort`, `grizzly`, `dash`, `qual`,
+# and every command plugin under `crates/plugins/command/`. Each binary is
+# rebuilt, whether or not an older copy is already installed.
+#
+# Plugins listed in the registry (`[package.metadata.jp-registry]`) are
+# installed into JP's plugin directory; the remaining plugins go to
+# `~/.cargo/bin` (see `_install-registry-plugin`).
+#
+# Omitted: test fixtures (the `*_probe` binaries), `build-registry` (which only
+# the registry recipes run), and the macOS app.
+[group('build')]
+[group('main')]
+install-all:
+    #!/usr/bin/env sh
+    set -eu
+
+    cargo install --locked --path crates/jp_cli
+    cargo install --locked --path .config/jp/tools
+    cargo install --locked --path crates/contrib/bookworm
+    cargo install --locked --path crates/contrib/comfort
+    cargo install --locked --path crates/contrib/grizzly
+    cargo install --locked --path crates/internal/dash
+    cargo install --locked --path crates/internal/qual
+
+    for manifest in crates/plugins/command/*/Cargo.toml; do
+        plugin=$(basename "$(dirname "$manifest")")
+        if grep -q '^\[package\.metadata\.jp-registry\]' "$manifest"; then
+            just quiet_flag="" _install-registry-plugin "$plugin" release
+        else
+            just quiet_flag="" install-plugin "$plugin" release
+        fi
+    done
 
 [group('jp')]
 issue-bug +ARGS="Please create a bug report for the following:\n\n": _install-jp
@@ -2255,8 +2290,10 @@ plugin-build-local: _install-jp (plugin-build "")
 # A plugin with a browser UI (a `ui` crate) has the UI built first, with
 # `build-ui`, and embedded through `JP_<PLUGIN>_UI`; a plain `cargo install`
 # serves a placeholder page in its place.
+#
+# PROFILE is the cargo profile to build with (defaults to `dev`).
 [group('plugins')]
-install-plugin PLUGIN:
+install-plugin PLUGIN PROFILE="dev":
     #!/usr/bin/env sh
     set -eu
 
@@ -2272,11 +2309,11 @@ install-plugin PLUGIN:
         target=$(cargo metadata --no-deps --format-version=1 | jq -r .target_directory)
         variable="JP_$(echo "{{PLUGIN}}" | tr 'a-z-' 'A-Z_')_UI"
         env "${variable}=${target}/ui/{{PLUGIN}}" \
-            cargo install {{quiet_flag}} --locked --path "$dir" --debug
+            cargo install {{quiet_flag}} --locked --path "$dir" --profile "{{PROFILE}}"
         exit 0
     fi
 
-    cargo install {{quiet_flag}} --locked --path "$dir" --debug
+    cargo install {{quiet_flag}} --locked --path "$dir" --profile "{{PROFILE}}"
 
 # Serve the review UI to work on it: the page reloads itself a moment after a
 # change to the UI's sources is saved.
@@ -2957,16 +2994,22 @@ _install-site-plugins:
     JP_INSTALL=1 just _install-vite
 
 # Build the `jp-serve-web` command plugin into JP's plugin directory.
+_install-serve-web: (_install-registry-plugin "serve-web")
+
+# Build a registry command plugin, `jp-<PLUGIN>`, into JP's plugin directory.
 #
-# Not `cargo install`, unlike the other plugins. `serve-web` is an official
-# registry plugin, so `jp` may already have installed a released build into its
-# plugin directory, and a second `jp-serve-web` in `~/.cargo/bin` would share its
-# name: `jp` refuses to run either of two binaries with one name. Writing the
-# local build over the installed one is what lets a checkout win.
+# Uses `cargo build` and overwrites the binary in JP's plugin directory rather
+# than `cargo install` into `~/.cargo/bin`. A registry plugin may already have a
+# released build in the plugin directory, and `jp` refuses to run a plugin when
+# two binaries with the same name exist on `$PATH` and in the plugin directory.
+# Overwriting the plugin directory copy lets the local checkout replace an
+# installed release.
+#
+# PROFILE is the cargo profile to build with (defaults to `dev`).
 #
 # Deliberately ignores `JP_NO_INSTALL`: that variable exists to stop recipes from
 # rebuilding `jp` itself, and this recipe's only job is to build the plugin.
-_install-serve-web *args:
+_install-registry-plugin PLUGIN PROFILE="dev":
     #!/usr/bin/env sh
     set -eu
 
@@ -2981,18 +3024,25 @@ _install-serve-web *args:
         data="$HOME/.local/share/jp"
     fi
 
-    cargo build {{quiet_flag}} --locked --package jp-serve-web {{args}}
+    bin="jp-{{PLUGIN}}"
+    cargo build {{quiet_flag}} --locked --package "$bin" --profile "{{PROFILE}}"
+
+    # Cargo writes the `dev` profile to `debug/`, and every other to its name.
+    case "{{PROFILE}}" in
+        dev) out=debug ;;
+        *) out="{{PROFILE}}" ;;
+    esac
 
     dir="$data/plugins/command"
     mkdir -p "$dir"
-    build=$(cargo metadata --format-version 1 | jq -r .build_directory)
+    target=$(cargo metadata --format-version 1 | jq -r .target_directory)
 
     # Copy beside the target and rename, so replacing the binary of a server
     # that's still running can't fail on a busy file.
-    cp "$build/debug/jp-serve-web" "$dir/.jp-serve-web.new"
-    chmod 755 "$dir/.jp-serve-web.new"
-    mv -f "$dir/.jp-serve-web.new" "$dir/jp-serve-web"
-    echo "Installed jp-serve-web to $dir" >&2
+    cp "$target/$out/$bin" "$dir/.$bin.new"
+    chmod 755 "$dir/.$bin.new"
+    mv -f "$dir/.$bin.new" "$dir/$bin"
+    echo "Installed $bin to $dir" >&2
 
 # Build and install the `bookworm` MCP server.
 _install-bookworm *args:
