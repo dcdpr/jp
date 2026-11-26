@@ -77,7 +77,7 @@ use crate::{
             ToolCoordinator,
             executor::{
                 Executor, ExecutorError, ExecutorResult, ExecutorSource, PermissionInfo,
-                mock::{
+                tests::test_support::{
                     MockExecutor, TestExecutorSource, asking_formatter, asking_formatter_runner,
                     no_commands,
                 },
@@ -86,11 +86,14 @@ use crate::{
         },
     },
     render::metadata::get_rendered_arguments,
-    signals::testing::{detached_router, test_router},
+    signals::tests::test_support::{detached_router, test_router},
 };
 
-#[path = "turn_loop_tool_order_tests.rs"]
+#[path = "tool_order_tests.rs"]
 mod tool_order;
+
+#[path = "agent_turn_tests.rs"]
+mod agent_turn_tests;
 
 fn empty_executor_source() -> Box<dyn ExecutorSource> {
     Box::new(TestExecutorSource::new())

@@ -47,8 +47,8 @@ use tokio::sync::{Notify, oneshot};
 
 use super::*;
 #[cfg(unix)]
-use crate::signals::testing::test_router;
-use crate::{Globals, editor::CUT_MARKER, shutdown::until_shutdown};
+use crate::signals::tests::test_support::test_router;
+use crate::{Globals, editor::tests::CUT_MARKER, shutdown::until_shutdown};
 
 /// A workspace no request in these tests reaches into, so it needs no storage.
 fn bare_workspace() -> Workspace {

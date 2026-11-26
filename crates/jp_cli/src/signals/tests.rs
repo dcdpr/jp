@@ -12,6 +12,9 @@ use tokio::sync::mpsc::{self, error::TryRecvError};
 
 use super::*;
 
+#[path = "test_support.rs"]
+pub(crate) mod test_support;
+
 /// Environment variable naming the PID file for
 /// [`a_prompt_left_open_until_the_process_exits`].
 #[cfg(unix)]
@@ -277,7 +280,7 @@ fn escalation_counter_bumps_and_resets() {
 /// stack and fall through to requesting shutdown, which is what this pins.
 #[tokio::test]
 async fn a_cloned_router_shares_the_handler_stack() {
-    let (router, signals) = super::testing::test_router();
+    let (router, signals) = test_support::test_router();
     let clone = router.clone();
 
     // Registered through the clone, delivered through the original's source.
@@ -306,7 +309,7 @@ async fn a_cloned_router_shares_the_handler_stack() {
 /// process: the injected exit action records the code instead of exiting.
 #[tokio::test]
 async fn escalation_ladder_reaches_exit_through_signal_task() {
-    let (router, signals) = super::testing::test_router();
+    let (router, signals) = test_support::test_router();
     let (_guard, mut interrupt_rx) = router.push_handler();
 
     // First press: notifies the topmost handler; no shutdown, no exit.

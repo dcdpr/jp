@@ -20,7 +20,7 @@ use crate::{
         interrupt::{StreamingInterruptResult, apply_streaming_interrupt},
         turn::TurnPhase,
     },
-    signals::testing::{detached_router, test_router},
+    signals::tests::test_support::{detached_router, test_router},
 };
 
 fn make_retry_state(max_retries: u32) -> StreamRetryState {

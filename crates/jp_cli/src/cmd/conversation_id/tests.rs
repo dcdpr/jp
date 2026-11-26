@@ -1,6 +1,9 @@
 use super::*;
 use crate::{cli::parse_args, cmd::target::PickerFilter};
 
+#[path = "test_support.rs"]
+mod test_support;
+
 type PositionalMulti = PositionalIds<true, true>;
 type PositionalSingle = PositionalIds<false, false>;
 type PositionalSessionSingle = PositionalIds<true, false>;

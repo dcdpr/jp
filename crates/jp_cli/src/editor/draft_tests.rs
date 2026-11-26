@@ -23,8 +23,9 @@ use jp_config::{
 use jp_conversation::ConversationStream;
 use jp_editor::{EditOutcome, EditRequest, EditorBackend};
 
-use super::{
-    CUT_MARKER, EditorResult, QUERY_FILENAME, config_seed, edit_query, parser::QueryDocument,
+use crate::editor::{
+    EditorResult, QUERY_FILENAME, config_seed, edit_query,
+    parser::{CUT_MARKER, QueryDocument},
     refresh_untouched,
 };
 

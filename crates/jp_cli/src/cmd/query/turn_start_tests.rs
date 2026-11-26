@@ -17,7 +17,7 @@ use tokio::{
 };
 
 use super::*;
-use crate::signals::testing::{detached_router, test_router};
+use crate::signals::tests::test_support::{detached_router, test_router};
 
 /// A stop request that lands while MCP servers are starting ends the turn
 /// before it runs.

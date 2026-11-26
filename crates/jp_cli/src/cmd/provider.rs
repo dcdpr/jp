@@ -1527,9 +1527,4 @@ fn store_error(error: &StoreError) -> Error {
 }
 
 #[cfg(test)]
-#[path = "provider_auth_tests.rs"]
-mod auth_tests;
-
-#[cfg(test)]
-#[path = "provider_tests.rs"]
 mod tests;

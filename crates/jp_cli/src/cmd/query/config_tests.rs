@@ -31,12 +31,12 @@ use crate::{
     cmd::query::{
         PendingStreamTrim,
         interrupt::TurnInterrupts,
-        tool::executor::{ExecutorSource, mock::TestExecutorSource},
+        tool::executor::{ExecutorSource, tests::test_support::TestExecutorSource},
         turn_loop,
     },
     config_pipeline::ConfigPipeline,
     resolve_config,
-    signals::testing::detached_router,
+    signals::tests::test_support::detached_router,
 };
 
 fn make_partial_with_tools() -> PartialAppConfig {

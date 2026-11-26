@@ -9,6 +9,9 @@ use test_log::test;
 
 use super::*;
 
+#[path = "auth_tests.rs"]
+mod auth_tests;
+
 fn anthropic_target() -> AuthTarget {
     AuthTarget {
         provider: ProviderId::Anthropic,

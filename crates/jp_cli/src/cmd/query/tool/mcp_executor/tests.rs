@@ -26,7 +26,7 @@ use serde_json::json;
 use tokio::time::{Duration, timeout};
 
 use super::*;
-use crate::cmd::query::tool::executor::{DynFanOutCall, mock::no_commands};
+use crate::cmd::query::tool::executor::{DynFanOutCall, tests::test_support::no_commands};
 
 /// A tool that asks one question, then echoes the arguments and the answer.
 ///
@@ -169,7 +169,7 @@ fn recorded(result: Result<&str, &str>) -> Review {
     })
 }
 
-#[path = "mcp_executor_shutdown_tests.rs"]
+#[path = "shutdown_tests.rs"]
 mod shutdown;
 
 /// Start a fixture whose `example` tool echoes its `name` and fans out.

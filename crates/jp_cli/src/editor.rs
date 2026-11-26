@@ -20,10 +20,6 @@ use jp_conversation::{
 };
 use jp_editor::{EditOutcome, EditRequest, EditorBackend, EditorError, TerminalEditorBackend};
 use jp_printer::Printer;
-// Tests elsewhere in the crate build query-message fixtures from the real
-// marker, so a fixture cannot drift from the parser.
-#[cfg(test)]
-pub(crate) use parser::CUT_MARKER;
 pub(crate) use parser::draft_query_text;
 use sha2::{Digest as _, Sha256};
 use tracing::{info, warn};
@@ -539,13 +535,4 @@ fn history_entry(
 }
 
 #[cfg(test)]
-#[path = "editor_tests.rs"]
-mod tests;
-
-#[cfg(test)]
-#[path = "editor_draft_tests.rs"]
-mod draft_tests;
-
-#[cfg(test)]
-#[path = "editor_history_tests.rs"]
-mod history_tests;
+pub(crate) mod tests;

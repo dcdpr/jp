@@ -13,7 +13,7 @@ use std::{
 use tokio::{runtime::Handle, sync::mpsc};
 use tokio_stream::wrappers::ReceiverStream;
 
-use super::{OsSignal, SignalRouter};
+use crate::signals::{OsSignal, SignalRouter};
 
 /// The injection half of a [`test_router`]: sends signals and observes exit
 /// decisions.

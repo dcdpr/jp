@@ -479,8 +479,4 @@ pub(crate) fn format_target_help(session: bool, multi: bool, ansi: bool) -> Stri
 }
 
 #[cfg(test)]
-mod test_support;
-
-#[cfg(test)]
-#[path = "conversation_id_tests.rs"]
 mod tests;

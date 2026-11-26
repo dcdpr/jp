@@ -37,7 +37,7 @@ use crate::{
         tool::{
             executor::{
                 Executor,
-                mock::{MockExecutor, ScriptedFanOut, TestExecutorSource},
+                tests::test_support::{MockExecutor, ScriptedFanOut, TestExecutorSource},
             },
             inquiry::{InquiryBackend, MockInquiryBackend},
             mcp_executor::TerminalExecutorSource,
@@ -45,7 +45,7 @@ use crate::{
         turn::TurnCoordinator,
     },
     render::tool::ToolRenderer,
-    signals::testing::detached_router,
+    signals::tests::test_support::detached_router,
 };
 
 fn empty_executor_source() -> Box<dyn ExecutorSource> {

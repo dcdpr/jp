@@ -19,7 +19,7 @@ use jp_tool::{Outcome, Question, ToolDefinition, ToolDocs};
 use serde_json::{Map, Value, json};
 use tokio_util::sync::CancellationToken;
 
-use super::{
+use crate::cmd::query::tool::executor::{
     CallExecutors, DynExecutor, Executor, ExecutorError, ExecutorResult, ExecutorSource,
     FanOutCall, PermissionInfo, Review,
 };

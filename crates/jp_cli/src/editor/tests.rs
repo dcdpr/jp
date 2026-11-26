@@ -17,7 +17,16 @@ use jp_config::{
 use jp_editor::{EditOutcome, EditRequest, EditorBackend};
 use jp_printer::{OutputFormat, Printer, RegionStyle, SharedBuffer, TerminalCapability};
 
+// Tests elsewhere in the crate build query-message fixtures from the real
+// marker, so a fixture cannot drift from the parser.
+pub(crate) use super::parser::CUT_MARKER;
 use super::{EditorResult, SuspendingEditor, build_editor_backend};
+
+#[path = "draft_tests.rs"]
+mod draft_tests;
+
+#[path = "history_tests.rs"]
+mod history_tests;
 
 fn editor_config(cmd: CommandConfigOrString) -> EditorConfig {
     EditorConfig {

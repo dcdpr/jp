@@ -1727,5 +1727,4 @@ fn question(request: InputRequest, supporting: &[ContentBlock]) -> Question {
 }
 
 #[cfg(test)]
-#[path = "mcp_executor_tests.rs"]
 mod tests;

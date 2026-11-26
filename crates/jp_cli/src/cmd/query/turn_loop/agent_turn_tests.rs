@@ -44,9 +44,11 @@ use tokio::time::{Duration, timeout};
 use super::{PendingStreamTrim, ToolCoordinator, TurnInterrupts, run_turn_loop};
 use crate::{
     access::approvals::ApprovalStore,
-    cmd::query::tool::{executor::mock::no_commands, mcp_executor::TerminalExecutorSource},
+    cmd::query::tool::{
+        executor::tests::test_support::no_commands, mcp_executor::TerminalExecutorSource,
+    },
     error::Error,
-    signals::testing::detached_router,
+    signals::tests::test_support::detached_router,
 };
 
 struct InquiringTool(Arc<AtomicUsize>);

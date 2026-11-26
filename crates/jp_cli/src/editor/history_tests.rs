@@ -5,7 +5,7 @@ use jp_conversation::{
 };
 use serde_json::Map;
 
-use super::build_history_text;
+use crate::editor::build_history_text;
 
 fn at(secs: u32) -> DateTime<Utc> {
     Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, secs).unwrap()

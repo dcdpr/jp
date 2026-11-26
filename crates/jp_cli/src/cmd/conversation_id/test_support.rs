@@ -1,8 +1,10 @@
 //! Test constructors for building [`PositionalIds`] and [`FlagIds`] directly
 //! without CLI parsing.
 
-use super::{FlagIds, PositionalIds};
-use crate::cmd::target::ConversationTarget;
+use crate::cmd::{
+    conversation_id::{FlagIds, PositionalIds},
+    target::ConversationTarget,
+};
 
 impl<const SESSION: bool, const MULTI: bool> PositionalIds<SESSION, MULTI> {
     pub fn from_targets(ids: Vec<ConversationTarget>) -> Self {

@@ -25,7 +25,7 @@ use jp_inquire::{InlineOption, ReplyEditMode, ReplyOutcome, prompt::PromptBacken
 use jp_printer::{Printer, SharedBuffer};
 
 use super::*;
-use crate::signals::testing::TestSignals;
+use crate::signals::tests::test_support::TestSignals;
 
 /// A prompt backend that records where each prompt opened in the chrome, and
 /// answers inline selects from a script.

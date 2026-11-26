@@ -16,8 +16,10 @@ use jp_llm::credential::DynExternalAuth;
 use jp_printer::OutputFormat;
 use jp_storage::resource_lock::FsResourceLocker;
 
-use super::*;
-use crate::{Cli, cmd::Commands};
+use crate::{
+    Cli,
+    cmd::{Commands, provider::*},
+};
 
 #[derive(Clone, Default)]
 struct FakeAuth {

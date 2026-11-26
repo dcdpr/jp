@@ -647,9 +647,4 @@ fn os_signals() -> impl Stream<Item = OsSignal> {
 }
 
 #[cfg(test)]
-#[path = "signals_testing.rs"]
-pub(crate) mod testing;
-
-#[cfg(test)]
-#[path = "signals_tests.rs"]
-mod tests;
+pub(crate) mod tests;

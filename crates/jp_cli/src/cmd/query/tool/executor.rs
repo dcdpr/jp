@@ -560,5 +560,4 @@ pub(crate) struct PermissionInfo {
 }
 
 #[cfg(test)]
-#[path = "executor_mock.rs"]
-pub(crate) mod mock;
+pub(crate) mod tests;

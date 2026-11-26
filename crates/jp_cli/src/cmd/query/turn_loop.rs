@@ -1620,9 +1620,4 @@ async fn with_served_models(
 }
 
 #[cfg(test)]
-#[path = "turn_loop_tests.rs"]
 mod tests;
-
-#[cfg(test)]
-#[path = "agent_turn_tests.rs"]
-mod agent_turn_tests;
