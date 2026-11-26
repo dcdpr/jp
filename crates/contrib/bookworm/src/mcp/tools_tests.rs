@@ -124,7 +124,7 @@ impl From<ExpectedUri> for CrateUri {
 
 #[test]
 #[expect(clippy::too_many_lines, reason = "table-driven test cases")]
-fn test_try_from_url() {
+fn test_try_from_url_parses_valid_uris() {
     let mut test_cases: HashMap<&'static str, TestCase> = HashMap::new();
 
     test_cases.insert("complete uri with fragment", TestCase {
@@ -237,6 +237,13 @@ fn test_try_from_url() {
         }),
     });
 
+    assert_cases(test_cases);
+}
+
+#[test]
+fn test_try_from_url_rejects_invalid_uris() {
+    let mut test_cases: HashMap<&'static str, TestCase> = HashMap::new();
+
     test_cases.insert("invalid scheme", TestCase {
         uri: "http://crates.io/serde_json",
         expected: Err(Error::InvalidResourceUri(
@@ -272,6 +279,11 @@ fn test_try_from_url() {
         )),
     });
 
+    assert_cases(test_cases);
+}
+
+/// Parse each case's URI and compare the result with what it expects.
+fn assert_cases(test_cases: HashMap<&'static str, TestCase>) {
     for (name, test_case) in test_cases {
         let url = Url::parse(test_case.uri).expect("Failed to parse URL");
         let result = CrateUri::try_from(&url);
