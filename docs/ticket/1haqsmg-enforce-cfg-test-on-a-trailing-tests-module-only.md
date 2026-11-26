@@ -61,7 +61,7 @@ checks `#[test]` functions.
 
 ## Then
 
-- [ ] Audit existing `#[cfg(test)]` sites across the workspace.
+- [x] Audit existing `#[cfg(test)]` sites across the workspace.
 - [ ] Move them to trailing module declarations, or exempt any that must stay.
 - [ ] Add the enforcement check to CI.
 - [ ] Document the rule in the `rust-development` skill.
@@ -136,3 +136,57 @@ Both `qual` gate interactions from the comment above are resolved:
   longer defines the item, and the new file didn't define it at the base commit.
   A same-named item in another file gets no credit.
   File-level findings have an empty symbol and remain scoped to their file.
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-26T12:56:26Z
+
+Audit of 2026-11-26: every production `.rs` file with a `#[cfg(test)]`
+attribute, checked for production code after the first one.
+
+rustqual 1.8.2's `count_production_lines` trims each line and stops at the first
+starting with `#[cfg(test)]`, so indented attributes (fields, methods,
+statements) cut the count too.
+`cfg(all(test, …))` and `cfg_attr(test, …)` do not.
+
+55 files have code after their first `#[cfg(test)]`.
+In 12 of them it is only the test-only item itself, so nothing is hidden: the
+`PartialEq for Error` impls in `jp_openrouter`, `jp_storage`, `jp_mcp`,
+`jp_workspace` and `jp_conversation`, the inline `mod tests` in
+`jp_tool/src/access.rs` and `openai/parity.rs`, plus `swift.rs`,
+`bookworm/src/mcp/tools.rs`, `mock.rs`, `async-anthropic/src/types.rs` and
+`jp_llm/src/test.rs`.
+`.config/jp/tools/src/code/fixture.rs` is a false positive: the attribute is
+inside a string literal in a test-only module.
+
+The other 42 hide production code:
+
+- **Test modules declared before production code**, which only need to move to
+  the end of the file: `jp_llm/src/lib.rs`, `jp_mcp/src/client.rs`,
+  `comfort/src/cli.rs`, `comfort/src/lib.rs`, `review/src/lib.rs`,
+  `.config/jp/tools/src/github.rs`, `jp_config/src/lib.rs`,
+  `.config/jp/tools/src/code.rs`.
+- **Test-only items with production code after them**, for `test_support`: the
+  `PartialEq` impls in `jp_storage/src/load.rs` and `jp_llm/src/error.rs`;
+  constructors in `jp_github/src/client.rs`, `jp_cli/src/bootstrap.rs`,
+  `acp/rpc.rs`, `fs/modify_file.rs`, `tool/prompter.rs`,
+  `serve-chat/src/state.rs` and `label/resolve.rs`; methods in
+  `jp_printer/src/region.rs`, `event_id.rs`, `stream/entry.rs`,
+  `jp_cli/src/shutdown.rs`, `jp_cli/src/signals.rs`, `dash/src/ui.rs`,
+  `tool/pending.rs`, `turn_selection.rs`, `jp_conversation/src/stream.rs` and
+  `tool/mcp_executor.rs`; free functions in `jp_cli/src/cli.rs`,
+  `jp_llm/src/provider.rs` and `acp/cassette.rs`; `MockInquiryBackend` in
+  `tool/inquiry.rs`; `request_value` in `ollama.rs`, `cerebras.rs`, `vllm.rs`,
+  `openrouter.rs` and `llamacpp.rs`; a re-export in `jp_cli/src/editor.rs`;
+  imports and helpers in `wiki/src/access.rs` and
+  `async-anthropic/src/errors.rs`.
+- **Items that cannot move**, which need a production change: struct fields and
+  `now()` twins in `jp_cli/src/ctx.rs`, a field and statements in
+  `cmd/query/turn_start.rs`, and an enum variant and match arm in
+  `grizzly/src/db.rs`.
+
+Counted in full, four files exceed the 800-line `SRP-002` limit:
+`.config/jp/tools/src/code.rs` (1,667), `tool/mcp_executor.rs` (1,188),
+`jp_config/src/lib.rs` (1,014) and `jp_conversation/src/stream.rs` (985).
+`fs/modify_file.rs` comes to 792.
