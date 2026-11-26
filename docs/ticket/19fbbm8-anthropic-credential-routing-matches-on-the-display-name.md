@@ -53,6 +53,6 @@ Fixed in PR #1395.
 The five Anthropic call sites (`start_query`, `chat_completion_stream`,
 `with_acp_fallback`, and both `advance` paths in the stream) resolve credentials
 by `model.id.name`.
-`a_model_scoped_refusal_switches_a_model_with_a_display_name` in
+`a_family_scoped_refusal_switches_a_model_with_a_display_name` in
 `fallback_tests.rs` covers a model whose details carry a display name.
 It fails against the display-name lookup.

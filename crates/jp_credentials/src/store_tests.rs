@@ -268,24 +268,6 @@ fn test_active_cooldown_scoping() {
 }
 
 #[test]
-fn test_model_scope_covers_only_that_model() {
-    let mut credential = token_credential("sk-a");
-    let now = datetime!(2026-07-03 12:00:00 Z);
-    let future = datetime!(2026-07-03 13:00:00 Z);
-
-    credential
-        .cooldowns
-        .insert(model_scope("claude-sonnet-5"), future);
-    assert_eq!(
-        credential.active_cooldown("claude-sonnet-5", now),
-        Some(("model:claude-sonnet-5", future))
-    );
-    // A newer model whose ID extends this one is a different model.
-    assert_eq!(credential.active_cooldown("claude-sonnet-5-5", now), None);
-    assert_eq!(credential.active_cooldown("claude-opus-5", now), None);
-}
-
-#[test]
 fn test_cooldown_until_policy() {
     let now = datetime!(2026-07-03 12:00:00 Z);
 

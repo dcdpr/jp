@@ -747,7 +747,7 @@ async fn runtime_model_rejection_preserves_its_classification() {
 }
 
 #[tokio::test]
-async fn a_rate_limited_model_selection_exhausts_the_subscription_for_that_model() {
+async fn a_rate_limited_model_selection_exhausts_the_subscription_for_that_family() {
     let agent = scripted(|method, params, _notifier| async move {
         match method.as_str() {
             m if m == agent_method::INITIALIZE => {
@@ -796,8 +796,8 @@ async fn a_rate_limited_model_selection_exhausts_the_subscription_for_that_model
         panic!("expected classified failure, got {error:?}")
     };
     assert_eq!(error.kind, StreamErrorKind::SubscriptionExhausted);
-    // Scoped to the model, so the login stays in use for every other model.
-    assert_eq!(error.quota_scope.as_deref(), Some("model:claude-fable-5-2"));
+    // The limit covers every model of the family, and only that family.
+    assert_eq!(error.quota_scope.as_deref(), Some("fable"));
     // The refusal reports no reset, so the cooldown is kept short.
     let reset = error.quota_reset.unwrap();
     assert!(
@@ -809,6 +809,17 @@ async fn a_rate_limited_model_selection_exhausts_the_subscription_for_that_model
         Some(Error::ModelSelection { model, .. }) if model.as_ref() == "claude-fable-5-2"
     ));
     assert!(receiver.recv().await.is_none());
+}
+
+#[test]
+fn a_rate_limited_model_outside_the_known_families_exhausts_the_account() {
+    let refused = RpcError::internal_error().data(json!({
+        "details": "API error: 429 This request would exceed your account's rate limit. Please \
+                    try again later · model not changed",
+    }));
+    let error = model_selection_failure(&"claude-ballad-1".parse().unwrap(), refused);
+    assert_eq!(error.kind, StreamErrorKind::SubscriptionExhausted);
+    assert_eq!(error.quota_scope, None);
 }
 
 #[test]

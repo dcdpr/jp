@@ -16,7 +16,6 @@ use jp_config::{
     assistant::{request::CachePolicy, tool_choice::ToolChoice},
     model::id::Name,
 };
-use jp_credentials::model_scope;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
@@ -25,7 +24,7 @@ use tracing::{debug, info, instrument::WithSubscriber as _, warn};
 use uuid::Uuid;
 
 use super::{
-    Error, cassette, options, process,
+    Error, cassette, family_of, options, process,
     protocol::{AuthUpdate, SdkNotification, State},
     rpc::{Handler, Inbound, Peer, Request, RpcError, Tap},
     schema::{
@@ -550,10 +549,11 @@ pub(super) const MODEL_REFUSAL_COOLDOWN: TimeDelta = TimeDelta::minutes(5);
 
 /// Classify Claude Code's refusal to select `model`.
 ///
-/// A rate-limit refusal is treated as a subscription exhaustion scoped to
-/// `model` for [`MODEL_REFUSAL_COOLDOWN`]: the login remains available for
-/// other models, while another credential in the fallback chain can serve
-/// `model`.
+/// A rate-limit refusal is treated as a subscription exhaustion for
+/// [`MODEL_REFUSAL_COOLDOWN`], scoped to the model family of `model`: the limit
+/// applies to every model of that family, the login remains available for other
+/// families, and another credential in the fallback chain can serve the family.
+/// A model outside the known families exhausts the whole account.
 fn model_selection_failure(model: &Name, source: RpcError) -> StreamError {
     let unknown = refuses_unknown_model(&source);
     let rate_limited = refuses_rate_limited_model(&source);
@@ -567,7 +567,7 @@ fn model_selection_failure(model: &Name, source: RpcError) -> StreamError {
         StreamError::subscription_exhausted(
             error.to_string(),
             Some(Utc::now() + MODEL_REFUSAL_COOLDOWN),
-            Some(model_scope(model)),
+            family_of(model).map(ToOwned::to_owned),
         )
     } else {
         StreamError::new(StreamErrorKind::Other, error.to_string())

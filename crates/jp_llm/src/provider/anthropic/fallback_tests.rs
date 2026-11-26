@@ -12,7 +12,7 @@ use jp_config::{AppConfig, providers::llm::AuthEntry, types::api_key_env::ApiKey
 use jp_conversation::thread::Thread;
 use jp_credentials::{
     CATEGORY_LLM, CredentialBackend, CredentialSecret, InMemoryCredentialBackend,
-    PROVIDER_ANTHROPIC, StoreError, StoredCredential, model_scope,
+    PROVIDER_ANTHROPIC, StoreError, StoredCredential,
 };
 use jp_storage::resource_lock::InMemoryResourceLocker;
 
@@ -115,9 +115,9 @@ fn notices(events: &[result::Result<Event, StreamError>]) -> Vec<&str> {
         .collect()
 }
 
-fn model_refused(model: &str) -> EventStream {
+fn family_refused(family: &str) -> EventStream {
     Box::pin(stream::iter(vec![Err(
-        StreamError::subscription_exhausted("refused", None, Some(model_scope(model))),
+        StreamError::subscription_exhausted("refused", None, Some(family.into())),
     )]))
 }
 
@@ -191,11 +191,11 @@ async fn acp_stream_advances_before_requesting_a_host_rebuild() {
 }
 
 #[tokio::test]
-async fn acp_stream_moves_only_the_exhausted_model_to_the_next_credential() {
+async fn acp_stream_moves_only_the_exhausted_family_to_the_next_credential() {
     let (provider, model, store) = provider(&["sub:sub", "sub:sub2"]);
     let attempt = provider.resolve(&model.id.name).await.unwrap();
     let events = provider
-        .with_acp_fallback(&model, attempt, model_refused("claude-sonnet-5"))
+        .with_acp_fallback(&model, attempt, family_refused("sonnet"))
         .collect::<Vec<_>>()
         .await;
     assert_eq!(
@@ -203,20 +203,19 @@ async fn acp_stream_moves_only_the_exhausted_model_to_the_next_credential() {
         StreamErrorKind::CredentialChanged
     );
 
-    let next = provider.resolve("claude-sonnet-5").await.unwrap();
-    assert_eq!(
-        next.selected.map(|selected| selected.entry),
-        Some(AuthEntry::Subscription(Some("sub2".into())))
-    );
-    // A newer model whose ID extends the refused one is a different model.
-    for other in ["claude-opus-5", "claude-sonnet-5-5"] {
-        let attempt = provider.resolve(other).await.unwrap();
+    for refused in ["claude-sonnet-5", "claude-sonnet-5-5"] {
+        let next = provider.resolve(refused).await.unwrap();
         assert_eq!(
-            attempt.selected.map(|selected| selected.entry),
-            Some(AuthEntry::Subscription(Some("sub".into()))),
-            "{other}"
+            next.selected.map(|selected| selected.entry),
+            Some(AuthEntry::Subscription(Some("sub2".into()))),
+            "{refused}"
         );
     }
+    let other = provider.resolve("claude-opus-5").await.unwrap();
+    assert_eq!(
+        other.selected.map(|selected| selected.entry),
+        Some(AuthEntry::Subscription(Some("sub".into())))
+    );
     let snapshot = store.load().unwrap();
     let profiles = snapshot.profiles(CATEGORY_LLM, PROVIDER_ANTHROPIC).unwrap();
     assert_eq!(
@@ -225,19 +224,19 @@ async fn acp_stream_moves_only_the_exhausted_model_to_the_next_credential() {
             .keys()
             .map(String::as_str)
             .collect::<Vec<_>>(),
-        vec!["model:claude-sonnet-5"]
+        vec!["sonnet"]
     );
 }
 
 #[tokio::test]
-async fn a_model_scoped_refusal_switches_a_model_with_a_display_name() {
+async fn a_family_scoped_refusal_switches_a_model_with_a_display_name() {
     let (provider, mut model, _) = provider(&["sub:sub", "api_key"]);
     // The API's model listing sets `display_name`; credential routing must key
-    // on `model.id.name` so model-scoped cooldowns still match.
+    // on `model.id.name` so family-scoped cooldowns still match.
     model.display_name = Some("Claude Sonnet 5".into());
     let attempt = provider.resolve(&model.id.name).await.unwrap();
     let events = provider
-        .with_acp_fallback(&model, attempt, model_refused("claude-sonnet-5"))
+        .with_acp_fallback(&model, attempt, family_refused("sonnet"))
         .collect::<Vec<_>>()
         .await;
     assert_eq!(
