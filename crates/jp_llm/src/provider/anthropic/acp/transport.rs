@@ -10,9 +10,12 @@ use std::{
 };
 
 use camino::{Utf8Path, Utf8PathBuf};
-use chrono::Utc;
+use chrono::{TimeDelta, Utc};
 use futures::{StreamExt as _, future::BoxFuture};
-use jp_config::assistant::{request::CachePolicy, tool_choice::ToolChoice};
+use jp_config::{
+    assistant::{request::CachePolicy, tool_choice::ToolChoice},
+    model::id::Name,
+};
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
@@ -21,7 +24,7 @@ use tracing::{debug, info, instrument::WithSubscriber as _, warn};
 use uuid::Uuid;
 
 use super::{
-    Error, cassette, options, process,
+    Error, cassette, family_of, options, process,
     protocol::{AuthUpdate, SdkNotification, State},
     rpc::{Handler, Inbound, Peer, Request, RpcError, Tap},
     schema::{
@@ -450,18 +453,9 @@ pub(super) async fn drive(
                     if config_id != "model" {
                         return source;
                     }
-                    let kind = if refuses_unknown_model(&source) {
-                        StreamErrorKind::UnknownModel
-                    } else {
-                        StreamErrorKind::Other
-                    };
-                    let error = Error::ModelSelection {
-                        model: prepared.model.clone(),
-                        source,
-                    };
                     record_failure(
                         &foreground_state,
-                        StreamError::new(kind, error.to_string()).with_source(error),
+                        model_selection_failure(&prepared.model, source),
                     )
                 })?;
                 // Claude Code can normalize a model alias to a canonical identifier.
@@ -544,6 +538,43 @@ pub(super) async fn drive(
     }
 }
 
+/// Cooldown duration for a login after Claude Code refuses to select a model.
+///
+/// The refusal reports no reset timestamp, and the error text does not
+/// distinguish an exhausted quota from a short-lived rate limit.
+/// Keep the cooldown short: a brief cooldown risks one extra retry against a
+/// still-limited login, whereas a long cooldown can route the model to a paid
+/// API key in the fallback chain.
+pub(super) const MODEL_REFUSAL_COOLDOWN: TimeDelta = TimeDelta::minutes(5);
+
+/// Classify Claude Code's refusal to select `model`.
+///
+/// A rate-limit refusal is treated as a subscription exhaustion for
+/// [`MODEL_REFUSAL_COOLDOWN`], scoped to the model family of `model`: the limit
+/// applies to every model of that family, the login remains available for other
+/// families, and another credential in the fallback chain can serve the family.
+/// A model outside the known families exhausts the whole account.
+fn model_selection_failure(model: &Name, source: RpcError) -> StreamError {
+    let unknown = refuses_unknown_model(&source);
+    let rate_limited = refuses_rate_limited_model(&source);
+    let error = Error::ModelSelection {
+        model: model.clone(),
+        source,
+    };
+    let failure = if unknown {
+        StreamError::new(StreamErrorKind::UnknownModel, error.to_string())
+    } else if rate_limited {
+        StreamError::subscription_exhausted(
+            error.to_string(),
+            Some(Utc::now() + MODEL_REFUSAL_COOLDOWN),
+            family_of(model).map(ToOwned::to_owned),
+        )
+    } else {
+        StreamError::new(StreamErrorKind::Other, error.to_string())
+    };
+    failure.with_source(error)
+}
+
 /// Check whether a `model` config-option RPC error indicates an unknown model.
 ///
 /// Claude Code reports unknown models as a generic internal error whose
@@ -555,6 +586,25 @@ pub(super) fn refuses_unknown_model(error: &RpcError) -> bool {
         .and_then(|data| data.get("details"))
         .and_then(Value::as_str)
         .is_some_and(|details| details.starts_with("Model '") && details.ends_with("' not found"))
+}
+
+/// Check whether a `model` config-option RPC error indicates an account rate
+/// limit for the selected model.
+///
+/// Claude Code probes the model on selection and surfaces the API error in
+/// `data.details` (for example, `"API error: 429 This request would exceed your
+/// account's rate limit. ..."`).
+/// Other 429 responses, such as per-minute token limits, do not match.
+pub(super) fn refuses_rate_limited_model(error: &RpcError) -> bool {
+    error
+        .data
+        .as_ref()
+        .and_then(|data| data.get("details"))
+        .and_then(Value::as_str)
+        .is_some_and(|details| {
+            details.starts_with("API error: 429 ")
+                && details.contains("would exceed your account's rate limit")
+        })
 }
 
 /// Fetch the `model` select options offered by the adapter for

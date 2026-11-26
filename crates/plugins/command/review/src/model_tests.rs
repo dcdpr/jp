@@ -106,13 +106,13 @@ fn a_withdrawn_comment_retires_its_number() {
         review.add_comment(on_review(body)).unwrap();
     }
 
-    assert_eq!(review.withdraw(3), Ok(Draft::Comment));
+    assert_eq!(review.withdraw(3, None), Ok(Draft::Comment));
     assert_eq!(review.comment(3), Err(refused(3, Why::Withdrawn)));
     assert_eq!(review.comment(9), Err(refused(9, Why::Missing)));
     assert_eq!(review.add_comment(on_review("Four.")), Ok(4));
 
-    review.withdraw(4).unwrap();
-    review.withdraw(2).unwrap();
+    review.withdraw(4, None).unwrap();
+    review.withdraw(2, None).unwrap();
     assert_eq!(review.add_comment(on_review("Five.")), Ok(5));
 }
 
@@ -196,6 +196,7 @@ fn editing_changes_a_draft_comment() {
         anchor: Some(anchor.clone()),
         suggestion: Some("three".to_owned()),
         body: Some("Better.".to_owned()),
+        expects: Some(Draft::Comment),
     });
 
     assert_eq!(edited, Ok(Draft::Comment));
@@ -261,18 +262,76 @@ fn editing_a_sent_comment_changes_only_its_draft_reply() {
     assert_eq!(comment.draft_reply.as_ref().unwrap().body, "Certain?");
 }
 
+/// An edit started on a draft comment and saved after the comment was submitted
+/// and given a draft reply must not overwrite the draft reply.
+#[test]
+fn an_edit_is_refused_once_the_comment_holds_another_draft() {
+    let mut review = review();
+    review.add_comment(on_review("First.")).unwrap();
+    let edit = |expects| Edit {
+        body: Some("Changed.".to_owned()),
+        expects: Some(expects),
+        ..Edit::default()
+    };
+
+    assert_eq!(
+        review.edit(1, edit(Draft::Reply)),
+        Err(refused(1, Why::Draft))
+    );
+
+    review.comments[0].pass = Some(1);
+    review
+        .reply(1, "Jane".to_owned(), at(3), "Sure?".to_owned())
+        .unwrap();
+
+    assert_eq!(
+        review.edit(1, edit(Draft::Comment)),
+        Err(refused(1, Why::Sent))
+    );
+    let comment = review.comment(1).unwrap();
+    assert_eq!(comment.content.body, "First.");
+    assert_eq!(comment.draft_reply.as_ref().unwrap().body, "Sure?");
+    assert_eq!(review.edit(1, edit(Draft::Reply)), Ok(Draft::Reply));
+}
+
+/// A withdrawal requested for a draft comment after the comment was submitted
+/// and given a draft reply must not withdraw the draft reply.
+#[test]
+fn a_withdrawal_is_refused_once_the_comment_holds_another_draft() {
+    let mut review = review();
+    review.add_comment(on_review("First.")).unwrap();
+
+    assert_eq!(
+        review.withdraw(1, Some(Draft::Reply)),
+        Err(refused(1, Why::Draft))
+    );
+
+    review.comments[0].pass = Some(1);
+    review
+        .reply(1, "Jane".to_owned(), at(3), "Sure?".to_owned())
+        .unwrap();
+
+    assert_eq!(
+        review.withdraw(1, Some(Draft::Comment)),
+        Err(refused(1, Why::Sent))
+    );
+    let comment = review.comment(1).unwrap();
+    assert_eq!(comment.draft_reply.as_ref().unwrap().body, "Sure?");
+    assert_eq!(review.withdraw(1, Some(Draft::Reply)), Ok(Draft::Reply));
+}
+
 #[test]
 fn withdrawing_a_draft_reply_keeps_the_comment() {
     let mut review = review();
     review.add_comment(on_review("First.")).unwrap();
     review.comments[0].pass = Some(1);
 
-    assert_eq!(review.withdraw(1), Err(refused(1, Why::Sent)));
+    assert_eq!(review.withdraw(1, None), Err(refused(1, Why::Sent)));
 
     review
         .reply(1, "Jane".to_owned(), at(3), "Sure?".to_owned())
         .unwrap();
-    assert_eq!(review.withdraw(1), Ok(Draft::Reply));
+    assert_eq!(review.withdraw(1, None), Ok(Draft::Reply));
     assert_eq!(review.comment(1).unwrap().draft_reply, None);
 }
 
@@ -287,7 +346,7 @@ fn resolving_needs_a_sent_comment_without_a_draft_reply() {
 
     assert_eq!(review.resolve(1, at(4)), Err(refused(1, Why::DraftReply)));
 
-    review.withdraw(1).unwrap();
+    review.withdraw(1, None).unwrap();
     assert_eq!(review.resolve(1, at(4)), Ok(Resolution::Resolved));
     assert_eq!(review.resolve(1, at(5)), Ok(Resolution::AlreadyResolved));
     assert_eq!(review.comment(1).unwrap().resolved_at, Some(at(4)));
@@ -295,6 +354,45 @@ fn resolving_needs_a_sent_comment_without_a_draft_reply() {
     assert_eq!(
         review.reply(1, "Jane".to_owned(), at(5), "More.".to_owned()),
         Err(refused(1, Why::Resolved))
+    );
+}
+
+/// The assistant never answered comment 1, so the reviewer wrote in it last.
+#[test]
+fn a_resolved_comment_is_opened_again() {
+    let mut review = review();
+    review.add_comment(on_review("First.")).unwrap();
+    review.add_comment(on_review("Second.")).unwrap();
+    review.comments[0].pass = Some(1);
+    review.resolve(1, at(4)).unwrap();
+
+    assert_eq!(review.comment_mut(1).unwrap().reopen(), Ok(true));
+
+    let reopened = review.comment(1).unwrap();
+    assert_eq!(reopened.status(), Status::Open);
+    assert_eq!(reopened.resolved_at, None);
+    assert!(reopened.awaits_assistant(), "the next pass sends it");
+    assert_eq!(
+        review.reply(1, "Jane".to_owned(), at(5), "Still wrong.".to_owned()),
+        Ok(Replied::Added)
+    );
+}
+
+#[test]
+fn only_a_resolved_comment_is_opened_again() {
+    let mut review = review();
+    review.add_comment(on_review("First.")).unwrap();
+    review.add_comment(on_review("Second.")).unwrap();
+    review.comments[0].pass = Some(1);
+
+    assert_eq!(review.comment_mut(1).unwrap().reopen(), Ok(false));
+    assert_eq!(
+        review.comment_mut(2).unwrap().reopen(),
+        Err(refused(2, Why::Draft))
+    );
+    assert_eq!(
+        review.comment_mut(3).map(|_| ()),
+        Err(refused(3, Why::Missing))
     );
 }
 
@@ -379,7 +477,7 @@ fn a_comment_awaits_the_assistant_until_the_assistant_writes_last() {
         .unwrap();
     assert!(waiting(&review));
 
-    review.withdraw(1).unwrap();
+    review.withdraw(1, None).unwrap();
     review.resolve(1, at(4)).unwrap();
     assert!(!waiting(&review));
 }
@@ -487,8 +585,21 @@ fn a_closed_review_refuses_every_change() {
         }),
         Err(Refusal::Closed)
     );
-    assert_eq!(review.withdraw(1), Err(Refusal::Closed));
+    assert_eq!(review.withdraw(1, None), Err(Refusal::Closed));
     assert_eq!(review.resolve(1, at(10)), Err(Refusal::Closed));
+}
+
+#[test]
+fn a_reopened_review_takes_changes_again() {
+    let mut review = review();
+    review.close(at(9)).unwrap();
+
+    assert!(review.reopen());
+    assert_eq!(review.state(), State::Open);
+    assert_eq!(review.closed_at, None);
+    assert_eq!(review.add_comment(on_review("More.")), Ok(1));
+
+    assert!(!review.reopen(), "it was open already");
 }
 
 #[test]
@@ -568,6 +679,14 @@ fn refusals_name_the_comment_in_the_review() {
     assert_eq!(
         Refusal::PassRunning(2).message(id()),
         "Pass 2 of R-1h4k2m9 has not ended."
+    );
+    assert_eq!(
+        Refusal::Approval(3).message(id()),
+        "R-1h4k2m9 has no approval 3."
+    );
+    assert_eq!(
+        Refusal::ApprovalWithoutRange.message(id()),
+        "An approval is of a range of a file: lines, or a span within them."
     );
 }
 

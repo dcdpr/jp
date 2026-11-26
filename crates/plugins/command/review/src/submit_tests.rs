@@ -99,6 +99,7 @@ fn what_the_assistant_wrote_outside_the_pass_is_not_printed() {
         at: at(3),
         version: Some(1),
         error: None,
+        answer: None,
     });
     review
         .answer(1, reply(Some(Verdict::Decline), "No."))
@@ -110,13 +111,42 @@ fn what_the_assistant_wrote_outside_the_pass_is_not_printed() {
     );
 }
 
+/// The host's answer to a pass's query, the turn ending as `outcome`.
+fn done(outcome: QueryOutcome, answer: Option<&str>) -> QueryCompleteResponse {
+    QueryCompleteResponse {
+        id: Some("pass".to_owned()),
+        conversation: "jp-c17629384710".to_owned(),
+        outcome,
+        data: None,
+        answer: answer.map(ToOwned::to_owned),
+    }
+}
+
 #[test]
 fn the_hosts_outcome_says_how_the_pass_ended() {
     assert_eq!(
-        Ending::of(QueryOutcome::Finished).outcome,
+        Ending::of(done(QueryOutcome::Finished, None)).outcome,
         Outcome::Completed
     );
-    assert_eq!(Ending::of(QueryOutcome::Stopped).outcome, Outcome::Stopped);
-    assert_eq!(Ending::of(QueryOutcome::Aborted).outcome, Outcome::Stopped);
-    assert_eq!(Ending::of(QueryOutcome::Finished).error, None);
+    assert_eq!(
+        Ending::of(done(QueryOutcome::Stopped, None)).outcome,
+        Outcome::Stopped
+    );
+    assert_eq!(
+        Ending::of(done(QueryOutcome::Aborted, None)).outcome,
+        Outcome::Stopped
+    );
+    assert_eq!(Ending::of(done(QueryOutcome::Finished, None)).error, None);
+}
+
+#[test]
+fn the_pass_keeps_the_closing_message_the_host_reports() {
+    assert_eq!(
+        Ending::of(done(QueryOutcome::Stopped, Some("Fixed #1; #2 next."))),
+        Ending {
+            outcome: Outcome::Stopped,
+            error: None,
+            answer: Some("Fixed #1; #2 next.".to_owned()),
+        }
+    );
 }

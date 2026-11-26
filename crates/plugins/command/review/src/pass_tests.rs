@@ -66,6 +66,7 @@ fn ended(outcome: Outcome, version: Option<u32>) -> Ended {
         at: at(5),
         version,
         error: None,
+        answer: None,
     }
 }
 
@@ -206,6 +207,7 @@ fn an_abandoned_pass_is_interrupted() {
             at: at(9),
             version: None,
             error: None,
+            answer: None,
         })
     );
     assert_eq!(review.passes.running(), None);

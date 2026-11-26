@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use indoc::indoc;
 use pretty_assertions::assert_eq;
 
@@ -57,6 +59,45 @@ fn heading_text_is_mapped() {
     assert_eq!(html, indoc! {r#"
         <h2><span data-s="3" data-e="8">Title</span></h2>
     "#});
+}
+
+/// The second heading starts on line 2, counted from 0, and no anchor names the
+/// line of the third.
+#[test]
+fn a_heading_carries_the_anchor_named_for_its_line() {
+    let anchors = BTreeMap::from([(0, "title".to_owned()), (2, "a-b".to_owned())]);
+
+    let html = render_with_anchors("# Title\n\n## A & B\n\n### Bare\n", &anchors).html;
+
+    assert_eq!(html, indoc! {r#"
+        <h1 id="title"><span data-s="2" data-e="7">Title</span></h1>
+        <h2 id="a-b"><span data-s="12" data-e="17">A &amp; B</span></h2>
+        <h3><span data-s="23" data-e="27">Bare</span></h3>
+    "#});
+}
+
+#[test]
+fn an_underlined_heading_carries_the_anchor_of_the_line_its_text_is_on() {
+    let anchors = BTreeMap::from([(2, "title".to_owned())]);
+
+    let html = render_with_anchors("Lead.\n\nTitle\n=====\n", &anchors).html;
+
+    assert_eq!(html, indoc! {r#"
+        <p><span data-s="0" data-e="5">Lead.</span></p>
+        <h1 id="title"><span data-s="7" data-e="12">Title</span></h1>
+    "#});
+}
+
+#[test]
+fn an_anchor_is_escaped_as_an_attribute() {
+    let anchors = BTreeMap::from([(0, "a\"b<c".to_owned())]);
+
+    let html = render_with_anchors("# T\n", &anchors).html;
+
+    assert_eq!(
+        html,
+        "<h1 id=\"a&quot;b&lt;c\"><span data-s=\"2\" data-e=\"3\">T</span></h1>\n"
+    );
 }
 
 #[test]

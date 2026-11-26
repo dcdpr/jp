@@ -1,20 +1,24 @@
 //! Core review data model and state transitions (`review.json`).
 //!
 //! [`Review`] represents the serialized state of a review: tracked file paths,
-//! file versions, comments, replies, and passes.
+//! file versions, comments, replies, passes, and what the reviewer approved and
+//! read ([`crate::progress`]).
 //! All mutations validate invariants and return a [`Refusal`] on invalid state
 //! transitions; disk I/O is handled by [`crate::store`] and
 //! [`crate::snapshot`].
 
-use std::{collections::BTreeMap, fmt};
+use std::collections::BTreeMap;
 
 use chrono::{DateTime, Utc};
+// `review.json` stores these as the HTTP API writes them.
+pub use jp_review_api::{Draft, Resolution, Role, State, Status, Verdict};
 use serde::{Deserialize, Serialize};
 
 use crate::{
     anchor::{Anchor, Target},
     id::{CommentRef, ReviewId},
     pass::Passes,
+    progress::Progress,
 };
 
 /// Current `review.json` schema version.
@@ -58,6 +62,9 @@ pub struct Review {
 
     #[serde(flatten)]
     pub passes: Passes,
+
+    #[serde(flatten)]
+    pub progress: Progress,
 }
 
 /// Snapshot of the review's tracked files at a point in time.
@@ -135,50 +142,6 @@ pub struct Reply {
     pub pass: Option<u32>,
 }
 
-/// Which side of a review wrote something.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Role {
-    Reviewer,
-    Assistant,
-}
-
-/// The assistant's disposition on a reviewer's comment.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Verdict {
-    /// Agrees, and makes the requested change.
-    Accept,
-    /// Agrees with the issue, and makes a different change.
-    Amend,
-    /// Makes no change, and says why.
-    Decline,
-    /// Agrees, but leaves the point for later, saying where it was tracked.
-    Defer,
-    /// Asks a question before changing anything.
-    Ask,
-}
-
-/// Where a comment stands, derived from its history.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Status {
-    /// Written by the reviewer, and not yet sent to the assistant.
-    Draft,
-    /// Sent, and waiting on one side or the other.
-    Open,
-    /// Closed by the reviewer.
-    Resolved,
-}
-
-/// Whether a review takes changes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum State {
-    Open,
-    Closed,
-}
-
 /// A comment to add to a review.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewComment {
@@ -194,6 +157,10 @@ pub struct Edit {
     pub anchor: Option<Anchor>,
     pub suggestion: Option<String>,
     pub body: Option<String>,
+
+    /// Expected draft target (`Comment` or `Reply`).
+    /// When `None`, edits whichever draft the comment currently holds.
+    pub expects: Option<Draft>,
 }
 
 /// What a reply did to the comment's draft reply.
@@ -201,23 +168,6 @@ pub struct Edit {
 pub enum Replied {
     Added,
     Replaced,
-}
-
-/// What an edit or a withdrawal applied to: a draft comment, or a comment's
-/// draft reply.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Draft {
-    Comment,
-    Reply,
-}
-
-/// What resolving a comment did.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Resolution {
-    Resolved,
-    AlreadyResolved,
 }
 
 /// Why a review refused a change.
@@ -246,6 +196,12 @@ pub enum Refusal {
 
     /// The pass with this number has not ended.
     PassRunning(u32),
+
+    /// An approval is of a range of a file, and the anchor names none.
+    ApprovalWithoutRange,
+
+    /// No approval carries this number.
+    Approval(u32),
 }
 
 /// What about a comment stands in the way of a change.
@@ -260,8 +216,7 @@ pub enum Why {
     /// The comment is a draft, so it has nothing to reply to or resolve.
     Draft,
 
-    /// The comment was sent and holds no draft reply, so it has nothing to edit
-    /// or withdraw.
+    /// The comment was sent, so it is no longer a draft to change or withdraw.
     Sent,
 
     /// The comment is resolved, so it takes no reply.
@@ -306,6 +261,10 @@ impl Refusal {
                 "{id} runs its passes in {conversation}; leave out `--id` to continue there."
             ),
             Self::PassRunning(number) => format!("Pass {number} of {id} has not ended."),
+            Self::ApprovalWithoutRange => {
+                "An approval is of a range of a file: lines, or a span within them.".to_owned()
+            }
+            Self::Approval(number) => format!("{id} has no approval {number}."),
         }
     }
 }
@@ -340,7 +299,7 @@ impl Why {
             Self::Missing => format!("No comment {comment}."),
             Self::Withdrawn => format!("{comment} was withdrawn."),
             Self::Draft => format!("{comment} is a draft, not yet sent."),
-            Self::Sent => format!("{comment} has been sent, and holds no draft reply."),
+            Self::Sent => format!("{comment} has been sent, so it is no longer a draft to change."),
             Self::Resolved => format!("{comment} is resolved."),
             Self::DraftReply => {
                 format!("{comment} holds a draft reply; withdraw it before resolving the comment.")
@@ -382,6 +341,7 @@ impl Review {
             comments: vec![],
             last_comment: 0,
             passes: Passes::default(),
+            progress: Progress::default(),
         }
     }
 
@@ -438,7 +398,7 @@ impl Review {
     }
 
     pub fn comment(&self, number: u32) -> Result<&Comment, Refusal> {
-        let missing = self.missing(number);
+        let missing = missing(self.last_comment, number);
         self.comments
             .iter()
             .find(|comment| comment.number == number)
@@ -446,23 +406,11 @@ impl Review {
     }
 
     pub(crate) fn comment_mut(&mut self, number: u32) -> Result<&mut Comment, Refusal> {
-        let missing = self.missing(number);
+        let missing = missing(self.last_comment, number);
         self.comments
             .iter_mut()
             .find(|comment| comment.number == number)
             .ok_or(missing)
-    }
-
-    /// Why no comment carries `number`: it was withdrawn when a comment has
-    /// taken it before.
-    fn missing(&self, number: u32) -> Refusal {
-        let why = if (1..=self.last_comment).contains(&number) {
-            Why::Withdrawn
-        } else {
-            Why::Missing
-        };
-
-        Refusal::Comment(number, why)
     }
 
     /// Add a comment, returning the number it takes.
@@ -554,14 +502,18 @@ impl Review {
     }
 
     /// Change a draft comment, or the body of the draft reply on a sent one.
+    ///
+    /// Refused when the comment no longer holds the draft `edit` expects.
     pub fn edit(&mut self, number: u32, edit: Edit) -> Result<Draft, Refusal> {
         self.writable()?;
-        if edit == Edit::default() {
+        if edit.anchor.is_none() && edit.suggestion.is_none() && edit.body.is_none() {
             return Err(Refusal::NothingToChange);
         }
 
         let comment = self.comment_mut(number)?;
-        if comment.status() == Status::Draft {
+        let draft = comment.status() == Status::Draft;
+        expected(number, draft, edit.expects)?;
+        if draft {
             let content = comment.content.edited(edit);
             content.check()?;
             comment.content = content;
@@ -584,18 +536,23 @@ impl Review {
         Ok(Draft::Reply)
     }
 
-    /// Withdraw a draft comment, retiring its number, or the draft reply on a
-    /// sent one.
-    pub fn withdraw(&mut self, number: u32) -> Result<Draft, Refusal> {
+    /// Withdraw a draft comment (retiring its number) or the draft reply on a
+    /// submitted comment.
+    ///
+    /// Returns an error if `expects` is `Some` and does not match the draft
+    /// kind the comment currently holds.
+    pub fn withdraw(&mut self, number: u32, expects: Option<Draft>) -> Result<Draft, Refusal> {
         self.writable()?;
-        let missing = self.missing(number);
+        let missing = missing(self.last_comment, number);
         let index = self
             .comments
             .iter()
             .position(|comment| comment.number == number)
             .ok_or(missing)?;
 
-        if self.comments[index].status() == Status::Draft {
+        let draft = self.comments[index].status() == Status::Draft;
+        expected(number, draft, expects)?;
+        if draft {
             self.comments.remove(index);
             return Ok(Draft::Comment);
         }
@@ -655,6 +612,36 @@ impl Review {
         self.closed_at = Some(at);
         Ok(true)
     }
+
+    /// Open a closed review again, returning `false` when it was open already.
+    pub fn reopen(&mut self) -> bool {
+        self.closed_at.take().is_some()
+    }
+}
+
+/// Verify that comment `number`'s current draft state (`is_draft_comment`)
+/// matches `expects`, if specified.
+///
+/// Prevents an edit or withdrawal intended for a draft comment from mutating a
+/// draft reply after the comment has been submitted (or vice versa).
+fn expected(number: u32, draft: bool, expects: Option<Draft>) -> Result<(), Refusal> {
+    match (expects, draft) {
+        (Some(Draft::Comment), false) => Err(Refusal::Comment(number, Why::Sent)),
+        (Some(Draft::Reply), true) => Err(Refusal::Comment(number, Why::Draft)),
+        _ => Ok(()),
+    }
+}
+
+/// Why no comment carries `number` in a review whose highest comment number
+/// allocated is `last`: it was withdrawn when a comment has taken it before.
+fn missing(last: u32, number: u32) -> Refusal {
+    let why = if (1..=last).contains(&number) {
+        Why::Withdrawn
+    } else {
+        Why::Missing
+    };
+
+    Refusal::Comment(number, why)
 }
 
 impl Comment {
@@ -674,6 +661,21 @@ impl Comment {
             Status::Open => Ok(()),
             Status::Draft => Err(Refusal::Comment(self.number, Why::Draft)),
             Status::Resolved => Err(Refusal::Comment(self.number, Why::Resolved)),
+        }
+    }
+
+    /// Open a resolved comment again, returning `false` when it was open
+    /// already.
+    ///
+    /// A draft was never sent, so it was never resolved either.
+    pub fn reopen(&mut self) -> Result<bool, Refusal> {
+        match self.status() {
+            Status::Draft => Err(Refusal::Comment(self.number, Why::Draft)),
+            Status::Open => Ok(false),
+            Status::Resolved => {
+                self.resolved_at = None;
+                Ok(true)
+            }
         }
     }
 
@@ -723,37 +725,6 @@ impl Content {
             body: edit.body.unwrap_or_else(|| self.body.clone()),
             suggestion: edit.suggestion.or_else(|| self.suggestion.clone()),
         }
-    }
-}
-
-impl fmt::Display for Status {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.pad(match self {
-            Self::Draft => "draft",
-            Self::Open => "open",
-            Self::Resolved => "resolved",
-        })
-    }
-}
-
-impl fmt::Display for State {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.pad(match self {
-            Self::Open => "open",
-            Self::Closed => "closed",
-        })
-    }
-}
-
-impl fmt::Display for Verdict {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.pad(match self {
-            Self::Accept => "accept",
-            Self::Amend => "amend",
-            Self::Decline => "decline",
-            Self::Defer => "defer",
-            Self::Ask => "ask",
-        })
     }
 }
 

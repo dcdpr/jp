@@ -20,7 +20,7 @@ use crossterm::style::Stylize as _;
 use super::target::{ConversationTarget, PickerFilter};
 use crate::cli::{
     CommandArgs,
-    flag::{Claim, Flag, FlagValues, OptionalValue, flag_arg},
+    flag::{Claim, Flag, FlagValues, FreeText, OptionalValue, flag_arg},
 };
 
 /// Positional conversation ID arguments: `[ID]` or `[ID]...`
@@ -47,6 +47,54 @@ pub(crate) struct PositionalIds<const SESSION: bool, const MULTI: bool> {
 #[derive(Debug, Default)]
 pub(crate) struct FlagIds<const SESSION: bool, const MULTI: bool, const GLOBAL: bool = false> {
     ids: Vec<ConversationTarget>,
+}
+
+/// Positional conversation target arguments as raw command-line words.
+///
+/// An optional-value flag whose separate argument turns out to be a
+/// conversation target returns that word here; [`PositionalIds::from_words`]
+/// then parses all target words in command-line order.
+#[derive(Debug, Default)]
+pub(crate) struct TargetWords {
+    /// Each word with its clap index, in command-line order.
+    words: Vec<(usize, String)>,
+}
+
+impl TargetWords {
+    /// The words clap matched as positional conversation targets.
+    pub(crate) fn read(matches: &ArgMatches) -> Self {
+        let indices = matches.indices_of("id").into_iter().flatten();
+        let words = matches
+            .get_raw("id")
+            .into_iter()
+            .flatten()
+            .map(|word| word.to_string_lossy().into_owned());
+
+        Self {
+            words: indices.zip(words).collect(),
+        }
+    }
+}
+
+impl FreeText for TargetWords {
+    type Words = Vec<String>;
+
+    fn takes_words(&self) -> bool {
+        true
+    }
+
+    fn is_text(&self, index: usize) -> bool {
+        self.words.iter().any(|(at, _)| *at == index)
+    }
+
+    fn give(&mut self, index: usize, word: String) {
+        let at = self.words.partition_point(|(i, _)| *i < index);
+        self.words.insert(at, (index, word));
+    }
+
+    fn into_words(self) -> Vec<String> {
+        self.words.into_iter().map(|(_, word)| word).collect()
+    }
 }
 
 /// The `-i` / `--id` flag that reads into a [`FlagIds`] of the same parameters.
@@ -150,6 +198,26 @@ impl<const SESSION: bool, const MULTI: bool, const GLOBAL: bool> ConversationIds
 
     fn supports_session(&self) -> bool {
         SESSION
+    }
+}
+
+impl<const SESSION: bool, const MULTI: bool> PositionalIds<SESSION, MULTI> {
+    /// Read the targets from `words`: the positional arguments, and every word
+    /// a flag gave back to them.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when a word names a target this command does not
+    /// accept, or the targets cannot be combined.
+    pub(crate) fn from_words(words: TargetWords) -> Result<Self, clap::Error> {
+        let ids = words
+            .into_words()
+            .iter()
+            .map(|word| parse_target::<SESSION>(word))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        validate_multi::<MULTI>(&ids)?;
+        Ok(Self { ids })
     }
 }
 

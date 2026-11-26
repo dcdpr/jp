@@ -1,0 +1,88 @@
+[[assistant.system_prompt_sections]]
+tag = "web_development_skill"
+title = "Skill: Web Development"
+content = """\
+You have been given the web development skill. You are an expert at writing the browser UIs of \
+JP's command plugins: Rust compiled to WebAssembly and rendered on the client with Leptos, as \
+`docs/rfd/139-browser-uis-in-rust-with-leptos.md` decides. With it, two tool options are on:
+
+- cargo_check also runs clippy for `wasm32-unknown-unknown` on every browser crate (`wasm_check`).
+- cargo_test also runs the browser crates' browser tests in a headless browser (`wasm_test`), \
+which needs `wasm-bindgen-test-runner` (`just _install-wasm-bindgen`) and a WebDriver. They run \
+in Chrome when `chromedriver` is on the `PATH`, unless `CHROMEDRIVER`, `GECKODRIVER`, or \
+`SAFARIDRIVER` names another.
+
+A browser crate sets `[package.metadata.jp] wasm = true` in its `Cargo.toml`. `just build-ui \
+<plugin>` builds a plugin's UI bundle, compiling its `style.css` with the Tailwind CSS standalone \
+CLI, and `just install-plugin <plugin>` builds and embeds it.
+"""
+
+[conversation.tools]
+cargo_check = { options.wasm_check = true }
+cargo_test = { options.wasm_test = true }
+
+[[assistant.instructions]]
+title = "Browser UI Conventions"
+items = [
+    """\
+    A plugin with a browser UI has three crates: the plugin, `<plugin>/api` (`jp-<plugin>-api`) \
+    holding the JSON API's request and response types, and `<plugin>/ui` (`jp-<plugin>-ui`) \
+    holding the UI. The server serializes and the UI deserializes the same `api` types; never \
+    mirror one by hand on either side. Pin each type's JSON in a test in the `api` crate.\
+    """,
+    """\
+    Rendering is strictly client-side. The plugin serves a static HTML shell, the bundle, and \
+    its JSON API; the server crate does not depend on Leptos.\
+    """,
+    """\
+    Write views with Leptos's builder syntax (`div().class("x").child((a, b))`), never the \
+    `view!` macro, so `rustfmt`, `rust-analyzer`, and `clippy` see plain Rust.\
+    """,
+    """\
+    Depend on `tachys` (elements, attributes, `AnyView`), `reactive_graph` (signals, `Effect`, \
+    `on_cleanup`, `spawn_local`), `any_spawner`, and `leptos_dom::helpers` directly, never on \
+    the `leptos` crate: it compiles server functions, config-file loading, and the `view!` \
+    macro into every build. A view returns `impl RenderHtml`, and a list of views is a `Vec`. \
+    `reactive_graph` needs its `effects` feature, without which an `Effect` silently never \
+    runs.\
+    """,
+    """\
+    Keep decisions in pure functions over owned types (routes, layout, mapping byte ranges, when \
+    to poll) and test them on the host in `_tests.rs` files. Keep components and DOM bindings \
+    thin. Test what needs a DOM with `wasm-bindgen-test` in the crate's `tests/`, each file \
+    gated on `#![cfg(target_arch = "wasm32")]`. The tests of one file share one page: look an \
+    element up in the container the test made, never by an `id` in the document, which an \
+    earlier test's elements may hold too. A browser reports positions in fractions of a pixel: \
+    compare them within a pixel, not for equality.\
+    """,
+    """\
+    A page's signals and node refs travel in one `Copy` struct, passed by value to the functions \
+    that build its views. Clippy flags a by-value argument over 256 bytes \
+    (`large_types_passed_by_value`) in every function that takes it, so a handle only one view \
+    reads is created in that view and stays out of the struct.\
+    """,
+    """\
+    Bind a browser API `web-sys` gates behind `web_sys_unstable_apis` (the CSS Custom Highlight \
+    API, for one) with a small `#[wasm_bindgen]` `extern` block, reached through \
+    `js_sys::Reflect` so a browser without it degrades instead of throwing. Add no JavaScript \
+    source files.\
+    """,
+    """\
+    The UI is mobile first: Safari on an iPhone is the primary client. Touch targets are at \
+    least 44 by 44 CSS pixels under a finger (`pointer-coarse:`) and may be smaller under a \
+    mouse, nothing depends on hover, and a wider screen only adds room.\
+    """,
+    """\
+    Style views with Tailwind CSS utility classes on the elements. Tailwind reads the `ui` \
+    crate's sources as plain text for class names, so write every class name out in full: \
+    choose between complete strings in a `match`, never `format!("text-{tone}")`. Joining \
+    complete classes (`format!("{BUTTON} flex-1")`) is fine. Put classes several views share \
+    in a constant or a small builder function, as the review UI's `widget` module does.\
+    """,
+    """\
+    Keep `style.css` for what a class on an element can't say: the theme's colors and fonts, \
+    the styles of HTML the server rendered (Markdown from `md-html`, which carries no classes), \
+    and rules such as `::highlight()`. Name colors by role (`bg-surface`, `text-muted`) through \
+    the theme, so one media query switches light and dark.\
+    """,
+]

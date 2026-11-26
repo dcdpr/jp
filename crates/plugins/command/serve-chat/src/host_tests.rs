@@ -87,6 +87,7 @@ fn query_complete(id: &str) -> HostToPlugin {
         conversation: "c1".to_owned(),
         outcome: QueryOutcome::Finished,
         data: None,
+        answer: None,
     })
 }
 

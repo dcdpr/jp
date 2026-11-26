@@ -13,7 +13,12 @@
 //!     "version": 2,
 //!     "comments": [1, 2],
 //!     "conversation": "jp-c17629384710",
-//!     "ended": { "outcome": "completed", "at": "2026-11-17T10:04:00Z", "version": 3 }
+//!     "ended": {
+//!       "outcome": "completed",
+//!       "at": "2026-11-17T10:04:00Z",
+//!       "version": 3,
+//!       "answer": "Both comments are addressed."
+//!     }
 //!   }
 //! ]
 //! ```
@@ -25,6 +30,8 @@
 use std::fmt;
 
 use chrono::{DateTime, Utc};
+// `review.json` stores it as the HTTP API writes it.
+pub use jp_review_api::Outcome;
 use serde::{Deserialize, Serialize};
 
 use crate::model::{Refusal, Review, Role, Why};
@@ -84,24 +91,11 @@ pub struct Ended {
     /// What went wrong, for a pass that failed or lost its host.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
-}
 
-/// How the turn of a pass ended.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Outcome {
-    /// The turn finished.
-    Completed,
-
-    /// The turn was stopped or aborted.
-    Stopped,
-
-    /// The host couldn't run the turn, or the turn failed.
-    Failed,
-
-    /// The process running the pass exited, or lost its host, before it learned
-    /// how the turn ended.
-    Interrupted,
+    /// The assistant's closing message: the last text it wrote in the turn, as
+    /// the host reported it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answer: Option<String>,
 }
 
 /// A pass named on the command line: its number, or the latest one.
@@ -235,6 +229,7 @@ impl Passes {
                 at,
                 version: None,
                 error: None,
+                answer: None,
             });
             interrupted.push(pass.number);
         }
@@ -314,17 +309,6 @@ impl Ended {
     /// Whether the pass's turn ran, so the assistant read its message.
     fn ran(&self) -> bool {
         matches!(self.outcome, Outcome::Completed | Outcome::Stopped)
-    }
-}
-
-impl fmt::Display for Outcome {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.pad(match self {
-            Self::Completed => "completed",
-            Self::Stopped => "stopped",
-            Self::Failed => "failed",
-            Self::Interrupted => "interrupted",
-        })
     }
 }
 

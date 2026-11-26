@@ -26,6 +26,9 @@
 //! destinations with a `javascript:`, `vbscript:`, `file:`, or non-image
 //! `data:` scheme are stripped.
 //!
+//! [`render_with_anchors`] also gives headings the `id`s its caller names, for
+//! `#fragment` links to land on.
+//!
 //! [`render_text`] renders plain text as preformatted HTML (`<pre>`), wrapping
 //! each line in a `<span>` with its source byte range.
 //!
@@ -39,6 +42,8 @@ mod position;
 mod range;
 mod span;
 mod text;
+
+use std::collections::BTreeMap;
 
 use comrak::{
     Arena, Options, html::format_document_with_formatter, options::Plugins, parse_document,
@@ -63,10 +68,25 @@ pub struct Rendered {
 /// before rendering must map offsets back to the original input themselves.
 #[must_use]
 pub fn render(source: &str) -> Rendered {
+    render_with_anchors(source, &BTreeMap::new())
+}
+
+/// Render Markdown as [`render`] does, with an `id` on the headings `anchors`
+/// names.
+///
+/// `anchors` maps the 0-based index of the line a heading starts on to the `id`
+/// that heading gets; a heading on any other line gets none.
+/// The caller decides the ids, and keeps them unique in the page the HTML goes
+/// into.
+#[must_use]
+pub fn render_with_anchors(source: &str, anchors: &BTreeMap<usize, String>) -> Rendered {
     let options = options();
     let arena = Arena::new();
     let root = parse_document(&arena, source, &options);
-    let lines = Lines::new(source);
+    let document = formatter::Document {
+        lines: Lines::new(source),
+        anchors,
+    };
 
     let mut html = String::new();
     // Writing to a `String` cannot fail.
@@ -76,7 +96,7 @@ pub fn render(source: &str) -> Rendered {
         &mut html,
         &Plugins::default(),
         formatter::format_node,
-        &lines,
+        &document,
     );
 
     Rendered { html }

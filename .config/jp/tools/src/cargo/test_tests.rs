@@ -1,8 +1,396 @@
 use camino_tempfile::tempdir;
 use jp_process::{ExitCode, MockProcessRunner};
 use jp_tool::{Action, Context};
+use pretty_assertions::assert_eq;
 
 use super::*;
+
+/// `cargo metadata` for a workspace holding the browser crate `a-ui`.
+const BROWSER_METADATA: &str =
+    r#"{ "packages": [{ "name": "a-ui", "metadata": { "jp": { "wasm": true } } }] }"#;
+
+const BROWSER_TEST: &[&str] = &[
+    "test",
+    "--target",
+    "wasm32-unknown-unknown",
+    "--test",
+    "*",
+    "--package=a-ui",
+];
+
+#[test]
+fn passing_browser_tests_are_counted() {
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns_success(BROWSER_METADATA)
+        .expect("cargo")
+        .args(BROWSER_TEST)
+        .returns_success(
+            "running 3 tests\ntest result: ok. 3 passed; 0 failed; 0 ignored; 0 filtered out\n",
+        );
+
+    let note = wasm_test(
+        Utf8Path::new("/work"),
+        "-W warnings",
+        None,
+        &[],
+        None,
+        None,
+        &runner,
+    );
+
+    assert_eq!(
+        note,
+        Some(BrowserRun {
+            note: "Browser tests: 3 passed, in a-ui.".to_owned(),
+            ran: 3,
+        })
+    );
+    let call = &runner.calls()[1];
+    assert!(
+        call.env.iter().any(
+            |(key, value)| key == "CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER"
+                && value == "wasm-bindgen-test-runner"
+        ),
+        "the browser runs them: {:?}",
+        call.env
+    );
+    assert!(
+        !call.env.iter().any(|(key, _)| key == "CHROMEDRIVER"),
+        "without a chromedriver, the runner picks the browser: {:?}",
+        call.env
+    );
+}
+
+#[test]
+fn a_chromedriver_found_runs_the_browser_tests_in_chrome() {
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns_success(BROWSER_METADATA)
+        .expect("cargo")
+        .returns_success("test result: ok. 1 passed; 0 failed; 0 ignored\n");
+
+    wasm_test(
+        Utf8Path::new("/work"),
+        "-W warnings",
+        None,
+        &[],
+        None,
+        Some("/opt/homebrew/bin/chromedriver"),
+        &runner,
+    );
+
+    let call = &runner.calls()[1];
+    assert!(
+        call.env
+            .iter()
+            .any(|(key, value)| key == "CHROMEDRIVER" && value == "/opt/homebrew/bin/chromedriver"),
+        "{:?}",
+        call.env
+    );
+}
+
+/// Chrome is preferred only while nothing names a browser: a `*DRIVER`
+/// variable, local or remote, is left to pick it.
+#[test]
+fn chrome_is_used_unless_a_driver_variable_names_a_browser() {
+    let found = || Some("/usr/local/bin/chromedriver".to_owned());
+
+    assert_eq!(
+        chromedriver_for(|_| false, found()).as_deref(),
+        Some("/usr/local/bin/chromedriver")
+    );
+    assert_eq!(chromedriver_for(|_| false, None), None, "none on the PATH");
+    assert_eq!(
+        chromedriver_for(|name| name == "SAFARIDRIVER", found()),
+        None
+    );
+    assert_eq!(
+        chromedriver_for(|name| name == "GECKODRIVER_REMOTE", found()),
+        None
+    );
+}
+
+#[test]
+fn failing_browser_tests_say_what_running_them_needs() {
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns_success(BROWSER_METADATA)
+        .expect("cargo")
+        .returns(ProcessOutput {
+            stdout: "test result: FAILED. 1 passed; 2 failed; 0 ignored\n".to_owned(),
+            stderr: "error: test failed, to rerun pass `--test highlight`\n".to_owned(),
+            status: ExitCode::from_code(101),
+        });
+
+    let note = wasm_test(
+        Utf8Path::new("/work"),
+        "-W warnings",
+        None,
+        &[],
+        Some("deletion"),
+        None,
+        &runner,
+    )
+    .unwrap();
+
+    assert_eq!(note.ran, 3);
+    let note = note.note;
+    assert!(
+        note.starts_with(
+            "Browser tests: 1 passed, 2 failed, in a-ui. Running them needs \
+             `wasm-bindgen-test-runner`"
+        ),
+        "{note}"
+    );
+    assert!(note.contains("--test highlight"), "{note}");
+    assert_eq!(
+        runner.calls()[1].args.last().map(String::as_str),
+        Some("deletion"),
+        "the name filter reaches the runner"
+    );
+}
+
+/// The packages tested have no browser crate, so nothing runs in a browser.
+#[test]
+fn packages_without_a_browser_crate_run_no_browser_tests() {
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns_success(BROWSER_METADATA);
+
+    let note = wasm_test(
+        Utf8Path::new("/work"),
+        "-W warnings",
+        None,
+        &["a".to_owned()],
+        None,
+        None,
+        &runner,
+    );
+
+    assert_eq!(note, None);
+    assert_eq!(runner.calls().len(), 1);
+}
+
+#[test]
+fn a_filter_matching_no_browser_test_says_so() {
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns_success(BROWSER_METADATA)
+        .expect("cargo")
+        .returns_success("test result: ok. 0 passed; 0 failed; 0 ignored; 3 filtered out\n");
+
+    let note = wasm_test(
+        Utf8Path::new("/work"),
+        "-W warnings",
+        None,
+        &[],
+        Some("only_on_the_host"),
+        None,
+        &runner,
+    );
+
+    assert_eq!(
+        note,
+        Some(BrowserRun {
+            note: "No browser test matched, in a-ui.".to_owned(),
+            ran: 0,
+        })
+    );
+}
+
+fn host_run_of(code: i32) -> Result<HostRun, Failure> {
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns(ProcessOutput {
+            stdout: String::new(),
+            stderr: "no tests to run\n".to_owned(),
+            status: ExitCode::from_code(code),
+        });
+
+    host_run(
+        Utf8Path::new("/work"),
+        "-W warnings",
+        None,
+        &[],
+        Some("seated".to_owned()),
+        false,
+        false,
+        &runner,
+    )
+}
+
+/// Nextest exits with 4 when its filter matches no tests, and with 101 when the
+/// build fails.
+#[test]
+fn a_host_run_that_matched_nothing_is_told_apart_from_a_failed_build() {
+    assert!(matches!(host_run_of(4), Ok(HostRun::NoneMatched(_))));
+    assert!(host_run_of(101).is_err());
+}
+
+fn browser_passed() -> BrowserRun {
+    BrowserRun {
+        note: "Browser tests: 2 passed, in a-ui.".to_owned(),
+        ran: 2,
+    }
+}
+
+#[test]
+fn a_run_matching_only_browser_tests_succeeds() {
+    let host = Ok(HostRun::NoneMatched("Unable to run any tests.".to_owned()));
+
+    let result = combine(host, Some(browser_passed()))
+        .unwrap()
+        .into_content()
+        .unwrap();
+
+    assert_eq!(
+        result,
+        "No host test matched.\n\nBrowser tests: 2 passed, in a-ui.\n"
+    );
+}
+
+#[test]
+fn a_failed_host_build_fails_the_run_whatever_the_browser_says() {
+    let host = Err("Unable to run any tests.".into());
+
+    let error = combine(host, Some(browser_passed()))
+        .unwrap_err()
+        .to_string();
+
+    assert_eq!(
+        error,
+        "Unable to run any tests.\n\nBrowser tests: 2 passed, in a-ui."
+    );
+}
+
+#[test]
+fn a_run_matching_nothing_on_either_side_fails() {
+    let host = Ok(HostRun::NoneMatched("Unable to run any tests.".to_owned()));
+    let browser = Some(BrowserRun {
+        note: "No browser test matched, in a-ui.".to_owned(),
+        ran: 0,
+    });
+
+    let error = combine(host, browser).unwrap_err().to_string();
+
+    assert_eq!(
+        error,
+        "Unable to run any tests.\n\nNo browser test matched, in a-ui."
+    );
+}
+
+/// When the filter names a test in a browser crate's `tests/` directory
+/// (excluded from the host build), nextest exits with code 4 and the test runs
+/// in headless Chrome.
+#[test]
+fn a_run_of_a_browser_test_alone_succeeds_through_both_halves() {
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns(ProcessOutput {
+            stdout: String::new(),
+            stderr: "no tests to run\n".to_owned(),
+            status: ExitCode::from_code(4),
+        })
+        .expect("cargo")
+        .args(&["metadata", "--no-deps", "--format-version=1"])
+        .returns_success(BROWSER_METADATA)
+        .expect("cargo")
+        .args(&[
+            "test",
+            "--target",
+            "wasm32-unknown-unknown",
+            "--test",
+            "*",
+            "--package=a-ui",
+            "--",
+            "seated",
+        ])
+        .returns_success("test result: ok. 1 passed; 0 failed; 0 ignored\n");
+
+    let content = cargo_test_impl(
+        Utf8Path::new("/work"),
+        "-W warnings",
+        None,
+        &[],
+        Some("seated".to_owned()),
+        false,
+        false,
+        Browsers::Run {
+            chromedriver: Some("/usr/bin/chromedriver".to_owned()),
+        },
+        &runner,
+    )
+    .unwrap()
+    .unwrap_content();
+
+    assert_eq!(
+        content,
+        "No host test matched.\n\nBrowser tests: 1 passed, in a-ui.\n"
+    );
+    assert!(
+        runner.calls()[2]
+            .env
+            .iter()
+            .any(|(key, value)| key == "CHROMEDRIVER" && value == "/usr/bin/chromedriver"),
+        "{:?}",
+        runner.calls()[2].env
+    );
+}
+
+#[test]
+fn browser_crates_that_cant_be_found_leave_the_host_run_standing() {
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns_success(r#"{"type":"test","event":"ok","name":"my_test","stdout":""}"#)
+        .expect("cargo")
+        .returns_error("could not find `Cargo.toml`\n");
+
+    let content = cargo_test_impl(
+        Utf8Path::new("/work"),
+        "-W warnings",
+        None,
+        &[],
+        None,
+        false,
+        false,
+        Browsers::Run { chromedriver: None },
+        &runner,
+    )
+    .unwrap()
+    .unwrap_content();
+
+    assert_eq!(
+        content,
+        "Ran 1/1 tests, of which 0 failed.\n\nThe browser tests weren't run: `cargo metadata` \
+         failed: could not find `Cargo.toml`\n"
+    );
+    assert_eq!(runner.calls().len(), 2, "no browser run without its crates");
+}
+
+#[test]
+fn the_browser_summary_sums_every_result_line() {
+    let stdout = "test result: ok. 2 passed; 0 failed; 0 ignored\nnoise\ntest result: FAILED. 1 \
+                  passed; 1 failed; 0 ignored\n";
+
+    assert_eq!(browser_summary(stdout), (3, 1));
+    assert_eq!(browser_summary(""), (0, 0));
+}
+
+#[test]
+fn a_note_follows_what_the_run_says() {
+    let passed: ToolResult = Ok("Ran 1/1 tests, of which 0 failed.\n".to_owned().into());
+
+    let noted = with_note(passed, Some("Browser tests: 3 passed, in a-ui.".to_owned()))
+        .unwrap()
+        .into_content()
+        .unwrap();
+
+    assert_eq!(
+        noted,
+        "Ran 1/1 tests, of which 0 failed.\n\nBrowser tests: 3 passed, in a-ui.\n"
+    );
+}
 
 #[test]
 fn test_cargo_test_success() {
@@ -26,6 +414,7 @@ fn test_cargo_test_success() {
         None,
         false,
         false,
+        Browsers::Skip,
         &runner,
     )
     .unwrap()
@@ -57,6 +446,7 @@ fn test_cargo_test_with_failure() {
         None,
         false,
         false,
+        Browsers::Skip,
         &runner,
     )
     .unwrap()
@@ -106,6 +496,7 @@ fn a_timed_out_test_is_reported_as_failed() {
         None,
         false,
         false,
+        Browsers::Skip,
         &runner,
     )
     .unwrap()
@@ -150,6 +541,7 @@ fn a_failed_run_with_no_parsed_failures_is_not_reported_as_passing() {
         None,
         false,
         false,
+        Browsers::Skip,
         &runner,
     )
     .unwrap()
@@ -191,6 +583,7 @@ fn no_tests_ran_error_is_bounded() {
         None,
         false,
         false,
+        Browsers::Skip,
         &runner,
     )
     .expect_err("a run with zero tests is an error")
@@ -243,6 +636,7 @@ fn failure_output_is_bounded_across_the_whole_run() {
         None,
         false,
         false,
+        Browsers::Skip,
         &runner,
     )
     .unwrap()
@@ -301,6 +695,7 @@ fn failure_blocks_are_bounded_when_captured_output_is_empty() {
         None,
         false,
         false,
+        Browsers::Skip,
         &runner,
     )
     .unwrap()
@@ -365,6 +760,7 @@ fn cargo_profile_is_passed_through_to_nextest() {
         Some("my_test".to_owned()),
         false,
         false,
+        Browsers::Skip,
         &runner,
     )
     .unwrap()
@@ -403,6 +799,7 @@ fn each_package_is_passed_to_nextest() {
         Some("my_test".to_owned()),
         false,
         false,
+        Browsers::Skip,
         &runner,
     )
     .unwrap()
@@ -442,6 +839,7 @@ fn test_rustflags_reaches_cargo() {
         None,
         false,
         false,
+        Browsers::Skip,
         &runner,
     )
     .unwrap();
@@ -473,6 +871,7 @@ fn insta_workspace_root_names_the_checkout_under_test() {
         None,
         false,
         false,
+        Browsers::Skip,
         &runner,
     )
     .unwrap();
@@ -507,6 +906,7 @@ fn test_backtrace_disabled_by_default() {
         None,
         false,
         false,
+        Browsers::Skip,
         &runner,
     )
     .unwrap();
@@ -541,6 +941,7 @@ fn test_checksum_freshness_disabled_by_default() {
         None,
         false,
         false,
+        Browsers::Skip,
         &runner,
     )
     .unwrap();
@@ -574,6 +975,7 @@ fn test_checksum_freshness_enabled() {
         None,
         false,
         true,
+        Browsers::Skip,
         &runner,
     )
     .unwrap();
@@ -608,6 +1010,7 @@ fn test_backtrace_enabled() {
         None,
         true,
         false,
+        Browsers::Skip,
         &runner,
     )
     .unwrap();

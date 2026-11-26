@@ -2,28 +2,33 @@
 //! records in `view`.
 
 use chrono::{DateTime, SecondsFormat, Utc};
+use jp_review_api::{
+    AnchorView, Change, Comment as CommentView, Counts, Detail, DiffView, Pass as PassView, Placed,
+    ReadUntil, Reply as ReplyView, Summary, Version,
+};
 
 use crate::{
     anchor::{Anchor, Target},
-    model::{Comment, Reply, Version},
-    pass::{Outcome, Pass},
-    view::{
-        AnchorView, Change, CommentView, Counts, Detail, DiffView, PassReport, Placed, Summary,
-    },
+    model::{Comment, Reply},
+    pass::Outcome,
+    view::PassReport,
 };
 
 /// The width the label of a line `jp review submit` prints is padded to: the
 /// longest verdict, `decline`.
 const LABEL_WIDTH: usize = 7;
 
+/// The maximum number of characters [`opening`] quotes of a passage.
+const OPENING_CHARS: usize = 60;
+
 /// A review's line in `jp review ls`.
-pub(crate) fn row(summary: &Summary<'_>) -> String {
+pub(crate) fn row(summary: &Summary) -> String {
     let head = &summary.head;
 
     format!(
         "{}  {:<6}  {}  {}{}\n",
         head.id,
-        head.state,
+        head.status,
         head.created_at.format("%Y-%m-%d"),
         head.title,
         counts(&summary.comments)
@@ -50,22 +55,27 @@ fn counts(counts: &Counts) -> String {
     format!(" ({})", parts.join(", "))
 }
 
-/// A review and its comments, as `jp review show` prints them.
-pub(crate) fn detail(detail: &Detail<'_>) -> String {
+/// A review, the closing message of each of its passes, and its comments, as
+/// `jp review show` prints them.
+pub(crate) fn detail(detail: &Detail) -> String {
     let head = &detail.head;
     let mut out = format!("# {}: {}\n\n", head.id, head.title);
-    out.push_str(&format!("- **Status**: {}\n", head.state));
+    out.push_str(&format!("- **Status**: {}\n", head.status));
     out.push_str(&format!("- **Author**: {}\n", head.author));
     out.push_str(&format!("- **Files**: {}\n", head.files.join(", ")));
-    out.push_str(&format!("- **Versions**: {}\n", versions(detail.versions)));
+    out.push_str(&format!("- **Versions**: {}\n", versions(&detail.versions)));
     out.push_str(&format!("- **Showing**: version {}\n", detail.version));
-    if let Some(conversation) = detail.conversation {
+    if let Some(conversation) = &detail.conversation {
         out.push_str(&format!("- **Conversation**: {conversation}\n"));
     }
     if !detail.passes.is_empty() {
-        out.push_str(&format!("- **Passes**: {}\n", passes(detail.passes)));
+        out.push_str(&format!("- **Passes**: {}\n", passes(&detail.passes)));
     }
 
+    for pass in &detail.passes {
+        out.push_str(&closing(pass));
+    }
+    out.push_str(&progress(detail));
     for view in &detail.comments {
         out.push('\n');
         out.push_str(&comment(view, detail.version));
@@ -87,7 +97,7 @@ fn versions(versions: &[Version]) -> String {
 }
 
 /// Each pass's number and how it ended: `1 completed, 2 running`.
-fn passes(passes: &[Pass]) -> String {
+fn passes(passes: &[PassView]) -> String {
     passes
         .iter()
         .map(|pass| match &pass.ended {
@@ -98,8 +108,71 @@ fn passes(passes: &[Pass]) -> String {
         .join(", ")
 }
 
+/// What the assistant said last in a pass, under a heading naming the pass;
+/// nothing for a pass whose turn left no closing message.
+fn closing(pass: &PassView) -> String {
+    let Some(ended) = &pass.ended else {
+        return String::new();
+    };
+    let Some(answer) = ended
+        .answer
+        .as_deref()
+        .map(str::trim)
+        .filter(|answer| !answer.is_empty())
+    else {
+        return String::new();
+    };
+
+    format!(
+        "\n## Pass {} ({})\n\n{answer}\n",
+        pass.number, ended.outcome
+    )
+}
+
+/// How far the reviewer has read each file, and the passages they approved,
+/// each under its heading; nothing for a review that says neither.
+fn progress(detail: &Detail) -> String {
+    let mut out = String::new();
+    if !detail.read_until.is_empty() {
+        out.push_str("\n## Read so far\n\n");
+    }
+    for read in &detail.read_until {
+        out.push_str(&format!("- {}\n", read_through(read, detail.version)));
+    }
+    if !detail.approvals.is_empty() {
+        out.push_str("\n## Approved\n\n");
+    }
+    for approval in &detail.approvals {
+        out.push_str(&format!(
+            "- {}: {}\n",
+            approval.number,
+            place(&approval.anchor, detail.version)
+        ));
+    }
+
+    out
+}
+
+/// How far a file was read, as it reads in version `shown`: `docs/a.md through
+/// line 42`.
+///
+/// A version holding none of the lines read names the line as it was counted.
+pub(crate) fn read_through(read: &ReadUntil, shown: u32) -> String {
+    match read
+        .projected
+        .as_ref()
+        .and_then(|placed| placed.range.as_ref())
+    {
+        Some(line) => format!("{} through line {line}", read.path),
+        None => format!(
+            "{} through line {} in version {}, of which version {shown} holds nothing",
+            read.path, read.line, read.version
+        ),
+    }
+}
+
 /// A comment, its anchor placed in version `shown`.
-fn comment(view: &CommentView<'_>, shown: u32) -> String {
+fn comment(view: &CommentView, shown: u32) -> String {
     let kind = if view.suggestion.is_some() {
         " suggestion"
     } else {
@@ -117,10 +190,10 @@ fn comment(view: &CommentView<'_>, shown: u32) -> String {
     if !view.body.is_empty() {
         out.push_str(&format!("\n{}\n", view.body));
     }
-    for sent in view.replies {
+    for sent in &view.replies {
         out.push_str(&reply(sent, ""));
     }
-    if let Some(draft) = view.draft_reply {
+    if let Some(draft) = &view.draft_reply {
         out.push_str(&reply(draft, "Draft reply from "));
     }
     if let Some(at) = view.resolved_at {
@@ -132,8 +205,8 @@ fn comment(view: &CommentView<'_>, shown: u32) -> String {
 
 /// The text a comment's range covers, quoted, or as the diff its suggestion
 /// makes; nothing for a comment on no range.
-pub(crate) fn excerpt(view: &CommentView<'_>) -> String {
-    match (view.excerpt, view.suggestion) {
+pub(crate) fn excerpt(view: &CommentView) -> String {
+    match (view.excerpt.as_deref(), view.suggestion.as_deref()) {
         (Some(excerpt), Some(replacement)) => {
             format!("\n```diff\n{}```\n", changed(excerpt, replacement))
         }
@@ -146,24 +219,25 @@ pub(crate) fn excerpt(view: &CommentView<'_>) -> String {
 ///
 /// An outdated one names the version it was written in, and the first since
 /// then that no longer holds its text.
-pub(crate) fn place(view: &AnchorView<'_>, shown: u32) -> String {
-    let written = view.anchor.version;
-    let since = view.resolved.map_or_else(
+pub(crate) fn place(view: &AnchorView, shown: u32) -> String {
+    let written = view.version;
+    let since = view.resolved.as_ref().map_or_else(
         || format!("in version {shown}"),
         |last| format!("since version {}", last.version + 1),
     );
 
-    match (&view.anchor.target, view.projected) {
-        (Target::Review, _) => "the review".to_owned(),
-        (Target::File(path), Some(_)) => path.clone(),
-        (Target::File(path), None) => format!("{path} in version {written}, absent {since}"),
+    match (&view.path, &view.range, &view.projected) {
+        (None, ..) => "the review".to_owned(),
+        (Some(path), None, Some(_)) => path.clone(),
+        (Some(path), None, None) => format!("{path} in version {written}, absent {since}"),
         (
-            Target::Range(path, _),
+            Some(path),
+            Some(_),
             Some(Placed {
                 range: Some(range), ..
             }),
         ) => format!("{path}:{range}"),
-        (Target::Range(path, range), _) => {
+        (Some(path), Some(range), _) => {
             format!("{path}:{range} in version {written}, outdated {since}")
         }
     }
@@ -191,7 +265,7 @@ fn changed(excerpt: &str, replacement: &str) -> String {
 }
 
 /// A reply under a comment, its heading opening with `lead`.
-fn reply(reply: &Reply, lead: &str) -> String {
+fn reply(reply: &ReplyView, lead: &str) -> String {
     let verdict = reply
         .verdict
         .map_or_else(String::new, |verdict| format!(", {verdict}"));
@@ -248,6 +322,19 @@ pub(crate) fn written(anchor: &Anchor) -> String {
     }
 }
 
+/// How `text` opens, to tell a passage by: its first line that holds something,
+/// truncated to [`OPENING_CHARS`] characters, with `…` after a truncated one.
+pub(crate) fn opening(text: &str) -> String {
+    let line = first_line(text);
+    if line.chars().count() <= OPENING_CHARS {
+        return line.to_owned();
+    }
+
+    let mut opening: String = line.chars().take(OPENING_CHARS).collect();
+    opening.push('…');
+    opening
+}
+
 /// The first line of `text` that holds something, trimmed.
 fn first_line(text: &str) -> &str {
     text.lines()
@@ -300,7 +387,7 @@ pub(crate) fn pass_end(report: &PassReport<'_>) -> String {
 /// What changed from one version to another, as a unified diff per file: each
 /// path under `vN/`, the version it is read in, and `/dev/null` for a file
 /// absent from a version.
-pub(crate) fn diff(view: &DiffView<'_>) -> String {
+pub(crate) fn diff(view: &DiffView) -> String {
     let mut out = String::new();
     for file in &view.files {
         let old = match file.change {

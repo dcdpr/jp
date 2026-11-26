@@ -34,6 +34,7 @@ pub mod error;
 pub mod event;
 mod event_id;
 pub mod patch;
+pub mod position;
 pub(crate) mod storage;
 pub mod stream;
 pub mod thread;

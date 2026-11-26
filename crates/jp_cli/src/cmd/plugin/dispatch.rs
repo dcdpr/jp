@@ -78,7 +78,7 @@ use crate::{
         interrupt::{
             Delivery, InterruptAction, TurnInterruptSender, TurnInterrupts, reply_edit_mode,
         },
-        last_request_id, resolve_new_title, turn_structured_data,
+        last_request_id, resolve_new_title, turn_answer, turn_structured_data,
     },
     config_pipeline::{ConfigPipeline, build_partial_over, config_search_roots},
     ctx::McpServerScope,
@@ -1320,9 +1320,10 @@ fn query_outcome(ending: TurnEnding) -> QueryOutcome {
 /// Build the protocol response for a delegated turn that ended without a
 /// runtime error.
 ///
-/// When `schema` is set, extracts the structured response from the turn started
-/// after `before` (the last request ID prior to this query), or returns an
-/// error response if the turn produced no structured data.
+/// Carries the last message text of the turn started after `before` (the last
+/// request ID prior to this query) as its answer.
+/// When `schema` is set, also extracts the structured response from that turn,
+/// or returns an error response if the turn produced no structured data.
 fn completed(
     id: Option<String>,
     conversation: String,
@@ -1331,12 +1332,14 @@ fn completed(
     before: Option<&EventId>,
     schema: Option<&Map<String, Value>>,
 ) -> HostToPlugin {
+    let answer = turn_answer(events, before);
     if schema.is_none() {
         return HostToPlugin::QueryComplete(QueryCompleteResponse {
             id,
             conversation,
             outcome,
             data: None,
+            answer,
         });
     }
 
@@ -1346,6 +1349,7 @@ fn completed(
             conversation,
             outcome,
             data: Some(data),
+            answer,
         }),
         Err(error) => query_error(id, format!("conversation {conversation}: {error}")),
     }

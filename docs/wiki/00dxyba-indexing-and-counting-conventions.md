@@ -31,11 +31,14 @@ consistent and happens in exactly one place per boundary.
   rendered.
   Nothing in between carries an ambiguous "is this 0- or 1-based?" value.
 
-`jp_conversation` carries core values (0-based) and never sees a user value.
-Everything above it translates at the point where it parses or renders user
-input, and each such point is listed under "Where the translation lives":
-`jp_cli`'s flag parsers for `--turn`/`--from`/`--to`, and `RuleBound`'s
-`FromStr`/`Display` for config values and the inline DSL.
+The stream API of `jp_conversation` takes and returns 0-based core values, never
+user-facing 1-based values.
+User-written positions parse into `Position` or `PositionSpec`
+(`jp_conversation::position`), which store the 1-based numbers as written.
+They translate to 0-based indices at the boundary points listed under [Where the
+translation lives](#where-the-translation-lives): `jp_cli`'s flag parsers for
+`--turn`, `--from`, `--to`, and `--reset`, the attachment selector, and
+`RuleBound`'s `FromStr`/`Display` for config values and the inline DSL.
 
 One consequence worth knowing before touching `RuleBound`: because it normalizes
 at parse time, its `FromEnd` payload is already a 0-based offset (`FromEnd(0)`
@@ -96,7 +99,19 @@ Two consequences worth calling out:
   Overlapping items are merged into a single window, whereas adjacent items
   (`1..3,4..6`) remain separate windows so `jp conversation compact` compacts
   each window independently.
-  Lists starting with a from-end position require `=` (`--turn=-3,-1`).
+
+- Values starting with a from-end position can be passed as a separate word,
+  with or without `=`: `--turn -3,-1`, `--reset -3..-1`.
+  Because no `jp` flag starts with a digit, a word starting with `-` and a digit
+  directly after an option that takes a value is attached to that option as its
+  value (`attach_from_end_values` in `jp_cli::cli::spelling`).
+
+- Compaction events use the same 1-based numbering.
+  `jp conversation compact --reset` accepts a comma-separated list of positions
+  and ranges (`--reset 1,3..5`), numbering compaction events from `1` in stream
+  order as listed by `jp conversation show`.
+  `--reset -1` selects the most recent compaction event, and any out-of-range
+  item returns an error.
 
 ## Which bounds go where
 
@@ -141,12 +156,22 @@ so it is half-open and uses distinct flag names (`--created-since` /
 
 ## Where the translation lives
 
-- **CLI turn selection** (`jp_cli::cmd::turn_selection`): `parse_bound` maps a
-  1-based absolute `N` to `RangeBound::Absolute(N - 1)` and a from-end `-N` to
-  `RangeBound::FromEnd(N - 1)`.
-  `--turn` endpoints go through `parse_turn_pos`, which produces the same two
-  flavours (`TurnPos::Absolute` / `TurnPos::FromEnd`) holding the number as
-  written; `TurnPos::to_range_bound` does the 1-based → 0-based shift.
+- **The position notation** (`jp_conversation::position`): `Position` is one
+  1-based number counted from either end (`Position::Absolute` /
+  `Position::FromEnd`), and `PositionSpec` is one position or an `A..B` range of
+  them.
+  Both hold the numbers as written.
+  `--turn`, the inline DSL, the attachment selector, and `--reset` parse a
+  `PositionSpec`; `--from`/`--to` parse a `Position`.
+  `Position::index`, `PositionSpec::resolve`, and `PositionSpec::clamp` do the
+  1-based → 0-based shift against a count of items.
+  `resolve` rejects a position outside the sequence, and `clamp` pulls it onto
+  the nearest end.
+
+- **CLI turn selection** (`jp_cli::cmd::turn_selection`): `parse_bound` and
+  `--turn` endpoints are `Position`s, and `range_bound` maps
+  `Position::Absolute(N)` to `RangeBound::Absolute(N - 1)` and
+  `Position::FromEnd(N)` to `RangeBound::FromEnd(N - 1)`.
   `TurnSelection::resolve` then resolves every bound against the stream and
   produces a `TurnSet` of inclusive 0-based windows.
 
@@ -177,12 +202,23 @@ so it is half-open and uses distinct flag names (`--created-since` /
   window needs no protecting.
 
 - **Config `keep_first`/`keep_last` and the inline DSL**: `RuleBound`'s
-  `FromStr` (`jp_config::conversation::compaction`) and `parse_dsl_bound`
+  `FromStr` (`jp_config::conversation::compaction`) and `dsl_bound`
   (`jp_cli::cmd::compact_flag`) both map `-N` to `RuleBound::FromEnd(N - 1)`.
 
   The two parsers differ on a bare `N`: in config it is a count (`keep_first =
   5` keeps five turns), in the DSL it is a position (`5..` starts at turn 5).
   Only the DSL produces `RuleBound::Absolute`; see "Which bounds go where".
+
+- **Attachment selector** (`jp_attachment_internal::selector`): the `RANGE` of
+  `CONTENT[:RANGE]` is a `PositionSpec`.
+  `PositionSpec::clamp` resolves it against the turn count, so a range that
+  overshoots the conversation selects the turns it does cover.
+
+- **Compaction numbers** (`jp_cli::cmd::conversation::compact`): `--reset` takes
+  a comma-separated list of `PositionSpec` items.
+  `resolve_reset` resolves each one against the number of compaction events in
+  the stream with `PositionSpec::resolve`, and `reset_lines` renders the 0-based
+  indices back as 1-based numbers.
 
 - **Timeline output** (`jp_cli::cmd::conversation::compact::timeline_lines`):
   the stored 0-based `from_turn`/`to_turn` are rendered as 1-based, e.g.
