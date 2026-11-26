@@ -1,33 +1,32 @@
-//! Deduplication of the notices a provider yields.
+//! Deduplication of provider notices across requests.
 //!
-//! A provider derives some notices again on every request it sends: a
-//! credential skipped for the same reason, a quota threshold already crossed,
-//! replayed reasoning the API withholds again.
-//! [`SeenNotices`] records which of those a provider has yielded, so each is
-//! yielded once per provider.
+//! A provider re-evaluates certain conditions on every request it sends, such
+//! as a skipped credential, an exceeded quota threshold, or replayed reasoning
+//! items that the API drops.
+//! [`SeenNotices`] tracks which of these standing conditions have already been
+//! reported so each is emitted at most once per provider instance.
 //!
-//! The provider decides which notices restate a standing condition.
-//! A notice that reports an event (a credential switch, a request billed as
-//! extra usage) is yielded every time it happens and is never recorded here.
+//! Event notices (such as a credential switch or a request billed as extra
+//! usage) are emitted every time they occur and are not recorded in
+//! [`SeenNotices`].
 
 use std::{
     collections::HashSet,
     sync::{Arc, Mutex, PoisonError},
 };
 
-/// The standing conditions one provider has already yielded a notice for.
+/// Standing-condition keys for which a provider has already emitted a notice.
 ///
-/// Clones share one record, so every stream a provider opens reads and writes
-/// the same one.
+/// Clones share the underlying set across every stream opened by the provider.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct SeenNotices(Arc<Mutex<HashSet<String>>>);
 
 impl SeenNotices {
-    /// Record `key`, returning whether it had not been seen before.
+    /// Insert `key` and return `true` if it was not already present.
     ///
-    /// `key` identifies the condition, which need not be the notice's text: a
-    /// notice whose wording changes while the condition stands is keyed on what
-    /// stays the same.
+    /// `key` identifies the underlying condition rather than the formatted
+    /// notice text, so notices whose wording varies (for example, by item ID or
+    /// utilization percentage) can still be deduplicated by condition.
     pub(crate) fn first(&self, key: &str) -> bool {
         self.0
             .lock()

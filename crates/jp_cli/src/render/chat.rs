@@ -1231,25 +1231,23 @@ impl ChatRenderer {
         }
     }
 
-    /// Render a provider notice: a line of chrome that is not part of the
+    /// Render a provider notice as a line of chrome outside the response.
+    ///
+    /// Flushes any buffered content first so a notice that arrives mid-stream
+    /// appears after the current paragraph, and ends any active reasoning
+    /// region.
+    ///
+    /// Ensures a single blank line above the notice (response content and the
+    /// role header already end with a blank line; tool chrome and prior notices
+    /// do not).
+    /// The blank line below the notice is emitted by the next rendered element,
+    /// or by [`close_notice`] when the notice is the last output of the
     /// response.
-    ///
-    /// Buffered content is committed first, so a notice that arrives while a
-    /// paragraph is still streaming lands after the paragraph.
-    /// The notice ends any reasoning region.
-    ///
-    /// The notice has one blank line above it.
-    /// Response content and the role header end in a blank line of their own;
-    /// under tool chrome or another notice the blank line is written here.
-    ///
-    /// The blank line below the notice is written by whatever renders next:
-    /// response content here, tool chrome by the tool renderer, and
-    /// [`close_notice`] when nothing does.
     ///
     /// [`close_notice`]: Self::close_notice
     pub fn render_notice(&mut self, line: &str) {
-        // A plain flush emits a separator the reasoning region owes unshaded:
-        // the notice below it is outside the region.
+        // Flush before ending the reasoning region so any pending separator is
+        // emitted unshaded.
         self.flush();
 
         let below_chrome = match self.last_content_kind {
@@ -1267,9 +1265,9 @@ impl ChatRenderer {
         self.set_response_kind(None);
     }
 
-    /// Write the blank line below a notice that nothing else will render below.
+    /// Emit a trailing blank line if the last rendered element was a notice.
     ///
-    /// Returns whether a notice was the last line rendered.
+    /// Returns `true` if a trailing notice was closed.
     pub fn close_notice(&mut self) -> bool {
         if self.last_content_kind != Some(ContentKind::Notice) {
             return false;

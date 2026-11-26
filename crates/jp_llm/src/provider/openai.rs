@@ -585,8 +585,8 @@ impl Provider for Openai {
             // either sends or retires one entry, so the loop is bounded by the
             // chain.
             loop {
-                // Yielded ahead of the request, so a notice recorded as seen
-                // has reached the caller even when the request then fails.
+                // Yield notices before sending the request so any notice
+                // marked as seen reaches the caller even if the request fails.
                 for notice in attempt.take_notices(&this.seen_notices) {
                     yield Ok(Event::Notice(notice));
                 }

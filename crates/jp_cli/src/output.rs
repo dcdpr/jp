@@ -24,22 +24,23 @@ use jp_term::table::{Details, details, details_json, details_markdown, list, lis
 use serde_json::{Value, to_string, to_string_pretty};
 use tracing::warn;
 
-/// A sink that prints provider notices to stderr as chrome.
+/// Return a sink that prints provider notices to stderr as chrome.
 ///
-/// For a request the user asked for directly whose events are collected rather
-/// than rendered: the notices land on stderr exactly as a query turn prints
-/// them.
+/// Use this for user-initiated requests whose events are collected rather than
+/// rendered through a [`TurnView`].
+///
+/// [`TurnView`]: crate::render::TurnView
 pub fn notice_sink(printer: &Printer) -> NoticeSink {
     let printer = printer.clone();
     NoticeSink::new(move |notice| printer.eprintln(notice_line(notice)))
 }
 
-/// A sink that logs provider notices from a background request, and prints
-/// nothing.
+/// Return a sink that logs provider notices from a background request without
+/// printing them to the terminal.
 ///
-/// A background request (an inquiry, title generation, a turn summary, an
-/// implicit compaction) runs on a model other than the one the user is talking
-/// to, so only the main model's notices reach the terminal.
+/// Background requests (inquiries, title generation, turn summaries, implicit
+/// compaction) run on a separate model, so only the main model's notices are
+/// shown in the terminal.
 /// `request` names the background request in the log record.
 pub fn background_notice_sink(request: &'static str) -> NoticeSink {
     NoticeSink::new(move |notice| {

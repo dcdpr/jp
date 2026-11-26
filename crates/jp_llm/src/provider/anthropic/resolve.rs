@@ -221,10 +221,10 @@ impl Attempt {
         }
     }
 
-    /// The notices to surface for this attempt, leaving none behind.
+    /// Drain and return the notices to surface for this attempt.
     ///
-    /// A skip notice `seen` already holds is dropped; the switch notice is
-    /// always kept.
+    /// Skip notices already present in `seen` are filtered out; the switch
+    /// notice is always retained.
     pub(super) fn take_notices(&mut self, seen: &SeenNotices) -> Vec<String> {
         let mut notices: Vec<String> = mem::take(&mut self.notices)
             .into_iter()
@@ -235,11 +235,12 @@ impl Attempt {
         notices
     }
 
-    /// Log this attempt's notices as warnings, leaving none behind.
+    /// Log and drain this attempt's notices as warnings without marking them as
+    /// seen.
     ///
-    /// For a request with no event stream to yield notices on.
-    /// Nothing is recorded as seen, so a later request through the same
-    /// provider still yields a skip notice logged here.
+    /// Used by requests without an event stream (such as model lookup), so a
+    /// subsequent stream request on the same provider still emits any skip
+    /// notices to the user.
     pub(super) fn log_notices(&mut self) {
         let skips = mem::take(&mut self.notices);
         for notice in skips.into_iter().chain(self.switch.take()) {

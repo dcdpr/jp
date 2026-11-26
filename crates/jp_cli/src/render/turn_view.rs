@@ -267,11 +267,11 @@ impl TurnView {
     }
 
     /// Render a provider notice as a line of chrome under the assistant header,
-    /// with one blank line above it and one below.
+    /// surrounded by blank lines.
     ///
-    /// Response content still buffered is committed ahead of the notice.
-    /// The blank line below is written by whatever renders next, or by
-    /// [`finish_response`] when the notice is the last line of the turn.
+    /// Flushes any buffered response content before printing the notice.
+    /// The trailing blank line is emitted by the next rendered element, or by
+    /// [`finish_response`] when the notice ends the turn.
     ///
     /// [`finish_response`]: Self::finish_response
     pub(crate) fn render_notice(&mut self, notice: &str) {
@@ -280,17 +280,14 @@ impl TurnView {
 
         self.chat.render_notice(&notice_line(notice));
 
-        // Owed for the blank line below the notice: the next tool header
-        // writes it, and response content clears the flag and writes the blank
-        // line itself.
+        // Request a blank line before the next tool header; assistant text or
+        // reasoning clears this flag and emits its own spacing.
         self.tool_separator.store(true, Ordering::Relaxed);
     }
 
-    /// Flush pending output at the end of a response that no tool call
-    /// continues.
-    ///
-    /// Nothing renders below a notice that is the last line of such a response,
-    /// so the blank line below it is written here.
+    /// Flush pending output at the end of a response with no pending tool
+    /// calls, and emit the trailing blank line if the response ended with a
+    /// notice.
     pub fn finish_response(&mut self) {
         self.flush();
         if self.chat.close_notice() {

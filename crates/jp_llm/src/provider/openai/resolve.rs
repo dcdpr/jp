@@ -247,10 +247,10 @@ impl Attempt {
         matches!(self.credential, Credential::Bearer(_))
     }
 
-    /// The notices to surface for this attempt, leaving none behind.
+    /// Drain and return the notices to surface for this attempt.
     ///
-    /// A skip notice `seen` already holds is dropped; the switch notice is
-    /// always kept.
+    /// Skip notices already present in `seen` are filtered out; the switch
+    /// notice is always retained.
     pub(super) fn take_notices(&mut self, seen: &SeenNotices) -> Vec<String> {
         let mut notices: Vec<String> = mem::take(&mut self.notices)
             .into_iter()

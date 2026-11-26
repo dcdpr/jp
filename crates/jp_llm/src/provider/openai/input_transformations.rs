@@ -21,9 +21,9 @@ use crate::{event::Event, provider::notices::SeenNotices};
 /// different or less capable model) emit one [`Event::Notice`] per reason;
 /// other removal reasons are only logged.
 ///
-/// A notice counts the removals `seen` does not hold yet, keyed on the item's
-/// id, and records them.
-/// A reason with no such removal emits no notice.
+/// Only removals whose item ID is not yet in `seen` are counted and recorded.
+/// If all removals for a reason were already reported, no notice is emitted for
+/// that reason.
 pub(super) fn input_transformation_notices(
     transformations: &[InputTransformation],
     seen: &SeenNotices,

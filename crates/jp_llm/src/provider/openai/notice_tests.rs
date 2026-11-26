@@ -25,14 +25,12 @@ use crate::{
     query::ChatQuery,
 };
 
-/// Two variables the environment always holds, standing in for two API keys.
+/// Two environment variables that are always set, standing in for two API keys.
 const WORK_KEY_ENV: &str = if cfg!(windows) { "USERNAME" } else { "USER" };
 const PERSONAL_KEY_ENV: &str = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
 
-/// A variable the environment never holds.
 const UNSET_KEY_ENV: &str = "JP_TEST_OPENAI_NOTICE_KEY_UNSET";
 
-/// A completed response that withheld the replayed reasoning items `removed`.
 fn completed(removed: &[&str]) -> String {
     let transformations: Vec<_> = removed
         .iter()
@@ -60,7 +58,6 @@ fn completed(removed: &[&str]) -> String {
     )
 }
 
-/// The response OpenAI answers a revoked or mistyped key with.
 fn unauthorized() -> String {
     let body = r#"{"error":{"message":"Incorrect API key provided.","type":"invalid_request_error","code":"invalid_api_key"}}"#;
 
@@ -71,8 +68,6 @@ fn unauthorized() -> String {
     )
 }
 
-/// Answer each request with what `respond` returns for the request's head and
-/// the number of requests before it.
 fn serve(
     listener: TcpListener,
     respond: impl Fn(&str, usize) -> String + Send + 'static,
@@ -93,8 +88,6 @@ fn serve(
     })
 }
 
-/// A config whose API requests go to `listener`, with a chain of two named keys
-/// read from `work` and `personal`.
 fn two_key_config(listener: &TcpListener, work: &str, personal: &str) -> OpenaiConfig {
     let mut config = AppConfig::new_test().providers.llm.openai;
     config.base_url = format!("http://{}", listener.local_addr().unwrap());
@@ -110,9 +103,8 @@ fn two_key_config(listener: &TcpListener, work: &str, personal: &str) -> OpenaiC
     config
 }
 
-/// Send one request through `provider` and collect what it yields.
 async fn request(provider: &Openai) -> Vec<Event> {
-    // Served without streaming, so the stand-in answers with one JSON body.
+    // Disable streaming so the mock server can respond with a single JSON body.
     let mut model = ModelDetails::empty("openai/gpt-6.2-sol".parse().unwrap());
     model.features = vec![STREAMING_UNSUPPORTED];
 

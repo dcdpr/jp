@@ -361,9 +361,8 @@ fn a_provider_notice_follows_the_paragraph_it_arrived_during() {
         Event::Notice("OpenAI dropped 11 reasoning items.".to_owned()),
     );
 
-    // One worker writes both channels in the order they were queued, so a
-    // paragraph that is on stdout once the notice has been printed was printed
-    // ahead of it.
+    // A single worker drains both stdout and stderr in queue order, so stdout
+    // containing the paragraph confirms it was flushed before the notice.
     printer.flush();
     assert_eq!(out.lock().as_str(), "I did not repost those findings.\n\n");
     assert_eq!(
