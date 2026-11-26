@@ -11,9 +11,7 @@ use std::{sync::Arc, time::Instant};
 use camino::Utf8PathBuf;
 use indexmap::IndexMap;
 use jp_attachment::Attachment;
-use jp_config::{
-    AppConfig, assistant::tool_choice::ToolChoice,
-};
+use jp_config::{AppConfig, assistant::tool_choice::ToolChoice};
 use jp_conversation::{ConversationStream, EventId, event::ChatRequest};
 use jp_inquire::prompt::TerminalPromptBackend;
 use jp_llm::{DynProvider, provider};
