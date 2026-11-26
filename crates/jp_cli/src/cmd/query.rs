@@ -164,7 +164,7 @@ use crate::{
     ctx::{IntoPartialAppConfig, McpServerScope},
     editor,
     error::{Error, Result},
-    output::{notice_sink, print_json},
+    output::{background_notice_sink, print_json},
     parser::AttachmentUrlOrPath,
     render::{RenderFlow, TurnView},
     signals::{SignalRouter, TurnInterrupt},
@@ -371,7 +371,8 @@ impl Query {
         // `setup`, so the composed request and the editor's history preview see
         // the compacted stream while nothing is written yet.
         if self.compact.should_compact() {
-            self.apply_pre_query_compaction(&setup, &cfg, &notice_sink(&ctx.printer))
+            let notices = background_notice_sink("pre-query compaction");
+            self.apply_pre_query_compaction(&setup, &cfg, &notices)
                 .await?;
         }
 
@@ -634,7 +635,7 @@ impl Query {
                     // assistant model. Skip the title instead of spawning a
                     // task that is doomed to fail after holding teardown
                     // open.
-                    let notices = notice_sink(&ctx.printer);
+                    let notices = background_notice_sink("title generation");
                     match TitleGeneratorTask::new(cid, stream, &cfg, ctx.term.is_tty, notices) {
                         Ok(task) => ctx.task_handler.spawn(task),
                         Err(error) => warn!(%error, "Skipping title generation."),
@@ -648,7 +649,7 @@ impl Query {
         // not yet have a summary. A misconfigured summary model logs a warning
         // rather than failing the query.
         if cfg.conversation.turn_summary.generate.auto && ctx.workspace.persists() {
-            match TurnSummaryTask::new(cid, &stream, &cfg, notice_sink(&ctx.printer)) {
+            match TurnSummaryTask::new(cid, &stream, &cfg, background_notice_sink("turn summary")) {
                 Ok(Some(task)) => ctx.task_handler.spawn(task),
                 Ok(None) => {}
                 Err(error) => warn!(%error, "Skipping turn summaries."),

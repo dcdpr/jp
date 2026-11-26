@@ -24,7 +24,7 @@ use jp_printer::Printer;
 use jp_term::background::DefaultBackground;
 
 use super::{ChatRenderer, RenderFlow, StructuredRenderer};
-use crate::format::sanitize_mode;
+use crate::{format::sanitize_mode, output::notice_line};
 
 /// Fallback label used when no [`assistant.name`][an] is configured.
 ///
@@ -69,6 +69,7 @@ pub(crate) struct TurnView {
     /// Shared with the [`ToolRenderer`] (wired via
     /// [`Self::set_tool_separator`]): the flag a tool result or custom argument
     /// block raises to owe a blank-line separator before the next tool call.
+    /// A provider notice raises it too.
     /// Visible assistant content clears it, since it supplies its own spacing.
     ///
     /// [`ToolRenderer`]: super::ToolRenderer
@@ -262,6 +263,35 @@ impl TurnView {
         } else {
             self.chat.skip_tool_call();
             None
+        }
+    }
+
+    /// Render a provider notice as a line of chrome under the assistant header,
+    /// surrounded by blank lines.
+    ///
+    /// Flushes any buffered response content before printing the notice.
+    /// The trailing blank line is emitted by the next rendered element, or by
+    /// [`finish_response`] when the notice ends the turn.
+    ///
+    /// [`finish_response`]: Self::finish_response
+    pub(crate) fn render_notice(&mut self, notice: &str) {
+        self.ensure_assistant_header();
+        self.structured.flush();
+
+        self.chat.render_notice(&notice_line(notice));
+
+        // Request a blank line before the next tool header; assistant text or
+        // reasoning clears this flag and emits its own spacing.
+        self.tool_separator.store(true, Ordering::Relaxed);
+    }
+
+    /// Flush pending output at the end of a response with no pending tool
+    /// calls, and emit the trailing blank line if the response ended with a
+    /// notice.
+    pub fn finish_response(&mut self) {
+        self.flush();
+        if self.chat.close_notice() {
+            self.tool_separator.store(false, Ordering::Relaxed);
         }
     }
 

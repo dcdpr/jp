@@ -16,7 +16,7 @@ use serde_json::Value;
 
 use super::{
     Anthropic, BetaFeatures, CLAUDE_CODE_IDENTITY_LINE, IDENTITY_LINE_OVERRIDE, create_request,
-    http, resolve,
+    http,
 };
 use crate::{
     credential::Credential,
@@ -24,7 +24,7 @@ use crate::{
     model::{ModelDetails, ReasoningDetails},
     provider::{
         ApiTestRoute, DynProvider, ProviderTestRoute, ProviderTestSupport, first_stored_profile,
-        number_ids, replay_credential_env,
+        notices::SeenNotices, number_ids, replay_credential_env,
     },
     query::ChatQuery,
 };
@@ -41,7 +41,7 @@ impl Anthropic {
             store: None,
             fixed_credential: Some(credential),
             client_cache: http::Clients::default(),
-            seen_notices: resolve::SeenNotices::default(),
+            seen_notices: SeenNotices::default(),
         }
     }
 

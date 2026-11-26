@@ -17,18 +17,43 @@
 //! [`DetailItem`]: jp_term::table::DetailItem
 
 use comfy_table::Row;
+use crossterm::style::Stylize as _;
 use jp_llm::event::NoticeSink;
 use jp_printer::{OutputFormat, Printer};
 use jp_term::table::{Details, details, details_json, details_markdown, list, list_markdown};
 use serde_json::{Value, to_string, to_string_pretty};
+use tracing::warn;
 
-/// A sink that prints provider notices to stderr as chrome.
+/// Return a sink that prints provider notices to stderr as chrome.
 ///
-/// For requests whose events are collected rather than rendered: the notices
-/// land on stderr exactly as a query turn prints them.
+/// Use this for user-initiated requests whose events are collected rather than
+/// rendered through a [`TurnView`].
+///
+/// [`TurnView`]: crate::render::TurnView
 pub fn notice_sink(printer: &Printer) -> NoticeSink {
     let printer = printer.clone();
-    NoticeSink::new(move |notice| printer.eprintln(notice))
+    NoticeSink::new(move |notice| printer.eprintln(notice_line(notice)))
+}
+
+/// Return a sink that logs provider notices from a background request without
+/// printing them to the terminal.
+///
+/// Background requests (inquiries, title generation, turn summaries, implicit
+/// compaction) run on a separate model, so only the main model's notices are
+/// shown in the terminal.
+/// `request` names the background request in the log record.
+pub fn background_notice_sink(request: &'static str) -> NoticeSink {
+    NoticeSink::new(move |notice| {
+        warn!(%notice, request, "Provider notice from a background request.");
+    })
+}
+
+/// Format a provider notice as a line of chrome: `WARN <notice>`.
+///
+/// The line is dim, with `WARN` in yellow.
+/// A printer that is not pretty strips the styling and keeps the label.
+pub fn notice_line(notice: &str) -> String {
+    format!("{} {}", "WARN".yellow().dim(), notice.dim())
 }
 
 /// Print a list table (header + rows) in the format dictated by the printer.
