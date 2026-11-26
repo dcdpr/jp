@@ -1,12 +1,12 @@
-//! What a finished turn hands back: its structured response, or its last
-//! message.
+//! Extract the result of a completed turn: its structured response or its last
+//! assistant message.
 
 use jp_conversation::{ConversationEvent, ConversationStream, EventId, event::ChatResponse};
 use serde_json::{Map, Value};
 
 use super::turn_start::last_request_id;
 
-/// Why a turn has no structured response to hand back.
+/// Reasons a turn has no structured response to return.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum StructuredDataError {
     #[error("the turn was stopped before it started")]
@@ -22,19 +22,20 @@ pub(crate) enum StructuredDataError {
     NotJson,
 }
 
-/// The structured response of the turn a run started.
+/// Extract the structured response from the turn started by this run.
 ///
-/// `before` is the [`last_request_id`] from before the run.
-/// When it is still the last request, the run appended nothing and there is no
-/// answer of its own to give.
-/// Otherwise only the conversation's last turn is searched, so an earlier
-/// turn's data is never returned in its place.
+/// `before` is the [`last_request_id`] captured before the turn ran.
+/// If the stream's last request ID still matches `before`, the turn was stopped
+/// before appending its request and returns
+/// [`StructuredDataError::NotStarted`].
+/// Otherwise, only the conversation's last turn is searched so data from an
+/// earlier turn is never returned.
 ///
-/// A response that is not valid JSON is recorded as its raw text in a JSON
+/// When the provider's response is not valid JSON, it is stored as a raw JSON
 /// string.
-/// When `schema` asks for something other than a string at its root, such a
-/// string is refused: it is a response cut short, most often by the output
-/// token limit, and not an answer.
+/// If `schema` specifies a root `type` other than `"string"`, a string value is
+/// rejected with [`StructuredDataError::NotJson`] (typically caused by hitting
+/// the output token limit).
 pub(crate) fn turn_structured_data(
     events: &ConversationStream,
     before: Option<&EventId>,
@@ -69,13 +70,12 @@ pub(crate) fn turn_structured_data(
     Ok(data)
 }
 
-/// The last message text the assistant wrote in the turn a run started.
+/// Extract the last non-empty assistant message from the turn started by this
+/// run.
 ///
-/// `before` is the [`last_request_id`] from before the run, and bounds the
-/// search the way it does for [`turn_structured_data`]: a run that appended no
-/// request has no message of its own, and only the conversation's last turn is
-/// searched.
-/// A message holding only whitespace is skipped.
+/// `before` is the [`last_request_id`] captured before the turn ran.
+/// Returns `None` if no new request was appended or if the last turn contains
+/// no non-whitespace assistant message.
 pub(crate) fn turn_answer(events: &ConversationStream, before: Option<&EventId>) -> Option<String> {
     if last_request_id(events).as_ref() == before {
         return None;

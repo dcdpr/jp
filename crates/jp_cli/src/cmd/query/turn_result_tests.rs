@@ -102,7 +102,11 @@ fn turn_structured_data_takes_a_replayed_turns_answer() {
     )
     .unwrap();
     built.pending_trim.apply(&mut stream);
-    assert_eq!(stream.turn_count(), 0, "--replay removes the turn it replays");
+    assert_eq!(
+        stream.turn_count(),
+        0,
+        "--replay removes the turn it replays"
+    );
     add_structured_turn(&mut stream, serde_json::json!({"turn": 2}));
 
     assert_eq!(

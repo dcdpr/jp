@@ -1,9 +1,9 @@
-//! Composing the request a query sends: the query text, piped stdin, a replayed
-//! or quoted message, the editor, and `--template`.
+//! Compose the request a query sends from the query text, piped stdin, a
+//! replayed or quoted message, the editor, and `--template`.
 //!
 //! [`Query::build_conversation`] is the entry point.
-//! It reads the conversation stream without changing it: any events a replay
-//! removes are described by a [`PendingStreamTrim`] and removed when the turn
+//! It reads the conversation stream without mutating it: any events removed by
+//! a replay are recorded in a [`PendingStreamTrim`] and applied when the turn
 //! starts.
 
 use std::borrow::Cow;

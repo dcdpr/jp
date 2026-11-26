@@ -1,5 +1,5 @@
-//! Reading the text a query argument stands for: an `@path` file, piped stdin,
-//! or a `--schema` value.
+//! Read query input from `@path` argument files, piped stdin, and `--schema`
+//! values.
 
 use std::{
     env, fs,

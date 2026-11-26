@@ -1,10 +1,10 @@
-//! How the `query` command's flags change the configuration a turn runs under,
-//! and what the conversation records of that change.
+//! Apply the `query` command's CLI flags to the turn configuration and record
+//! durable changes in the conversation stream.
 //!
-//! [`IntoPartialAppConfig::apply_cli_config`] writes the flags into the partial
+//! [`IntoPartialAppConfig::apply_cli_config`] applies the flags to the partial
 //! config.
-//! [`turn_config_delta`] and [`persist_config_reset`] decide what the
-//! conversation stream records, so a change holds for later turns.
+//! [`turn_config_delta`] and [`persist_config_reset`] record config changes in
+//! the conversation stream so they persist across turns.
 
 use std::collections::HashSet;
 
@@ -67,19 +67,17 @@ pub(super) fn persist_config_reset(
     events.add_config_reset(ResetDelta { timestamp }, layers);
 }
 
-/// What a conversation would have to record to arrive at `cfg`.
+/// Compute the config delta needed for the conversation stream to match `cfg`.
 ///
-/// The difference between the configuration the stream already resolves to and
-/// the effective configuration this turn runs under, whichever layer produced
-/// it: a `--cfg` file, a command flag like `--model`, a named compaction
-/// setting.
-/// Recording it makes the change hold from this turn on rather than for this
-/// turn alone.
-/// `None` when the two agree and there is nothing to record.
+/// Compares the stream's resolved config against the effective config `cfg` for
+/// this turn (including `--cfg` files, command flags such as `--model`, and
+/// named compaction settings).
+/// Recording this delta makes the change persist for subsequent turns.
+/// Returns `None` when the stream's config already matches `cfg`.
 ///
-/// A field whose merge strategy cannot reach the new value carries it whole and
-/// has its path recorded in the returned `unsets`, which clear the field before
-/// the delta merges.
+/// Any field whose merge strategy cannot produce the new value is replaced in
+/// full and has its path recorded in the returned `unsets`, clearing the field
+/// before the delta merges.
 pub(crate) fn turn_config_delta(
     cfg: &AppConfig,
     lock: &ConversationLock,
@@ -178,8 +176,8 @@ impl IntoPartialAppConfig for Query {
     }
 }
 
-/// The configuration layer the conversation behind `handle` carries, merged
-/// over `partial`, and the paths it explicitly clears.
+/// Load the conversation's config layer from `handle`, merge it over `partial`,
+/// and return the merged partial along with any explicitly unset paths.
 ///
 /// # Errors
 ///

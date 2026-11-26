@@ -1,8 +1,10 @@
-//! Starting a turn: gathering what it needs, then running it.
+//! Prepare and start a conversation turn.
 //!
-//! [`TurnInputs::collect`] reads the CLI context; [`TurnInputs::run`] waits for
-//! the MCP servers, assembles the thread, and hands the turn to
-//! [`Query::run_turn`].
+//! [`TurnInputs::collect`] loads attachments and admits command plugins from
+//! [`Ctx`]; [`TurnInputs::run`] awaits MCP server startup, assembles the
+//! [`Thread`], and delegates execution to [`Query::run_turn`].
+//!
+//! [`Thread`]: jp_conversation::thread::Thread
 
 use std::{sync::Arc, time::Instant};
 
@@ -209,7 +211,7 @@ pub(crate) struct TurnInputs {
 
     /// The command plugins admitted for this turn, sharing `config` with it.
     ///
-    /// A tool on any other plugin is left out of the turn.
+    /// Tools from unadmitted plugins are omitted from the turn.
     command_plugins: CommandPlugins,
 
     /// The request that starts the turn.
@@ -432,14 +434,14 @@ impl TurnInputs {
     }
 }
 
-/// The id of the conversation's last [`ChatRequest`], if it has one.
+/// Return the [`EventId`] of the conversation's last [`ChatRequest`], if any.
 ///
-/// Taken before a turn runs and compared after it, this says whether the run
-/// appended a request: a turn stopped before it started leaves the stream's
-/// requests as they were, and one that started appends a request with an id the
-/// stream has never handed out.
-/// Sanitizing the stream before the turn can add or remove a `TurnStart`, but
-/// never a request, so the comparison holds across it.
+/// Captured before a turn runs and compared afterward to check whether the turn
+/// appended its request: a turn stopped before its start leaves the stream's
+/// requests unchanged, whereas a started turn appends a request with a fresh
+/// [`EventId`].
+/// Stream sanitization before the turn may add or remove a `TurnStart`, but
+/// never a `ChatRequest`.
 pub(crate) fn last_request_id(events: &ConversationStream) -> Option<EventId> {
     events
         .iter_events_by_turn()

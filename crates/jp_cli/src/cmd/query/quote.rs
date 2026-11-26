@@ -1,5 +1,5 @@
-//! `--quote`: seeding a request with the assistant's last message, for an
-//! inline reply.
+//! `--quote`: seed a request with the assistant's last message for an inline
+//! reply.
 
 use jp_config::AppConfig;
 use jp_conversation::{ConversationEvent, ConversationStream, event::ChatRequest};
@@ -68,17 +68,15 @@ pub(super) fn seed_quoted_reply(
     true
 }
 
-/// Reformat `message` with the project's standard markdown formatting: prose
-/// wrapped at `style.markdown.wrap_width`, tables padded into aligned columns.
+/// Reformat `message` with the configured markdown settings: prose wrapped at
+/// `style.markdown.wrap_width` and tables padded into aligned columns.
 ///
-/// The result is markdown source rather than terminal output, so the display-
-/// only parts of that formatting are left off: styling escapes are stripped,
-/// horizontal rules stay the plain `---` a parser reads back as one, and table
-/// columns keep their full content.
-/// `style.markdown.table_max_column_width` deliberately does not apply here: it
-/// cuts a wide header short and splits a wide cell across physical lines, which
-/// reads fine on screen but puts truncated text and extra rows into the request
-/// the user sends next.
+/// Because the output is markdown source rather than terminal display, terminal
+/// styling escapes are stripped, horizontal rules remain plain `---`, and table
+/// columns keep their full width.
+/// `style.markdown.table_max_column_width` is disabled so wide headers are not
+/// truncated and wide cells are not wrapped across physical lines (which a
+/// markdown parser would read back as extra table rows in the next request).
 fn reformat_quoted_message(message: &str, config: &AppConfig) -> String {
     let formatter = Formatter::with_width(config.style.markdown.wrap_width)
         .table_max_column_width(0)

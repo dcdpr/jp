@@ -1,6 +1,5 @@
-//! Assembling the [`Thread`] a provider request is built from: the conversation
-//! stream, its attachments, and the system prompt and sections from
-//! [`AssistantConfig`].
+//! Assemble the [`Thread`] for a provider request from the conversation stream,
+//! attachments, and [`AssistantConfig`] system prompt and sections.
 
 use jp_attachment::Attachment;
 use jp_config::assistant::{

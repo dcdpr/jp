@@ -1,14 +1,15 @@
-//! `--mount`: external paths linked into the workspace, and the access grants
-//! that let tools reach them.
+//! `--mount`: symlink external paths into the workspace and grant tools access
+//! to them.
 //!
-//! A mount takes effect in two stages.
-//! [`apply_mounts`] writes the access grants into the partial config while the
-//! configuration is resolved.
-//! Like any other change the query's flags make, the grants are recorded in the
-//! conversation's config, so later turns keep them without repeating `--mount`.
-//! [`create_mount_effects`] creates the symlink in the workspace and records
-//! its approval in user-local storage once the conversation is locked.
-//! Both stay after the query ends.
+//! A mount takes effect in two stages:
+//!
+//! 1. [`apply_mounts`] writes the access grants into the partial config during
+//!    config resolution.
+//!    Those grants are recorded in the conversation's config delta, so
+//!    subsequent turns retain them without repeating `--mount`.
+//! 2. [`create_mount_effects`] creates the symlink in the workspace and records
+//!    its approval in user-local storage once the conversation is locked.
+//!    Both persist after the query finishes.
 
 use std::{env, fs};
 
