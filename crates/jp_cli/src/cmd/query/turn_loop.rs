@@ -46,7 +46,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tracing::{debug, info, warn};
 
 use super::{
-    PendingStreamTrim, build_sections, build_thread,
+    PendingStreamTrim,
     interrupt::{
         InterruptAction, LoopAction, StreamingInterruptResult, TurnInterrupts,
         apply_streaming_interrupt, handle_llm_event, handle_streaming_interrupt, reply_edit_mode,
@@ -56,6 +56,7 @@ use super::{
         ResponseBoundary, StreamErrorOutcome, StreamRetryState, agent_restart_is_safe,
         commit_partial_response, handle_stream_error,
     },
+    thread::{build_sections, build_thread},
     tool::{
         Host, PendingTools, ToolCallState, ToolCoordinator, ToolEvent, ToolPrompter, ToolRenderer,
         build_execution_plan,
