@@ -197,20 +197,23 @@ pub(super) fn tool_name(name: &str) -> String {
     format!("mcp__jp__{name}")
 }
 
-/// Move trailing user text blocks from `messages` into the `session/prompt`
+/// Extract trailing user text blocks from `messages` for the `session/prompt`
 /// request.
 ///
-/// Moves every trailing text block across consecutive user messages, so the
-/// transcript ends on an assistant message whenever the trailing user messages
+/// Pops every trailing text block across consecutive user messages, so the
+/// transcript ends on an assistant message whenever the pending user messages
 /// contain only text.
-/// Claude Code loads a transcript that ends in a user message by inserting an
-/// assistant message reading "No response requested." after it
+/// If a transcript ends in a user message, Claude Code inserts an assistant
+/// message reading `"No response requested."` after it on load
 /// (anthropics/claude-code#109781).
 ///
-/// Tool results and document attachments remain in `messages`, so a transcript
-/// ending in either still gets that message: tool results have no
-/// `session/prompt` form, and attachments keep their native `document` blocks
-/// there, with their title and context, in the cached prefix.
+/// Tool results and document attachments stay in `messages`, so a transcript
+/// ending in either still gets that inserted message.
+/// Tool results have no `session/prompt` representation, and attachments stay
+/// in the transcript as native `document` blocks with their title and context
+/// in the cached prefix.
+///
+/// Returns `[CONTINUE_MESSAGE]` when no trailing user text block is present.
 fn take_pending_prompt(messages: &mut Vec<Message>) -> Vec<String> {
     let mut prompt = Vec::new();
     while let Some(last) = messages.last_mut()
