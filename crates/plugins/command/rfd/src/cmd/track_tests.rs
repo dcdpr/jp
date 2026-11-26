@@ -158,7 +158,7 @@ Tracking ticket for [RFD 116](../rfd/116-shareable-tooling.md).
         workspace.paths.show(&path),
         tracked.ticket
     )]);
-    assert!(tracked.report.warnings.is_empty());
+    assert_eq!(tracked.report.warnings, [] as [String; 0]);
 }
 
 /// Without a plan to list, the marker stands in for it, and the next `track`
@@ -441,7 +441,7 @@ fn only_an_accepted_or_implemented_rfd_is_tracked() {
             error
         );
     }
-    assert!(ticket_files(&workspace).is_empty());
+    assert_eq!(ticket_files(&workspace), [] as [String; 0]);
 
     workspace.rfd("030-built.md", &[("Status", "Implemented")], "Body.");
     assert!(
@@ -522,7 +522,7 @@ RFD tracking must be enabled first by adding the `tracking-rfd` label to the tic
     max = 1
     unique = \"key-value\""
     );
-    assert!(ticket_files(&workspace).is_empty());
+    assert_eq!(ticket_files(&workspace), [] as [String; 0]);
 }
 
 /// A link listing fixed values can't name every RFD.
@@ -551,7 +551,7 @@ fn the_link_has_to_take_any_value() {
             "{declared}"
         );
     }
-    assert!(ticket_files(&workspace).is_empty());
+    assert_eq!(ticket_files(&workspace), [] as [String; 0]);
 }
 
 /// A board that requires another key, or refuses a label the ticket is filed
@@ -581,7 +581,7 @@ fn a_board_refusing_the_other_labels_is_named_as_the_reason() {
         "A tracking ticket is filed with `tracking-rfd=116` and `type=tracking`, and the ticket \
          board refuses them. `area` label missing: add one of area=cli."
     );
-    assert!(ticket_files(&workspace).is_empty());
+    assert_eq!(ticket_files(&workspace), [] as [String; 0]);
 }
 
 /// A board that defines no labels takes any, so it takes the link.
@@ -649,7 +649,7 @@ fn an_interrupted_plan_read_files_nothing() {
     .unwrap_err();
 
     assert_eq!(error, "Interrupted.");
-    assert!(ticket_files(&workspace).is_empty());
+    assert_eq!(ticket_files(&workspace), [] as [String; 0]);
 }
 
 #[test]
@@ -748,7 +748,7 @@ fn stop_without_a_ticket_files_nothing() {
         output.text,
         "RFD 116 has no tracking ticket; nothing to stop.\n"
     );
-    assert!(ticket_files(&workspace).is_empty());
+    assert_eq!(ticket_files(&workspace), [] as [String; 0]);
     assert_eq!(
         stop(&workspace.paths, &links(), id("099")).unwrap_err(),
         "No RFD found with number 099."

@@ -6,7 +6,7 @@ pub mod describe_tools;
 
 use std::{collections::HashMap, sync::Arc};
 
-use async_trait::async_trait;
+use futures::future::BoxFuture;
 use indexmap::IndexMap;
 use jp_tool::Outcome;
 use serde_json::Value;
@@ -23,16 +23,44 @@ use serde_json::Value;
 ///
 /// [RFD 058]: https://jp.computer/rfd/058-typed-content-blocks-for-tool-responses
 /// [`ToolResult`]: jp_tool::ToolResult
-#[async_trait]
 pub trait BuiltinTool: Send + Sync {
     /// Execute the tool with the given arguments and accumulated answers.
-    async fn execute(&self, arguments: &Value, answers: &IndexMap<String, Value>) -> Outcome;
+    fn execute(
+        &self,
+        arguments: &Value,
+        answers: &IndexMap<String, Value>,
+    ) -> impl Future<Output = Outcome> + Send;
+}
+
+/// A [`BuiltinTool`] behind a pointer: `Arc<dyn DynBuiltinTool>`.
+///
+/// Every `BuiltinTool` implements this trait, and [`execute`] does what
+/// [`BuiltinTool::execute`] does, returning a boxed future.
+/// Implement [`BuiltinTool`], not this trait.
+///
+/// [`execute`]: Self::execute
+pub trait DynBuiltinTool: Send + Sync {
+    fn execute<'a>(
+        &'a self,
+        arguments: &'a Value,
+        answers: &'a IndexMap<String, Value>,
+    ) -> BoxFuture<'a, Outcome>;
+}
+
+impl<T: BuiltinTool> DynBuiltinTool for T {
+    fn execute<'a>(
+        &'a self,
+        arguments: &'a Value,
+        answers: &'a IndexMap<String, Value>,
+    ) -> BoxFuture<'a, Outcome> {
+        Box::pin(BuiltinTool::execute(self, arguments, answers))
+    }
 }
 
 /// Registry mapping builtin tool names to their executors.
 #[derive(Clone, Default)]
 pub struct BuiltinExecutors {
-    executors: HashMap<String, Arc<dyn BuiltinTool>>,
+    executors: HashMap<String, Arc<dyn DynBuiltinTool>>,
 }
 
 impl BuiltinExecutors {
@@ -50,7 +78,7 @@ impl BuiltinExecutors {
     }
 
     #[must_use]
-    pub fn get(&self, name: &str) -> Option<Arc<dyn BuiltinTool>> {
+    pub fn get(&self, name: &str) -> Option<Arc<dyn DynBuiltinTool>> {
         self.executors.get(name).cloned()
     }
 }

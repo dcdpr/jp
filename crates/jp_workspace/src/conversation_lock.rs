@@ -217,6 +217,15 @@ impl ConversationLock {
         self.persist.lock().take()
     }
 
+    /// Whether the conversation has ever been written to storage.
+    ///
+    /// `false` for a conversation created in memory that no scope has flushed
+    /// yet.
+    #[must_use]
+    pub fn is_written(&self) -> bool {
+        self.written.load(Ordering::Relaxed)
+    }
+
     /// The write projection this lock persists with.
     ///
     /// Resolved from storage presence at acquisition (or the creation flags for
@@ -517,6 +526,16 @@ impl ConversationMut {
 
         debug!(id = %self.id, "Flushed conversation to disk.");
         Ok(())
+    }
+
+    /// Persist the conversation immediately, even if no mutations were made in
+    /// this scope.
+    ///
+    /// Used to materialize a new conversation directory on disk before writing
+    /// auxiliary files (such as a query draft) into it.
+    pub fn store(&mut self) -> crate::error::Result<()> {
+        self.dirty.store(true, Ordering::Relaxed);
+        self.flush()
     }
 
     /// Take the drop-time persist failure recorded since the last call.

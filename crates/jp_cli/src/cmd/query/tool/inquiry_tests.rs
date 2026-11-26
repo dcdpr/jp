@@ -147,15 +147,15 @@ async fn llm_backend_returns_answer() {
     let backend =
         LlmInquiryBackend::new(config, IndexMap::new(), vec![], vec![], discard_notices());
 
-    let result = backend
-        .inquire(
-            test_events(),
-            &inquiry_id,
-            "test_tool",
-            &test_question(),
-            CancellationToken::new(),
-        )
-        .await;
+    let result = InquiryBackend::inquire(
+        &backend,
+        test_events(),
+        &inquiry_id,
+        "test_tool",
+        &test_question(),
+        CancellationToken::new(),
+    )
+    .await;
 
     assert_eq!(result.unwrap(), json!(true));
 }
@@ -187,16 +187,16 @@ async fn llm_backend_applies_its_assistant_config_to_the_request() {
     let backend =
         LlmInquiryBackend::new(config, IndexMap::new(), vec![], vec![], discard_notices());
 
-    backend
-        .inquire(
-            test_events(),
-            &inquiry_id,
-            "test_tool",
-            &test_question(),
-            CancellationToken::new(),
-        )
-        .await
-        .expect("the inquiry resolves");
+    InquiryBackend::inquire(
+        &backend,
+        test_events(),
+        &inquiry_id,
+        "test_tool",
+        &test_question(),
+        CancellationToken::new(),
+    )
+    .await
+    .expect("the inquiry resolves");
 
     let sent = requests.lock().expect("not poisoned");
     let query = sent.first().expect("one request was sent");
@@ -232,16 +232,16 @@ async fn llm_backend_asks_for_only_the_answer() {
         discard_notices(),
     );
 
-    backend
-        .inquire(
-            test_events(),
-            &inquiry_id,
-            "ticket_create",
-            &Question::text("shorter_title", "Give a shorter title for: A long title").unwrap(),
-            CancellationToken::new(),
-        )
-        .await
-        .expect("the inquiry resolves");
+    InquiryBackend::inquire(
+        &backend,
+        test_events(),
+        &inquiry_id,
+        "ticket_create",
+        &Question::text("shorter_title", "Give a shorter title for: A long title").unwrap(),
+        CancellationToken::new(),
+    )
+    .await
+    .expect("the inquiry resolves");
 
     let sent = requests.lock().expect("not poisoned");
     let query = sent.first().expect("one request was sent");
@@ -281,16 +281,16 @@ async fn llm_backend_includes_the_preamble() {
         .unwrap()
         .with_preamble("The title is 71 characters: An edited title");
 
-    backend
-        .inquire(
-            test_events(),
-            &inquiry_id,
-            "ticket_create",
-            &question,
-            CancellationToken::new(),
-        )
-        .await
-        .expect("the inquiry resolves");
+    InquiryBackend::inquire(
+        &backend,
+        test_events(),
+        &inquiry_id,
+        "ticket_create",
+        &question,
+        CancellationToken::new(),
+    )
+    .await
+    .expect("the inquiry resolves");
 
     let sent = requests.lock().expect("not poisoned");
     let query = sent.first().expect("one request was sent");
@@ -337,16 +337,16 @@ async fn llm_backend_delivers_provider_notices() {
         notices,
     );
 
-    let answer = backend
-        .inquire(
-            test_events(),
-            &tool_call_inquiry_id("call_1", "confirm", 1),
-            "test_tool",
-            &Question::boolean("confirm", "Proceed?").unwrap(),
-            CancellationToken::new(),
-        )
-        .await
-        .expect("the inquiry is answered");
+    let answer = InquiryBackend::inquire(
+        &backend,
+        test_events(),
+        &tool_call_inquiry_id("call_1", "confirm", 1),
+        "test_tool",
+        &Question::boolean("confirm", "Proceed?").unwrap(),
+        CancellationToken::new(),
+    )
+    .await
+    .expect("the inquiry is answered");
 
     assert_eq!(answer, json!(true));
     assert_eq!(*seen.lock().unwrap(), [
@@ -361,15 +361,15 @@ async fn llm_backend_returns_error_on_missing_structured_data() {
     let backend =
         LlmInquiryBackend::new(config, IndexMap::new(), vec![], vec![], discard_notices());
 
-    let result = backend
-        .inquire(
-            test_events(),
-            &inquiry_id,
-            "test_tool",
-            &test_question(),
-            CancellationToken::new(),
-        )
-        .await;
+    let result = InquiryBackend::inquire(
+        &backend,
+        test_events(),
+        &inquiry_id,
+        "test_tool",
+        &test_question(),
+        CancellationToken::new(),
+    )
+    .await;
 
     assert!(matches!(result, Err(InquiryError::MissingStructuredData)));
 }
@@ -381,15 +381,15 @@ async fn llm_backend_returns_error_on_answer_extraction_failure() {
     let backend =
         LlmInquiryBackend::new(config, IndexMap::new(), vec![], vec![], discard_notices());
 
-    let result = backend
-        .inquire(
-            test_events(),
-            &inquiry_id,
-            "test_tool",
-            &test_question(),
-            CancellationToken::new(),
-        )
-        .await;
+    let result = InquiryBackend::inquire(
+        &backend,
+        test_events(),
+        &inquiry_id,
+        "test_tool",
+        &test_question(),
+        CancellationToken::new(),
+    )
+    .await;
 
     assert!(matches!(result, Err(InquiryError::AnswerExtraction { .. })));
 }
@@ -403,15 +403,15 @@ async fn llm_backend_returns_error_on_null_answer() {
     let backend =
         LlmInquiryBackend::new(config, IndexMap::new(), vec![], vec![], discard_notices());
 
-    let result = backend
-        .inquire(
-            test_events(),
-            &inquiry_id,
-            "test_tool",
-            &test_question(),
-            CancellationToken::new(),
-        )
-        .await;
+    let result = InquiryBackend::inquire(
+        &backend,
+        test_events(),
+        &inquiry_id,
+        "test_tool",
+        &test_question(),
+        CancellationToken::new(),
+    )
+    .await;
 
     assert!(matches!(result, Err(InquiryError::AnswerExtraction { .. })));
 }
@@ -426,15 +426,15 @@ async fn llm_backend_returns_cancelled_when_token_is_already_cancelled() {
     let token = CancellationToken::new();
     token.cancel();
 
-    let result = backend
-        .inquire(
-            test_events(),
-            &inquiry_id,
-            "test_tool",
-            &test_question(),
-            token,
-        )
-        .await;
+    let result = InquiryBackend::inquire(
+        &backend,
+        test_events(),
+        &inquiry_id,
+        "test_tool",
+        &test_question(),
+        token,
+    )
+    .await;
 
     assert!(matches!(result, Err(InquiryError::Cancelled)));
 }
@@ -449,15 +449,15 @@ async fn llm_backend_passes_select_question() {
     let backend =
         LlmInquiryBackend::new(config, IndexMap::new(), vec![], vec![], discard_notices());
 
-    let result = backend
-        .inquire(
-            test_events(),
-            &inquiry_id,
-            "test_tool",
-            &question,
-            CancellationToken::new(),
-        )
-        .await;
+    let result = InquiryBackend::inquire(
+        &backend,
+        test_events(),
+        &inquiry_id,
+        "test_tool",
+        &question,
+        CancellationToken::new(),
+    )
+    .await;
 
     assert_eq!(result.unwrap(), json!("B"));
 }
@@ -470,15 +470,15 @@ async fn llm_backend_passes_text_question() {
     let backend =
         LlmInquiryBackend::new(config, IndexMap::new(), vec![], vec![], discard_notices());
 
-    let result = backend
-        .inquire(
-            test_events(),
-            &inquiry_id,
-            "test_tool",
-            &question,
-            CancellationToken::new(),
-        )
-        .await;
+    let result = InquiryBackend::inquire(
+        &backend,
+        test_events(),
+        &inquiry_id,
+        "test_tool",
+        &question,
+        CancellationToken::new(),
+    )
+    .await;
 
     assert_eq!(result.unwrap(), json!("Because reasons"));
 }
@@ -488,15 +488,15 @@ async fn mock_backend_returns_configured_answer() {
     let inquiry_id = tool_call_inquiry_id("call_1", "confirm", 1);
     let backend = MockInquiryBackend::new(HashMap::from([(inquiry_id.clone(), json!(true))]));
 
-    let result = backend
-        .inquire(
-            test_events(),
-            &inquiry_id,
-            "test_tool",
-            &test_question(),
-            CancellationToken::new(),
-        )
-        .await;
+    let result = InquiryBackend::inquire(
+        &backend,
+        test_events(),
+        &inquiry_id,
+        "test_tool",
+        &test_question(),
+        CancellationToken::new(),
+    )
+    .await;
 
     assert_eq!(result.unwrap(), json!(true));
 }
@@ -505,15 +505,15 @@ async fn mock_backend_returns_configured_answer() {
 async fn mock_backend_returns_error_for_unknown_inquiry() {
     let backend = MockInquiryBackend::new(HashMap::new());
 
-    let result = backend
-        .inquire(
-            test_events(),
-            "tool_call.unknown.call_999",
-            "test_tool",
-            &test_question(),
-            CancellationToken::new(),
-        )
-        .await;
+    let result = InquiryBackend::inquire(
+        &backend,
+        test_events(),
+        "tool_call.unknown.call_999",
+        "test_tool",
+        &test_question(),
+        CancellationToken::new(),
+    )
+    .await;
 
     assert!(matches!(result, Err(InquiryError::Other(_))));
 }
@@ -527,15 +527,15 @@ async fn mock_backend_ignores_cancellation_token() {
     let token = CancellationToken::new();
     token.cancel();
 
-    let result = backend
-        .inquire(
-            test_events(),
-            &inquiry_id,
-            "test_tool",
-            &test_question(),
-            token,
-        )
-        .await;
+    let result = InquiryBackend::inquire(
+        &backend,
+        test_events(),
+        &inquiry_id,
+        "test_tool",
+        &test_question(),
+        token,
+    )
+    .await;
 
     assert_eq!(result.unwrap(), json!(42));
 }
@@ -562,15 +562,15 @@ async fn llm_backend_uses_per_question_override() {
     let backend =
         LlmInquiryBackend::new(default_config, overrides, vec![], vec![], discard_notices());
 
-    let result = backend
-        .inquire(
-            test_events(),
-            &inquiry_id,
-            "test_tool",
-            &test_question(),
-            CancellationToken::new(),
-        )
-        .await;
+    let result = InquiryBackend::inquire(
+        &backend,
+        test_events(),
+        &inquiry_id,
+        "test_tool",
+        &test_question(),
+        CancellationToken::new(),
+    )
+    .await;
 
     assert_eq!(result.unwrap(), json!(true));
 }
@@ -656,15 +656,15 @@ async fn dedicated_model_backend_returns_answer() {
     let backend =
         LlmInquiryBackend::new(config, IndexMap::new(), vec![], vec![], discard_notices());
 
-    let result = backend
-        .inquire(
-            test_events(),
-            &inquiry_id,
-            "test_tool",
-            &test_question(),
-            CancellationToken::new(),
-        )
-        .await;
+    let result = InquiryBackend::inquire(
+        &backend,
+        test_events(),
+        &inquiry_id,
+        "test_tool",
+        &test_question(),
+        CancellationToken::new(),
+    )
+    .await;
 
     assert_eq!(result.unwrap(), json!(true));
 }

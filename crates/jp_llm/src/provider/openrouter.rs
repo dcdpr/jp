@@ -1,7 +1,6 @@
-use std::time::Duration;
+use std::{future, time::Duration};
 
 use async_stream::try_stream;
-use async_trait::async_trait;
 use base64::Engine as _;
 use chrono::NaiveDate;
 use futures::{StreamExt as _, TryStreamExt as _, pin_mut, stream};
@@ -120,7 +119,6 @@ impl ForcedToolFallback {
     }
 }
 
-#[async_trait]
 impl Provider for Openrouter {
     async fn model_details(&self, name: &Name) -> Result<ModelDetails> {
         let id: ModelIdConfig = (PROVIDER, name.as_ref()).try_into()?;
@@ -139,11 +137,18 @@ impl Provider for Openrouter {
         Ok(models)
     }
 
-    async fn chat_completion_stream(
+    fn chat_completion_stream(
         &self,
         model: &ModelDetails,
         query: ChatQuery,
-    ) -> Result<EventStream> {
+    ) -> impl Future<Output = Result<EventStream>> + Send {
+        future::ready(self.open_stream(model, query))
+    }
+}
+
+impl Openrouter {
+    /// Build the chat completion request and open its event stream.
+    fn open_stream(&self, model: &ModelDetails, query: ChatQuery) -> Result<EventStream> {
         let (request, is_structured, forced_tool_fallback, decoders) =
             create_request(model, query)?;
 

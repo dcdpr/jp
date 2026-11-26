@@ -108,13 +108,11 @@ pub(crate) fn event_lines(kind: &EventKind) -> Vec<Cow<'_, str>> {
             // Anything else was parsed into a `Value` before it was persisted,
             // so its text has to be rebuilt. Pretty-printed for the same reason
             // tool call arguments are.
-            None => serde_json::to_string_pretty(data)
-                .map(|json| {
-                    json.lines()
-                        .map(|line| Cow::Owned(line.to_owned()))
-                        .collect()
-                })
-                .unwrap_or_default(),
+            None => serde_json::to_string_pretty(data).map_or_default(|json| {
+                json.lines()
+                    .map(|line| Cow::Owned(line.to_owned()))
+                    .collect()
+            }),
         },
         EventKind::ToolCallRequest(req) => {
             let mut out: Vec<Cow<'_, str>> = req.name.lines().map(Cow::Borrowed).collect();

@@ -134,10 +134,7 @@ fn execute(
     let heap_src = match find_latest_heap_json(&spec.working_dir.join("tmp/profiling")) {
         Ok(path) => path,
         Err(e) => {
-            let note = launch_result
-                .note()
-                .map(|n| format!("{n}\n\n"))
-                .unwrap_or_default();
+            let note = launch_result.note().map_or_default(|n| format!("{n}\n\n"));
             return Err(format!("{note}{e}").into());
         }
     };

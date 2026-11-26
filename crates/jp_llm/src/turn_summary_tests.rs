@@ -342,7 +342,8 @@ fn a_turn_id_is_escaped_in_its_tag() {
 fn an_id_that_names_no_turn_start_is_skipped() {
     let events = conversation(vec![qa(1, "First question", "First answer")]);
 
-    assert!(transcripts(&events, &[id("missing"), id("chat001")]).is_empty());
+    assert_eq!(transcripts(&events, &[id("missing"), id("chat001")]), []
+        as [TurnTranscript; 0]);
 }
 
 #[test]
@@ -352,7 +353,8 @@ fn a_turn_with_nothing_to_show_has_no_transcript() {
         entry("think01", ChatResponse::reasoning("Only thoughts.")),
     ]);
 
-    assert!(transcripts(&events, &[id("turn001")]).is_empty());
+    assert_eq!(transcripts(&events, &[id("turn001")]), []
+        as [TurnTranscript; 0]);
 }
 
 #[test]
@@ -585,7 +587,7 @@ async fn generate_leaves_out_a_turn_too_large_for_the_window_without_a_request()
 
     let summaries = summarize(&provider, Some(WINDOW), events, &["turn001"], BATCH_SIZE).await;
 
-    assert!(summaries.is_empty());
+    assert_eq!(summaries, [] as [GeneratedTurnSummary; 0]);
     assert!(requests.lock().unwrap().is_empty());
 }
 
@@ -663,7 +665,7 @@ async fn generate_with_a_batch_size_of_zero_sends_nothing() {
 
     let summaries = summarize(&provider, None, events, &["turn001"], 0).await;
 
-    assert!(summaries.is_empty());
+    assert_eq!(summaries, [] as [GeneratedTurnSummary; 0]);
     assert!(requests.lock().unwrap().is_empty());
 }
 

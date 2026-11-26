@@ -59,10 +59,9 @@ fn remove_nonexistent_is_ok() {
 #[test]
 fn load_ids_empty() {
     let backend = InMemoryStorageBackend::new();
-    assert!(
-        backend
-            .load_conversation_ids(ConversationFilter::default())
-            .is_empty()
+    assert_eq!(
+        backend.load_conversation_ids(ConversationFilter::default()),
+        [] as [ConversationId; 0]
     );
 }
 
@@ -130,7 +129,7 @@ fn load_expired_none_when_no_expiry() {
         .unwrap();
 
     let expired = backend.load_expired_conversation_ids(Utc::now());
-    assert!(expired.is_empty());
+    assert_eq!(expired, [] as [ConversationId; 0]);
 }
 
 #[test]
@@ -171,14 +170,7 @@ fn load_expired_skips_future_conversations() {
         .unwrap();
 
     let expired = backend.load_expired_conversation_ids(Utc::now());
-    assert!(expired.is_empty());
-}
-
-#[test]
-fn sanitize_returns_empty_report() {
-    let backend = InMemoryStorageBackend::new();
-    let report = backend.sanitize().unwrap();
-    assert!(!report.has_repairs());
+    assert_eq!(expired, [] as [ConversationId; 0]);
 }
 
 #[test]
@@ -218,7 +210,7 @@ fn lock_info_returns_none() {
 #[test]
 fn list_orphaned_locks_empty() {
     let backend = InMemoryStorageBackend::new();
-    assert!(backend.list_orphaned_locks().is_empty());
+    assert_eq!(backend.list_orphaned_locks(), [] as [ConversationId; 0]);
 }
 
 #[test]

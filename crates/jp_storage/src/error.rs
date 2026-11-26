@@ -30,6 +30,16 @@ pub enum Error {
         source: io::Error,
     },
 
+    /// Reading `path` failed.
+    ///
+    /// Carries `path` because `std::io::Error` does not.
+    #[error("failed to read {path}")]
+    ReadFailed {
+        path: Utf8PathBuf,
+        #[source]
+        source: io::Error,
+    },
+
     /// Renaming `from` to `to` failed.
     ///
     /// Carries both paths because `source` can refer to either: for example,
@@ -63,6 +73,15 @@ pub enum Error {
 
     #[error("conversation not found: {0}")]
     ConversationNotFound(ConversationId),
+
+    /// Moving conversation `id` from `from` would collide with `existing` in
+    /// the destination partition.
+    #[error("conversation {id} already exists at {existing}; {from} was not moved")]
+    ConversationExists {
+        id: ConversationId,
+        from: Utf8PathBuf,
+        existing: Utf8PathBuf,
+    },
 }
 
 impl Error {

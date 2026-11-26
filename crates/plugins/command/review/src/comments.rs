@@ -45,7 +45,7 @@ pub(crate) fn comment(
                 created_at: written,
                 content: Content {
                     anchor,
-                    body: body.map(str::trim).unwrap_or_default().to_owned(),
+                    body: body.map_or_default(str::trim).to_owned(),
                     suggestion: replace,
                 },
             })

@@ -192,8 +192,7 @@ impl Priority {
 fn ids(value: Option<&Value>) -> Vec<String> {
     value
         .and_then(Value::as_array)
-        .map(|values| values.iter().filter_map(text).collect())
-        .unwrap_or_default()
+        .map_or_default(|values| values.iter().filter_map(text).collect())
 }
 
 /// A string or a number from the board file, as text; `None` for anything else,

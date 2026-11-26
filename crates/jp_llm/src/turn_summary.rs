@@ -43,7 +43,7 @@ use serde_json::{Map, Value, json};
 use tracing::debug;
 
 use crate::{
-    Provider,
+    DynProvider,
     error::Result,
     event::NoticeSink,
     event_builder,
@@ -176,7 +176,7 @@ pub fn resolve_model(config: &AppConfig) -> ModelConfig {
 /// Returns an error if the conversation configuration fails to resolve, the
 /// query thread cannot be built, or the provider request fails after retries.
 pub async fn generate(
-    provider: &dyn Provider,
+    provider: &dyn DynProvider,
     details: &ModelDetails,
     request: TurnSummaryRequest,
 ) -> Result<Vec<GeneratedTurnSummary>> {

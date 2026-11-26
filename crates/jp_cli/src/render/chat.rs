@@ -1422,8 +1422,8 @@ fn build_role_header_line(
     width: usize,
     pretty: bool,
 ) -> String {
-    let suffix_part = suffix.map(|s| format!(" ({s})")).unwrap_or_default();
-    let detail_part = detail.map(|d| format!(" {d} ──")).unwrap_or_default();
+    let suffix_part = suffix.map_or_default(|s| format!(" ({s})"));
+    let detail_part = detail.map_or_default(|d| format!(" {d} ──"));
 
     // Compute fill against the unstyled width so ANSI escapes don't throw
     // off the column count.
@@ -1440,9 +1440,7 @@ fn build_role_header_line(
         } else {
             String::new()
         };
-        let detail_styled = detail
-            .map(|d| format!(" {} ──", d.dim()))
-            .unwrap_or_default();
+        let detail_styled = detail.map_or_default(|d| format!(" {} ──", d.dim()));
         format!("── {label_styled}{suffix_styled} {dashes}{detail_styled}")
     } else {
         format!("{left}{dashes}{detail_part}")

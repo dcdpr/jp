@@ -131,8 +131,12 @@ impl Vcr {
 
             insta::with_settings!({ snapshot_path => &self.fixtures, prepend_module_to_snapshot => false }, {
                 match snap {
-                    Snap::Debug(v) => insta::assert_debug_snapshot!(name, v),
-                    Snap::Json(v) => insta::assert_json_snapshot!(name, v),
+                    Snap::Debug(v) => {
+                        insta::assert_debug_snapshot!(name, v);
+                    }
+                    Snap::Json(v) => {
+                        insta::assert_json_snapshot!(name, v);
+                    }
                 }
             });
         }

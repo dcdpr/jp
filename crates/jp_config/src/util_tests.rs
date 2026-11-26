@@ -2,6 +2,7 @@ use std::fs;
 
 use assert_matches::assert_matches;
 use camino_tempfile::tempdir;
+use jp_test::env_var::EnvVarGuard;
 use serde_json::{Value, json};
 use serial_test::serial;
 use test_log::test;
@@ -643,7 +644,8 @@ fn test_list_configs_in_load_path() {
 fn test_list_configs_in_missing_load_path() {
     let tmp = tempdir().unwrap();
 
-    assert!(list_configs_in_load_path(&tmp.path().join("absent")).is_empty());
+    assert_eq!(list_configs_in_load_path(&tmp.path().join("absent")), []
+        as [String; 0]);
 }
 
 /// Each listed segment resolves back to its own file, which is the contract

@@ -141,10 +141,8 @@ with_backends!(load_missing_stream_errors, |b| {
 });
 
 with_backends!(load_ids_empty, |b| {
-    assert!(
-        b.load_conversation_ids(ConversationFilter::default())
-            .is_empty()
-    );
+    assert_eq!(b.load_conversation_ids(ConversationFilter::default()), []
+        as [ConversationId; 0]);
 });
 
 with_backends!(load_ids_returns_written, |b| {
@@ -184,10 +182,8 @@ with_backends!(archive_and_unarchive, |b| {
 
     // After archiving, ID disappears from active, appears in archived.
     b.archive(&id).unwrap();
-    assert!(
-        b.load_conversation_ids(ConversationFilter::default())
-            .is_empty()
-    );
+    assert_eq!(b.load_conversation_ids(ConversationFilter::default()), []
+        as [ConversationId; 0]);
     assert_eq!(
         b.load_conversation_ids(ConversationFilter { archived: true }),
         vec![id]
@@ -202,9 +198,9 @@ with_backends!(archive_and_unarchive, |b| {
         b.load_conversation_ids(ConversationFilter::default()),
         vec![id]
     );
-    assert!(
-        b.load_conversation_ids(ConversationFilter { archived: true })
-            .is_empty()
+    assert_eq!(
+        b.load_conversation_ids(ConversationFilter { archived: true }),
+        [] as [ConversationId; 0]
     );
 });
 
@@ -227,9 +223,9 @@ with_backends!(unarchive_nonexistent_is_not_found, |b| {
 });
 
 with_backends!(load_archived_ids_empty_when_no_archive_dir, |b| {
-    assert!(
-        b.load_conversation_ids(ConversationFilter { archived: true })
-            .is_empty()
+    assert_eq!(
+        b.load_conversation_ids(ConversationFilter { archived: true }),
+        [] as [ConversationId; 0]
     );
 });
 
@@ -261,7 +257,7 @@ with_backends!(load_expired_none_when_no_expiry, |b| {
     .unwrap();
 
     let expired = b.load_expired_conversation_ids(Utc::now());
-    assert!(expired.is_empty());
+    assert_eq!(expired, [] as [ConversationId; 0]);
 });
 
 with_backends!(load_expired_returns_past, |b| {
@@ -296,12 +292,7 @@ with_backends!(load_expired_skips_future, |b| {
     .unwrap();
 
     let expired = b.load_expired_conversation_ids(Utc::now());
-    assert!(expired.is_empty());
-});
-
-with_backends!(sanitize_empty_store, |b| {
-    let report = b.sanitize().unwrap();
-    assert!(!report.has_repairs());
+    assert_eq!(expired, [] as [ConversationId; 0]);
 });
 
 with_backends!(lock_acquire_and_release, |b| {
@@ -377,5 +368,5 @@ fn null_lock_info_returns_none() {
 #[test]
 fn null_lock_no_orphans() {
     let backend = NullLockBackend;
-    assert!(backend.list_orphaned_locks().is_empty());
+    assert_eq!(backend.list_orphaned_locks(), [] as [ConversationId; 0]);
 }

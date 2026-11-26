@@ -16,7 +16,7 @@ use serde_json::Value;
 
 use super::{
     ConversationFilter, ConversationIndexEntry, ConversationLockGuard, LoadBackend, LockBackend,
-    PersistBackend, Projection, SanitizeReport, SessionBackend, StoragePresence,
+    PersistBackend, Projection, SessionBackend, StoragePresence,
 };
 use crate::{
     LoadError,
@@ -192,11 +192,6 @@ impl LoadBackend for InMemoryStorageBackend {
                 (expires_at <= now).then_some(*id)
             })
             .collect()
-    }
-
-    fn sanitize(&self) -> Result<SanitizeReport> {
-        // In-memory data is always structurally valid.
-        Ok(SanitizeReport::default())
     }
 }
 

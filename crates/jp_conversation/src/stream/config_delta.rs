@@ -219,13 +219,12 @@ pub(crate) fn deserialize(value: &Value) -> Result<ConfigDelta, String> {
     let unsets = value
         .get("unsets")
         .and_then(Value::as_array)
-        .map(|paths| {
+        .map_or_default(|paths| {
             paths
                 .iter()
                 .filter_map(|path| path.as_str().map(str::to_owned))
                 .collect()
-        })
-        .unwrap_or_default();
+        });
 
     let delta = deserialize_partial_config(subtree(value));
 

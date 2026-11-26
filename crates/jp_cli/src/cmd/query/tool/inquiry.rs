@@ -17,7 +17,7 @@
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
+use futures::future::BoxFuture;
 use indexmap::IndexMap;
 use jp_attachment::Attachment;
 use jp_config::{
@@ -26,7 +26,7 @@ use jp_config::{
 };
 use jp_conversation::{ConversationStream, event::ChatRequest, thread::Thread};
 use jp_llm::{
-    Provider,
+    DynProvider,
     event::NoticeSink,
     event_builder::structured_data,
     model::ModelDetails,
@@ -114,7 +114,10 @@ pub enum InquiryError {
 /// call to an LLM provider.
 /// Tests use `MockInquiryBackend` to return pre-configured answers without
 /// network calls.
-#[async_trait]
+///
+/// Implement this trait, writing `inquire` as an `async fn`.
+/// The turn loop holds the backend as `Arc<dyn DynInquiryBackend>`, which every
+/// `InquiryBackend` implements.
 pub trait InquiryBackend: Send + Sync {
     /// Resolve an inquiry and return the answer.
     ///
@@ -126,14 +129,52 @@ pub trait InquiryBackend: Send + Sync {
     /// `inquiry_id` is an opaque correlation ID for logging.
     /// `tool_name` identifies the tool that needs input.
     /// `question` describes the expected answer type and text.
-    async fn inquire(
+    fn inquire(
         &self,
         events: ConversationStream,
         inquiry_id: &str,
         tool_name: &str,
         question: &Question,
         cancellation_token: CancellationToken,
-    ) -> Result<Value, InquiryError>;
+    ) -> impl Future<Output = Result<Value, InquiryError>> + Send;
+}
+
+/// An [`InquiryBackend`] behind a pointer: `Arc<dyn DynInquiryBackend>`.
+///
+/// Every `InquiryBackend` implements this trait, and [`inquire`] does what
+/// [`InquiryBackend::inquire`] does, returning a boxed future.
+/// Implement [`InquiryBackend`], not this trait.
+///
+/// [`inquire`]: Self::inquire
+pub trait DynInquiryBackend: Send + Sync {
+    fn inquire<'a>(
+        &'a self,
+        events: ConversationStream,
+        inquiry_id: &'a str,
+        tool_name: &'a str,
+        question: &'a Question,
+        cancellation_token: CancellationToken,
+    ) -> BoxFuture<'a, Result<Value, InquiryError>>;
+}
+
+impl<T: InquiryBackend> DynInquiryBackend for T {
+    fn inquire<'a>(
+        &'a self,
+        events: ConversationStream,
+        inquiry_id: &'a str,
+        tool_name: &'a str,
+        question: &'a Question,
+        cancellation_token: CancellationToken,
+    ) -> BoxFuture<'a, Result<Value, InquiryError>> {
+        Box::pin(InquiryBackend::inquire(
+            self,
+            events,
+            inquiry_id,
+            tool_name,
+            question,
+            cancellation_token,
+        ))
+    }
 }
 
 /// Fully-resolved configuration for a single inquiry call.
@@ -141,7 +182,7 @@ pub trait InquiryBackend: Send + Sync {
 /// Built at turn start from the three-layer merge: per-question
 /// `PartialAssistantConfig` → global inquiry config → main assistant config.
 pub struct InquiryConfig {
-    pub provider: Arc<dyn Provider>,
+    pub provider: Arc<dyn DynProvider>,
     pub model: ModelDetails,
     pub system_prompt: Option<String>,
     pub sections: Vec<SectionConfig>,
@@ -217,7 +258,6 @@ impl LlmInquiryBackend {
     }
 }
 
-#[async_trait]
 impl InquiryBackend for LlmInquiryBackend {
     async fn inquire(
         &self,
@@ -379,7 +419,10 @@ impl MockInquiryBackend {
 }
 
 #[cfg(test)]
-#[async_trait]
+#[expect(
+    clippy::unused_async_trait_impl,
+    reason = "a test double implements the async trait synchronously"
+)]
 impl InquiryBackend for MockInquiryBackend {
     async fn inquire(
         &self,

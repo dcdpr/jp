@@ -18,7 +18,6 @@ use std::{
     time::Duration,
 };
 
-use async_trait::async_trait;
 use camino::Utf8PathBuf;
 use futures::future::BoxFuture;
 use indexmap::IndexMap;
@@ -60,8 +59,8 @@ use tracing::{debug, warn};
 use url::Url;
 
 use super::executor::{
-    CallExecutors, Executor, ExecutorError, ExecutorResult, ExecutorSource, FanOutCall,
-    PermissionInfo, Review, response,
+    CallExecutors, DynExecutor, Executor, ExecutorError, ExecutorResult, ExecutorSource,
+    FanOutCall, PermissionInfo, Review, response,
 };
 use crate::access::{approvals::ApprovalStore, compile::compile_tool_policy};
 
@@ -706,7 +705,7 @@ impl TerminalExecutorSource {
         &self,
         request: ToolCallRequest,
         config: ToolConfigWithDefaults,
-    ) -> Box<dyn Executor> {
+    ) -> Box<dyn DynExecutor> {
         // A restarted call keeps its slot, and with it the service-side
         // invocation the paused attempt belongs to. Building a second slot
         // would strand that invocation and submit a duplicate call.
@@ -804,7 +803,7 @@ impl TerminalExecutorSource {
         arguments: Map<String, Value>,
         config: ToolConfigWithDefaults,
         slot: Arc<CallSlot>,
-    ) -> Box<dyn Executor> {
+    ) -> Box<dyn DynExecutor> {
         Box::new(ToolExecutor {
             arguments: SyncMutex::new(arguments),
             config,
@@ -821,7 +820,6 @@ struct FanOutHandle {
     slot: Arc<CallSlot>,
 }
 
-#[async_trait]
 impl FanOutCall for FanOutHandle {
     async fn recorded(&self) -> Result<ToolCallResponse, ExecutorError> {
         let mut state = self.slot.state.lock().await;
@@ -1487,7 +1485,6 @@ impl ToolExecutor {
     }
 }
 
-#[async_trait]
 impl Executor for ToolExecutor {
     fn tool_id(&self) -> &str {
         &self.slot.request.id
@@ -1520,11 +1517,11 @@ impl Executor for ToolExecutor {
         }
         Some(PermissionInfo {
             tool_id: self.slot.request.id.clone(),
-            state_key: self.state_key(),
+            state_key: Executor::state_key(self),
             tool_name: self.slot.request.name.clone(),
             tool_source: self.config.source().clone(),
             run_mode,
-            arguments: self.arguments().into(),
+            arguments: Executor::arguments(self).into(),
         })
     }
 
@@ -1609,7 +1606,7 @@ impl Executor for ToolExecutor {
             parent.submit(&self.peer).await;
         } else if !restarting && state.execution == ToolExecution::Caller {
             let mut params = CallToolRequestParams::new(self.slot.request.name.clone());
-            params.arguments = Some(self.arguments());
+            params.arguments = Some(Executor::arguments(self));
             params.meta = Some(Meta(Map::from_iter([(
                 CORRELATION_KEY.into(),
                 self.slot.key.0.clone().into(),
@@ -1636,7 +1633,7 @@ impl Executor for ToolExecutor {
             });
         };
         let admission = Admission::Run {
-            arguments: self.arguments(),
+            arguments: Executor::arguments(self),
         };
         if reply.send(Ok(admission)).is_err() {
             return ExecutorResult::Failed(ExecutorError::ReplyExpired {

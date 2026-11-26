@@ -1,6 +1,6 @@
 use chrono::{TimeZone as _, Timelike as _};
 use jp_config::{
-    PartialAppConfig, PartialConfig as _, PartialConfigDelta as _,
+    PartialAppConfig, PartialConfigDelta as _,
     conversation::tool::{PartialToolConfig, RunMode, ToolSource, access::FsRuleConfig},
     model::id::{
         ModelIdConfig, Name, PartialModelIdConfig, PartialModelIdOrAliasConfig, ProviderId,
@@ -186,7 +186,7 @@ fn a_delta_that_only_clears_is_recorded() {
         vec!["providers.mcp.bookworm.arguments".to_owned()],
     ));
 
-    assert!(resolved_arguments(&stream).is_empty());
+    assert_eq!(resolved_arguments(&stream), [] as [String; 0]);
 }
 
 /// A stream that never cleared anything reports nothing, deltas or not.
@@ -198,7 +198,7 @@ fn config_unsets_is_empty_without_a_clearing_delta() {
         server_arguments_partial(&["run"]),
     ));
 
-    assert!(stream.config_unsets().unwrap().is_empty());
+    assert_eq!(stream.config_unsets().unwrap(), [] as [String; 0]);
 }
 
 #[test]
@@ -592,7 +592,7 @@ fn a_delta_without_unsets_loads_with_none() {
         panic!("expected an apply");
     };
 
-    assert!(apply.unsets.is_empty());
+    assert_eq!(apply.unsets, [] as [String; 0]);
     assert_eq!(apply.delta.style.code.color, Some(false));
 }
 
@@ -951,7 +951,7 @@ fn test_to_parts_from_parts_roundtrip() {
 
     // Empty stream roundtrips.
     let (base_config, events) = stream.to_parts().unwrap();
-    assert!(events.is_empty());
+    assert_eq!(events, [] as [Value; 0]);
     let stream2 = ConversationStream::from_parts(base_config, events, &PartialAppConfig::empty())
         .unwrap()
         .with_created_at(stream.created_at);
@@ -1287,7 +1287,7 @@ fn test_pending_inquiries_leave_out_earlier_turns() {
     stream.push(question("call_1.confirm", 2));
     stream.push(answer("call_1.confirm", 3));
 
-    assert!(stream.pending_inquiries().is_empty());
+    assert_eq!(stream.pending_inquiries(), [] as [&ConversationEvent; 0]);
 }
 
 #[test]
@@ -3521,7 +3521,7 @@ fn trimming_the_last_turn_of_a_stream_without_turn_markers_removes_its_events() 
     let request = stream.trim_last_turn();
 
     assert_eq!(request.map(|r| r.content), Some("q0".to_owned()));
-    assert!(entry_labels(&stream).is_empty());
+    assert_eq!(entry_labels(&stream), [] as [String; 0]);
 }
 
 #[test]

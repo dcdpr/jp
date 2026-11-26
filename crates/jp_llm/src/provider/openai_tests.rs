@@ -2878,7 +2878,7 @@ mod synthesize_non_streaming_output_item_events {
             false,
         );
 
-        assert!(events.is_empty());
+        assert_eq!(events, [] as [Event; 0]);
     }
 
     #[test]
@@ -3210,7 +3210,7 @@ mod map_event {
             part: serde_json::from_value(json!({"type": "summary_text", "text": ""})).unwrap(),
         });
 
-        assert!(events.is_empty());
+        assert_eq!(events, [] as [Event; 0]);
     }
 
     #[test]
@@ -4051,7 +4051,7 @@ mod model_details {
 
     use super::super::{Openai, PROVIDER};
     use crate::{
-        credential::Credential, error::Error, model::ModelDetails, provider::Provider as _,
+        credential::Credential, error::Error, model::ModelDetails, provider::DynProvider as _,
     };
 
     fn api_provider() -> Openai {

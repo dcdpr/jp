@@ -1,9 +1,8 @@
 //! The vLLM provider: a self-hosted server that speaks the OpenAI-compatible
 //! `/v1/chat/completions` dialect and checks a Bearer token.
 
-use std::time::Duration;
+use std::{future, time::Duration};
 
-use async_trait::async_trait;
 use base64::Engine as _;
 use jp_attachment::AttachmentContent;
 use jp_config::{
@@ -15,7 +14,6 @@ use jp_config::{
 };
 use jp_conversation::thread::text_attachments_to_xml;
 use reqwest::header::{self, HeaderMap, HeaderValue};
-use reqwest_eventsource::{EventSource, retry::Never};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tracing::{debug, trace, warn};
@@ -23,7 +21,9 @@ use tracing::{debug, trace, warn};
 use super::{
     EventStream, ModelDetails,
     lookup::find_listed,
-    openai_compat::{assemble_event_stream, convert_events, convert_tool_choice, convert_tools},
+    openai_compat::{
+        assemble_event_stream, convert_events, convert_tool_choice, convert_tools, event_source,
+    },
     trace_to_tmpfile,
 };
 use crate::{
@@ -46,7 +46,6 @@ pub struct Vllm {
     base_url: String,
 }
 
-#[async_trait]
 impl Provider for Vllm {
     async fn model_details(&self, name: &Name) -> Result<ModelDetails, Error> {
         let id: ModelIdConfig = (PROVIDER, name.as_ref()).try_into()?;
@@ -70,11 +69,18 @@ impl Provider for Vllm {
             .collect::<Result<_, _>>()
     }
 
-    async fn chat_completion_stream(
+    fn chat_completion_stream(
         &self,
         model: &ModelDetails,
         query: ChatQuery,
-    ) -> Result<EventStream, Error> {
+    ) -> impl Future<Output = Result<EventStream, Error>> + Send {
+        future::ready(self.open_stream(model, query))
+    }
+}
+
+impl Vllm {
+    /// Build the chat completion request and open its event stream.
+    fn open_stream(&self, model: &ModelDetails, query: ChatQuery) -> Result<EventStream, Error> {
         debug!(model = %model.id.name, "Starting vLLM chat completion stream.");
 
         let (body, is_structured, decoders) = create_request(model, query)?;
@@ -90,12 +96,7 @@ impl Provider for Vllm {
             .header("content-type", "application/json")
             .json(&body);
 
-        let mut es =
-            EventSource::new(request).map_err(|e| Error::InvalidResponse(e.to_string()))?;
-        // Retries are owned by the stream retry layer; disable EventSource's
-        // own auto-reconnect so a closed connection ends the stream instead of
-        // silently re-issuing the request.
-        es.set_retry_policy(Box::new(Never));
+        let es = event_source(request)?;
 
         Ok(decoders.attach(with_tool_call_keepalive(
             assemble_event_stream(es, "vllm", is_structured),

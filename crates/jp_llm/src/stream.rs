@@ -42,7 +42,6 @@ pub type EventStream = Pin<Box<dyn Stream<Item = Result<Event, StreamError>> + S
 /// resume within ~1s of reopening the lid instead.
 ///
 /// [`StreamErrorKind::Timeout`]: crate::StreamErrorKind::Timeout
-#[must_use]
 pub fn with_idle_timeout(stream: EventStream, idle: Duration) -> EventStream {
     with_idle_timeout_at(stream, idle, SystemTime::now)
 }
@@ -128,7 +127,6 @@ fn with_idle_timeout_at(
 /// The number of continuation requests is bounded separately by the provider.
 ///
 /// [`StreamErrorKind::OutputLimit`]: crate::StreamErrorKind::OutputLimit
-#[must_use]
 pub fn with_output_limit(stream: EventStream, max_bytes: u64) -> EventStream {
     stream! {
         let mut stream = stream;
@@ -203,7 +201,6 @@ fn metadata_byte_size(metadata: &Map<String, Value>) -> usize {
 /// Providers without them keep their real idle behavior during tool calls, so a
 /// genuine stall there is still surfaced as a timeout.
 /// Outside an open tool call this is a transparent pass-through.
-#[must_use]
 pub fn with_tool_call_keepalive(stream: EventStream, interval: Duration) -> EventStream {
     stream! {
         let mut stream = stream;
@@ -257,7 +254,6 @@ pub fn with_tool_call_keepalive(stream: EventStream, interval: Duration) -> Even
 ///
 /// After the response finishes, this is a transparent pass-through.
 /// Apply it per-provider, only where the provider is known to have such gaps.
-#[must_use]
 pub fn with_response_keepalive(
     stream: EventStream,
     interval: Duration,

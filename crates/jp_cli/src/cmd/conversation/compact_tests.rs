@@ -31,7 +31,10 @@ use super::{
 use crate::{
     Globals,
     cli::parse_args,
-    cmd::{conversation_id::ConversationIds as _, target::ConversationTarget},
+    cmd::{
+        compact_flag::CompactSpec, conversation_id::ConversationIds as _,
+        target::ConversationTarget,
+    },
     ctx::Ctx,
 };
 
@@ -68,7 +71,7 @@ fn bare_compact_flag_parses_without_a_value() {
     // Bare `--compact` (no value) means "apply config rules".
     let compact = parse_compact(&["--compact"]);
     assert!(compact.compact_flag.use_config_rules);
-    assert!(compact.compact_flag.specs.is_empty());
+    assert_eq!(compact.compact_flag.specs, [] as [CompactSpec; 0]);
 }
 
 #[test]

@@ -1,5 +1,3 @@
-use std::io::Write as _;
-
 use super::*;
 
 /// Write `text` into a model-backed terminal and return the resulting screen.

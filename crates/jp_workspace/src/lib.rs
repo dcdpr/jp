@@ -14,7 +14,6 @@ mod error;
 mod handle;
 mod id;
 pub mod roots;
-mod sanitize;
 pub mod session;
 pub(crate) mod session_mapping;
 pub mod session_store;
@@ -41,13 +40,13 @@ use jp_conversation::{Conversation, ConversationEvent, ConversationId, Conversat
 use jp_storage::{
     backend::{
         ConversationFilter, ConversationIndexEntry, FsStorageBackend, InMemoryStorageBackend,
-        LoadBackend, LockBackend, NullPersistBackend, PersistBackend, Projection, SessionBackend,
-        StoragePresence,
+        LoadBackend, LockBackend, NullLockBackend, NullPersistBackend, PersistBackend, Projection,
+        ReadOnlySessionBackend, SessionBackend, StoragePresence,
     },
     lock::LockInfo,
+    validate::StorageLocation,
 };
 use parking_lot::{ArcRwLockReadGuard, RawRwLock, RwLock, RwLockReadGuard};
-pub use sanitize::{SanitizeReport, TrashedConversation};
 pub use session_mapping::SessionOverview;
 use state::State;
 use tracing::{debug, trace, warn};
@@ -97,6 +96,10 @@ pub struct Workspace {
 
     /// The filesystem backend, for workspaces opened from disk.
     fs: Option<Arc<FsStorageBackend>>,
+
+    /// Whether mutations are persisted to the backing store; see
+    /// [`Self::without_persistence`].
+    persists: bool,
 
     /// The in-memory state of the workspace.
     state: State,
@@ -161,6 +164,7 @@ impl Workspace {
             locker: backend.clone(),
             sessions: backend,
             fs: None,
+            persists: true,
             state: State::default(),
             persist_failures: PersistFailures::default(),
         }
@@ -177,8 +181,6 @@ impl Workspace {
     ///
     /// The conversation index is not populated, so [`conversations`] is empty
     /// until [`load_conversation_index`] is called.
-    /// Call [`sanitize`] before that: it repairs the backing store, and
-    /// indexing an unrepaired store carries the damage into the index.
     ///
     /// Opening writes to disk: the user-local silo is created if missing, its
     /// `storage` symlink is repointed at this workspace root, and the workspace
@@ -191,7 +193,6 @@ impl Workspace {
     ///
     /// [`conversations`]: Self::conversations
     /// [`load_conversation_index`]: Self::load_conversation_index
-    /// [`sanitize`]: Self::sanitize
     pub fn open(dir: &Utf8Path) -> Result<Self> {
         Self::open_inner(dir, DEFAULT_STORAGE_DIR, Access::ReadWrite)
     }
@@ -346,28 +347,47 @@ impl Workspace {
             .with_sessions(backend)
     }
 
-    /// Disable persistence for the workspace.
+    /// Disable persistence, locking, and session writes for this workspace.
     ///
-    /// Swaps the persist backend to [`NullPersistBackend`], which silently
-    /// discards all writes.
+    /// Conversation writes are discarded, locks always succeed without blocking
+    /// on other processes, and session mappings are read-only.
+    /// [`Self::persists`] returns `false` after this call.
+    #[must_use]
+    pub fn without_persistence(mut self) -> Self {
+        self.disable_persistence();
+        self.locker = Arc::new(NullLockBackend);
+        self.sessions = Arc::new(ReadOnlySessionBackend::new(Arc::clone(&self.sessions)));
+        self
+    }
+
+    /// Replace the persist backend with [`NullPersistBackend`] for the rest of
+    /// the run.
+    ///
     /// Already-created `ConversationMut` instances hold their own `Arc` clone
     /// of the original backend and continue to persist.
     pub fn disable_persistence(&mut self) {
         self.persist = Arc::new(NullPersistBackend);
+        self.persists = false;
+    }
+
+    /// Whether workspace changes are persisted to the backing store.
+    ///
+    /// `false` for a workspace built with [`Self::without_persistence`], or
+    /// once [`Self::disable_persistence`] is called.
+    #[must_use]
+    pub const fn persists(&self) -> bool {
+        self.persists
     }
 
     /// Scan conversation IDs from the backing store and populate the workspace
     /// index.
     ///
-    /// All entries are lazily initialized — metadata and events are loaded on
-    /// first access via [`metadata`], [`events`], etc.
-    ///
-    /// Call [`sanitize`] before this method to ensure the backing store is in a
-    /// consistent state.
+    /// All entries are lazily initialized: metadata and events are loaded on
+    /// first access via [`metadata`], [`events`], etc. Stored conversations
+    /// that fail validation are excluded.
     ///
     /// [`events`]: Self::events
     /// [`metadata`]: Self::metadata
-    /// [`sanitize`]: Self::sanitize
     pub fn load_conversation_index(&mut self) {
         trace!("Loading conversation index.");
 
@@ -803,6 +823,16 @@ impl Workspace {
         self.state.presence.get(id).copied()
     }
 
+    /// Return the storage locations holding the conversation (live or
+    /// archived).
+    ///
+    /// Returns an empty vector if the conversation has not been persisted or if
+    /// the backing store has no user-addressable locations.
+    #[must_use]
+    pub fn conversation_locations(&self, h: &ConversationHandle) -> Vec<StorageLocation> {
+        self.loader.conversation_locations(&h.id())
+    }
+
     /// Get conversation metadata via a handle.
     ///
     /// Returns an error if the conversation data cannot be loaded from the
@@ -969,7 +999,15 @@ impl Workspace {
     /// Moves the conversation back to the live partition and inserts it into
     /// the in-memory index.
     /// Returns a handle for the restored conversation.
+    ///
+    /// Holds the conversation lock across the move and the metadata update.
+    /// Returns [`Error::LockFailed`] without moving anything if another process
+    /// holds the lock.
     pub fn unarchive_conversation(&mut self, id: &ConversationId) -> Result<ConversationHandle> {
+        let Some(_guard) = self.locker.try_lock(&id.to_string(), None)? else {
+            return Err(Error::LockFailed(id.to_string()));
+        };
+
         // Capture where the archived copy lives before moving it, so a private
         // `--local` conversation isn't projected into the workspace on restore.
         let presence = self
@@ -1104,6 +1142,18 @@ impl Workspace {
         }
 
         Ok(())
+    }
+
+    /// Check whether conversation `id`'s lock is currently free by acquiring
+    /// and immediately releasing it.
+    ///
+    /// Always returns `Ok(true)` when persistence is disabled.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the lock check fails.
+    pub fn conversation_lock_is_free(&self, id: &ConversationId) -> Result<bool> {
+        Ok(self.locker.try_lock(&id.to_string(), None)?.is_some())
     }
 
     /// Read the lock holder info for a conversation.

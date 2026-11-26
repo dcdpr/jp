@@ -34,8 +34,8 @@ libc = { workspace = true }
 # that conflicts on the next sync. The lints that catch mistakes rather than
 # taste stay on.
 [lints.rust]
-future-incompatible = "warn"
-nonstandard-style = "warn"
+future_incompatible = { level = "warn", priority = -1 }
+nonstandard_style = { level = "warn", priority = -1 }
 unused = { level = "warn", priority = -1 }
 
 [lints.clippy]

@@ -781,8 +781,7 @@ impl Listing {
 fn activity(conversation: &SessionConversation, now: DateTime<Utc>) -> String {
     conversation
         .last_event_at
-        .map(|at| format!("{} ago", age(now, at)))
-        .unwrap_or_default()
+        .map_or_default(|at| format!("{} ago", age(now, at)))
 }
 
 /// Format the elapsed time from `then` to `now` as `12s`, `5m`, `3h`, or `2d`.

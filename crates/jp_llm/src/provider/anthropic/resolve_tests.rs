@@ -346,7 +346,7 @@ fn test_named_profile_resolves_to_bearer() {
         ready(landing),
         Credential::Bearer("sk-ant-token".to_owned())
     );
-    assert!(notices.is_empty());
+    assert_eq!(notices, [] as [String; 0]);
 }
 
 #[test]
@@ -470,7 +470,7 @@ fn test_cooldown_scoped_to_model_family() {
     )
     .unwrap();
     assert_eq!(ready(landing), Credential::Bearer("sk-a".to_owned()));
-    assert!(notices.is_empty());
+    assert_eq!(notices, [] as [String; 0]);
 }
 
 /// An expired access token is not a dead credential: resolution refreshes it in
@@ -1064,7 +1064,8 @@ fn test_notices_for_a_standing_condition_are_reported_once() {
     ]);
 
     // Same threshold on a later request, one point further along.
-    assert!(watch().observe(&warning(0.81, 0.75), NOW()).is_empty());
+    assert_eq!(watch().observe(&warning(0.81, 0.75), NOW()), [] as [String;
+        0]);
 
     // A higher threshold is worth hearing about.
     assert_eq!(watch().observe(&warning(0.91, 0.9), NOW()), vec![
@@ -1102,10 +1103,7 @@ fn test_response_without_quota_headers_is_silent() {
     let store = memory_store(&[("personal", token_profile("sk-personal"))]);
     let watch = QuotaWatch::new(Some(&store), Some(&selected_profile("personal")));
 
-    assert!(
-        watch
-            .observe(&UnifiedRateLimit::default(), NOW())
-            .is_empty()
-    );
+    assert_eq!(watch.observe(&UnifiedRateLimit::default(), NOW()), []
+        as [String; 0]);
     assert!(stored(&store, "personal").cooldowns.is_empty());
 }

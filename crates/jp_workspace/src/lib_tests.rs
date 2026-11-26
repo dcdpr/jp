@@ -11,7 +11,7 @@ use jp_config::{
 };
 use jp_conversation::event::ChatRequest;
 use jp_storage::{
-    backend::{FsStorageBackend, NullLockBackend, NullPersistBackend, PersistBackend as _},
+    backend::{FsStorageBackend, NullLockBackend, NullPersistBackend},
     value::read_json,
 };
 use parking_lot::RwLock;
@@ -504,6 +504,71 @@ fn test_load_index_fresh_workspace() {
     workspace.disable_persistence();
 
     workspace.load_conversation_index();
+    assert_eq!(workspace.conversations().count(), 0);
+}
+
+#[test]
+fn test_a_workspace_persists_unless_told_otherwise() {
+    let workspace = Workspace::in_memory("/ws");
+    assert!(workspace.persists());
+    assert!(!workspace.without_persistence().persists());
+}
+
+#[test]
+fn test_a_workspace_without_persistence_writes_nothing() {
+    let tmp = tempdir().unwrap();
+    let fs = FsStorageBackend::new(&tmp.path().join("storage")).unwrap();
+    let mut workspace = workspace_with_fs(tmp.path(), &fs).without_persistence();
+
+    let id =
+        workspace.create_conversation(Conversation::default(), Arc::new(AppConfig::new_test()));
+    let handle = workspace.acquire_conversation(&id).unwrap();
+    let LockResult::Acquired(lock) = workspace.lock_conversation(handle, None).unwrap() else {
+        panic!("a workspace without persistence takes no lock to be refused");
+    };
+
+    let held = fs.try_lock(&id.to_string(), None).unwrap();
+    assert!(held.is_some(), "the workspace holds no lock in the store");
+
+    lock.into_mut()
+        .update_metadata_and_flush(|metadata| metadata.title = Some("Changed".to_owned()))
+        .unwrap();
+    assert_eq!(fs.load_conversation_ids(ConversationFilter::default()), []
+        as [ConversationId; 0]);
+}
+
+#[test]
+fn test_load_index_leaves_out_invalid_conversations() {
+    let tmp = tempdir().unwrap();
+    let fs = FsStorageBackend::new(&tmp.path().join("storage")).unwrap();
+    let mut workspace = workspace_with_fs(tmp.path(), &fs);
+    workspace.disable_persistence();
+
+    let valid = ConversationId::try_from(datetime!(2024-01-01 00:00:00 Z)).unwrap();
+    let invalid = ConversationId::try_from(datetime!(2024-01-02 00:00:00 Z)).unwrap();
+    fs.write_test_conversation(&valid, &Conversation::default());
+    fs.create_corrupt_test_conversation_dir(&invalid.to_dirname(None))
+        .unwrap();
+
+    workspace.load_conversation_index();
+
+    assert!(workspace.acquire_conversation(&valid).is_ok());
+    assert!(workspace.acquire_conversation(&invalid).is_err());
+}
+
+#[test]
+fn test_load_index_of_only_invalid_conversations_is_empty() {
+    let tmp = tempdir().unwrap();
+    let fs = FsStorageBackend::new(&tmp.path().join("storage")).unwrap();
+    let mut workspace = workspace_with_fs(tmp.path(), &fs);
+    workspace.disable_persistence();
+
+    let id = ConversationId::try_from(datetime!(2024-01-01 00:00:00 Z)).unwrap();
+    fs.create_corrupt_test_conversation_dir(&id.to_dirname(None))
+        .unwrap();
+
+    workspace.load_conversation_index();
+
     assert_eq!(workspace.conversations().count(), 0);
 }
 
@@ -1327,6 +1392,66 @@ fn test_archived_keyword_resolves_most_recently_archived() {
         .map(|(id, _, _)| *id)
         .unwrap();
     assert_eq!(most_recent, id2);
+}
+
+#[test]
+fn test_unarchive_refuses_a_conversation_another_process_holds() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path().join("root");
+    let storage = root.join("storage");
+
+    let fs = FsStorageBackend::new(&storage).unwrap();
+    let mut ws = workspace_with_fs(&root, &fs);
+    let config = Arc::new(AppConfig::new_test());
+
+    let id = ConversationId::try_from(datetime!(2024-06-01 00:00:00 Z)).unwrap();
+    ws.create_conversation_with_id(id, Conversation::default(), config);
+    let h = ws.acquire_conversation(&id).unwrap();
+    let mut conv = ws.test_lock(h).into_mut();
+    conv.update_metadata(|_| {});
+    conv.flush().unwrap();
+    drop(conv);
+    let h = ws.acquire_conversation(&id).unwrap();
+    ws.archive_conversation(ws.test_lock(h).into_mut()).unwrap();
+
+    let held = fs.try_lock(&id.to_string(), None).unwrap().unwrap();
+    assert_eq!(
+        ws.unarchive_conversation(&id).unwrap_err(),
+        Error::LockFailed(id.to_string())
+    );
+    assert!(ws.acquire_conversation(&id).is_err());
+    assert_eq!(ws.archived_conversations().count(), 1);
+
+    drop(held);
+    ws.unarchive_conversation(&id).unwrap();
+    assert!(ws.acquire_conversation(&id).is_ok());
+}
+
+#[test]
+fn test_a_conversation_lock_is_free_unless_another_holder_has_it() {
+    let tmp = tempdir().unwrap();
+    let fs = FsStorageBackend::new(&tmp.path().join("storage")).unwrap();
+    let ws = workspace_with_fs(tmp.path(), &fs);
+    let id = ConversationId::try_from(datetime!(2024-06-01 00:00:00 Z)).unwrap();
+
+    assert!(ws.conversation_lock_is_free(&id).unwrap());
+    assert!(fs.try_lock(&id.to_string(), None).unwrap().is_some());
+
+    let held = fs.try_lock(&id.to_string(), None).unwrap().unwrap();
+    assert!(!ws.conversation_lock_is_free(&id).unwrap());
+    drop(held);
+    assert!(ws.conversation_lock_is_free(&id).unwrap());
+}
+
+#[test]
+fn test_a_workspace_without_persistence_sees_every_lock_as_free() {
+    let tmp = tempdir().unwrap();
+    let fs = FsStorageBackend::new(&tmp.path().join("storage")).unwrap();
+    let ws = workspace_with_fs(tmp.path(), &fs).without_persistence();
+    let id = ConversationId::try_from(datetime!(2024-06-01 00:00:00 Z)).unwrap();
+
+    let _held = fs.try_lock(&id.to_string(), None).unwrap().unwrap();
+    assert!(ws.conversation_lock_is_free(&id).unwrap());
 }
 
 #[test]

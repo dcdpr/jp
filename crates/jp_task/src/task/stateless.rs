@@ -1,10 +1,9 @@
 use std::error::Error;
 
-use async_trait::async_trait;
 use futures::future::BoxFuture;
 use tokio_util::sync::CancellationToken;
 
-use crate::Task;
+use crate::{DynTask, Task};
 
 pub struct StatelessTask(BoxFuture<'static, Result<(), Box<dyn Error + Send + Sync>>>);
 
@@ -16,7 +15,6 @@ impl StatelessTask {
     }
 }
 
-#[async_trait]
 impl Task for StatelessTask {
     fn name(&self) -> &'static str {
         "stateless"
@@ -25,7 +23,7 @@ impl Task for StatelessTask {
     async fn run(
         mut self: Box<Self>,
         token: CancellationToken,
-    ) -> Result<Box<dyn Task>, Box<dyn Error + Send + Sync>> {
+    ) -> Result<Box<dyn DynTask>, Box<dyn Error + Send + Sync>> {
         jp_macro::select!(token.cancelled(), |_cancel| {}, &mut self.0, |v| { v? });
 
         Ok(self)

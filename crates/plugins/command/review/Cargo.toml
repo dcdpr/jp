@@ -5,7 +5,6 @@ description = "Review workspace files with the assistant, through range-anchored
 authors.workspace = true
 documentation.workspace = true
 edition.workspace = true
-homepage.workspace = true
 license-file.workspace = true
 publish.workspace = true
 readme.workspace = true

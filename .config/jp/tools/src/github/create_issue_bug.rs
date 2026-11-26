@@ -147,10 +147,7 @@ async fn check_labels(as_ref: Option<&[String]>) -> Result<()> {
                 .map(|l| format!(
                     "- {}{}",
                     l.name,
-                    l.description
-                        .as_ref()
-                        .map(|d| format!(" ({d})"))
-                        .unwrap_or_default()
+                    l.description.as_ref().map_or_default(|d| format!(" ({d})"))
                 ))
                 .collect::<Vec<_>>()
                 .join("\n")

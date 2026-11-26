@@ -72,6 +72,7 @@ impl Show {
                 .with_labels(labels)
                 .with_attachments(attachments)
                 .with_compactions(compactions)
+                .with_locations(ctx.workspace.conversation_locations(&handle))
                 .with_pretty_printing(ctx.printer.pretty_printing_enabled());
 
             // The two views carry different things: the payload is a stable

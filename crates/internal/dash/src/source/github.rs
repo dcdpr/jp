@@ -147,7 +147,7 @@ impl GitHub {
     #[must_use]
     pub fn open(dir: Utf8PathBuf) -> Self {
         let file = cache::file(&dir, "github");
-        let state: State = file.as_deref().map(cache::load).unwrap_or_default();
+        let state: State = file.as_deref().map_or_default(cache::load);
         let driver = merge::Driver::new(state.holds.clone());
 
         Self {

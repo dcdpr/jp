@@ -1,7 +1,7 @@
 use pretty_assertions::assert_eq;
 
 use super::*;
-use crate::{lexer::Dialect, syntax::SyntaxNode};
+use crate::{error::ParseError, lexer::Dialect, syntax::SyntaxNode};
 
 fn parse_json(input: &str) -> SyntaxNode {
     let result = parse(input, Dialect::Json);
@@ -88,7 +88,7 @@ fn tree_structure_array() {
 #[test]
 fn parse_error_on_missing_brace() {
     let result = parse(r#"{"a": 1"#, Dialect::Json);
-    assert!(!result.errors.is_empty());
+    assert_ne!(result.errors, [] as [ParseError; 0]);
     // Still produces a tree (error recovery)
     let root = SyntaxNode::new_root(result.green_node);
     assert_eq!(root.kind(), SyntaxKind::Root);
@@ -97,7 +97,7 @@ fn parse_error_on_missing_brace() {
 #[test]
 fn parse_error_on_missing_value() {
     let result = parse(r#"{"a": }"#, Dialect::Json);
-    assert!(!result.errors.is_empty());
+    assert_ne!(result.errors, [] as [ParseError; 0]);
 }
 
 #[test]

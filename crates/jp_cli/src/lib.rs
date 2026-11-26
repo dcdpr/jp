@@ -1,14 +1,15 @@
+// qual:allow(srp, file_length=1000) reason: "run entry point, config loading, workspace loading, logging, and runtime setup in one file; split in T-1rp06gh"
 mod access;
 mod bootstrap;
 mod cli;
 mod cmd;
 mod config_pipeline;
 mod ctx;
+mod deferred_report;
 mod editor;
-#[cfg(test)]
-mod env_testing;
 mod error;
 mod format;
+mod load_failure;
 mod output;
 mod parser;
 mod render;
@@ -17,6 +18,7 @@ mod session;
 mod shared;
 mod shutdown;
 mod signals;
+mod trash_restore;
 
 use std::{
     env, fmt, fs,
@@ -36,7 +38,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::NamedUtf8TempFile;
 use cmd::Commands;
 use crossterm::{style::Stylize as _, terminal};
-use ctx::{Ctx, IntoPartialAppConfig};
+use ctx::{Ctx, IntoPartialAppConfig, recovery_backend};
 use error::{Error, Result};
 use jp_config::{
     AppConfig, PartialAppConfig,
@@ -49,9 +51,7 @@ use jp_config::{
 };
 use jp_inquire::prompt::TerminalPromptBackend;
 use jp_printer::{Chrome, OutputFormat, OutputWidth, Printer, RegionStyle};
-use jp_storage::backend::{
-    FsStorageBackend, NullLockBackend, NullPersistBackend, ReadOnlySessionBackend,
-};
+use jp_storage::backend::{FsStorageBackend, RecoveryBackend};
 use jp_term::table::{DetailRow, Details, details, details_markdown};
 use jp_workspace::{
     DEFAULT_STORAGE_DIR, Workspace, roots, session_store::WorkspaceSessionStore, user_data_dir,
@@ -480,6 +480,34 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
             return output;
         }
 
+        // Resolve the workspace root and open it read-only without running
+        // trash restoration or startup validation, so `jp doctor` sees the
+        // store as-is.
+        WorkspaceRequirement::Diagnose => {
+            let Commands::Doctor(args) = cli.command else {
+                unreachable!("`Diagnose` is declared by `jp doctor` alone");
+            };
+
+            let session = session::resolve();
+            let exec = bootstrap::resolve(
+                cli.globals.workspace.as_ref(),
+                session.as_ref(),
+                cli.globals.no_interactive,
+            )?;
+            let (workspace, fs_backend) =
+                load_workspace(&exec.root, cli.globals.persist, LoadIntent::Inspect)?;
+            let recovery = recovery_backend(fs_backend.as_ref(), workspace.persists());
+
+            return args
+                .run(
+                    &printer,
+                    recovery.as_ref(),
+                    stdin_interactive(cli.globals.no_interactive),
+                    workspace.persists(),
+                )
+                .map_err(Into::into);
+        }
+
         // Resolves a root below, then constructs the workspace and loads the
         // conversation index.
         WorkspaceRequirement::Load => {}
@@ -514,17 +542,14 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
     let (mut workspace, fs_backend) =
         load_workspace(&exec.root, cli.globals.persist, LoadIntent::Run)?;
 
-    trace!("Sanitizing workspace.");
-    let report = workspace.sanitize()?;
-    if report.has_repairs() {
-        for trashed in &report.trashed {
-            warn!(
-                dirname = trashed.dirname,
-                error = %trashed.error,
-                "Trashed corrupt conversation"
-            );
-        }
-    }
+    // Held until the run ends, whichever way it ends, so the reports follow the
+    // command's own output.
+    let _store_reports = prepare_conversation_store(
+        fs_backend.as_deref().filter(|_| workspace.persists()),
+        recovery_backend(fs_backend.as_ref(), workspace.persists()),
+        exec.config_cwd(),
+        &printer,
+    )?;
 
     // Populate the conversation index. This does NOT load the contents of
     // individual conversations, this is done lazily as needed.
@@ -1115,19 +1140,60 @@ pub(crate) enum LoadIntent {
     Inspect,
 }
 
+/// End-of-run stderr report guards for the conversation store, dropped in field
+/// order after command output.
+struct StoreReports {
+    _trash: Option<deferred_report::DeferredReport>,
+    _load_failures: load_failure::LoadFailureNotice,
+}
+
+/// Restore any legacy `.trash/` entries (when `fs` is `Some`), scan for
+/// conversations that fail validation, and return the deferred stderr report
+/// guards.
+fn prepare_conversation_store(
+    fs: Option<&FsStorageBackend>,
+    recovery: Arc<dyn RecoveryBackend>,
+    config_cwd: &Utf8Path,
+    printer: &Printer,
+) -> Result<StoreReports> {
+    // Before the scan, so a restored conversation that still fails to load is
+    // reported below.
+    let trash = fs.map(|fs| {
+        let leftovers = trash_restore::restore_trash(fs, || {
+            load_base_partial(Some(fs), config_cwd.to_owned())
+                .and_then(|partial| Ok(build(partial)?))
+                .map(Arc::new)
+                .inspect_err(|error| warn!(%error, "Not restoring drafts from the trash."))
+                .ok()
+        });
+        trash_restore::notice(printer.clone(), &leftovers)
+    });
+
+    trace!("Scanning for conversations that do not load.");
+    let invalid = recovery.scan().map_err(cmd::Error::from)?;
+    let failures: Vec<_> = invalid
+        .iter()
+        .map(load_failure::LoadFailure::from)
+        .collect();
+
+    Ok(StoreReports {
+        _trash: trash,
+        _load_failures: load_failure::notice(printer.clone(), recovery, &failures),
+    })
+}
+
 /// Construct the workspace at the given, bootstrap-selected checkout root.
 ///
 /// Root selection lives in [`bootstrap::resolve`]; this only builds the storage
 /// backend and [`Workspace`] on top of it.
 /// `intent` decides what the load may write — see [`LoadIntent`].
 ///
-/// When `persist` is `false` (`--no-persist`), the persist backend is swapped
-/// to [`NullPersistBackend`] and the lock backend to [`NullLockBackend`] so
-/// that ephemeral queries never write to disk and never block on lock
-/// contention.
-/// The session backend is wrapped in [`ReadOnlySessionBackend`] for the same
-/// reason: the run still needs to read which conversation the session is on,
-/// but must not record one that it never persisted.
+/// When `persist` is `false` (`--no-persist`), the workspace is opened [without
+/// persistence]: ephemeral queries never write to disk and never block on lock
+/// contention, and the run still reads which conversation the session is on
+/// without recording one it never persisted.
+///
+/// [without persistence]: Workspace::without_persistence
 fn load_workspace(
     root: &Utf8Path,
     persist: bool,
@@ -1158,11 +1224,7 @@ fn load_workspace(
     }
 
     if !persist {
-        let sessions = Arc::new(ReadOnlySessionBackend::new(workspace.sessions().clone()));
-        workspace = workspace
-            .with_persist(Arc::new(NullPersistBackend))
-            .with_locker(Arc::new(NullLockBackend))
-            .with_sessions(sessions);
+        workspace = workspace.without_persistence();
     }
     info!(workspace = %workspace.root(), "Using existing workspace.");
 

@@ -1,11 +1,15 @@
 //! Executors that return a scripted result instead of running anything.
 
+#![expect(
+    clippy::unused_async_trait_impl,
+    reason = "test doubles implement async traits synchronously"
+)]
+
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
 };
 
-use async_trait::async_trait;
 use indexmap::IndexMap;
 use jp_config::conversation::tool::ToolConfigWithDefaults;
 use jp_conversation::event::{ToolCallRequest, ToolCallResponse};
@@ -16,8 +20,8 @@ use serde_json::{Map, Value, json};
 use tokio_util::sync::CancellationToken;
 
 use super::{
-    CallExecutors, Executor, ExecutorError, ExecutorResult, ExecutorSource, FanOutCall,
-    PermissionInfo, Review,
+    CallExecutors, DynExecutor, Executor, ExecutorError, ExecutorResult, ExecutorSource,
+    FanOutCall, PermissionInfo, Review,
 };
 
 /// A runner for a service whose tools run no local command.
@@ -161,7 +165,6 @@ impl MockExecutor {
     }
 }
 
-#[async_trait]
 impl Executor for MockExecutor {
     fn formatted_arguments(&self) -> Option<String> {
         self.formatted.clone()
@@ -223,7 +226,6 @@ impl Executor for MockExecutor {
 /// the execution service folds and records.
 pub(crate) struct ScriptedFanOut(pub(crate) ToolCallResponse);
 
-#[async_trait]
 impl FanOutCall for ScriptedFanOut {
     async fn recorded(&self) -> Result<ToolCallResponse, ExecutorError> {
         Ok(self.0.clone())
@@ -262,7 +264,7 @@ impl TestExecutorSource {
     /// invoked to create the executor.
     pub(crate) fn with_executor<F>(self, tool_name: &str, factory: F) -> Self
     where
-        F: Fn(ToolCallRequest) -> Box<dyn Executor> + Send + Sync + 'static,
+        F: Fn(ToolCallRequest) -> Box<dyn DynExecutor> + Send + Sync + 'static,
     {
         self.with_call(tool_name, move |request| {
             CallExecutors::call(factory(request))

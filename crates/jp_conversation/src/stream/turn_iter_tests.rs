@@ -84,8 +84,7 @@ fn last_turns(stream: &ConversationStream) -> (Vec<&ConversationEvent>, Vec<&Con
     let via_turns = stream
         .iter_turns()
         .next_back()
-        .map(|turn| turn.into_iter().map(|e| e.event).collect())
-        .unwrap_or_default();
+        .map_or_default(|turn| turn.into_iter().map(|e| e.event).collect());
     let direct = stream.last_turn_events().collect();
 
     (via_turns, direct)

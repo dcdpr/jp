@@ -1,17 +1,20 @@
 use clap::{ArgMatches, Command};
 use jp_conversation::ConversationId;
+use jp_storage::backend::Removal as StorageRemoval;
 use jp_workspace::{ConversationHandle, Workspace};
 
 use crate::{
     cli::CommandArgs,
     cmd::{
-        ConversationLoadRequest, Output,
-        conversation_id::PositionalIds,
-        lock::{LockOutcome, LockRequest, acquire_lock},
+        self, ConversationLoadRequest, Output,
+        conversation_id::{ConversationIds as _, PositionalIds},
+        lock::{LockOutcome, LockRequest, acquire_lock, wait_until_free},
+        target::ConversationTarget,
         time::CreationRange,
     },
     ctx::Ctx,
-    shared::confirm::{ConfirmFlag, ConversationAction, confirm_conversation_action},
+    format::no_persist_note,
+    shared::confirm::{Answers, ConfirmFlag, ConversationAction, confirm_unloaded_removal},
 };
 
 /// `jp conversation rm`.
@@ -26,8 +29,8 @@ pub(crate) struct Rm {
     /// Confirmation prompting: `--confirm`, `--no-confirm`, or `--yes`.
     ///
     /// Removal always prompts by default; `--no-confirm` / `--yes` skips it.
-    /// With no user available to answer — no terminal, or `--no-interactive`
-    /// — removal fails unless `--no-confirm` was passed.
+    /// With no user available to answer (no terminal, or `--no-interactive`),
+    /// removal fails unless `--no-confirm` was passed.
     confirm: ConfirmFlag,
 }
 
@@ -48,30 +51,47 @@ impl CommandArgs for Rm {
 }
 
 impl Rm {
-    pub(crate) async fn run(self, ctx: &mut Ctx, mut handles: Vec<ConversationHandle>) -> Output {
+    pub(crate) async fn run(self, ctx: &mut Ctx, handles: Vec<ConversationHandle>) -> Output {
         let active_id = ctx
             .session
             .as_ref()
             .and_then(|s| ctx.workspace.session_active_conversation(s));
 
-        // Range mode: resolve IDs by filtering all conversations on
-        // creation date. `conversation_load_request` returns `none()` in this
-        // mode, so `handles` is empty here.
-        if self.range.is_set() {
-            handles = self.resolve_filtered(&ctx.workspace)?;
-
+        // `conversation_load_request` returns `none()` in range mode and for
+        // literal IDs, so `handles` is empty in both and the targets are
+        // resolved here.
+        let removals = if self.range.is_set() {
+            let handles = self.resolve_filtered(&ctx.workspace)?;
             if handles.is_empty() {
                 ctx.printer.println("No conversations match the range.");
                 return Ok(());
             }
-        }
+            handles.into_iter().map(Removal::Loaded).collect()
+        } else if let Some(ids) = self.literal_ids() {
+            resolve_literal(ctx, &ids)?
+        } else {
+            handles.into_iter().map(Removal::Loaded).collect::<Vec<_>>()
+        };
 
         // Removal is destructive, so the default (`None`) prompts; only an
         // explicit `--no-confirm` / `--yes` skips it.
-        let force = self.confirm.preference() == Some(false);
+        let mut answers = self.confirm.answers();
+        let count = removals.len();
         let mut removed = 0_usize;
-        for handle in handles {
-            if remove(ctx, handle, active_id, force).await? {
+        for (index, removal) in removals.into_iter().enumerate() {
+            // `N` declined the rest, so none of their locks is taken.
+            if answers.rest() == Some(false) {
+                break;
+            }
+
+            let more = index + 1 < count;
+            let done = match removal {
+                Removal::Loaded(handle) => {
+                    remove(ctx, handle, active_id, &mut answers, more).await?
+                }
+                Removal::Unloaded(id) => remove_unloaded(ctx, id, &mut answers, more).await?,
+            };
+            if done {
                 removed += 1;
             }
         }
@@ -81,15 +101,39 @@ impl Rm {
         } else {
             ctx.printer.println("Conversation(s) removed.");
         }
+        if !ctx.workspace.persists() {
+            ctx.printer.println("");
+            ctx.printer.println(no_persist_note());
+        }
         Ok(())
     }
 
     pub(crate) fn conversation_load_request(&self) -> ConversationLoadRequest {
-        if self.range.is_set() {
+        if self.range.is_set() || self.literal_ids().is_some() {
             ConversationLoadRequest::none()
         } else {
             ConversationLoadRequest::explicit_or_session(&self.target)
         }
+    }
+
+    /// Return the target conversation IDs if every positional target is a
+    /// literal ID.
+    ///
+    /// Literal IDs are resolved in `run` so `rm` can target invalid and
+    /// archived conversations that are absent from the live conversation index.
+    fn literal_ids(&self) -> Option<Vec<ConversationId>> {
+        let targets = self.target.ids();
+        if targets.is_empty() {
+            return None;
+        }
+
+        targets
+            .iter()
+            .map(|target| match target {
+                ConversationTarget::Id(id) => Some(*id),
+                _ => None,
+            })
+            .collect()
     }
 
     /// Resolve handles by applying the range filter over the workspace.
@@ -111,9 +155,83 @@ impl Rm {
     }
 }
 
-/// Remove one conversation, asking first unless `force` says the caller already
-/// decided.
+/// Target conversation for removal.
+enum Removal {
+    /// A conversation present in the live workspace index.
+    Loaded(ConversationHandle),
+
+    /// A conversation absent from the live index (invalid or archived).
+    Unloaded(ConversationId),
+}
+
+/// Resolve literal conversation IDs against the live workspace index first,
+/// falling back to [`RecoveryBackend::inspect`] for invalid or archived
+/// conversations.
 ///
+/// Validates all IDs up front so an unknown ID fails before any conversation is
+/// removed.
+///
+/// [`RecoveryBackend::inspect`]: jp_storage::backend::RecoveryBackend::inspect
+fn resolve_literal(ctx: &Ctx, ids: &[ConversationId]) -> Result<Vec<Removal>, cmd::Error> {
+    ids.iter()
+        .map(|id| match ctx.workspace.acquire_conversation(id) {
+            Ok(handle) => Ok(Removal::Loaded(handle)),
+            Err(_) if ctx.recovery.inspect(id).is_some() => Ok(Removal::Unloaded(*id)),
+            Err(not_found) => Err(crate::error::Error::from(not_found).into()),
+        })
+        .collect()
+}
+
+/// Remove an invalid or archived conversation via [`RecoveryBackend::remove`],
+/// prompting unless `answers` already holds a sticky decision.
+///
+/// Waits if another process holds the conversation lock.
+/// Returns `Ok(true)` if the conversation was removed, or `Ok(false)` if the
+/// user declined.
+///
+/// [`RecoveryBackend::remove`]: jp_storage::backend::RecoveryBackend::remove
+async fn remove_unloaded(
+    ctx: &Ctx,
+    id: ConversationId,
+    answers: &mut Answers,
+    more: bool,
+) -> Result<bool, cmd::Error> {
+    loop {
+        // `decide` can only answer yes or no, so a failed prompt answers no and
+        // its error is returned once the lock is released.
+        let mut prompt_error = None;
+        let removal = ctx.recovery.remove(&id, &mut |stored| {
+            answers
+                .decide(more, |more| confirm_unloaded_removal(ctx, stored, more))
+                .unwrap_or_else(|error| {
+                    prompt_error = Some(error);
+                    false
+                })
+        })?;
+
+        if let Some(error) = prompt_error {
+            return Err(error.into());
+        }
+
+        match removal {
+            StorageRemoval::Locked => wait_until_free(ctx, id).await?,
+            StorageRemoval::Removed => return Ok(true),
+            StorageRemoval::Declined => return Ok(false),
+            StorageRemoval::NotFound => {
+                return Err(crate::error::Error::from(jp_workspace::Error::not_found(
+                    "Conversation",
+                    &id,
+                ))
+                .into());
+            }
+        }
+    }
+}
+
+/// Remove one conversation, asking first unless `answers` already holds the
+/// answer.
+///
+/// `more` says whether more conversations follow this one.
 /// Returns whether the conversation was removed.
 /// Declining leaves it in place and is not an error: the user answered the
 /// question they were asked, and the next conversation in the run still gets
@@ -126,7 +244,8 @@ async fn remove(
     ctx: &mut Ctx,
     handle: ConversationHandle,
     active_id: Option<ConversationId>,
-    force: bool,
+    answers: &mut Answers,
+    more: bool,
 ) -> Result<bool, crate::error::Error> {
     let lock = match acquire_lock(LockRequest::from_ctx(handle, ctx)).await? {
         LockOutcome::Acquired(lock) => lock,
@@ -134,7 +253,7 @@ async fn remove(
         LockOutcome::ForkConversation(_) => unreachable!("fork not allowed"),
     };
 
-    if !force && !confirm_conversation_action(ctx, ConversationAction::Remove, &lock, active_id)? {
+    if !answers.confirm_action(ctx, ConversationAction::Remove, &lock, active_id, more)? {
         return Ok(false);
     }
 

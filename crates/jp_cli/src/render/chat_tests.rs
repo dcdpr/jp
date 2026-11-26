@@ -1,4 +1,4 @@
-use std::{fmt::Write as _, io};
+use std::io;
 
 use jp_config::{
     AppConfig,

@@ -6,7 +6,7 @@
 
 use std::{
     error::Error as StdError,
-    io,
+    future, io,
     net::{Ipv4Addr, SocketAddr},
     sync::Arc,
     time::{Duration, Instant},
@@ -303,11 +303,11 @@ impl ServerHandler for Handler {
         info
     }
 
-    async fn list_tools(
+    fn list_tools(
         &self,
         _: Option<PaginatedRequestParams>,
         _: RequestContext<RoleServer>,
-    ) -> Result<ListToolsResult, ErrorData> {
+    ) -> impl Future<Output = Result<ListToolsResult, ErrorData>> + Send + '_ {
         let tools = self
             .service
             .definitions()
@@ -335,10 +335,10 @@ impl ServerHandler for Handler {
                 tool
             })
             .collect();
-        Ok(ListToolsResult {
+        future::ready(Ok(ListToolsResult {
             tools,
             ..Default::default()
-        })
+        }))
     }
 
     async fn call_tool(

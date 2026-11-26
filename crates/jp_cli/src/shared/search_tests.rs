@@ -116,7 +116,7 @@ fn event_lines_chat_response_structured_string_is_verbatim() {
 #[test]
 fn event_lines_turn_start_is_empty() {
     let kind = EventKind::TurnStart(jp_conversation::event::TurnStart::default());
-    assert!(collect_lines(&kind).is_empty());
+    assert_eq!(collect_lines(&kind), [] as [String; 0]);
 }
 
 #[test]
@@ -466,7 +466,8 @@ fn filter_ids_returns_empty_when_no_match() {
         Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
     )])]);
 
-    assert!(matching(&ctx, &[id], "nonexistent").is_empty());
+    assert_eq!(matching(&ctx, &[id], "nonexistent"), [] as [ConversationId;
+        0]);
 }
 
 #[test]

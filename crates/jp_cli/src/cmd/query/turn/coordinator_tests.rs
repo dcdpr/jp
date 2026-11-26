@@ -29,7 +29,7 @@ fn pending_tool_progress_does_not_become_an_executable_or_partial_event() {
         id: "pending".into(),
         name: "fs_create_file".into(),
     });
-    assert!(coordinator.peek_partial_events().is_empty());
+    assert_eq!(coordinator.peek_partial_events(), [] as [ChatResponse; 0]);
     assert_eq!(coordinator.current_phase(), TurnPhase::Streaming);
     let result = coordinator.handle_event(&mut stream, Event::Finished(FinishReason::Completed));
     assert!(matches!(result.action, Action::Done));
@@ -658,7 +658,7 @@ fn test_peek_partial_events() {
     coordinator.start_turn(&mut stream, ChatRequest::from("test"));
 
     // Initially no partial content
-    assert!(coordinator.peek_partial_events().is_empty());
+    assert_eq!(coordinator.peek_partial_events(), [] as [ChatResponse; 0]);
 
     // Add a partial message (not flushed)
     coordinator.handle_event(&mut stream, Event::message(0, "Hello "));
@@ -674,7 +674,7 @@ fn test_peek_partial_events() {
 
     // Flush clears the buffer
     coordinator.handle_event(&mut stream, Event::flush(0));
-    assert!(coordinator.peek_partial_events().is_empty());
+    assert_eq!(coordinator.peek_partial_events(), [] as [ChatResponse; 0]);
 }
 
 #[test]
@@ -873,13 +873,13 @@ fn test_prepare_continuation() {
 
     // Add partial content
     coordinator.handle_event(&mut stream, Event::message(0, "Partial"));
-    assert!(!coordinator.peek_partial_events().is_empty());
+    assert_ne!(coordinator.peek_partial_events(), [] as [ChatResponse; 0]);
 
     // Prepare continuation resets state
     coordinator.prepare_continuation();
 
     assert_eq!(coordinator.current_phase(), TurnPhase::Streaming);
-    assert!(coordinator.peek_partial_events().is_empty());
+    assert_eq!(coordinator.peek_partial_events(), [] as [ChatResponse; 0]);
 }
 
 /// Tests the multi-part tool call flow: an initial Part with name+id (empty

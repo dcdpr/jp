@@ -186,7 +186,7 @@ async fn test_resolves_a_stored_token_profile() {
     );
     assert!(attempt.is_subscription());
     assert_eq!(attempt.attribution.account_id.as_deref(), Some("acct-1"));
-    assert!(attempt.notices.is_empty());
+    assert_eq!(attempt.notices, [] as [String; 0]);
 }
 
 #[tokio::test]

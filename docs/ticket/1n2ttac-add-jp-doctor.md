@@ -1,6 +1,6 @@
 # Add jp doctor
 
-- **Status**: Todo
+- **Status**: Done
 - **Authors**: jp
 - **Date**: 2026-11-18
 - **Label**: client=cli
@@ -9,7 +9,106 @@
 - **Parent**: T-1n2tnwv
 
 Check the `jp` installation, user-global and workspace configuration, and
-conversation storage (load failures, unsent drafts, and `.trash/` contents),
-reporting each detected problem with a suggested fix.
-`jp doctor` is read-only: it suggests commands such as `jp c repair` and `jp c
-trash` without modifying anything on disk.
+conversation storage, reporting each problem grouped by section, and apply a fix
+only when the user names it.
+
+Plain `jp doctor` is read-only.
+It skips the steps every other command runs before its own code (the one-time
+trash restore, the startup scan and its cleanup of leftover `.tmp` files and
+import staging directories, the scan-cache write), so it reports the store as it
+is rather than as those steps leave it.
+`jp doctor --fix <name>` applies one named fix to every finding it covers, and
+writes nothing else.
+
+Checks and fixes live with the data they cover: conversation checks and fixes
+behind `RecoveryBackend` in `jp_storage`, workspace checks in `jp_workspace`,
+config checks in `jp_config`.
+Each check returns typed findings; a finding with a fix carries the fix's name.
+`jp doctor` runs the checks, groups the findings, and applies the fixes it is
+told to, with no fixing logic of its own.
+
+- [x] `jp doctor` runs without the pre-run step: no trash restore, no startup
+      scan, no load-failure report, and nothing written to the conversation
+      store; selecting the workspace (`-w`, the session's workspace, the
+      conflict prompt) works as for any command
+- [x] Findings are typed and grouped by section; each section prints the exact
+      `jp doctor --fix <name>` command for the findings it can fix, and a
+      suggestion (a command or an edit) for those it cannot
+- [x] `jp doctor --fix <name>` applies that fix to every finding it covers: asks
+      once before writing, takes each conversation's lock, skips one another
+      process holds and names it in the error the run ends with, and only
+      reports what it would do under `--no-persist`
+- [x] Fix `rebuild-metadata`: rebuilds a missing `metadata.json` from the events
+      and the directory name
+- [x] Reports leftover `.tmp` files and import staging directories, which the
+      startup scan of any other command removes
+- [x] Validates the archive partition (`conversations/.archive/`), which startup
+      validation never reads, and reports archived conversations that fail to
+      load
+- [x] Lists directories under `conversations/` whose name is not a conversation
+      ID (`ValidationResult::unrecognized`), which the load-failure report
+      leaves out, suggesting `rm -r <path>` for each
+- [x] The load-failure report printed after every command
+      (`jp_cli::load_failure::render_text`) lists at most 5 failures again, and
+      above that ends with "Run `jp doctor` to list them"
+
+## Comments
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-23T23:11:20Z
+
+Removed the two unsent-draft items.
+A conversation with no turns and a query draft beside it loads fine: it is not
+an error or a warning, so `jp doctor` does not report it.
+Such conversations show in `jp c ls` like any other, and `jp c rm` removes them.
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-23T23:59:25Z
+
+Archived conversations that fail to load are fixed and removed where they are:
+`jp doctor --fix rebuild-metadata` and `jp conversation rm <id>` reach the
+archive, and the conversation stays archived.
+
+The archive is never read on the regular path.
+The startup scan, the conversation index, `jp q` and `jp c ls` read live
+conversations only.
+`jp doctor` reads the whole archive; a lookup by ID (`jp c rm <id>`, a `--fix
+--id`) reads it only for a conversation with no live copy.
+
+A rebuilt `metadata.json` has no `archived_at`, so the conversation stays
+archived but sorts last in `jp c ls --archived`.
+`jp c ls --archived` still leaves out an archived conversation whose metadata
+fails to load, without saying so.
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-24T12:04:33Z
+
+`jp conversation ls --archived` now reports the archived conversations it leaves
+out because they fail to load, after the listing, as `N archived conversation(s)
+failed to load`.
+The archive index already validated them; `RecoveryBackend::scan_archive` hands
+back the ones it dropped, re-reading only those, since the index left the others
+in the in-memory scan cache.
+Plain `jp c ls` does not read the archive.
+
+A rebuilt archived conversation's archive time is the directory's modification
+time, read before the new `metadata.json` is written.
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-24T12:27:17Z
+
+The workspace and config sections moved to their own tickets, as extensions of
+`jp doctor`: T-1r5g63p (workspace) and T-1r5g63q (config).
+Everything else on this ticket has landed, so it closes.
+
+The load-failure report printed after every command now ends with "Run `jp
+doctor` to see how to fix it/them" instead of a `jp conversation rm` command, so
+every remedy is found in `jp doctor`.

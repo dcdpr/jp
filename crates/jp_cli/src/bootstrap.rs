@@ -56,6 +56,13 @@ pub(crate) enum WorkspaceRequirement {
     /// have not asked.
     Subject,
 
+    /// Resolve a workspace root and open its [`Workspace`] read-only, skipping
+    /// startup steps that modify the store.
+    ///
+    /// Used by `jp doctor` so the report reflects the store's exact on-disk
+    /// state without running trash restoration or startup cleanup.
+    Diagnose,
+
     /// Resolve a root, construct the [`Workspace`], and load the conversation
     /// index.
     Load,

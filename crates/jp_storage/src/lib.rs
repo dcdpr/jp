@@ -7,8 +7,9 @@ pub mod resource_lock;
 pub mod value;
 
 pub mod load;
+mod location;
+mod rebuild;
 mod scan;
-pub mod trash;
 pub mod validate;
 
 use std::{fs, io, time::SystemTime};
@@ -281,26 +282,7 @@ impl Storage {
         // Bring any existing copy to the current directory name (e.g. after a
         // title change) and drop other stale copies for this id.
         reconcile_conversation_dir(id, conversations_dir, &conv_dir)?;
-        fs::create_dir_all(&conv_dir).map_err(|error| Error::write_failed(&conv_dir, error))?;
-
-        let (base_config, events_json) = events
-            .to_parts()
-            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-
-        write_json(&conv_dir.join(METADATA_FILE), metadata)?;
-
-        // Write `base_config.json` before `events.json`. The loader picks the
-        // current vs legacy format by the presence of `base_config.json`, so
-        // for a legacy conversation's first upgrade this ordering ensures an
-        // interrupted write never leaves the unreadable "current marker, no
-        // base config" state. The worst interrupted state is a fresh
-        // `base_config.json` beside a still-legacy `events.json`, which the
-        // loader reads back without data loss.
-        write_json(&conv_dir.join(BASE_CONFIG_FILE), &base_config)?;
-
-        write_json(&conv_dir.join(EVENTS_FILE), &events_json)?;
-
-        Ok(())
+        write_conversation_files(&conv_dir, metadata, events)
     }
 
     /// Move a conversation directory into the `.archive/` subdirectory of every
@@ -309,78 +291,72 @@ impl Storage {
     /// A projected conversation lives in both roots, so each copy is archived;
     /// archiving only the first found would leave the other copy live.
     /// Creates each archive directory if needed.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::ConversationExists`] when an archive already holds a directory
+    /// for the conversation, under any title; nothing is moved in any root.
     pub fn archive_conversation(&self, id: &ConversationId) -> Result<()> {
-        let mut archived = false;
-        for root in [Some(&self.root), self.user.as_ref()] {
-            let Some(root) = root else {
-                continue;
-            };
-
-            let Some(conv_dir) = find_conversation_dir_path(root, id) else {
-                continue;
-            };
-
-            let dirname = conv_dir
-                .file_name()
-                .expect("conversation dir has a name")
-                .to_owned();
-
-            let archive_dir = root.join(CONVERSATIONS_DIR).join(ARCHIVE_DIR);
-            fs::create_dir_all(&archive_dir)?;
-
-            let target = archive_dir.join(&dirname);
-            if target.exists() {
-                fs::remove_dir_all(&target)?;
-            }
-            fs::rename(&conv_dir, &target)?;
-            archived = true;
-        }
-
-        if archived {
-            Ok(())
-        } else {
-            Err(Error::ConversationNotFound(*id))
-        }
+        self.move_conversation(id, Partition::Live, Partition::Archive)
     }
 
     /// Move a conversation directory out of `.archive/` back to the live
     /// conversations directory in every root that holds the archived copy.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::ConversationExists`] when a root already holds a live directory
+    /// for the conversation, under any title; nothing is moved in any root.
     pub fn unarchive_conversation(&self, id: &ConversationId) -> Result<()> {
+        self.move_conversation(id, Partition::Archive, Partition::Live)
+    }
+
+    /// Move conversation `id` from partition `from` to partition `to` in every
+    /// root that holds it in `from`.
+    ///
+    /// Every root is checked before any directory moves, so a conversation is
+    /// never left in `from` in one root and in `to` in the other.
+    fn move_conversation(&self, id: &ConversationId, from: Partition, to: Partition) -> Result<()> {
         let prefix = id.to_dirname(None);
-        let mut unarchived = false;
+        let mut moves = vec![];
 
-        for root in [Some(&self.root), self.user.as_ref()] {
-            let Some(root) = root else {
+        for root in [Some(&self.root), self.user.as_ref()].into_iter().flatten() {
+            let conversations = root.join(CONVERSATIONS_DIR);
+            let from_dir = from.dir(&conversations);
+            let to_dir = to.dir(&conversations);
+
+            let Some(source) = conversation_dirs_for_id(&from_dir, &prefix)
+                .into_iter()
+                .next()
+            else {
                 continue;
             };
-
-            let archive_dir = root.join(CONVERSATIONS_DIR).join(ARCHIVE_DIR);
-            if !archive_dir.is_dir() {
-                continue;
+            if let Some(existing) = conversation_dirs_for_id(&to_dir, &prefix)
+                .into_iter()
+                .next()
+            {
+                return Err(Error::ConversationExists {
+                    id: *id,
+                    from: source,
+                    existing,
+                });
             }
 
-            let entry = dir_entries(&archive_dir).find(|e| e.file_name().starts_with(&prefix));
-
-            let Some(entry) = entry else {
-                continue;
-            };
-
-            let dirname = entry.file_name().to_owned();
-            let source = entry.into_path();
-            let target = root.join(CONVERSATIONS_DIR).join(&dirname);
-
-            if target.exists() {
-                fs::remove_dir_all(&target)?;
-            }
-            fs::rename(&source, &target)?;
-            unarchived = true;
+            let target = to_dir.join(source.file_name().unwrap_or(&prefix));
+            moves.push((source, to_dir, target));
         }
 
-        if unarchived {
-            Ok(())
-        } else {
-            Err(Error::ConversationNotFound(*id))
+        if moves.is_empty() {
+            return Err(Error::ConversationNotFound(*id));
         }
+
+        for (source, to_dir, target) in moves {
+            fs::create_dir_all(&to_dir).map_err(|error| Error::write_failed(&to_dir, error))?;
+            fs::rename(&source, &target)
+                .map_err(|error| Error::rename_failed(&source, &target, error))?;
+        }
+
+        Ok(())
     }
 
     /// Load metadata for a conversation in the archive partition.
@@ -877,14 +853,8 @@ fn adopt_conversation_dir(
 /// Remove every directory matching conversation `id` from a single
 /// `conversations/` directory.
 fn remove_conversation_dirs(id: &ConversationId, conversations_dir: &Utf8Path) -> Result<()> {
-    let prefix = id.to_dirname(None);
-    for entry in dir_entries(conversations_dir) {
-        let name = entry.file_name().to_owned();
-        let matches =
-            (name == prefix || name.starts_with(&format!("{prefix}-"))) && entry.path().is_dir();
-        if matches {
-            fs::remove_dir_all(entry.into_path())?;
-        }
+    for dir in conversation_dirs_for_id(conversations_dir, &id.to_dirname(None)) {
+        fs::remove_dir_all(dir)?;
     }
     Ok(())
 }
@@ -1143,6 +1113,63 @@ fn build_conversation_dir_prefix(root: &Utf8Path, id: &ConversationId) -> Utf8Pa
     root.join(CONVERSATIONS_DIR).join(id.to_dirname(None))
 }
 
+/// Storage partition within a `conversations/` directory.
+#[derive(Debug, Clone, Copy)]
+enum Partition {
+    Live,
+    Archive,
+}
+
+impl Partition {
+    fn dir(self, conversations: &Utf8Path) -> Utf8PathBuf {
+        match self {
+            Self::Live => conversations.to_path_buf(),
+            Self::Archive => conversations.join(ARCHIVE_DIR),
+        }
+    }
+}
+
+/// Write `metadata.json`, `base_config.json`, and `events.json` into
+/// `conv_dir`, creating the directory if needed.
+///
+/// Does not rename or remove sibling directories for the same conversation ID,
+/// and preserves any non-managed files in `conv_dir`.
+///
+/// # Errors
+///
+/// Returns an error if any file cannot be written.
+pub fn write_conversation_files(
+    conv_dir: &Utf8Path,
+    metadata: &Conversation,
+    events: &ConversationStream,
+) -> Result<()> {
+    fs::create_dir_all(conv_dir).map_err(|error| Error::write_failed(conv_dir, error))?;
+
+    let (base_config, events_json) = events
+        .to_parts()
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+
+    write_json(&conv_dir.join(METADATA_FILE), metadata)?;
+
+    // Write `base_config.json` before `events.json`. The loader picks the
+    // current vs legacy format by the presence of `base_config.json`, so for a
+    // legacy conversation's first upgrade this ordering ensures an interrupted
+    // write never leaves the unreadable "current marker, no base config" state.
+    // The worst interrupted state is a fresh `base_config.json` beside a
+    // still-legacy `events.json`, which the loader reads back without data
+    // loss.
+    write_json(&conv_dir.join(BASE_CONFIG_FILE), &base_config)?;
+
+    write_json(&conv_dir.join(EVENTS_FILE), &events_json)?;
+
+    Ok(())
+}
+
+/// Return `true` if `dir` contains at least one managed conversation file.
+pub(crate) fn holds_managed_files(dir: &Utf8Path) -> bool {
+    MANAGED_FILES.iter().any(|name| dir.join(name).exists())
+}
+
 pub(crate) fn load_conversation_id_from_entry(entry: &Utf8DirEntry) -> Option<ConversationId> {
     if !entry.file_type().ok()?.is_dir() {
         return None;
@@ -1204,15 +1231,15 @@ impl Storage {
             })
     }
 
-    /// Create an empty conversation directory that will fail validation.
+    /// Create a conversation directory that fails validation.
     ///
-    /// The directory contains no files, so it will fail the "missing
-    /// metadata.json" check during validation.
+    /// The directory holds a `metadata.json` that is not valid JSON.
     /// For test fixture setup only.
     #[doc(hidden)]
-    pub fn create_test_conversation_dir(&self, dirname: &str) {
+    pub fn create_corrupt_test_conversation_dir(&self, dirname: &str) -> io::Result<()> {
         let dir = self.root.join(CONVERSATIONS_DIR).join(dirname);
-        fs::create_dir_all(&dir).unwrap();
+        fs::create_dir_all(&dir)?;
+        fs::write(dir.join(METADATA_FILE), "not json")
     }
 }
 

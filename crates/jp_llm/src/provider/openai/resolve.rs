@@ -846,8 +846,7 @@ fn classify(
     let keys = api_key_env.names();
     let subscriptions: Vec<&str> = store
         .and_then(|document| document.profiles(CATEGORY_LLM, provider))
-        .map(|profiles| profiles.keys().map(String::as_str).collect())
-        .unwrap_or_default();
+        .map_or_default(|profiles| profiles.keys().map(String::as_str).collect());
 
     match (keys.contains(&name), subscriptions.contains(&name)) {
         (true, false) => Ok(AuthEntry::ApiKey(Some(name.to_owned()))),

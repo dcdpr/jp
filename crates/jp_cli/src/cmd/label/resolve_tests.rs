@@ -59,8 +59,7 @@ fn setup(
 fn values<'a>(resolved: &'a Resolution, key: &str) -> Vec<&'a str> {
     resolved
         .get(key)
-        .map(|values| values.iter().map(String::as_str).collect())
-        .unwrap_or_default()
+        .map_or_default(|values| values.iter().map(String::as_str).collect())
 }
 
 /// Every key that resolved, in rule-declaration order.
@@ -119,7 +118,7 @@ async fn an_empty_list_rule_keeps_its_key_with_no_values() {
     let resolved = resolver.automatic(Trigger::New).await.unwrap();
 
     assert_eq!(keys(&resolved), ["crate"]);
-    assert!(values(&resolved, "crate").is_empty());
+    assert_eq!(values(&resolved, "crate"), [] as [&str; 0]);
 }
 
 /// `apply_on` selects which rules a trigger applies.
@@ -201,7 +200,7 @@ async fn a_silent_command_produces_no_values() {
     let resolved = resolver.automatic(Trigger::New).await.unwrap();
 
     assert_eq!(keys(&resolved), ["quiet"]);
-    assert!(values(&resolved, "quiet").is_empty());
+    assert_eq!(values(&resolved, "quiet"), [] as [&str; 0]);
 }
 
 /// A rule that failed is dropped entirely: its key is absent, so whatever the

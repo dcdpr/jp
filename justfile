@@ -8,7 +8,7 @@ deny_version         := "0.20.2"
 expand_version       := "1.0.126"
 insta_version        := "1.48.0"
 jilu_version         := "0.13.2"
-llvm_cov_version     := "0.8.7"
+llvm_cov_version     := "0.9.2"
 nextest_version      := "0.9.143"
 rustqual_version     := "1.8.2"
 shear_version        := "1.13.4"
@@ -2128,11 +2128,28 @@ shear *FLAGS="--fix": (_install "cargo-shear@" + shear_version)
 typecheck-js:
     npx --yes --package=typescript@5 -- tsc --project crates/plugins/command/serve-web/tsconfig.json
 
+# Generate code coverage into `target/lcov.info`, the way `coverage-ci` does.
+#
+# Tests run under nextest, one process per test, as they do everywhere else.
+# Under plain `cargo test` a crate's tests share one process, a terminal on
+# stdin, and the environment, and several `jp_cli` tests fail that way.
+#
+# The target directory comes from `cargo metadata`, so the clean also works when
+# `CARGO_TARGET_DIR` points outside the checkout. See `coverage-ci` for why the
+# clean is needed.
 [group('check')]
 coverage: _coverage-setup
-    # FIXME: Branch coverage seems to have broken recently?
-    # cargo llvm-cov --doctests --branch --lcov --no-cfg-coverage --no-cfg-coverage-nightly --profile=coverage --output-path=target/lcov.info
-    cargo llvm-cov --doctests --lcov --no-cfg-coverage --no-cfg-coverage-nightly --profile=coverage --output-path=target/lcov.info
+    #!/usr/bin/env sh
+    set -eu
+
+    target="$(cargo metadata --format-version 1 --no-deps | jq -r .target_directory)/llvm-cov-target"
+    if [ -d "$target" ]; then
+        cargo clean --workspace --profile=coverage --target-dir="$target"
+    fi
+
+    cargo llvm-cov --branch --no-cfg-coverage --no-cfg-coverage-nightly --cargo-profile=coverage --no-report nextest
+    cargo llvm-cov --branch --no-cfg-coverage --no-cfg-coverage-nightly --profile=coverage --no-report --doc
+    cargo llvm-cov report --branch --doctests --lcov --output-path=target/lcov.info --profile=coverage
 
 _bacon CMD *FLAGS: (_install "bacon@" + bacon_version)
     @bacon {{CMD}} -- {{FLAGS}}
@@ -2529,12 +2546,14 @@ docs-ci: _install_ci_matchers
 #
 # It is `cargo clean`, not `cargo llvm-cov clean --workspace`: the latter cleans
 # only the `dev` profile's directory, and these builds use `coverage`.
+#
+# `--branch` adds branch coverage (`BRDA` records), which is nightly-only.
 [group('ci')]
 coverage-ci: _coverage-setup _install_ci_matchers
     cargo clean --locked --workspace --profile=coverage --target-dir=target/llvm-cov-target
-    cargo llvm-cov --locked --no-cfg-coverage --no-cfg-coverage-nightly --cargo-profile=coverage --no-report nextest
-    cargo llvm-cov --locked --no-cfg-coverage --no-cfg-coverage-nightly --profile=coverage --no-report --doc
-    cargo llvm-cov report --doctests --lcov --output-path lcov.info --profile=coverage
+    cargo llvm-cov --locked --branch --no-cfg-coverage --no-cfg-coverage-nightly --cargo-profile=coverage --no-report nextest
+    cargo llvm-cov --locked --branch --no-cfg-coverage --no-cfg-coverage-nightly --profile=coverage --no-report --doc
+    cargo llvm-cov report --branch --doctests --lcov --output-path lcov.info --profile=coverage
 
 _coverage-setup: (_rustup_component "llvm-tools") _install-llvm-cov (_install "cargo-nextest@" + nextest_version + " cargo-expand@" + expand_version)
 

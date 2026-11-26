@@ -698,7 +698,7 @@ mod node {
         let (_, value) = root.properties().into_iter().next().expect("property");
 
         assert!(value.is_unconstrained());
-        assert!(value.types().is_empty());
+        assert_eq!(value.types(), [] as [String; 0]);
         assert!(value.accepts_type(&json!("a")));
         assert!(value.accepts_type(&json!(1)));
         assert!(value.accepts_type(&json!(null)));

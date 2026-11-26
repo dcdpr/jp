@@ -84,8 +84,8 @@ fn defaults_for_optional_fields() {
     else {
         panic!("expected Command");
     };
-    assert!(requires.is_empty());
-    assert!(suggests.is_empty());
+    assert_eq!(requires.as_slice(), [] as [String; 0]);
+    assert_eq!(suggests.as_slice(), [] as [String; 0]);
 }
 
 #[test]
@@ -155,7 +155,7 @@ fn command_group_with_suggests() {
         panic!("expected Command");
     };
     assert_eq!(requires, &["serve"]);
-    assert!(suggests.is_empty());
+    assert_eq!(suggests.as_slice(), [] as [String; 0]);
     assert_eq!(web.kind.binaries().len(), 1);
 }
 

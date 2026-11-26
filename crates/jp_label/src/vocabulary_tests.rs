@@ -690,7 +690,7 @@ fn retiring_values_of_a_key_taking_any_value_is_an_error() {
 
     let retired = Vocabulary::parse(r#"{"client": {"retired": ["cli"]}}"#).unwrap();
     assert!(!retired.facet("client").unwrap().is_open());
-    assert!(retired.tokens().is_empty());
+    assert_eq!(retired.tokens(), [] as [String; 0]);
 }
 
 /// A board where each `rfd` value sits on one item, one item carries `focus`,
@@ -740,10 +740,9 @@ fn a_value_unique_key_clashes_on_a_shared_value_only() {
             value: Some("117".to_owned())
         }]
     );
-    assert!(
-        vocabulary
-            .clashes(&labels(&["rfd=116"]), &labels(&["rfd=118"]))
-            .is_empty()
+    assert_eq!(
+        vocabulary.clashes(&labels(&["rfd=116"]), &labels(&["rfd=118"])),
+        [] as [Clash; 0]
     );
 }
 
@@ -786,10 +785,9 @@ fn a_clash_matches_without_case() {
 
 #[test]
 fn keys_that_are_not_unique_never_clash() {
-    assert!(
-        unique()
-            .clashes(&labels(&["client=cli"]), &labels(&["client=cli"]))
-            .is_empty()
+    assert_eq!(
+        unique().clashes(&labels(&["client=cli"]), &labels(&["client=cli"])),
+        [] as [Clash; 0]
     );
 }
 

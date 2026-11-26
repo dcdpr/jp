@@ -19,6 +19,14 @@ fn persistence_is_on_unless_turned_off() {
     assert!(!parse(&["-P", "conversation", "ls"]).globals.persist);
 }
 
+#[test]
+fn the_default_globals_are_those_of_a_command_with_no_global_flags() {
+    assert_eq!(
+        format!("{:?}", Globals::default()),
+        format!("{:?}", parse(&["conversation", "ls"]).globals)
+    );
+}
+
 // Global options are accepted on either side of the subcommand.
 #[test]
 fn a_global_option_after_the_subcommand_is_read() {

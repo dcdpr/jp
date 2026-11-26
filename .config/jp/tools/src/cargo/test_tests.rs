@@ -413,11 +413,7 @@ fn each_package_is_passed_to_nextest() {
 
 /// The variables the last command `runner` ran was given.
 fn captured_env(runner: &MockProcessRunner) -> Vec<(String, String)> {
-    runner
-        .calls()
-        .pop()
-        .map(|call| call.env)
-        .unwrap_or_default()
+    runner.calls().pop().map_or_default(|call| call.env)
 }
 
 /// `cargo test` was the one compiling tool that never set `RUSTFLAGS`, so it

@@ -28,8 +28,12 @@ fn a_suite_is_matched_by_the_tests_inside_it() {
         "UISuite/ConversationListTests/labelsRows()".to_owned(),
     ];
 
-    assert!(unmatched(&["UISuite/ConversationListTests".to_owned()], &executed).is_empty());
-    assert!(unmatched(&["UISuite".to_owned()], &executed).is_empty());
+    assert_eq!(
+        unmatched(&["UISuite/ConversationListTests".to_owned()], &executed),
+        [] as [String; 0]
+    );
+    assert_eq!(unmatched(&["UISuite".to_owned()], &executed), []
+        as [String; 0]);
 }
 
 /// A prefix that stops mid-name is not a suite of that name.
@@ -51,7 +55,7 @@ fn a_partial_name_is_not_a_match() {
 fn nothing_is_unmatched_when_nothing_is_known() {
     let requested = ["UISuite/ConversationListTests/clickSelects()".to_owned()];
 
-    assert!(unmatched(&requested, &[]).is_empty());
+    assert_eq!(unmatched(&requested, &[]), [] as [String; 0]);
 }
 
 /// A result bundle's test tree, in the shape `xcresulttool get test-results
@@ -129,7 +133,7 @@ fn ignores_every_node_that_is_not_a_test_case() {
         }]
     });
 
-    assert!(executed_tests(&document).is_empty());
+    assert_eq!(executed_tests(&document), [] as [String; 0]);
 }
 
 /// `nodeIdentifier` is optional in the schema.
@@ -145,10 +149,11 @@ fn skips_a_test_case_with_no_identifier() {
         }]
     });
 
-    assert!(executed_tests(&document).is_empty());
+    assert_eq!(executed_tests(&document), [] as [String; 0]);
 }
 
 #[test]
 fn reads_nothing_from_a_document_with_no_tests() {
-    assert!(executed_tests(&json!({ "testNodes": [] })).is_empty());
+    assert_eq!(executed_tests(&json!({ "testNodes": [] })), [] as [String;
+        0]);
 }

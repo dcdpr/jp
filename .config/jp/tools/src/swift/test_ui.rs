@@ -153,7 +153,7 @@ fn swift_test_ui_impl<R: ProcessRunner>(
     // `xcodebuild` unions the `-only-testing` selectors and ignores any that
     // match nothing, so a run naming one real test and one typo passes with the
     // typo unmentioned. The bundle is the only record of what actually ran.
-    let executed = document.as_ref().map(executed_tests).unwrap_or_default();
+    let executed = document.as_ref().map_or_default(executed_tests);
     let missed = unmatched(tests, &executed);
     if !missed.is_empty() {
         return error(format!(

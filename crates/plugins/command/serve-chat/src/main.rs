@@ -8,6 +8,10 @@ use std::{
 use jp_plugin::stdio;
 use jp_serve_chat::{HELP_TEXT, run};
 
+#[expect(
+    clippy::bufreader_stdin,
+    reason = "`run` moves stdin to another thread, and a `StdinLock` is not `Send`"
+)]
 fn main() {
     let code = stdio::exit_code(
         "serve chat",

@@ -246,7 +246,7 @@ fn a_request_without_an_id_is_not_sent() {
         client.send_expecting::<1>(&unmatched),
         Err(Error::NoId)
     ));
-    assert!(written.lines().is_empty());
+    assert_eq!(written.lines(), [] as [String; 0]);
     assert!(nothing_waits(&client));
 }
 

@@ -8,7 +8,7 @@
 //! See: `docs/rfd/072-command-plugin-system.md`
 
 use std::{
-    io::{self, BufRead, BufReader, IsTerminal as _, Write},
+    io::{self, BufRead, IsTerminal as _, Write},
     process,
 };
 
@@ -53,7 +53,7 @@ fn main() {
         "path",
         io::stdin().is_terminal(),
         || HELP_TEXT.to_owned(),
-        || run(BufReader::new(io::stdin()), io::stdout()),
+        || run(io::stdin().lock(), io::stdout()),
         &mut io::stderr(),
     );
 

@@ -98,8 +98,7 @@ pub(crate) fn hash_object(root: &Utf8Path, path: &str) -> Option<String> {
 /// The commits on `branch` that changed `path`, newest first.
 pub(crate) fn changes(root: &Utf8Path, branch: &str, path: &str) -> Vec<String> {
     text(root, &["log", "--format=%H", branch, "--", path])
-        .map(|log| log.lines().map(ToOwned::to_owned).collect())
-        .unwrap_or_default()
+        .map_or_default(|log| log.lines().map(ToOwned::to_owned).collect())
 }
 
 /// Whether the work tree holds `path`, a directory, as `rev` does: no change to

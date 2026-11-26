@@ -3,10 +3,12 @@ use std::fmt;
 use chrono::{DateTime, Utc};
 use crossterm::style::Stylize as _;
 use jp_conversation::ConversationId;
+use jp_storage::validate::{StorageLocation, ValidationError};
 use jp_term::table::{DetailItem, DetailRow, Details, details};
 use serde_json::json;
 
 use super::datetime::DateTimeFmt;
+use crate::load_failure::failure_json;
 
 pub struct DetailsFmt {
     /// The ID of the conversation.
@@ -63,6 +65,12 @@ pub struct DetailsFmt {
     /// Compactions applied to the conversation.
     pub compactions: Vec<DetailItem>,
 
+    /// Validation error when the conversation cannot be loaded.
+    pub status: Option<ValidationError>,
+
+    /// Storage locations holding the conversation.
+    pub locations: Vec<StorageLocation>,
+
     /// Pretty-print the output.
     pub pretty: bool,
 }
@@ -87,6 +95,8 @@ impl DetailsFmt {
             labels: vec![],
             attachments: vec![],
             compactions: vec![],
+            status: None,
+            locations: vec![],
             pretty: true,
         }
     }
@@ -136,6 +146,18 @@ impl DetailsFmt {
     #[must_use]
     pub fn with_compactions(mut self, compactions: Vec<DetailItem>) -> Self {
         self.compactions = compactions;
+        self
+    }
+
+    #[must_use]
+    pub fn with_status(mut self, status: Option<ValidationError>) -> Self {
+        self.status = status;
+        self
+    }
+
+    #[must_use]
+    pub fn with_locations(mut self, locations: Vec<StorageLocation>) -> Self {
+        self.locations = locations;
         self
     }
 
@@ -235,6 +257,11 @@ impl DetailsFmt {
                 .iter()
                 .map(|item| item.json.clone())
                 .collect::<Vec<_>>(),
+            "status": match &self.status {
+                Some(error) => failure_json(error),
+                None => serde_json::Value::Null,
+            },
+            "locations": self.locations,
         })
     }
 
@@ -254,6 +281,10 @@ impl DetailsFmt {
 
         if let Some(title) = self.title.clone() {
             rows.push(self.scalar("Title", title));
+        }
+
+        if let Some(error) = &self.status {
+            rows.push(self.scalar("Status", format!("unable to load: {error}")));
         }
 
         if let Some(name) = self.assistant_name.clone() {
@@ -342,6 +373,15 @@ impl DetailsFmt {
                 self.styled_label("Compactions"),
                 self.compactions.clone(),
             ));
+        }
+
+        if !self.locations.is_empty() {
+            let items = self
+                .locations
+                .iter()
+                .map(|location| DetailItem::new(location.as_str(), location.as_str().into()))
+                .collect();
+            rows.push(DetailRow::list(self.styled_label("Locations"), items));
         }
 
         rows

@@ -3,17 +3,15 @@ use std::fs;
 use std::os::unix::fs::symlink;
 
 use camino_tempfile::Utf8TempDir;
+use jp_test::env_var::EnvVarGuard;
+use serial_test::serial;
 
 use super::*;
 
-/// Run `git` in `dir` isolated from global and system git config, so host
-/// settings such as commit signing and hooks do not affect the test.
 fn git(dir: &Utf8Path, args: &[&str]) {
     let output = Command::new("git")
         .current_dir(dir)
         .args(args)
-        .env("GIT_CONFIG_GLOBAL", "")
-        .env("GIT_CONFIG_SYSTEM", "")
         .output()
         .unwrap_or_else(|error| panic!("git {args:?}: {error}"));
 
@@ -40,7 +38,10 @@ fn repository() -> Utf8TempDir {
 }
 
 #[test]
+#[serial(env_vars)]
 fn the_prefix_is_the_dir_below_the_top_of_the_work_tree() {
+    let _git_global = EnvVarGuard::set("GIT_CONFIG_GLOBAL", "");
+    let _git_system = EnvVarGuard::set("GIT_CONFIG_SYSTEM", "");
     let top = repository();
 
     assert_eq!(prefix(top.path()), Ok(Some(String::new())));
@@ -48,7 +49,10 @@ fn the_prefix_is_the_dir_below_the_top_of_the_work_tree() {
 }
 
 #[test]
+#[serial(env_vars)]
 fn a_missing_directory_has_no_answer() {
+    let _git_global = EnvVarGuard::set("GIT_CONFIG_GLOBAL", "");
+    let _git_system = EnvVarGuard::set("GIT_CONFIG_SYSTEM", "");
     let dir = Utf8TempDir::new().unwrap();
     let missing = dir.path().join("missing");
 
@@ -62,7 +66,10 @@ fn a_missing_directory_has_no_answer() {
 }
 
 #[test]
+#[serial(env_vars)]
 fn a_path_git_rejects_is_an_error() {
+    let _git_global = EnvVarGuard::set("GIT_CONFIG_GLOBAL", "");
+    let _git_system = EnvVarGuard::set("GIT_CONFIG_SYSTEM", "");
     let top = repository();
 
     let error = unrecorded(top.path(), &[Utf8PathBuf::from("../outside.toml")]).unwrap_err();
@@ -71,14 +78,20 @@ fn a_path_git_rejects_is_an_error() {
 }
 
 #[test]
+#[serial(env_vars)]
 fn a_directory_outside_a_work_tree_has_no_prefix() {
+    let _git_global = EnvVarGuard::set("GIT_CONFIG_GLOBAL", "");
+    let _git_system = EnvVarGuard::set("GIT_CONFIG_SYSTEM", "");
     let dir = Utf8TempDir::new().unwrap();
 
     assert_eq!(prefix(dir.path()), Ok(None));
 }
 
 #[test]
+#[serial(env_vars)]
 fn modified_and_untracked_files_are_unrecorded() {
+    let _git_global = EnvVarGuard::set("GIT_CONFIG_GLOBAL", "");
+    let _git_system = EnvVarGuard::set("GIT_CONFIG_SYSTEM", "");
     let top = repository();
     let dir = top.path().join("sub");
     fs::write(dir.join("docs/rfd/index.md"), "Edited").unwrap();
@@ -101,7 +114,10 @@ fn modified_and_untracked_files_are_unrecorded() {
 }
 
 #[test]
+#[serial(env_vars)]
 fn paths_are_relative_to_the_directory() {
+    let _git_global = EnvVarGuard::set("GIT_CONFIG_GLOBAL", "");
+    let _git_system = EnvVarGuard::set("GIT_CONFIG_SYSTEM", "");
     let top = repository();
     let dir = top.path().join("sub/docs/rfd");
     fs::write(dir.join("index.md"), "Edited").unwrap();
@@ -119,7 +135,10 @@ fn paths_are_relative_to_the_directory() {
 }
 
 #[test]
+#[serial(env_vars)]
 fn a_staged_change_is_still_unrecorded() {
+    let _git_global = EnvVarGuard::set("GIT_CONFIG_GLOBAL", "");
+    let _git_system = EnvVarGuard::set("GIT_CONFIG_SYSTEM", "");
     let top = repository();
     fs::write(top.path().join("sub/docs/rfd/index.md"), "Staged").unwrap();
     git(top.path(), &["add", "sub/docs/rfd/index.md"]);
@@ -133,7 +152,10 @@ fn a_staged_change_is_still_unrecorded() {
 }
 
 #[test]
+#[serial(env_vars)]
 fn ignored_files_are_untracked() {
+    let _git_global = EnvVarGuard::set("GIT_CONFIG_GLOBAL", "");
+    let _git_system = EnvVarGuard::set("GIT_CONFIG_SYSTEM", "");
     let top = repository();
     let dir = top.path().join("sub");
     fs::write(
@@ -167,7 +189,10 @@ fn ignored_files_are_untracked() {
 }
 
 #[test]
+#[serial(env_vars)]
 fn every_file_outside_a_work_tree_is_unrecorded() {
+    let _git_global = EnvVarGuard::set("GIT_CONFIG_GLOBAL", "");
+    let _git_system = EnvVarGuard::set("GIT_CONFIG_SYSTEM", "");
     let dir = Utf8TempDir::new().unwrap();
     fs::write(dir.path().join("b.toml"), "B").unwrap();
     fs::write(dir.path().join("a.toml"), "A").unwrap();
@@ -186,7 +211,10 @@ fn every_file_outside_a_work_tree_is_unrecorded() {
 
 #[cfg(unix)]
 #[test]
+#[serial(env_vars)]
 fn a_committed_symlink_is_unrecorded() {
+    let _git_global = EnvVarGuard::set("GIT_CONFIG_GLOBAL", "");
+    let _git_system = EnvVarGuard::set("GIT_CONFIG_SYSTEM", "");
     let top = repository();
     let shared = Utf8TempDir::new().unwrap();
     fs::write(shared.path().join("create.toml"), "# shared\n").unwrap();
@@ -208,7 +236,10 @@ fn a_committed_symlink_is_unrecorded() {
 
 #[cfg(unix)]
 #[test]
+#[serial(env_vars)]
 fn a_file_below_a_symlinked_directory_is_unrecorded() {
+    let _git_global = EnvVarGuard::set("GIT_CONFIG_GLOBAL", "");
+    let _git_system = EnvVarGuard::set("GIT_CONFIG_SYSTEM", "");
     let top = repository();
     let shared = Utf8TempDir::new().unwrap();
     fs::write(shared.path().join("config.mjs"), "Shared").unwrap();
@@ -242,7 +273,10 @@ fn a_symlink_outside_a_work_tree_is_named_as_one() {
 }
 
 #[test]
+#[serial(env_vars)]
 fn an_edit_hidden_from_status_is_unrecorded() {
+    let _git_global = EnvVarGuard::set("GIT_CONFIG_GLOBAL", "");
+    let _git_system = EnvVarGuard::set("GIT_CONFIG_SYSTEM", "");
     for flag in ["--assume-unchanged", "--skip-worktree"] {
         let top = repository();
         let dir = top.path().join("sub");
@@ -400,7 +434,10 @@ fn write_writes_missing_files_and_leaves_matching_ones() {
 }
 
 #[test]
+#[serial(env_vars)]
 fn write_refuses_before_writing_anything_git_cannot_restore() {
+    let _git_global = EnvVarGuard::set("GIT_CONFIG_GLOBAL", "");
+    let _git_system = EnvVarGuard::set("GIT_CONFIG_SYSTEM", "");
     let dir = Utf8TempDir::new().unwrap();
     fs::write(dir.path().join("mine.toml"), "mine\n").unwrap();
 
@@ -451,7 +488,10 @@ fn write_with_force_overwrites_what_git_cannot_restore() {
 }
 
 #[test]
+#[serial(env_vars)]
 fn refusing_nothing_unrecorded_is_no_refusal() {
+    let _git_global = EnvVarGuard::set("GIT_CONFIG_GLOBAL", "");
+    let _git_system = EnvVarGuard::set("GIT_CONFIG_SYSTEM", "");
     let top = repository();
 
     assert_eq!(

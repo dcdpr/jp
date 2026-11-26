@@ -17,8 +17,8 @@
 
 use std::{error::Error as StdError, fmt};
 
-use async_trait::async_trait;
 use camino::Utf8Path;
+use futures::future::BoxFuture;
 use jp_config::model::id::ProviderId;
 
 use crate::provider::{anthropic, openai};
@@ -72,10 +72,9 @@ pub struct AccountIdentity {
 /// already-resolved credential.
 ///
 /// [`Provider`]: crate::Provider
-#[async_trait]
 pub trait ProviderAuth: Send + Sync {
     /// Runtime-owned authentication, when supported by this provider.
-    fn external_auth(&self) -> Option<&dyn ExternalAuth> {
+    fn external_auth(&self) -> Option<&dyn DynExternalAuth> {
         None
     }
 
@@ -96,10 +95,43 @@ pub trait ProviderAuth: Send + Sync {
     /// token.
     /// Callers treat a failure as "identity unknown", not as a fatal condition:
     /// a credential without a recovered identity is stored unverified.
-    async fn recover_identity(
+    fn recover_identity(
         &self,
         token: &str,
-    ) -> Result<AccountIdentity, Box<dyn std::error::Error + Send + Sync>>;
+    ) -> impl Future<Output = Result<AccountIdentity, BoxedError>> + Send;
+}
+
+/// A [`ProviderAuth`] behind a pointer: `Box<dyn DynProviderAuth>`.
+///
+/// Every `ProviderAuth` implements this trait, and each method does what the
+/// `ProviderAuth` method of the same name does, returning a boxed future.
+/// Implement [`ProviderAuth`], not this trait.
+pub trait DynProviderAuth: Send + Sync {
+    fn external_auth(&self) -> Option<&dyn DynExternalAuth>;
+
+    fn setup_token_hint(&self) -> &'static str;
+
+    fn recover_identity<'a>(
+        &'a self,
+        token: &'a str,
+    ) -> BoxFuture<'a, Result<AccountIdentity, BoxedError>>;
+}
+
+impl<T: ProviderAuth> DynProviderAuth for T {
+    fn external_auth(&self) -> Option<&dyn DynExternalAuth> {
+        ProviderAuth::external_auth(self)
+    }
+
+    fn setup_token_hint(&self) -> &'static str {
+        ProviderAuth::setup_token_hint(self)
+    }
+
+    fn recover_identity<'a>(
+        &'a self,
+        token: &'a str,
+    ) -> BoxFuture<'a, Result<AccountIdentity, BoxedError>> {
+        Box::pin(ProviderAuth::recover_identity(self, token))
+    }
 }
 
 /// Login operations delegated to a provider's external runtime.
@@ -107,35 +139,81 @@ pub trait ProviderAuth: Send + Sync {
 /// Credentials never cross this interface.
 /// The directory selects the login for every operation, including status checks
 /// and logout.
-#[async_trait]
 pub trait ExternalAuth: Send + Sync {
     /// Stable directory component used to namespace this runtime's logins.
     fn directory_name(&self) -> &'static str;
 
     /// Sign in interactively and return the verified subscription identity.
-    async fn login(
+    fn login(
         &self,
         directory: &Utf8Path,
-    ) -> Result<AccountIdentity, Box<dyn StdError + Send + Sync>>;
+    ) -> impl Future<Output = Result<AccountIdentity, BoxedError>> + Send;
 
     /// Inspect effective subscription authentication without reading tokens.
     ///
     /// `None` means the runtime is not using a subscription login.
-    async fn status(
+    fn status(
         &self,
         directory: &Utf8Path,
-    ) -> Result<Option<AccountIdentity>, Box<dyn StdError + Send + Sync>>;
+    ) -> impl Future<Output = Result<Option<AccountIdentity>, BoxedError>> + Send;
 
     /// Clear the runtime's login without deleting its configuration or history.
-    async fn logout(&self, directory: &Utf8Path) -> Result<(), Box<dyn StdError + Send + Sync>>;
+    fn logout(&self, directory: &Utf8Path) -> impl Future<Output = Result<(), BoxedError>> + Send;
 }
+
+/// An [`ExternalAuth`] behind a pointer: `&dyn DynExternalAuth`.
+///
+/// Every `ExternalAuth` implements this trait, and each method does what the
+/// `ExternalAuth` method of the same name does, returning a boxed future.
+/// Implement [`ExternalAuth`], not this trait.
+pub trait DynExternalAuth: Send + Sync {
+    fn directory_name(&self) -> &'static str;
+
+    fn login<'a>(
+        &'a self,
+        directory: &'a Utf8Path,
+    ) -> BoxFuture<'a, Result<AccountIdentity, BoxedError>>;
+
+    fn status<'a>(
+        &'a self,
+        directory: &'a Utf8Path,
+    ) -> BoxFuture<'a, Result<Option<AccountIdentity>, BoxedError>>;
+
+    fn logout<'a>(&'a self, directory: &'a Utf8Path) -> BoxFuture<'a, Result<(), BoxedError>>;
+}
+
+impl<T: ExternalAuth> DynExternalAuth for T {
+    fn directory_name(&self) -> &'static str {
+        ExternalAuth::directory_name(self)
+    }
+
+    fn login<'a>(
+        &'a self,
+        directory: &'a Utf8Path,
+    ) -> BoxFuture<'a, Result<AccountIdentity, BoxedError>> {
+        Box::pin(ExternalAuth::login(self, directory))
+    }
+
+    fn status<'a>(
+        &'a self,
+        directory: &'a Utf8Path,
+    ) -> BoxFuture<'a, Result<Option<AccountIdentity>, BoxedError>> {
+        Box::pin(ExternalAuth::status(self, directory))
+    }
+
+    fn logout<'a>(&'a self, directory: &'a Utf8Path) -> BoxFuture<'a, Result<(), BoxedError>> {
+        Box::pin(ExternalAuth::logout(self, directory))
+    }
+}
+
+type BoxedError = Box<dyn StdError + Send + Sync>;
 
 /// Get the credential mechanics for a provider.
 ///
 /// Returns `None` for providers without stored-credential support; their
 /// constructors read their own environment variables instead.
 #[must_use]
-pub fn provider_auth(id: ProviderId) -> Option<Box<dyn ProviderAuth>> {
+pub fn provider_auth(id: ProviderId) -> Option<Box<dyn DynProviderAuth>> {
     match id {
         ProviderId::Anthropic => Some(Box::new(anthropic::auth::AnthropicAuth)),
         ProviderId::Openai => Some(Box::new(openai::auth::OpenaiAuth)),

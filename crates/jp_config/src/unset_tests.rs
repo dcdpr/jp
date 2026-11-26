@@ -1,6 +1,5 @@
 //! Tests for [`PartialAppConfig::unset`].
 
-use schematic::PartialConfig as _;
 use test_log::test;
 
 use super::*;

@@ -131,7 +131,7 @@ fn parses_canonical_pr_diff_uri() {
     assert!(matches!(parsed.kind, ResourceKind::PullDiff {
         number: 544
     }));
-    assert!(parsed.excludes.is_empty());
+    assert_eq!(parsed.excludes, [] as [String; 0]);
     assert!(!parsed.no_defaults);
 }
 
@@ -905,7 +905,7 @@ fn synthesizer_returns_empty_for_no_entries() {
     assert_eq!(synth.included, 0);
     assert_eq!(synth.excluded, 0);
     assert_eq!(synth.truncated, 0);
-    assert!(synth.text.is_empty());
+    assert_eq!(synth.text, "");
 }
 
 fn canonical(uri: &str) -> Result<String, String> {

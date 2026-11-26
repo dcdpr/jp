@@ -1,9 +1,13 @@
+#![expect(
+    clippy::unused_async_trait_impl,
+    reason = "test doubles implement async traits synchronously"
+)]
+
 use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
 };
 
-use async_trait::async_trait;
 use camino_tempfile::tempdir;
 use datetime_literal::datetime;
 use futures::{StreamExt as _, stream};
@@ -20,7 +24,7 @@ use jp_conversation::{
 };
 use jp_inquire::prompt::MockPromptBackend;
 use jp_llm::{
-    Error as LlmError, EventStream, Provider, StreamError, StreamErrorKind,
+    DynProvider, Error as LlmError, EventStream, StreamError, StreamErrorKind,
     event::{Event, EventPart, FinishReason, ToolCallPart},
     model::ModelDetails,
     query::{ChatQuery, QueryContext, QueryStream, ToolExecution},
@@ -47,7 +51,6 @@ use crate::{
 
 struct InquiringTool(Arc<AtomicUsize>);
 
-#[async_trait]
 impl BuiltinTool for InquiringTool {
     async fn execute(&self, _: &Value, answers: &IndexMap<String, Value>) -> Outcome {
         self.0.fetch_add(1, Ordering::SeqCst);
@@ -65,8 +68,7 @@ struct AgentProvider {
     config: AppConfig,
 }
 
-#[async_trait]
-impl Provider for AgentProvider {
+impl jp_llm::Provider for AgentProvider {
     async fn model_details(&self, _: &Name) -> Result<ModelDetails, LlmError> {
         Ok(ModelDetails::empty("anthropic/test".parse().unwrap()))
     }
@@ -148,10 +150,9 @@ struct SwitchingAgentProvider {
     error: fn() -> StreamError,
 }
 
-#[async_trait]
-impl Provider for SwitchingAgentProvider {
+impl jp_llm::Provider for SwitchingAgentProvider {
     async fn model_details(&self, name: &Name) -> Result<ModelDetails, LlmError> {
-        self.first.model_details(name).await
+        jp_llm::Provider::model_details(&self.first, name).await
     }
     async fn models(&self) -> Result<Vec<ModelDetails>, LlmError> {
         Ok(vec![])
@@ -171,7 +172,7 @@ impl Provider for SwitchingAgentProvider {
     ) -> Result<QueryStream, LlmError> {
         let index = self.starts.fetch_add(1, Ordering::SeqCst);
         if index == 0 {
-            let started = self.first.start_query(model, query, context).await?;
+            let started = jp_llm::Provider::start_query(&self.first, model, query, context).await?;
             let mut source = started.events;
             let error = self.error;
             let events = async_stream::stream! {
@@ -321,8 +322,7 @@ struct UnrecordedCallProvider {
     starts: AtomicUsize,
 }
 
-#[async_trait]
-impl Provider for UnrecordedCallProvider {
+impl jp_llm::Provider for UnrecordedCallProvider {
     async fn model_details(&self, _: &Name) -> Result<ModelDetails, LlmError> {
         Ok(ModelDetails::empty("anthropic/test".parse().unwrap()))
     }

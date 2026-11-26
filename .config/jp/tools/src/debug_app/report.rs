@@ -1269,8 +1269,7 @@ fn allocation_tables(bundle: &TraceBundle) -> (Vec<String>, Vec<String>) {
         .ok()
         .as_ref()
         .and_then(Toc::first_run)
-        .map(|run| run.tables.iter().map(|t| t.schema.clone()).collect())
-        .unwrap_or_default();
+        .map_or_default(|run| run.tables.iter().map(|t| t.schema.clone()).collect());
     tables.sort_unstable();
     tables.dedup();
 

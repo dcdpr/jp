@@ -1,5 +1,3 @@
-use jp_attachment::Handler as _;
-
 use super::*;
 
 fn uri() -> Url {

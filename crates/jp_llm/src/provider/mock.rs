@@ -26,10 +26,10 @@
 
 use std::{
     collections::VecDeque,
+    future,
     sync::{Arc, Mutex},
 };
 
-use async_trait::async_trait;
 use futures::stream;
 use jp_config::model::id::{ModelIdConfig, Name, ProviderId};
 use serde_json::{Map, Value};
@@ -224,33 +224,33 @@ impl MockProvider {
     }
 }
 
-#[async_trait]
 impl Provider for MockProvider {
-    async fn model_details(&self, name: &Name) -> Result<ModelDetails> {
+    fn model_details(&self, name: &Name) -> impl Future<Output = Result<ModelDetails>> + Send {
         let mut model = self.model.clone();
         model.id = ModelIdConfig {
             provider: ProviderId::Test,
             name: name.clone(),
         };
-        Ok(model)
+        future::ready(Ok(model))
     }
 
-    async fn models(&self) -> Result<Vec<ModelDetails>> {
-        Ok(vec![self.model.clone()])
+    fn models(&self) -> impl Future<Output = Result<Vec<ModelDetails>>> + Send {
+        future::ready(Ok(vec![self.model.clone()]))
     }
 
-    async fn chat_completion_stream(
+    fn chat_completion_stream(
         &self,
         _model: &ModelDetails,
         query: ChatQuery,
-    ) -> Result<EventStream> {
+    ) -> impl Future<Output = Result<EventStream>> + Send {
         if let Some(requests) = &self.requests {
             requests.lock().expect("mock requests lock").push(query);
         }
 
         if let Some((kind, message)) = &self.stream_error {
             let error = StreamError::new(*kind, message.clone());
-            return Ok(Box::pin(stream::iter([Err(error)])));
+            let events: EventStream = Box::pin(stream::iter([Err(error)]));
+            return future::ready(Ok(events));
         }
 
         let events = match &self.batches {
@@ -262,7 +262,8 @@ impl Provider for MockProvider {
                 .expect("MockProvider received more requests than it has scripted batches"),
         };
 
-        Ok(Box::pin(stream::iter(events.into_iter().map(Ok))))
+        let events: EventStream = Box::pin(stream::iter(events.into_iter().map(Ok)));
+        future::ready(Ok(events))
     }
 }
 

@@ -7,7 +7,9 @@ use jp_plugin::message::{
     EditFilesRequest, EditedResponse, ErrorResponse, ExitMessage, OutputFormat, PrintMessage,
     ToolAction, WorkspaceInfo,
 };
+use jp_test::env_var::EnvVarGuard;
 use serde_json::{Map, json};
+use serial_test::serial;
 use ticket::epoch::EPOCH_FILE;
 
 use super::*;
@@ -139,7 +141,7 @@ fn add_labelled(dir: &Utf8TempDir, title: &str, labels: &[&str]) -> TicketId {
 /// Run git in `dir`, failing the test with its stderr rather than a bare status
 /// code.
 fn git(dir: &Utf8Path, args: &[&str]) -> String {
-    let output = isolated_git(dir)
+    let output = git_command(dir)
         .args(args)
         .output()
         .unwrap_or_else(|error| panic!("git {args:?}: {error}"));
@@ -153,15 +155,9 @@ fn git(dir: &Utf8Path, args: &[&str]) -> String {
     String::from_utf8(output.stdout).unwrap()
 }
 
-/// Build a `git` command in `dir` isolated from global and system git config,
-/// so host settings such as user identity, default branch, and commit signing
-/// do not affect the test.
-fn isolated_git(dir: &Utf8Path) -> std::process::Command {
+fn git_command(dir: &Utf8Path) -> std::process::Command {
     let mut command = std::process::Command::new("git");
-    command
-        .current_dir(dir)
-        .env("GIT_CONFIG_GLOBAL", "")
-        .env("GIT_CONFIG_SYSTEM", "");
+    command.current_dir(dir);
 
     command
 }
@@ -190,7 +186,7 @@ fn git_repo() -> Utf8TempDir {
 fn commit(root: &Utf8Path, message: &str, at: Option<&str>) {
     git(root, &["add", "-A"]);
 
-    let mut command = isolated_git(root);
+    let mut command = git_command(root);
     command.args(["commit", "-m", message]);
     if let Some(at) = at {
         command
@@ -313,7 +309,7 @@ fn add_takes_a_title_and_defaults_the_author() {
             assert_eq!(title.as_deref(), Some("Tool call header misaligned"));
             assert_eq!(author, None);
             assert_eq!(body, None);
-            assert!(labels.is_empty());
+            assert_eq!(labels, [] as [String; 0]);
             assert_eq!(parent, None);
         }
         other => panic!("expected add, got {other:?}"),
@@ -432,7 +428,10 @@ fn subcommands_are_not_mistaken_for_ids() {
 }
 
 #[test]
+#[serial(env_vars)]
 fn the_author_falls_back_through_jp_then_git_then_the_environment() {
+    let _git_global = EnvVarGuard::set("GIT_CONFIG_GLOBAL", "");
+    let _git_system = EnvVarGuard::set("GIT_CONFIG_SYSTEM", "");
     let jp = serde_json::json!({
       "user": {
         "name": "John Doe"
@@ -454,9 +453,10 @@ fn the_author_falls_back_through_jp_then_git_then_the_environment() {
     );
 
     // The configured name picks up git's email, so a ticket's author line reads
-    // like an RFD's. The address is whatever the machine has configured and may
-    // be missing entirely, so only the shape is pinned: the name, and nothing
-    // after it but a bracketed address.
+    // like an RFD's. With the user's and the system's git config hidden, the
+    // address comes from the repository the test runs in and may be missing
+    // entirely, so only the shape is pinned: the name, and nothing after it but
+    // a bracketed address.
     let resolved = resolve_author(None, &jp).unwrap();
     assert!(
         resolved == "John Doe" || (resolved.starts_with("John Doe <") && resolved.ends_with('>')),
@@ -566,7 +566,7 @@ fn list_filters_are_optional() {
         } => {
             assert_eq!(query, None);
             assert_eq!(status, Some(Status::InProgress));
-            assert!(labels.is_empty());
+            assert_eq!(labels, [] as [String; 0]);
             assert_eq!(under, None);
             assert_eq!(order, None);
         }
@@ -1755,7 +1755,7 @@ fn commands_run_against_the_resolved_directory() {
         labels: vec![],
     })
     .unwrap();
-    assert!(created.warnings.is_empty());
+    assert_eq!(created.warnings, [] as [String; 0]);
 
     // Ids are generated, so the rest of the lifecycle follows the one that was
     // just handed out rather than a fixed number.
@@ -1812,7 +1812,10 @@ fn commands_run_against_the_resolved_directory() {
 /// and references that were already on `base` do not — they belong to the
 /// ticket that kept it.
 #[test]
+#[serial(env_vars)]
 fn refresh_rewrites_the_branch_and_leaves_the_base_alone() {
+    let _git_global = EnvVarGuard::set("GIT_CONFIG_GLOBAL", "");
+    let _git_system = EnvVarGuard::set("GIT_CONFIG_SYSTEM", "");
     let repo = git_repo();
     let root = repo.path();
     let dir = root.join("docs/ticket");
@@ -1890,7 +1893,10 @@ fn refresh_rewrites_the_branch_and_leaves_the_base_alone() {
 /// inside the file.
 /// That is what lets `reassign` be a plain rename.
 #[test]
+#[serial(env_vars)]
 fn refresh_leaves_a_reply_alone() {
+    let _git_global = EnvVarGuard::set("GIT_CONFIG_GLOBAL", "");
+    let _git_system = EnvVarGuard::set("GIT_CONFIG_SYSTEM", "");
     let repo = git_repo();
     let root = repo.path();
     let dir = root.join("docs/ticket");
@@ -1923,7 +1929,10 @@ fn refresh_leaves_a_reply_alone() {
 /// any other file's is — it may mean the ticket that kept the id — so it is
 /// reported rather than redirected.
 #[test]
+#[serial(env_vars)]
 fn refresh_reports_prose_naming_the_old_id_in_the_renamed_ticket() {
+    let _git_global = EnvVarGuard::set("GIT_CONFIG_GLOBAL", "");
+    let _git_system = EnvVarGuard::set("GIT_CONFIG_SYSTEM", "");
     let repo = git_repo();
     let root = repo.path();
     let dir = root.join("docs/ticket");
@@ -1958,7 +1967,10 @@ fn refresh_reports_prose_naming_the_old_id_in_the_renamed_ticket() {
 /// A ticket is named by its workspace-relative path, and git runs in the ticket
 /// directory, so the path has to be resolved before either sees it.
 #[test]
+#[serial(env_vars)]
 fn refresh_accepts_a_repository_relative_path() {
+    let _git_global = EnvVarGuard::set("GIT_CONFIG_GLOBAL", "");
+    let _git_system = EnvVarGuard::set("GIT_CONFIG_SYSTEM", "");
     let repo = git_repo();
     let root = repo.path();
     let dir = root.join("docs/ticket");
@@ -1988,7 +2000,10 @@ fn refresh_accepts_a_repository_relative_path() {
 /// the occurrence may be the winning ticket's.
 /// Report it, don't redirect it.
 #[test]
+#[serial(env_vars)]
 fn refresh_reports_a_file_that_named_the_id_on_base() {
+    let _git_global = EnvVarGuard::set("GIT_CONFIG_GLOBAL", "");
+    let _git_system = EnvVarGuard::set("GIT_CONFIG_SYSTEM", "");
     let repo = git_repo();
     let root = repo.path();
     let dir = root.join("docs/ticket");
@@ -2032,7 +2047,10 @@ fn refresh_reports_a_file_that_named_the_id_on_base() {
 /// The new id must sit where the ticket was filed, not where the clock is now,
 /// or a refreshed ticket jumps ahead of everything it was created alongside.
 #[test]
+#[serial(env_vars)]
 fn refresh_keeps_the_ticket_in_the_bucket_it_was_created_in() {
+    let _git_global = EnvVarGuard::set("GIT_CONFIG_GLOBAL", "");
+    let _git_system = EnvVarGuard::set("GIT_CONFIG_SYSTEM", "");
     let repo = git_repo();
     let root = repo.path();
     let dir = root.join("docs/ticket");
@@ -2061,7 +2079,10 @@ fn refresh_keeps_the_ticket_in_the_bucket_it_was_created_in() {
 /// history from another repository is, sorts first rather than failing the
 /// repair.
 #[test]
+#[serial(env_vars)]
 fn refresh_puts_a_ticket_older_than_the_epoch_in_the_first_bucket() {
+    let _git_global = EnvVarGuard::set("GIT_CONFIG_GLOBAL", "");
+    let _git_system = EnvVarGuard::set("GIT_CONFIG_SYSTEM", "");
     let repo = git_repo();
     let root = repo.path();
     let dir = root.join("docs/ticket");
@@ -3242,7 +3263,7 @@ fn labelling_two_tickets_with_one_unique_label_is_refused() {
              each `rfd` value."
         )
     );
-    assert!(labels_of(&dir, first).is_empty());
+    assert_eq!(labels_of(&dir, first), [] as [String; 0]);
 }
 
 fn dated_board() -> Options {
@@ -3634,7 +3655,7 @@ fn edit_closing_with_the_last_items_checked_does_not_warn() {
     };
 
     assert_eq!(edit(&["second"]).warnings.len(), 1);
-    assert!(edit(&["parallel"]).warnings.is_empty());
+    assert_eq!(edit(&["parallel"]).warnings, [] as [String; 0]);
 }
 
 #[test]

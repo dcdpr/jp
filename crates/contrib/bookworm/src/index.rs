@@ -241,8 +241,7 @@ fn parse_rustdoc_file(
         2 if parts[0] == "index" => {
             let module_path = path
                 .parent()
-                .map(|p| p.to_string_lossy())
-                .unwrap_or_default()
+                .map_or_default(|p| p.to_string_lossy())
                 .replace('/', "::");
 
             entries.push(DocsetEntry::new(module_path, EntryType::Module, path));

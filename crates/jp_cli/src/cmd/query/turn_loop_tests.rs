@@ -1,3 +1,8 @@
+#![expect(
+    clippy::unused_async_trait_impl,
+    reason = "test doubles implement async traits synchronously"
+)]
+
 use std::{
     collections::VecDeque,
     fmt,
@@ -9,10 +14,9 @@ use std::{
     time::Duration,
 };
 
-use async_trait::async_trait;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use camino_tempfile::tempdir;
-use futures::{StreamExt as _, stream};
+use futures::stream;
 use indexmap::IndexMap;
 use inquire::InquireError;
 use jp_config::{
@@ -45,7 +49,7 @@ use jp_inquire::{
     prompt::{MockPromptBackend, PromptBackend},
 };
 use jp_llm::{
-    Error as LlmError, EventStream, Provider,
+    DynProvider, Error as LlmError, EventStream,
     error::StreamError,
     event::{Event, EventMatcher, EventPatch, FinishReason, NoticeSink, PatchAction},
     model::ModelDetails,
@@ -150,8 +154,7 @@ impl SequentialMockProvider {
     }
 }
 
-#[async_trait]
-impl Provider for SequentialMockProvider {
+impl jp_llm::Provider for SequentialMockProvider {
     async fn model_details(&self, name: &id::Name) -> Result<ModelDetails, LlmError> {
         let mut model = self.model.clone();
         model.id.name = name.clone();
@@ -186,8 +189,7 @@ struct AlwaysPrematureProvider {
     calls: AtomicUsize,
 }
 
-#[async_trait]
-impl Provider for AlwaysPrematureProvider {
+impl jp_llm::Provider for AlwaysPrematureProvider {
     async fn model_details(&self, name: &id::Name) -> Result<ModelDetails, LlmError> {
         Ok(ModelDetails::empty(id::ModelIdConfig {
             provider: ProviderId::Test,
@@ -224,8 +226,7 @@ struct RunawayProvider {
     calls: AtomicUsize,
 }
 
-#[async_trait]
-impl Provider for RunawayProvider {
+impl jp_llm::Provider for RunawayProvider {
     async fn model_details(&self, name: &id::Name) -> Result<ModelDetails, LlmError> {
         Ok(ModelDetails::empty(id::ModelIdConfig {
             provider: ProviderId::Test,
@@ -278,8 +279,7 @@ impl RejectingProvider {
     }
 }
 
-#[async_trait]
-impl Provider for RejectingProvider {
+impl jp_llm::Provider for RejectingProvider {
     async fn model_details(&self, name: &id::Name) -> Result<ModelDetails, LlmError> {
         Ok(ModelDetails::empty(id::ModelIdConfig {
             provider: ProviderId::Test,
@@ -366,7 +366,7 @@ async fn run_rejected_turn(
         .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
         .unwrap();
 
-    let dyn_provider: Arc<dyn Provider> = provider;
+    let dyn_provider: Arc<dyn DynProvider> = provider;
     let model = dyn_provider
         .model_details(&"glm-5.3".parse().unwrap())
         .await
@@ -493,7 +493,7 @@ async fn unknown_model_without_a_listing_names_no_alternatives() {
         panic!("expected an unknown-model error, got: {result:?}");
     };
     assert_eq!(model, "glm-5.3");
-    assert!(available.is_empty());
+    assert_eq!(available, [] as [String; 0]);
 }
 
 #[tokio::test]
@@ -592,8 +592,7 @@ impl StallingMockProvider {
     }
 }
 
-#[async_trait]
-impl Provider for StallingMockProvider {
+impl jp_llm::Provider for StallingMockProvider {
     async fn model_details(&self, name: &id::Name) -> Result<ModelDetails, LlmError> {
         let mut model = self.model.clone();
         model.id.name = name.clone();
@@ -668,8 +667,7 @@ impl StallThenAnswerProvider {
     }
 }
 
-#[async_trait]
-impl Provider for StallThenAnswerProvider {
+impl jp_llm::Provider for StallThenAnswerProvider {
     async fn model_details(&self, name: &id::Name) -> Result<ModelDetails, LlmError> {
         let mut model = self.model.clone();
         model.id.name = name.clone();
@@ -768,7 +766,7 @@ async fn a_client_reply_continues_the_running_turn() {
         });
 
         let result = run_turn_loop(
-            provider.clone() as Arc<dyn Provider>,
+            provider.clone() as Arc<dyn DynProvider>,
             &model,
             &config,
             &router,
@@ -886,7 +884,7 @@ async fn a_client_stop_ends_the_turn_mid_stream() {
         });
 
         let result = run_turn_loop(
-            provider.clone() as Arc<dyn Provider>,
+            provider.clone() as Arc<dyn DynProvider>,
             &model,
             &config,
             &router,
@@ -975,7 +973,7 @@ async fn a_client_abort_ends_the_turn_mid_stream() {
         });
 
         let result = run_turn_loop(
-            provider.clone() as Arc<dyn Provider>,
+            provider.clone() as Arc<dyn DynProvider>,
             &model,
             &config,
             &router,
@@ -1017,8 +1015,7 @@ struct RateLimitedProvider {
     calls: AtomicUsize,
 }
 
-#[async_trait]
-impl Provider for RateLimitedProvider {
+impl jp_llm::Provider for RateLimitedProvider {
     async fn model_details(&self, name: &id::Name) -> Result<ModelDetails, LlmError> {
         Ok(ModelDetails::empty(id::ModelIdConfig {
             provider: ProviderId::Test,
@@ -1087,7 +1084,7 @@ async fn a_client_abort_during_retry_backoff_ends_the_turn_as_aborted() {
         });
 
         let result = run_turn_loop(
-            provider.clone() as Arc<dyn Provider>,
+            provider.clone() as Arc<dyn DynProvider>,
             &model,
             &config,
             &router,
@@ -1149,7 +1146,7 @@ async fn an_interrupt_abort_during_streaming_ends_the_turn_as_aborted() {
             .unwrap();
 
         let stalled = Arc::new(Notify::new());
-        let provider: Arc<dyn Provider> = Arc::new(
+        let provider: Arc<dyn DynProvider> = Arc::new(
             StallingMockProvider::with_message("The answer is 4.").notify_when_stalled(&stalled),
         );
         let model = provider
@@ -1214,7 +1211,7 @@ async fn a_client_stop_taken_between_phases_ends_the_turn_as_stopped() {
         .unwrap();
 
     let (provider, requests) = MockProvider::with_message("never asked").capturing_requests();
-    let provider: Arc<dyn Provider> = Arc::new(provider);
+    let provider: Arc<dyn DynProvider> = Arc::new(provider);
     let model = provider
         .model_details(&"test-model".parse().unwrap())
         .await
@@ -1272,7 +1269,7 @@ async fn a_client_abort_taken_between_phases_ends_the_turn_as_aborted() {
         .unwrap();
 
     let (provider, requests) = MockProvider::with_message("never asked").capturing_requests();
-    let provider: Arc<dyn Provider> = Arc::new(provider);
+    let provider: Arc<dyn DynProvider> = Arc::new(provider);
     let model = provider
         .model_details(&"test-model".parse().unwrap())
         .await
@@ -1450,7 +1447,7 @@ async fn two_client_replies_during_a_tool_both_reach_the_conversation() {
         });
 
         let result = run_turn_loop(
-            Arc::clone(&provider) as Arc<dyn Provider>,
+            Arc::clone(&provider) as Arc<dyn DynProvider>,
             &model,
             &config,
             &router,
@@ -1534,7 +1531,7 @@ async fn test_interrupt_stop_during_streaming_persists_content() {
         // `stalled` fires once the stream is parked inside the streaming
         // event loop; see the Ctrl-C task below.
         let stalled = Arc::new(Notify::new());
-        let provider: Arc<dyn Provider> = Arc::new(
+        let provider: Arc<dyn DynProvider> = Arc::new(
             StallingMockProvider::with_message("The answer is 4.").notify_when_stalled(&stalled),
         );
         let model = provider
@@ -1635,7 +1632,7 @@ async fn a_completed_block_is_persisted_before_the_turn_ends() {
         let conv_id = lock.id();
 
         let stalled = Arc::new(Notify::new());
-        let provider: Arc<dyn Provider> = Arc::new(
+        let provider: Arc<dyn DynProvider> = Arc::new(
             StallingMockProvider::with_message("The answer is 4.").notify_when_stalled(&stalled),
         );
         let model = provider
@@ -1729,7 +1726,7 @@ async fn a_refusal_takes_back_content_it_had_persisted() {
 
     // The shape Anthropic produces when a classifier declines mid-stream: the
     // content block is complete and flushed before the refusal arrives.
-    let provider: Arc<dyn Provider> = Arc::new(MockProvider::new(vec![
+    let provider: Arc<dyn DynProvider> = Arc::new(MockProvider::new(vec![
         Event::message(0, "Partial answer the classifier declines."),
         Event::flush(0),
         Event::Finished(FinishReason::Refused {
@@ -1802,7 +1799,7 @@ async fn test_streaming_interrupt_menu_cancel_escalates() {
         // `stalled` fires once the stream is parked inside the streaming
         // event loop; see the Ctrl-C task below.
         let stalled = Arc::new(Notify::new());
-        let provider: Arc<dyn Provider> = Arc::new(
+        let provider: Arc<dyn DynProvider> = Arc::new(
             StallingMockProvider::with_message("The answer is 4.").notify_when_stalled(&stalled),
         );
         let model = provider
@@ -1906,7 +1903,7 @@ async fn test_normal_completion_persists_content() {
     let chat_request = ChatRequest::from("Hello");
 
     let response_content = "Hello! How can I help you today?";
-    let provider: Arc<dyn Provider> = Arc::new(MockProvider::with_message(response_content));
+    let provider: Arc<dyn DynProvider> = Arc::new(MockProvider::with_message(response_content));
     let model = provider
         .model_details(&"test-model".parse().unwrap())
         .await
@@ -1983,7 +1980,7 @@ async fn an_interrupt_before_the_first_phase_appends_nothing() {
         .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
         .unwrap();
 
-    let provider: Arc<dyn Provider> = Arc::new(MockProvider::with_message("never asked"));
+    let provider: Arc<dyn DynProvider> = Arc::new(MockProvider::with_message("never asked"));
     let model = provider
         .model_details(&"test-model".parse().unwrap())
         .await
@@ -2060,10 +2057,11 @@ async fn premature_stream_end_without_finished_returns_error() {
         .unwrap();
 
     // Emits a partial message, then ends with no `Finished` event.
-    let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider::with_premature_end(vec![
-        Event::message(0, "partial answer"),
-        Event::flush(0),
-    ]));
+    let provider: Arc<dyn DynProvider> =
+        Arc::new(SequentialMockProvider::with_premature_end(vec![
+            Event::message(0, "partial answer"),
+            Event::flush(0),
+        ]));
     let model = provider
         .model_details(&"test-model".parse().unwrap())
         .await
@@ -2127,7 +2125,7 @@ async fn premature_stream_end_exhausts_retry_budget() {
         .unwrap();
 
     let provider = Arc::new(AlwaysPrematureProvider::default());
-    let dyn_provider: Arc<dyn Provider> = provider.clone();
+    let dyn_provider: Arc<dyn DynProvider> = provider.clone();
     let model = dyn_provider
         .model_details(&"test-model".parse().unwrap())
         .await
@@ -2206,7 +2204,7 @@ async fn output_ceiling_ends_turn_without_re_requesting() {
     let conv_id = lock.id();
 
     let provider = Arc::new(RunawayProvider::default());
-    let dyn_provider: Arc<dyn Provider> = provider.clone();
+    let dyn_provider: Arc<dyn DynProvider> = provider.clone();
     let model = dyn_provider
         .model_details(&"test-model".parse().unwrap())
         .await
@@ -2312,7 +2310,7 @@ async fn orphan_tool_call_is_sanitized_before_provider_request() {
         conv.flush().unwrap();
     }
 
-    let provider: Arc<dyn Provider> = Arc::new(MockProvider::with_message("ok"));
+    let provider: Arc<dyn DynProvider> = Arc::new(MockProvider::with_message("ok"));
     let model = provider
         .model_details(&"test-model".parse().unwrap())
         .await
@@ -2392,7 +2390,7 @@ async fn test_tool_call_cycle_completes_with_followup() {
     let chat_request = ChatRequest::from("List files in current directory");
 
     // Provider returns tool call first, then message
-    let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider::with_tool_then_message(
+    let provider: Arc<dyn DynProvider> = Arc::new(SequentialMockProvider::with_tool_then_message(
         "call_123",
         "fs_list_files",
         "Here are the files in the directory.",
@@ -2492,7 +2490,6 @@ impl SleepingExecutor {
     }
 }
 
-#[async_trait]
 impl Executor for SleepingExecutor {
     fn tool_id(&self) -> &str {
         &self.tool_id
@@ -2692,7 +2689,7 @@ async fn test_tool_interrupt_menu_cancel_escalates() {
         });
 
         let result = run_turn_loop(
-            Arc::clone(&provider) as Arc<dyn Provider>,
+            Arc::clone(&provider) as Arc<dyn DynProvider>,
             &model,
             &config,
             &router,
@@ -2841,7 +2838,7 @@ async fn test_tool_stop_on_interrupt_commits_responses_without_follow_up() {
         });
 
         let result = run_turn_loop(
-            Arc::clone(&provider) as Arc<dyn Provider>,
+            Arc::clone(&provider) as Arc<dyn DynProvider>,
             &model,
             &config,
             &router,
@@ -2950,7 +2947,7 @@ async fn a_lost_connection_ends_the_turn_with_an_error() {
     let result = timeout(
         Duration::from_secs(10),
         run_turn_loop(
-            Arc::clone(&provider) as Arc<dyn Provider>,
+            Arc::clone(&provider) as Arc<dyn DynProvider>,
             &model,
             &config,
             &router,
@@ -3092,7 +3089,7 @@ async fn test_interrupt_during_tool_prompt_completes_turn_early() {
         });
 
         let result = run_turn_loop(
-            Arc::clone(&provider) as Arc<dyn Provider>,
+            Arc::clone(&provider) as Arc<dyn DynProvider>,
             &model,
             &config,
             &router,
@@ -3168,7 +3165,7 @@ async fn test_multiple_tool_calls_in_sequence() {
     let chat_request = ChatRequest::from("Do multiple things");
 
     // Create provider with multiple tool calls in first response
-    let provider: Arc<dyn Provider> = Arc::new({
+    let provider: Arc<dyn DynProvider> = Arc::new({
         let tool_call_events = vec![
             Event::tool_call_start(0, "call_1".to_string(), "tool_a".to_string()),
             Event::tool_call_start(1, "call_2".to_string(), "tool_b".to_string()),
@@ -3278,7 +3275,7 @@ async fn test_empty_tool_response_continues_cycle() {
     let chat_request = ChatRequest::from("Use unknown tool");
 
     // Provider returns a call to a tool that won't be found
-    let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider::with_tool_then_message(
+    let provider: Arc<dyn DynProvider> = Arc::new(SequentialMockProvider::with_tool_then_message(
         "call_unknown",
         "nonexistent_tool",
         "I was unable to use that tool.",
@@ -3439,7 +3436,7 @@ async fn test_tool_restart_on_interrupt() {
         });
 
         let result = run_turn_loop(
-            Arc::clone(&provider) as Arc<dyn Provider>,
+            Arc::clone(&provider) as Arc<dyn DynProvider>,
             &model,
             &config,
             &router,
@@ -3544,11 +3541,12 @@ async fn test_merged_stream_exits_after_tool_response() {
         let chat_request = ChatRequest::from("Please use echo_tool");
 
         // Provider returns tool call first, then a final message
-        let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider::with_tool_then_message(
-            "call_echo",
-            "echo_tool",
-            "Tool executed successfully.",
-        ));
+        let provider: Arc<dyn DynProvider> =
+            Arc::new(SequentialMockProvider::with_tool_then_message(
+                "call_echo",
+                "echo_tool",
+                "Tool executed successfully.",
+            ));
         let model = provider
             .model_details(&"test-model".parse().unwrap())
             .await
@@ -3655,11 +3653,12 @@ async fn test_tool_call_with_run_mode_ask_approves() {
 
         let chat_request = ChatRequest::from("Please use mock_tool");
 
-        let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider::with_tool_then_message(
-            "call_ask",
-            "mock_tool",
-            "Tool was approved and executed.",
-        ));
+        let provider: Arc<dyn DynProvider> =
+            Arc::new(SequentialMockProvider::with_tool_then_message(
+                "call_ask",
+                "mock_tool",
+                "Tool was approved and executed.",
+            ));
         let model = provider
             .model_details(&"test-model".parse().unwrap())
             .await
@@ -3800,11 +3799,12 @@ async fn test_tool_call_with_run_mode_ask_skips() {
 
         let chat_request = ChatRequest::from("Please use mock_tool");
 
-        let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider::with_tool_then_message(
-            "call_skip",
-            "mock_tool",
-            "Tool was skipped by user.",
-        ));
+        let provider: Arc<dyn DynProvider> =
+            Arc::new(SequentialMockProvider::with_tool_then_message(
+                "call_skip",
+                "mock_tool",
+                "Tool was skipped by user.",
+            ));
         let model = provider
             .model_details(&"test-model".parse().unwrap())
             .await
@@ -3956,11 +3956,12 @@ async fn test_permission_prompt_follows_interactive_not_is_tty() {
 
         let chat_request = ChatRequest::from("Please use mock_tool");
 
-        let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider::with_tool_then_message(
-            "call_piped",
-            "mock_tool",
-            "Tool was skipped by user.",
-        ));
+        let provider: Arc<dyn DynProvider> =
+            Arc::new(SequentialMockProvider::with_tool_then_message(
+                "call_piped",
+                "mock_tool",
+                "Tool was skipped by user.",
+            ));
         let model = provider
             .model_details(&"test-model".parse().unwrap())
             .await
@@ -4084,11 +4085,12 @@ async fn test_tool_call_with_run_mode_allow() {
 
         let chat_request = ChatRequest::from("Please use mock_tool");
 
-        let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider::with_tool_then_message(
-            "call_unattended",
-            "mock_tool",
-            "Tool ran in unattended mode.",
-        ));
+        let provider: Arc<dyn DynProvider> =
+            Arc::new(SequentialMockProvider::with_tool_then_message(
+                "call_unattended",
+                "mock_tool",
+                "Tool ran in unattended mode.",
+            ));
         let model = provider
             .model_details(&"test-model".parse().unwrap())
             .await
@@ -4223,11 +4225,12 @@ async fn test_tool_call_with_run_mode_skip() {
 
         let chat_request = ChatRequest::from("Please use mock_tool");
 
-        let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider::with_tool_then_message(
-            "call_skip",
-            "mock_tool",
-            "Tool was skipped by configuration.",
-        ));
+        let provider: Arc<dyn DynProvider> =
+            Arc::new(SequentialMockProvider::with_tool_then_message(
+                "call_skip",
+                "mock_tool",
+                "Tool was skipped by configuration.",
+            ));
         let model = provider
             .model_details(&"test-model".parse().unwrap())
             .await
@@ -4402,7 +4405,7 @@ async fn test_multiple_tools_with_different_run_modes() {
         let chat_request = ChatRequest::from("Use both tools");
 
         // Provider returns two tool calls, then a message
-        let provider: Arc<dyn Provider> = Arc::new({
+        let provider: Arc<dyn DynProvider> = Arc::new({
             let tool_call_events = vec![
                 Event::tool_call_start(0, "call_ask".to_string(), "tool_ask".to_string()),
                 Event::tool_call_start(
@@ -4590,11 +4593,12 @@ async fn test_tool_call_returns_error() {
 
         let chat_request = ChatRequest::from("Use failing_tool");
 
-        let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider::with_tool_then_message(
-            "call_fail",
-            "failing_tool",
-            "Tool failed, here is the error.",
-        ));
+        let provider: Arc<dyn DynProvider> =
+            Arc::new(SequentialMockProvider::with_tool_then_message(
+                "call_fail",
+                "failing_tool",
+                "Tool failed, here is the error.",
+            ));
         let model = provider
             .model_details(&"test-model".parse().unwrap())
             .await
@@ -4709,8 +4713,7 @@ impl DelayedMockProvider {
     }
 }
 
-#[async_trait]
-impl Provider for DelayedMockProvider {
+impl jp_llm::Provider for DelayedMockProvider {
     async fn model_details(&self, name: &id::Name) -> Result<ModelDetails, LlmError> {
         let mut model = self.model.clone();
         model.id.name = name.clone();
@@ -4771,8 +4774,7 @@ impl PacedMockProvider {
     }
 }
 
-#[async_trait]
-impl Provider for PacedMockProvider {
+impl jp_llm::Provider for PacedMockProvider {
     async fn model_details(&self, name: &id::Name) -> Result<ModelDetails, LlmError> {
         let mut model = self.model.clone();
         model.id.name = name.clone();
@@ -4846,7 +4848,7 @@ async fn test_waiting_indicator_shows_during_delay() {
         let chat_request = ChatRequest::from("Hello");
 
         // Provider delays 500ms before returning stream
-        let provider: Arc<dyn Provider> = Arc::new(DelayedMockProvider::new(
+        let provider: Arc<dyn DynProvider> = Arc::new(DelayedMockProvider::new(
             Duration::from_millis(500),
             "Response after delay",
         ));
@@ -4939,7 +4941,7 @@ async fn test_waiting_indicator_survives_keep_alive_and_shows_status() {
         // 250ms HTTP round-trip ("sending request"), then 250ms of silence on
         // the open stream ("waiting for first tokens"), then a keep-alive
         // ("receiving response data"), then 250ms more before content.
-        let provider: Arc<dyn Provider> =
+        let provider: Arc<dyn DynProvider> =
             Arc::new(PacedMockProvider::new(Duration::from_millis(250), vec![
                 vec![
                     (Duration::from_millis(250), Ok(Event::KeepAlive)),
@@ -5047,7 +5049,7 @@ async fn test_waiting_indicator_cleared_before_retry_notice() {
 
         // First call: keep-alive, then a transient error (triggers a retry).
         // Second call: a normal response.
-        let provider: Arc<dyn Provider> =
+        let provider: Arc<dyn DynProvider> =
             Arc::new(PacedMockProvider::new(Duration::from_millis(100), vec![
                 vec![
                     (Duration::from_millis(100), Ok(Event::KeepAlive)),
@@ -5146,7 +5148,7 @@ async fn test_waiting_indicator_not_shown_when_disabled() {
 
         let chat_request = ChatRequest::from("Hello");
 
-        let provider: Arc<dyn Provider> = Arc::new(DelayedMockProvider::new(
+        let provider: Arc<dyn DynProvider> = Arc::new(DelayedMockProvider::new(
             Duration::from_millis(200),
             "Quick response",
         ));
@@ -5226,7 +5228,7 @@ async fn test_waiting_indicator_not_shown_for_non_tty() {
 
         let chat_request = ChatRequest::from("Hello");
 
-        let provider: Arc<dyn Provider> = Arc::new(DelayedMockProvider::new(
+        let provider: Arc<dyn DynProvider> = Arc::new(DelayedMockProvider::new(
             Duration::from_millis(200),
             "Non-tty response",
         ));
@@ -5305,7 +5307,7 @@ async fn test_waiting_indicator_follows_stderr_not_stdout() {
 
         let chat_request = ChatRequest::from("Hello");
 
-        let provider: Arc<dyn Provider> = Arc::new(DelayedMockProvider::new(
+        let provider: Arc<dyn DynProvider> = Arc::new(DelayedMockProvider::new(
             Duration::from_millis(200),
             "Redirected-stderr response",
         ));
@@ -5458,8 +5460,7 @@ async fn test_multi_part_tool_call_shows_preparing_spinner() {
             }
         }
 
-        #[async_trait]
-        impl Provider for DelayedToolCallProvider {
+        impl jp_llm::Provider for DelayedToolCallProvider {
             async fn model_details(&self, name: &id::Name) -> Result<ModelDetails, LlmError> {
                 let mut m = self.model.clone();
                 m.id.name = name.clone();
@@ -5487,7 +5488,7 @@ async fn test_multi_part_tool_call_shows_preparing_spinner() {
             }
         }
 
-        let provider: Arc<dyn Provider> = Arc::new(DelayedToolCallProvider {
+        let provider: Arc<dyn DynProvider> = Arc::new(DelayedToolCallProvider {
             first_cycle: std::sync::Mutex::new(Some(combined_first_cycle)),
             second_cycle: std::sync::Mutex::new(Some(message_events)),
             model: ModelDetails::empty(id::ModelIdConfig {
@@ -5582,7 +5583,7 @@ async fn test_turn_start_event_is_emitted() {
 
     let chat_request = ChatRequest::from("Hello");
 
-    let provider: Arc<dyn Provider> = Arc::new(MockProvider::with_message("Hi there"));
+    let provider: Arc<dyn DynProvider> = Arc::new(MockProvider::with_message("Hi there"));
     let model = provider
         .model_details(&"test-model".parse().unwrap())
         .await
@@ -5641,7 +5642,7 @@ async fn test_turn_start_index_increments_across_turns() {
     // First turn.
     let chat_request = ChatRequest::from("First question");
 
-    let provider: Arc<dyn Provider> = Arc::new(MockProvider::with_message("First answer"));
+    let provider: Arc<dyn DynProvider> = Arc::new(MockProvider::with_message("First answer"));
     let model = provider
         .model_details(&"test-model".parse().unwrap())
         .await
@@ -5677,7 +5678,7 @@ async fn test_turn_start_index_increments_across_turns() {
     // Second turn.
     let chat_request = ChatRequest::from("Second question");
 
-    let provider: Arc<dyn Provider> = Arc::new(MockProvider::with_message("Second answer"));
+    let provider: Arc<dyn DynProvider> = Arc::new(MockProvider::with_message("Second answer"));
     let model = provider
         .model_details(&"test-model".parse().unwrap())
         .await
@@ -5745,7 +5746,7 @@ async fn test_markdown_flushed_before_tool_header() {
 
         // LLM emits a message part followed immediately by a tool call
         // in the same response. The message must appear before the header.
-        let provider: Arc<dyn Provider> = Arc::new({
+        let provider: Arc<dyn DynProvider> = Arc::new({
             let events = vec![
                 Event::message(0, "Let me check that.\n\n"),
                 Event::flush(0),
@@ -5916,7 +5917,7 @@ async fn test_parallel_tool_calls_rendered_atomically() {
         let mut args_b = Map::new();
         args_b.insert("path".into(), "/tmp/test.rs".into());
 
-        let provider: Arc<dyn Provider> = Arc::new({
+        let provider: Arc<dyn DynProvider> = Arc::new({
             let tool_events = vec![
                 Event::tool_call_start(0, "call_a".to_string(), "tool_a".to_string()),
                 Event::tool_call_args(0, serde_json::to_string(&args_a).unwrap()),
@@ -6086,7 +6087,7 @@ async fn test_single_tool_call_rendered_with_args() {
         let mut args = Map::new();
         args.insert("path".into(), "/etc/hosts".into());
 
-        let provider: Arc<dyn Provider> = Arc::new({
+        let provider: Arc<dyn DynProvider> = Arc::new({
             let events = vec![
                 Event::tool_call_start(0, "call_1".to_string(), "fs_read_file".to_string()),
                 Event::tool_call_args(0, serde_json::to_string(&args).unwrap()),
@@ -6182,7 +6183,6 @@ async fn test_single_tool_call_rendered_with_args() {
 /// `bad.rs`, and records the order it ran in.
 struct PathReader(Arc<Mutex<Vec<String>>>);
 
-#[async_trait]
 impl BuiltinTool for PathReader {
     async fn execute(&self, arguments: &Value, _: &IndexMap<String, Value>) -> Outcome {
         let path = arguments["path"].as_str().unwrap_or_default().to_owned();
@@ -6260,7 +6260,7 @@ async fn fan_out_turn(tool: Value, arguments: &Value) -> FanOutTurn {
     // What production hands the provider: the service's advertisement.
     let tools = source.advertised();
 
-    let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider {
+    let provider: Arc<dyn DynProvider> = Arc::new(SequentialMockProvider {
         responses: vec![
             vec![
                 Event::tool_call_start(0, "call_1".to_string(), "fs_read_file".to_string()),
@@ -6491,7 +6491,6 @@ impl TalkingExecutor {
     }
 }
 
-#[async_trait]
 impl Executor for TalkingExecutor {
     fn tool_id(&self) -> &str {
         &self.tool_id
@@ -6573,7 +6572,7 @@ fn talking_tool_config(names: &[&str]) -> AppConfig {
 }
 
 /// A provider that requests `calls` in one cycle, then answers with a message.
-fn tool_calling_provider(calls: &[(&str, &str)]) -> Arc<dyn Provider> {
+fn tool_calling_provider(calls: &[(&str, &str)]) -> Arc<dyn DynProvider> {
     let mut events = Vec::new();
     for (index, (id, name)) in calls.iter().enumerate() {
         events.push(Event::tool_call_start(
@@ -6961,7 +6960,7 @@ async fn a_sink_survives_the_re_spawn_an_answer_triggers() {
 
         // Tool call, then the assistant's answer to the question, then a final
         // message.
-        let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider {
+        let provider: Arc<dyn DynProvider> = Arc::new(SequentialMockProvider {
             responses: vec![
                 single_tool_call_events("call_ask", "asking_tool"),
                 structured_inquiry_events("call_ask.which", &json!(true)),
@@ -7306,7 +7305,7 @@ async fn a_tool_prompt_hides_the_window_and_restores_it() {
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
             .unwrap();
 
-        let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider {
+        let provider: Arc<dyn DynProvider> = Arc::new(SequentialMockProvider {
             responses: vec![
                 single_tool_call_events("call_ask", "asking_tool"),
                 final_message_events("Done."),
@@ -7496,7 +7495,7 @@ async fn a_question_for_the_user_is_on_disk_before_its_prompt_opens() {
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
             .unwrap();
 
-        let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider {
+        let provider: Arc<dyn DynProvider> = Arc::new(SequentialMockProvider {
             responses: vec![
                 single_tool_call_events("call_ask", "asking_tool"),
                 final_message_events("Done."),
@@ -7573,7 +7572,7 @@ async fn a_question_for_the_user_is_on_disk_before_its_prompt_opens() {
         let stream = fs
             .load_conversation_stream(&lock.id(), &PartialAppConfig::empty())
             .expect("the conversation is on disk");
-        assert!(stream.pending_inquiries().is_empty());
+        assert_eq!(stream.pending_inquiries(), [] as [&ConversationEvent; 0]);
         assert_eq!(
             stream
                 .iter()
@@ -7621,7 +7620,6 @@ impl AskingTalkingExecutor {
     }
 }
 
-#[async_trait]
 impl Executor for AskingTalkingExecutor {
     fn tool_id(&self) -> &str {
         &self.tool_id
@@ -7698,7 +7696,6 @@ impl InquiryMockExecutor {
     }
 }
 
-#[async_trait]
 impl Executor for InquiryMockExecutor {
     fn tool_id(&self) -> &str {
         &self.tool_id
@@ -7836,7 +7833,7 @@ async fn inquiry_ceiling_honors_the_global_inquiry_override() {
         .request
         .max_response_bytes = MaxResponseBytes::Bytes(4096);
 
-    let provider: Arc<dyn Provider> = Arc::new(MockProvider::new(vec![]));
+    let provider: Arc<dyn DynProvider> = Arc::new(MockProvider::new(vec![]));
     let model = inquiry_mock_model();
 
     let backend = build_inquiry_backend(
@@ -7876,7 +7873,7 @@ async fn inquiry_ceiling_survives_a_sibling_only_request_override() {
 
     let config = jp_config::util::build(partial).expect("valid config");
 
-    let provider: Arc<dyn Provider> = Arc::new(MockProvider::new(vec![]));
+    let provider: Arc<dyn DynProvider> = Arc::new(MockProvider::new(vec![]));
     let model = inquiry_mock_model();
 
     let backend = build_inquiry_backend(
@@ -7914,7 +7911,7 @@ async fn inquiry_ceiling_can_be_disabled_independently() {
 
     let config = jp_config::util::build(partial).expect("valid config");
 
-    let provider: Arc<dyn Provider> = Arc::new(MockProvider::new(vec![]));
+    let provider: Arc<dyn DynProvider> = Arc::new(MockProvider::new(vec![]));
     let model = inquiry_mock_model();
 
     let backend = build_inquiry_backend(
@@ -7964,7 +7961,7 @@ async fn inquiry_ceiling_honors_the_per_question_override() {
         .tools
         .insert("inquiry_tool".to_string(), tool);
 
-    let provider: Arc<dyn Provider> = Arc::new(MockProvider::new(vec![]));
+    let provider: Arc<dyn DynProvider> = Arc::new(MockProvider::new(vec![]));
     let model = inquiry_mock_model();
 
     let backend = build_inquiry_backend(
@@ -8027,7 +8024,7 @@ async fn test_tool_with_single_inquiry() {
         // 1. Tool call
         // 2. Structured inquiry answer (from LlmInquiryBackend)
         // 3. Final message
-        let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider {
+        let provider: Arc<dyn DynProvider> = Arc::new(SequentialMockProvider {
             responses: vec![
                 single_tool_call_events("call_inq", "inquiry_tool"),
                 structured_inquiry_events("call_inq.confirm", &json!(true)),
@@ -8156,7 +8153,7 @@ async fn test_secret_question_without_tty_fails_tool() {
             .unwrap();
 
         let chat_request = ChatRequest::from("Use the tool");
-        let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider {
+        let provider: Arc<dyn DynProvider> = Arc::new(SequentialMockProvider {
             responses: vec![
                 single_tool_call_events("call_sec", "secret_tool"),
                 final_message_events("Understood."),
@@ -8265,7 +8262,7 @@ async fn test_secret_question_with_assistant_target_fails_tool() {
             .unwrap();
 
         let chat_request = ChatRequest::from("Use the tool");
-        let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider {
+        let provider: Arc<dyn DynProvider> = Arc::new(SequentialMockProvider {
             responses: vec![
                 single_tool_call_events("call_sec", "secret_tool"),
                 final_message_events("Understood."),
@@ -8367,7 +8364,7 @@ async fn test_secret_prompter_answer_is_redacted() {
             .unwrap();
 
         let chat_request = ChatRequest::from("Use the tool");
-        let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider {
+        let provider: Arc<dyn DynProvider> = Arc::new(SequentialMockProvider {
             responses: vec![
                 single_tool_call_events("call_sec", "secret_tool"),
                 final_message_events("Secret used."),
@@ -8473,7 +8470,7 @@ async fn test_secret_static_answer_is_redacted() {
             .unwrap();
 
         let chat_request = ChatRequest::from("Use the tool");
-        let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider {
+        let provider: Arc<dyn DynProvider> = Arc::new(SequentialMockProvider {
             responses: vec![
                 single_tool_call_events("call_sec", "secret_tool"),
                 final_message_events("Secret used."),
@@ -8580,7 +8577,7 @@ async fn test_static_answer_records_answered_inquiry() {
             .unwrap();
 
         let chat_request = ChatRequest::from("Use the tool");
-        let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider {
+        let provider: Arc<dyn DynProvider> = Arc::new(SequentialMockProvider {
             responses: vec![
                 single_tool_call_events("call_static", "static_tool"),
                 final_message_events("Done."),
@@ -8689,7 +8686,7 @@ async fn test_remembered_answer_cache_hit_records_new_inquiry_pair() {
             .unwrap();
 
         let chat_request = ChatRequest::from("Use the tool twice");
-        let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider {
+        let provider: Arc<dyn DynProvider> = Arc::new(SequentialMockProvider {
             responses: vec![
                 single_tool_call_events("call_a", "cached_tool"),
                 single_tool_call_events("call_b", "cached_tool"),
@@ -8812,7 +8809,7 @@ async fn test_tool_with_multiple_inquiries() {
         // 2. Structured answer for q1 ("confirm")
         // 3. Structured answer for q2 ("reason")
         // 4. Final message
-        let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider {
+        let provider: Arc<dyn DynProvider> = Arc::new(SequentialMockProvider {
             responses: vec![
                 single_tool_call_events("call_mq", "multi_q_tool"),
                 structured_inquiry_events("call_mq.confirm", &json!(true)),
@@ -8965,7 +8962,7 @@ async fn test_parallel_tools_one_with_inquiry() {
             Event::Finished(FinishReason::Completed),
         ];
 
-        let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider {
+        let provider: Arc<dyn DynProvider> = Arc::new(SequentialMockProvider {
             responses: vec![
                 parallel_events,
                 structured_inquiry_events("call_inq.confirm", &json!(true)),
@@ -9097,7 +9094,7 @@ async fn test_parallel_tools_both_with_inquiries() {
             Event::Finished(FinishReason::Completed),
         ];
 
-        let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider {
+        let provider: Arc<dyn DynProvider> = Arc::new(SequentialMockProvider {
             responses: vec![
                 parallel_events,
                 unkeyed_structured_events(&json!(true)),
@@ -9208,8 +9205,7 @@ async fn test_retry_counter_resets_on_successful_event() {
         model: ModelDetails,
     }
 
-    #[async_trait]
-    impl Provider for MidStreamRateLimitProvider {
+    impl jp_llm::Provider for MidStreamRateLimitProvider {
         async fn model_details(&self, name: &id::Name) -> Result<ModelDetails, LlmError> {
             let mut m = self.model.clone();
             m.id.name = name.clone();
@@ -9269,7 +9265,7 @@ async fn test_retry_counter_resets_on_successful_event() {
 
         // Provider that returns partial content + rate limit error on the first
         // two calls, then succeeds on the third.
-        let provider: Arc<dyn Provider> = Arc::new(MidStreamRateLimitProvider {
+        let provider: Arc<dyn DynProvider> = Arc::new(MidStreamRateLimitProvider {
             call_index: call_index_clone,
             model: ModelDetails::empty(id::ModelIdConfig {
                 provider: ProviderId::Test,
@@ -9387,7 +9383,7 @@ async fn test_unavailable_tool_before_approved_does_not_panic() {
             Event::Finished(FinishReason::Completed),
         ];
 
-        let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider {
+        let provider: Arc<dyn DynProvider> = Arc::new(SequentialMockProvider {
             responses: vec![
                 parallel_events,
                 final_message_events("All tools dispatched."),
@@ -9497,7 +9493,7 @@ async fn test_inquiry_failure_marks_tool_as_error() {
         // 1. Tool call
         // 2. Plain message (NOT structured) → inquiry fails
         // 3. Final message (LLM sees the error and responds)
-        let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider {
+        let provider: Arc<dyn DynProvider> = Arc::new(SequentialMockProvider {
             responses: vec![
                 single_tool_call_events("call_fail", "inquiry_tool"),
                 final_message_events("I don't understand the question."),
@@ -9700,7 +9696,7 @@ async fn test_live_header_uses_configured_model_id_not_provider_returned() {
 
         let chat_request = ChatRequest::from("Hello");
 
-        let provider: Arc<dyn Provider> = Arc::new(MockProvider::with_message("Hi there"));
+        let provider: Arc<dyn DynProvider> = Arc::new(MockProvider::with_message("Hi there"));
         let model = provider
             .model_details(&"api-rewritten".parse().unwrap())
             .await
@@ -9804,7 +9800,7 @@ async fn reasoning_before_a_tool_call_shades_the_tool_chrome() {
         .unwrap();
 
     // First response: reasoning, then a tool call that continues the region.
-    let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider {
+    let provider: Arc<dyn DynProvider> = Arc::new(SequentialMockProvider {
         responses: vec![
             vec![
                 Event::reasoning(0, "Thinking about it.\n\n"),
@@ -9929,7 +9925,7 @@ async fn a_tool_that_does_not_join_reasoning_renders_unshaded_live() {
         .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
         .unwrap();
 
-    let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider {
+    let provider: Arc<dyn DynProvider> = Arc::new(SequentialMockProvider {
         responses: vec![
             vec![
                 Event::reasoning(0, "Thinking about it.\n\n"),
@@ -10080,7 +10076,7 @@ async fn test_rebuild_cap_stops_a_provider_that_keeps_requesting_rebuilds() {
     seed_patchable_metadata(&lock, rounds);
 
     let batches = (0..rounds).map(repair_cycle).collect();
-    let provider: Arc<dyn Provider> = Arc::new(MockProvider::with_batches(batches));
+    let provider: Arc<dyn DynProvider> = Arc::new(MockProvider::with_batches(batches));
     let model = provider
         .model_details(&"test-model".parse().unwrap())
         .await
@@ -10152,25 +10148,26 @@ async fn test_refused_rebuild_clears_the_retry_line() {
         // leaves the cursor parked at the end of it.
         // Second cycle: a patch matching no event, so the rebuild that follows is
         // refused for lack of progress and the turn aborts.
-        let provider: Arc<dyn Provider> = Arc::new(PacedMockProvider::new(Duration::ZERO, vec![
-            vec![(
-                Duration::ZERO,
-                Err(StreamError::transient("simulated hiccup")),
-            )],
-            vec![
-                (
+        let provider: Arc<dyn DynProvider> =
+            Arc::new(PacedMockProvider::new(Duration::ZERO, vec![
+                vec![(
                     Duration::ZERO,
-                    Ok(Event::Patch(vec![EventPatch {
-                        matcher: EventMatcher::MetadataValue {
-                            key: "absent_key".into(),
-                            value: "absent_value".into(),
-                        },
-                        action: PatchAction::RemoveMetadata("absent_key".into()),
-                    }])),
-                ),
-                (Duration::ZERO, Ok(Event::Finished(FinishReason::Retry))),
-            ],
-        ]));
+                    Err(StreamError::transient("simulated hiccup")),
+                )],
+                vec![
+                    (
+                        Duration::ZERO,
+                        Ok(Event::Patch(vec![EventPatch {
+                            matcher: EventMatcher::MetadataValue {
+                                key: "absent_key".into(),
+                                value: "absent_value".into(),
+                            },
+                            action: PatchAction::RemoveMetadata("absent_key".into()),
+                        }])),
+                    ),
+                    (Duration::ZERO, Ok(Event::Finished(FinishReason::Retry))),
+                ],
+            ]));
         let model = provider
             .model_details(&"test-model".parse().unwrap())
             .await
@@ -10252,7 +10249,7 @@ async fn test_refused_rebuild_persists_streamed_content() {
 
     // No patch precedes the rebuild request, so it is refused for lack of
     // progress while a streamed part is still unflushed.
-    let provider: Arc<dyn Provider> = Arc::new(MockProvider::with_batches(vec![vec![
+    let provider: Arc<dyn DynProvider> = Arc::new(MockProvider::with_batches(vec![vec![
         Event::message(0, "partial answer"),
         Event::Finished(FinishReason::Retry),
     ]]));
@@ -10305,7 +10302,6 @@ async fn test_refused_rebuild_persists_streamed_content() {
 
 struct HttpInquiryTool(Arc<AtomicUsize>);
 
-#[async_trait]
 impl BuiltinTool for HttpInquiryTool {
     async fn execute(&self, _: &Value, answers: &IndexMap<String, Value>) -> Outcome {
         self.0.fetch_add(1, Ordering::SeqCst);

@@ -70,7 +70,7 @@ fn parse_tolerates_missing_optional_fields() {
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].message, "");
     assert!(events[0].fields.is_empty());
-    assert!(events[0].spans.is_empty());
+    assert_eq!(events[0].spans, [] as [String; 0]);
 }
 
 #[test]

@@ -1145,7 +1145,7 @@ async fn run_query(
     let title = resolve_title(&config, &lock, &stream, &chat_request)
         .map(|task| -> TitleFuture { Box::pin(generate_title(task, lock.id())) });
 
-    let summaries = start_turn_summaries(&config, &lock, &stream, ctx.term.args.persist);
+    let summaries = start_turn_summaries(&config, &lock, &stream, ctx.workspace.persists());
 
     // The last request before this query, to tell its turn from earlier ones.
     let before = lock.with_events(last_request_id);
@@ -2424,8 +2424,7 @@ fn handle_read_draft(
         revision: stored.as_deref().map(draft_revision),
         content: stored
             .as_deref()
-            .map(draft_query_text)
-            .unwrap_or_default()
+            .map_or_default(draft_query_text)
             .to_owned(),
         conflict: false,
     })
@@ -2487,8 +2486,7 @@ fn handle_write_draft(
             conversation: req.conversation,
             content: current
                 .as_deref()
-                .map(draft_query_text)
-                .unwrap_or_default()
+                .map_or_default(draft_query_text)
                 .to_owned(),
             revision: current_revision,
             conflict: true,
@@ -3181,8 +3179,7 @@ fn third_party_hint(key: &str, entry: &RegistryPlugin) -> String {
     let from = entry
         .repository
         .as_deref()
-        .map(|repository| format!(" ({repository})"))
-        .unwrap_or_default();
+        .map_or_default(|repository| format!(" ({repository})"));
 
     format!(
         "\n  `jp {key}` is provided by the third-party plugin `{}`{from}.\n  Install it with `jp \

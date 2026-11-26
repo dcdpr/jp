@@ -370,10 +370,7 @@ fn route(mut message: Value) -> Route {
         (Some(_), Some(id)) => Route::Answer(id),
         (Some(method), None) => Route::Forward(Incoming::Notification {
             method,
-            params: message
-                .get_mut("params")
-                .map(Value::take)
-                .unwrap_or_default(),
+            params: message.get_mut("params").map_or_default(Value::take),
         }),
         (None, Some(Value::Number(id))) => {
             let Some(id) = id.as_i64() else {
@@ -392,10 +389,7 @@ fn route(mut message: Value) -> Route {
                         .unwrap_or_default()
                         .to_owned(),
                 )),
-                None => Ok(message
-                    .get_mut("result")
-                    .map(Value::take)
-                    .unwrap_or_default()),
+                None => Ok(message.get_mut("result").map_or_default(Value::take)),
             };
 
             Route::Forward(Incoming::Response { id, outcome })
@@ -610,8 +604,7 @@ impl Server {
         let tail = self
             .stderr
             .lock()
-            .map(|lines| lines.iter().cloned().collect::<Vec<_>>().join("\n"))
-            .unwrap_or_default();
+            .map_or_default(|lines| lines.iter().cloned().collect::<Vec<_>>().join("\n"));
 
         if tail.is_empty() {
             return LspError::Closed { detail };
@@ -654,9 +647,7 @@ fn collect_stderr(stderr: ChildStderr) -> Arc<Mutex<VecDeque<String>>> {
 }
 
 fn initialize_params(root: &Utf8Path, options: &Value, experimental: &Value) -> Value {
-    let uri = Url::from_directory_path(root.as_std_path())
-        .map(String::from)
-        .unwrap_or_default();
+    let uri = Url::from_directory_path(root.as_std_path()).map_or_default(String::from);
 
     json!({
         "processId": std::process::id(),

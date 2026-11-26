@@ -159,9 +159,9 @@ impl Conversation {
             Commands::Print(args) => args.run(ctx, &handles),
             Commands::Path(args) => args.run(ctx, handles),
             Commands::List(args) => args.run(ctx, &handles),
-            Commands::Use(args) => args.run(ctx, handles),
+            Commands::Use(args) => args.run(ctx, handles).await,
             Commands::Archive(args) => args.run(ctx, handles).await,
-            Commands::Unarchive(args) => args.run(ctx),
+            Commands::Unarchive(args) => args.run(ctx).await,
         }
     }
 

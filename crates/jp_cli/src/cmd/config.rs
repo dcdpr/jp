@@ -46,12 +46,12 @@ impl Config {
     pub(crate) async fn run(self, ctx: &mut Ctx, handles: Vec<ConversationHandle>) -> Output {
         match self.command {
             Commands::Show(args) => {
-                debug_assert!(handles.is_empty());
+                debug_assert_eq!(handles, [] as [ConversationHandle; 0]);
                 args.run(ctx)
             }
             Commands::Set(args) => args.run(ctx, handles).await,
             Commands::Fmt(args) => {
-                debug_assert!(handles.is_empty());
+                debug_assert_eq!(handles, [] as [ConversationHandle; 0]);
                 args.run(ctx)
             }
         }

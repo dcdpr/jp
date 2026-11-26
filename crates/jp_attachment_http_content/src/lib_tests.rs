@@ -40,7 +40,7 @@ mod html_to_markdown {
     fn empty_body() {
         let html = "<html><head></head><body></body></html>";
         let md = html_to_markdown(html).unwrap();
-        assert!(md.trim().is_empty());
+        assert_eq!(md.trim(), "");
     }
 }
 
@@ -90,8 +90,6 @@ mod collapse_blank_lines {
 }
 
 mod canonical {
-    use jp_attachment::Handler as _;
-
     use super::*;
 
     #[test]

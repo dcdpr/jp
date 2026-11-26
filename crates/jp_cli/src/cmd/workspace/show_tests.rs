@@ -193,22 +193,20 @@ fn conversation_count_unions_sibling_checkout_scans() {
     let id = Id::from_str("ws123").unwrap();
     // `first` is upserted last, so it is the most recently used checkout and
     // takes the full load; `second` stays a scanned sibling. A full load
-    // would sanitize the bare (event-less) directory below away — the scan
-    // must not, since it merely lists projected IDs.
+    // would sanitize the event-less directory below away — the scan must
+    // not, since it merely lists projected IDs.
     jp_workspace::roots::upsert_root(&user_dir, &second).unwrap();
     jp_workspace::roots::upsert_root(&user_dir, &first).unwrap();
 
     // A checkout-only conversation in the *second* root: present only as a
     // projection directory, invisible to the first root's full load.
     let conversation = ConversationId::from_str("jp-c17636257521").unwrap();
-    std::fs::create_dir_all(
-        second
-            .join(crate::DEFAULT_STORAGE_DIR)
-            .join("conversations")
-            .join(conversation.to_dirname(None))
-            .as_std_path(),
-    )
-    .unwrap();
+    let conversation_dir = second
+        .join(crate::DEFAULT_STORAGE_DIR)
+        .join("conversations")
+        .join(conversation.to_dirname(None));
+    std::fs::create_dir_all(conversation_dir.as_std_path()).unwrap();
+    std::fs::write(conversation_dir.join("metadata.json").as_std_path(), "{}").unwrap();
 
     let (printer, out, _err) = Printer::memory(OutputFormat::Json);
     Show {

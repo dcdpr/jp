@@ -1,8 +1,11 @@
+use std::sync::Arc;
+
 use chrono::{DateTime, FixedOffset, Local, Utc};
 use clap::{Arg, ArgAction, ArgMatches, Command, value_parser};
 use comfy_table::{Cell, CellAlignment, Row};
 use crossterm::style::{Color, Stylize as _};
 use jp_conversation::{Conversation, ConversationId};
+use jp_printer::Printer;
 use jp_storage::backend::StoragePresence;
 use jp_term::{
     osc::hyperlink,
@@ -14,11 +17,12 @@ use jp_workspace::ConversationHandle;
 use crate::{
     cli::{CommandArgs, many},
     cmd::{
-        ConversationLoadRequest, Output,
+        self, ConversationLoadRequest, Output,
         conversation_id::PositionalIds,
         label::{self, LabelSelector},
     },
     ctx::Ctx,
+    load_failure::{self, LoadFailure, LoadFailureNotice},
     output::print_table,
 };
 
@@ -197,7 +201,7 @@ impl Ls {
         ConversationLoadRequest::explicit_or_none(&self.target)
     }
 
-    #[expect(clippy::unnecessary_wraps, clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     pub(crate) fn run(&self, ctx: &mut Ctx, handles: &[ConversationHandle]) -> Output {
         let active_conversation_id = ctx
             .session
@@ -254,6 +258,14 @@ impl Ls {
                     matches_filters(id, &c, local).then(|| to_details(*id, &c, local, external))
                 })
                 .collect()
+        };
+
+        // Scan for invalid archived conversations after listing valid ones so
+        // the scan cache already holds the valid entries.
+        let _archive_failures = if self.archived {
+            Some(archive_failure_notice(ctx)?)
+        } else {
+            None
         };
 
         let count = conversations.len();
@@ -358,15 +370,12 @@ impl Ls {
         };
 
         let last_message_at_fmt = if self.full {
-            details
-                .last_event_at
-                .map(|t| {
-                    let format = "%Y-%m-%d %H:%M:%S";
-                    let local_offset: FixedOffset = *Local::now().offset();
+            details.last_event_at.map_or_default(|t| {
+                let format = "%Y-%m-%d %H:%M:%S";
+                let local_offset: FixedOffset = *Local::now().offset();
 
-                    t.with_timezone(&local_offset).format(format).to_string()
-                })
-                .unwrap_or_default()
+                t.with_timezone(&local_offset).format(format).to_string()
+            })
         } else {
             details.last_event_at.map_or_else(String::new, |t| {
                 let ago = (Utc::now() - t).to_std().expect("valid duration");
@@ -470,6 +479,19 @@ fn build_header_row(columns: Columns, marker: Option<SortMarker>) -> Row {
     }
 
     header
+}
+
+/// Scan for archived conversations that failed validation and return a guard
+/// that reports them to stderr when dropped.
+fn archive_failure_notice(ctx: &Ctx) -> Result<LoadFailureNotice, cmd::Error> {
+    let invalid = ctx.recovery.scan_archive()?;
+    let failures: Vec<_> = invalid.iter().map(LoadFailure::from).collect();
+
+    Ok(load_failure::notice(
+        Printer::clone(&ctx.printer),
+        Arc::clone(&ctx.recovery),
+        &failures,
+    ))
 }
 
 /// The column header that should carry the sort marker, if any.

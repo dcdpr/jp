@@ -1,4 +1,6 @@
 #[cfg(unix)]
+use jp_test::env_var::EnvVarGuard;
+#[cfg(unix)]
 use serial_test::serial;
 use test_log::test;
 
@@ -6,8 +8,6 @@ use super::*;
 use crate::assignment::KvAssignment;
 #[cfg(unix)]
 use crate::types::command::CommandConfig;
-#[cfg(unix)]
-use crate::util::EnvVarGuard;
 
 /// A string `cmd` is stored verbatim on the partial; splitting into
 /// program/args happens later in `command()`.

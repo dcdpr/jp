@@ -10,6 +10,7 @@ use jp_config::{
 };
 use jp_conversation::{Conversation, ConversationId};
 use jp_storage::backend::FsStorageBackend;
+use jp_test::env_var::EnvVarGuard;
 use jp_workspace::{
     Workspace,
     session::{Session, SessionId, SessionSource},
@@ -21,7 +22,6 @@ use serial_test::serial;
 use test_log::test;
 
 use super::*;
-use crate::env_testing::EnvVarGuard;
 
 #[test]
 fn a_successful_run_keeps_its_trace_log_only_under_jp_debug() {
@@ -758,6 +758,37 @@ fn test_load_cli_cfg_args_global_only_when_workspace_has_no_match() {
 
     let result = build_cfg(partial, &overrides, Some(&workspace)).unwrap();
     assert_eq!(result.assistant.name.as_deref(), Some("from-global"));
+}
+
+#[test]
+#[serial(env_vars)]
+fn doctor_reports_on_the_workspace_the_flag_names() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path().join("workspace");
+    let elsewhere = tmp.path().join("elsewhere");
+    let previous_cwd = env::current_dir().unwrap();
+
+    let _global = EnvVarGuard::set("JP_GLOBAL_CONFIG_DIR", tmp.path().join("global").as_str());
+    let _user_data = EnvVarGuard::set("JP_USER_DATA_DIR", tmp.path().join("user_data").as_str());
+
+    let broken = root.join(".jp").join("conversations").join("17941219991");
+    fs::create_dir_all(&broken).unwrap();
+    fs::write(broken.join("metadata.json"), "not json").unwrap();
+    fs::create_dir_all(&elsewhere).unwrap();
+    env::set_current_dir(&elsewhere).unwrap();
+
+    let cli = Cli::try_parse_from(["jp", "--workspace", root.as_str(), "doctor"]).unwrap();
+    let result = run_inner(cli, OutputFormat::Text);
+
+    env::set_current_dir(previous_cwd).unwrap();
+    assert!(
+        matches!(&result, Err(Error::Command(error)) if error.code.get() == 3),
+        "expected the problems-found status, got: {result:?}"
+    );
+    assert_eq!(
+        fs::read_to_string(broken.join("metadata.json")).unwrap(),
+        "not json"
+    );
 }
 
 #[test]

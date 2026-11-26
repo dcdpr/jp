@@ -1,4 +1,7 @@
-use std::sync::{Arc, Mutex, OnceLock};
+use std::{
+    future,
+    sync::{Arc, Mutex, OnceLock},
+};
 
 use reqwest::{
     Client,
@@ -110,9 +113,10 @@ impl Octocrab {
         serde_json::from_value(response).map_err(Into::into)
     }
 
-    #[allow(clippy::unused_async)] // Keep async for octocrab API compatibility at callsites.
-    pub async fn all_pages<T>(&self, page: Page<T>) -> Result<Vec<T>> {
-        Ok(page.items)
+    // Returns a future so callers keep the `.await` that octocrab's
+    // `all_pages` requires.
+    pub fn all_pages<T>(&self, page: Page<T>) -> impl Future<Output = Result<Vec<T>>> {
+        future::ready(Ok(page.items))
     }
 
     pub(crate) async fn get_json<T: DeserializeOwned>(
