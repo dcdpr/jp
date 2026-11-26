@@ -11,7 +11,7 @@ use jp_conversation::{
 };
 use serde_json::{Map, json};
 
-use super::transcript::{PreparedRequest, RESUMED_TRANSCRIPT_NOTE};
+use super::transcript::PreparedRequest;
 use crate::{provider::CONTINUE_MESSAGE, query::ChatQuery};
 
 fn conversation() -> ChatQuery {
@@ -151,10 +151,7 @@ fn tool_result_continuation_does_not_repeat_the_previous_request() {
         .retain(|event| !matches!(event.kind, EventKind::ChatResponse(_)));
     let model = super::model_details(&"claude-opus-5".parse().unwrap());
     let prepared = PreparedRequest::new(&model, query).unwrap();
-    assert_eq!(prepared.prompt, vec![
-        RESUMED_TRANSCRIPT_NOTE,
-        CONTINUE_MESSAGE
-    ]);
+    assert_eq!(prepared.prompt, vec![CONTINUE_MESSAGE]);
     assert_eq!(prepared.history.len(), 3);
     assert_eq!(
         serde_json::to_value(&prepared.history[2]).unwrap(),

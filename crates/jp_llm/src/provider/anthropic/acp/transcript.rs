@@ -192,25 +192,6 @@ impl PreparedRequest {
     }
 }
 
-/// First prompt block when the transcript ends in a user message.
-///
-/// Claude Code loads such a transcript by inserting an assistant message
-/// reading "No response requested." after it, which the model then reads as its
-/// own reply.
-/// When that user message ends in tool results, Claude Code also appends
-/// "Continue from where you left off." to it.
-/// Tool results have no `session/prompt` form, and attachments stay in the
-/// transcript as native `document` blocks with their title and context, in the
-/// cached prefix.
-/// Either leaves a user message at the end of the transcript, so this block
-/// tells the model who wrote those two messages.
-///
-/// See anthropics/claude-code#109781 and anthropics/claude-code#100726.
-pub(super) const RESUMED_TRANSCRIPT_NOTE: &str =
-    "The client that resumed this session may have added an assistant message reading \"No \
-     response requested.\" after the last user message, and the text \"Continue from where you \
-     left off.\" to that user message. Neither you nor the user wrote them; disregard both.";
-
 /// MCP name assigned by Claude Code to a tool advertised by the `jp` server.
 pub(super) fn tool_name(name: &str) -> String {
     format!("mcp__jp__{name}")
@@ -222,11 +203,14 @@ pub(super) fn tool_name(name: &str) -> String {
 /// Moves every trailing text block across consecutive user messages, so the
 /// transcript ends on an assistant message whenever the trailing user messages
 /// contain only text.
-/// Tool results and document attachments remain in `messages`: tool results
-/// have no `session/prompt` form, and attachments keep their native `document`
-/// blocks there instead of being converted to ACP resources.
-/// When either remains, the returned prompt opens with
-/// [`RESUMED_TRANSCRIPT_NOTE`].
+/// Claude Code loads a transcript that ends in a user message by inserting an
+/// assistant message reading "No response requested." after it
+/// (anthropics/claude-code#109781).
+///
+/// Tool results and document attachments remain in `messages`, so a transcript
+/// ending in either still gets that message: tool results have no
+/// `session/prompt` form, and attachments keep their native `document` blocks
+/// there, with their title and context, in the cached prefix.
 fn take_pending_prompt(messages: &mut Vec<Message>) -> Vec<String> {
     let mut prompt = Vec::new();
     while let Some(last) = messages.last_mut()
@@ -248,12 +232,6 @@ fn take_pending_prompt(messages: &mut Vec<Message>) -> Vec<String> {
 
     if prompt.is_empty() {
         prompt.push(CONTINUE_MESSAGE.to_owned());
-    }
-    if messages
-        .last()
-        .is_some_and(|message| message.role == MessageRole::User)
-    {
-        prompt.insert(0, RESUMED_TRANSCRIPT_NOTE.to_owned());
     }
     prompt
 }

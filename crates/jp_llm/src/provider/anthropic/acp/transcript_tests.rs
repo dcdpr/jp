@@ -144,9 +144,9 @@ fn consecutive_requests_move_into_the_prompt_together() {
 }
 
 // Tool results have no `session/prompt` form, so they remain at the end of the
-// transcript and the prompt prepends `RESUMED_TRANSCRIPT_NOTE`.
+// transcript and the prompt is the continue message.
 #[test]
-fn trailing_tool_results_prompt_disowns_the_inserted_reply() {
+fn trailing_tool_results_stay_in_the_transcript() {
     let timestamp = datetime!(2026-09-11 12:00:00 Z);
     let mut stream =
         ConversationStream::new(AppConfig::new_test().into()).with_created_at(timestamp);
@@ -172,12 +172,8 @@ fn trailing_tool_results_prompt_disowns_the_inserted_reply() {
     let model = super::super::model_details(&"claude-opus-5".parse().unwrap());
     let prepared = PreparedRequest::new(&model, query).unwrap();
     assert_eq!(prepared.prompt, vec![
-        "The client that resumed this session may have added an assistant message reading \"No \
-         response requested.\" after the last user message, and the text \"Continue from where \
-         you left off.\" to that user message. Neither you nor the user wrote them; disregard \
-         both.",
         "Continue your response exactly from where you left off. Do not repeat content you \
-         already produced.",
+         already produced."
     ]);
     assert_eq!(
         serde_json::to_value(prepared.history.last().unwrap()).unwrap(),
@@ -189,7 +185,7 @@ fn trailing_tool_results_prompt_disowns_the_inserted_reply() {
 // The documents remain in the transcript as native `document` blocks, keeping
 // their title and context, while the request text moves into the prompt.
 #[test]
-fn attachments_stay_in_the_transcript_and_the_prompt_disowns_the_inserted_reply() {
+fn attachments_stay_in_the_transcript() {
     let timestamp = datetime!(2026-09-11 12:00:00 Z);
     let mut stream =
         ConversationStream::new(AppConfig::new_test().into()).with_created_at(timestamp);
@@ -205,10 +201,7 @@ fn attachments_stay_in_the_transcript_and_the_prompt_disowns_the_inserted_reply(
         .into();
     let model = super::super::model_details(&"claude-opus-5".parse().unwrap());
     let prepared = PreparedRequest::new(&model, query).unwrap();
-    assert_eq!(prepared.prompt, vec![
-        RESUMED_TRANSCRIPT_NOTE,
-        "Summarize the notes."
-    ]);
+    assert_eq!(prepared.prompt, vec!["Summarize the notes."]);
     assert_eq!(prepared.history.len(), 1);
     let history = serde_json::to_value(&prepared.history[0]).unwrap();
     assert_eq!(history["role"], "user");
