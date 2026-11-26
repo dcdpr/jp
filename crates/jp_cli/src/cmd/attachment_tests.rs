@@ -389,7 +389,7 @@ fn rm_removes_a_file_attachment_whose_file_is_gone() {
     rt.block_on(rm.run(&mut ctx, vec![handle])).unwrap();
     ctx.printer.flush();
 
-    assert!(stored_urls(&ctx, &id).is_empty());
+    assert_eq!(stored_urls(&ctx, &id), Vec::<String>::new());
     assert_eq!(
         *out.lock(),
         format!(
@@ -537,7 +537,7 @@ fn add_refuses_a_url_its_handler_cannot_resolve() {
             )
         ),
     ]);
-    assert!(stored_urls(&ctx, &id).is_empty());
+    assert_eq!(stored_urls(&ctx, &id), Vec::<String>::new());
     assert_eq!(delta_count(&ctx, &id), before);
     assert_eq!(*out.lock(), "");
     assert_eq!(*err.lock(), "");
@@ -606,7 +606,7 @@ fn add_refuses_a_retired_mcp_attachment() {
             ))
         ),
     ]);
-    assert!(stored_urls(&ctx, &id).is_empty());
+    assert_eq!(stored_urls(&ctx, &id), Vec::<String>::new());
     assert_eq!(delta_count(&ctx, &id), before);
     assert_eq!(*out.lock(), "");
     assert_eq!(*err.lock(), "");
@@ -631,7 +631,7 @@ fn rm_removes_a_retired_mcp_attachment() {
     rt.block_on(rm.run(&mut ctx, vec![handle])).unwrap();
     ctx.printer.flush();
 
-    assert!(stored_urls(&ctx, &id).is_empty());
+    assert_eq!(stored_urls(&ctx, &id), Vec::<String>::new());
     assert_eq!(
         *out.lock(),
         format!("Removed {RETIRED_MCP_URL} from conversation {id}\n")
