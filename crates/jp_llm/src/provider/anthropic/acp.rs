@@ -26,6 +26,7 @@ use crate::{
 };
 
 mod cassette;
+mod context;
 mod options;
 mod process;
 mod protocol;

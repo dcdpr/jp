@@ -276,10 +276,7 @@ fn replayed(
     policy: CachePolicy,
 ) -> impl FnOnce(&PreparedRequest) -> Connection {
     move |prepared| Connection {
-        artifact: NativeArtifact {
-            session: recorded_session(&script),
-            path: None,
-        },
+        artifact: NativeArtifact::resume(recorded_session(&script)),
         environment: options::environment(prepared, policy),
         transport: Box::new(Recorded(script)),
     }
