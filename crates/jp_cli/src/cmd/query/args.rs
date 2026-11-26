@@ -21,7 +21,11 @@ use jp_config::{
     providers::llm::AuthEntry,
 };
 
-use super::{Query, parse_schema, string_or_path, tool};
+use super::{
+    Query,
+    input::{parse_schema, string_or_path},
+    tool,
+};
 use crate::{
     Spelling,
     cli::flag::{
