@@ -167,6 +167,19 @@ newer release has fixed.
     `.git` as hard-coded skips.
     Once `tools` is analysed, check that its existing findings don't trip an
     `enforced` rule in `qual.toml`.
+18. **`exclude_files` removes a file from the module tree, not only from the
+    findings.** An excluded file is never parsed, so the modules it declares
+    lose the `#[cfg(test)]` context they inherit through it
+    (`propagate_cfg_test_through_plain_mods` in
+    `src/adapters/shared/cfg_test_files.rs` starts from parsed files only).
+    JP's DRY pass excludes `**/tests.rs` and `**/*_tests.rs`; a
+    `test_support.rs` declared from an excluded `foo/tests.rs` then reads as
+    production code, and every helper in it is reported as `DRY-002` or
+    `DRY-006` dead code.
+    `.config/rustqual/dry.toml` works around it by excluding
+    `**/test_support.rs` as well.
+    Propose parsing excluded files for the module tree and cfg-test
+    classification, and dropping them only when findings are reported.
 
 ## Comments
 

@@ -370,6 +370,37 @@ fn a_test_file_names_its_modules_as_siblings() {
     ]);
 }
 
+/// Helpers and test doubles share one name, so every tool that tells test code
+/// from production by file name finds them.
+#[test]
+fn a_test_file_declares_only_test_files_and_test_support() {
+    let violations = check_files(&[
+        ("src/lib.rs", "mod foo;\n"),
+        ("src/foo.rs", "#[cfg(test)]\nmod tests;\n"),
+        ("src/foo/tests.rs", indoc! {r#"
+            #[path = "mock.rs"]
+            pub(crate) mod mock;
+
+            #[path = "test_support.rs"]
+            pub(crate) mod test_support;
+
+            #[path = "other_tests.rs"]
+            mod other_tests;
+        "#}),
+        ("src/foo/mock.rs", ""),
+        ("src/foo/test_support.rs", ""),
+        ("src/foo/other_tests.rs", ""),
+    ]);
+
+    assert_eq!(violations, [at(
+        "src/foo/tests.rs",
+        2,
+        Breach::SupportModuleName {
+            path: "mock.rs".to_owned()
+        }
+    )]);
+}
+
 #[test]
 fn a_single_test_file_declares_no_further_modules() {
     let violations = check_files(&[

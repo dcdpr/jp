@@ -55,6 +55,12 @@ pub(crate) mod test_support;
 // The tests themselves may follow, or live only in `other_tests.rs`.
 ```
 
+A module a test file declares is another test file, or the module's one
+`test_support.rs`, which holds what the tests share and no tests of its own:
+helpers, fixtures, and test doubles.
+The fixed name lets a tool that tells test code from production by file name
+find it, as rustqual's DRY pass does (`.config/rustqual/dry.toml`).
+
 Every `mod` in a test file carries a `#[path]`. rustc treats a file loaded
 through a `#[path]` as owning its directory, and rustqual's resolver does not,
 so an unpathed `mod` would resolve differently for the two.
@@ -86,7 +92,7 @@ block, and no test-only item, field, variant, match arm, statement, or `use`.
 
 `#[test]` functions, including `#[tokio::test]` and its kin, appear only in
 files named `tests.rs` or `*_tests.rs`.
-A `test_support.rs` or a test double holds none.
+A `test_support.rs` holds none.
 
 `mod.rs` files are not used: `foo/mod.rs` is `foo.rs`, so `foo_tests.rs` and
 `foo/tests.rs` each have one place.
@@ -105,12 +111,10 @@ In order of preference:
    it.
    The test module is a child module, so it still reaches the parent's private
    items.
-4. Move it into a `test_support` module declared from `foo/tests.rs`, when other
-   modules' tests use it.
+4. Move it into `foo/test_support.rs`, declared from `foo/tests.rs`, when other
+   modules' tests use it, or when it is a test double.
    They name it `foo::tests::test_support::…`, and it can still reach `foo`'s
    private items, as any descendant can.
-5. Put a test double in a module of its own declared from `foo/tests.rs`, such
-   as `foo/mock.rs`.
 
 A `PartialEq` impl that only tests need, comparing `Debug` output, is replaced
 at its call sites with `assert_matches!` where that loses nothing, and moved

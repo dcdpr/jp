@@ -5,11 +5,11 @@ use serde_json::json;
 
 use super::*;
 
-#[path = "fixture.rs"]
-pub(super) mod fixture;
+#[path = "test_support.rs"]
+pub(super) mod test_support;
 
 fn items() -> Vec<Item> {
-    outline::flatten(&fixture::stream_symbols())
+    outline::flatten(&test_support::stream_symbols())
 }
 
 fn item(label: &str, start: usize, end: usize) -> GroupItem {
@@ -81,7 +81,7 @@ fn a_statement_past_the_cap_falls_back_to_its_largest_part_within_it() {
 #[test]
 fn groups_references_by_their_enclosing_item() {
     let items = items();
-    let lines = fixture::stream_lines();
+    let lines = test_support::stream_lines();
 
     // `use crate::Render;`, both references on line 21, `total`, and the test.
     let groups = group_lines(&items, &lines, &[0, 21, 21, 27, 37], false);
@@ -125,7 +125,7 @@ fn groups_references_by_their_enclosing_item() {
 #[test]
 fn every_reference_in_a_test_file_is_a_test_reference() {
     let items = items();
-    let lines = fixture::stream_lines();
+    let lines = test_support::stream_lines();
 
     let groups = group_lines(&items, &lines, &[27], true);
 
@@ -138,7 +138,7 @@ fn every_reference_in_a_test_file_is_a_test_reference() {
 #[test]
 fn a_file_with_test_and_other_references_counts_toward_both() {
     let items = items();
-    let lines = fixture::stream_lines();
+    let lines = test_support::stream_lines();
     let mut references = Hits::default();
 
     tally(
@@ -157,7 +157,7 @@ fn a_file_with_test_and_other_references_counts_toward_both() {
 #[test]
 fn an_impl_block_is_labelled_by_its_own_name() {
     let items = items();
-    let lines = fixture::stream_lines();
+    let lines = test_support::stream_lines();
 
     // `impl Render for Stream {`, a reference to `Render` in an impl header.
     let groups = group_lines(&items, &lines, &[19], false);

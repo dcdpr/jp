@@ -337,6 +337,11 @@ impl<'ast> Visit<'ast> for Tests {
                     .breaches
                     .push((decl.line, Breach::NotSibling { path: path.clone() }));
             }
+            Some(path) if !layout::may_declare_from_tests(Utf8Path::new(path)) => {
+                self.report
+                    .breaches
+                    .push((decl.line, Breach::SupportModuleName { path: path.clone() }));
+            }
             Some(_) => {}
         }
         self.report

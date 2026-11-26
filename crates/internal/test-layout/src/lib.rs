@@ -129,6 +129,14 @@ pub enum Breach {
     #[error("`#[path = \"{path}\"]` in a test file must name a file in the same directory")]
     NotSibling { path: String },
 
+    /// A module a test file declares that is neither a test file nor the
+    /// module's `test_support.rs`.
+    #[error(
+        "`#[path = \"{path}\"]` in a test file names neither a test file (`tests.rs`, \
+         `*_tests.rs`) nor `test_support.rs`: put helpers and test doubles in `test_support.rs`"
+    )]
+    SupportModuleName { path: String },
+
     /// A `*_tests.rs` file declaring further test modules.
     #[error(
         "a `*_tests.rs` file is a module's only test module, so it declares none: move this file \

@@ -1,10 +1,10 @@
 use super::{
-    super::{protocol::Position, tests::fixture},
+    super::{protocol::Position, tests::test_support},
     *,
 };
 
 fn items() -> Vec<Item> {
-    flatten(&fixture::stream_symbols())
+    flatten(&test_support::stream_symbols())
 }
 
 fn name(items: &[Item], index: Option<usize>) -> Option<&str> {
@@ -133,7 +133,7 @@ fn finds_children_by_name() {
 #[test]
 fn code_starts_after_doc_comments_and_attributes() {
     let items = items();
-    let lines = fixture::stream_lines();
+    let lines = test_support::stream_lines();
 
     assert_eq!(code_start(&items[0], &lines), 6);
     assert_eq!(code_start(&items[4], &lines), 14);
@@ -143,7 +143,7 @@ fn code_starts_after_doc_comments_and_attributes() {
 #[test]
 fn reads_the_first_doc_paragraph_from_the_source() {
     let items = items();
-    let lines = fixture::stream_lines();
+    let lines = test_support::stream_lines();
     let doc = |index: usize, max: usize| doc_paragraph(&items[index], &lines, max);
 
     // `Stream`'s doc has a second paragraph, behind the derive attribute.

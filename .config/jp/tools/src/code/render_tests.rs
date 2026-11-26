@@ -2,10 +2,10 @@ use std::rc::Rc;
 
 use pretty_assertions::assert_eq;
 
-use super::{super::tests::fixture, *};
+use super::{super::tests::test_support, *};
 
 fn stream_source() -> Rc<[String]> {
-    fixture::stream_lines().into()
+    test_support::stream_lines().into()
 }
 
 fn group(label: &str, start: usize, end: usize, lines: &[usize], test: bool) -> Group {

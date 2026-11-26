@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use super::*;
-use crate::debug_jp::util::launch::{LaunchResult, Termination, tests::mock::MockLauncher};
+use crate::debug_jp::util::launch::{LaunchResult, Termination, tests::test_support::MockLauncher};
 
 fn spec(workspace: &Utf8Path) -> LaunchSpec {
     LaunchSpec {

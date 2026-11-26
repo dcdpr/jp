@@ -128,6 +128,12 @@ pub(crate) fn holds_test_functions(file: &Utf8Path) -> bool {
         .is_some_and(|stem| stem == "tests" || stem.ends_with("_tests"))
 }
 
+/// Whether a test file may declare a module loaded from `file`: another test
+/// file, or the module's one `test_support.rs`.
+pub(crate) fn may_declare_from_tests(file: &Utf8Path) -> bool {
+    holds_test_functions(file) || file.file_name() == Some("test_support.rs")
+}
+
 /// Resolve `.` and `..` segments textually, keeping a leading `..` that has
 /// nothing to cancel.
 fn normalize(path: &Utf8Path) -> Utf8PathBuf {

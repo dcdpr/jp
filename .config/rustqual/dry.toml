@@ -24,10 +24,17 @@
 # gate ignores those because only `DRY-*` rules are collected here; whether a
 # marker is stale is decided in the main pass.
 
+# `test_support.rs` is excluded too, though it holds no tests. An excluded file
+# drops out of the module tree as well as the findings, so this pass never sees
+# the `tests.rs` that declares a `test_support.rs`, and would report its helpers
+# as dead production code. The test layout (W-0e0vd74) makes `test_support.rs`
+# the one name a test file may give a module that is not a test file. Drop the
+# glob once excluded files stay in the module tree (T-0yh5j3r item 18).
 exclude_files = [
     "**/*_tests.rs",
     "**/tests.rs",
     "**/tests/**",
+    "**/test_support.rs",
 ]
 
 # `DRY-004` (wildcard imports) is covered by `clippy::wildcard_imports` (enabled

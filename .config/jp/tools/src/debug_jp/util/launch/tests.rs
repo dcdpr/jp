@@ -2,8 +2,8 @@ use std::time::Duration;
 
 use super::*;
 
-#[path = "mock.rs"]
-pub(crate) mod mock;
+#[path = "test_support.rs"]
+pub(crate) mod test_support;
 
 /// Tiny budget so the escalation ladder runs in well under a second.
 /// `run` is generous enough that an immediately-exiting child is reliably
