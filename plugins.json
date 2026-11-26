@@ -10,19 +10,19 @@
       "binaries": {
         "aarch64-apple-darwin": {
           "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-gui-aarch64-apple-darwin",
-          "sha256": "662164aea01637be1376d6944e30c79fcd6475fa53783bb1b396035f838dd980"
+          "sha256": "8cda2b5bec3130c2b9c54c5ea843895eae8de8e5d38671651981bd0a75e943af"
         },
         "x86_64-apple-darwin": {
           "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-gui-x86_64-apple-darwin",
-          "sha256": "eccaf1adce6244144e7bf424d25f231fb0520c7852def467fafc290286bf2f2a"
+          "sha256": "36a25a7bc133ac700467423529ea69a1bbdda7a17184c0c4f8339fb2ca45600a"
         },
         "x86_64-pc-windows-msvc": {
           "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-gui-x86_64-pc-windows-msvc",
-          "sha256": "b1b88233ec2d8391460cfe872dd6e1b6da9454dd661fcb2fa53bbff5e973bd60"
+          "sha256": "86fa732c7b485b4f28980a7abcdb615fe50bb279ac1b8673916ae7592f0cfb54"
         },
         "x86_64-unknown-linux-gnu": {
           "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-gui-x86_64-unknown-linux-gnu",
-          "sha256": "516d906cec2133141fcd15a6b855f2dd2113acd3e25bba988bfb4b23c14cb8df"
+          "sha256": "e9ffbf8830b2b6d7345d0417c47519bd73ef81f7e623ec55e0c4a7acb02da692"
         }
       }
     },
@@ -35,19 +35,19 @@
       "binaries": {
         "aarch64-apple-darwin": {
           "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-path-aarch64-apple-darwin",
-          "sha256": "a52b968506aff7111f524002172fdcda2cfbd352e30b390c3c1c1ebd1708e937"
+          "sha256": "f936434d5d13f9aa00eb9737b407061fec41d3862b1bff72bdc600db270caeca"
         },
         "x86_64-apple-darwin": {
           "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-path-x86_64-apple-darwin",
-          "sha256": "0f4bf0c13e2bbfe260841b9284b5b2c3b64bcf70192b599e84220dd553d812ff"
+          "sha256": "5e2cb002922441cee08e22b38b457cbc49b4d4c8cc76a238c3fc8e8a8e197f86"
         },
         "x86_64-pc-windows-msvc": {
           "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-path-x86_64-pc-windows-msvc",
-          "sha256": "1f5848e01f2878ec48524e7eae12fcc0fe42adcc3a4e171d775e9acb2ebf9559"
+          "sha256": "86e733619fb82babb0a4c3a4968d64d8a16763e5f0fd45e3902e54085e9b9afa"
         },
         "x86_64-unknown-linux-gnu": {
           "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-path-x86_64-unknown-linux-gnu",
-          "sha256": "1190795477077215399fceebef97ce8f0635d7c7ed37a1473c43425be14d0db2"
+          "sha256": "761f3a9d856bd8e72e3826b855e2599c0c07b63c59284559ca6b2970a6eaa571"
         }
       }
     },
@@ -72,19 +72,19 @@
       "binaries": {
         "aarch64-apple-darwin": {
           "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-serve-web-aarch64-apple-darwin",
-          "sha256": "f9b527d68787410dfe0599d6d30e37a981c1be930dce2a9b6535d1a3261004f5"
+          "sha256": "71a285ad3434d590d445761852e231c563dea18b59df36ae50f2c9d29e5f6564"
         },
         "x86_64-apple-darwin": {
           "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-serve-web-x86_64-apple-darwin",
-          "sha256": "d0f091b6fd5161fcc3b4b9a2ed3bb151092647df5fd99f3cf89bed439ec518d8"
+          "sha256": "0190a255e64d8712c8dde41eebe2c102dcbe609f163c72dbf2c1ff4eaeec53b5"
         },
         "x86_64-pc-windows-msvc": {
           "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-serve-web-x86_64-pc-windows-msvc",
-          "sha256": "1593a1f17d51dbb4643d80c3643553b519dcd4600d39f1458eacabdc38f2fcf0"
+          "sha256": "896e3dd92baa1dee1f60a389d50e9acf8b8c64487b0d7aa006d5eb1cdc073ee8"
         },
         "x86_64-unknown-linux-gnu": {
           "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-serve-web-x86_64-unknown-linux-gnu",
-          "sha256": "d23530cc9db7bd2442773f064c4df54411bded09809accac405c0e8c38f176c4"
+          "sha256": "2db0db234d98085458fc763d8c24fcdad2873c1ddc552a1ff270227b8124ff45"
         }
       }
     }
