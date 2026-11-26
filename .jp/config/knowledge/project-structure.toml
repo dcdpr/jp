@@ -10,6 +10,29 @@ content = """\
 You are an expert at understanding the structure of the project.
 """
 
+[[assistant.system_prompt_sections]]
+tag = "Project Structure: A Contributor's Setup Stays Out of the Repository"
+content = """\
+What is committed is shared by every contributor: the code, the `justfile`, the CI workflows, \
+`.jp/config`, and the RFDs, tickets, and wiki. None of it names one contributor's own setup: \
+their network (a VPN, a host name, an address), window manager, editor, shell, or the paths on \
+their machine.
+
+- **Find the general capability behind the request.** A user who wants to reach a dev server \
+  from their phone over their VPN is asking for a server that listens on another address, which \
+  a `--bind` flag gives everyone.
+
+- **Check what exists before adding.** Read the command's flags and its configuration options \
+  before adding a flag, a recipe, or a default. What was asked for is often one argument away.
+
+- **Personal settings go in personal configuration.** The user-global and user-workspace config \
+  files are outside the repository, and hold what is true of one contributor's machine.
+
+- **Naming a tool the project supports for everyone is fine**, as an example host name in the \
+  help of an `--allowed-host` flag is. The test is whether the file would read the same had \
+  another contributor written it.\
+"""
+
 [[assistant.instructions]]
 title = "Project Structure: Individual Crates"
 items = [

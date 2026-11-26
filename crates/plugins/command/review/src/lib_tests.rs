@@ -3,6 +3,7 @@ use std::{
     fs::{self, File},
     io::{self, BufReader, Cursor, Read},
     net::{SocketAddr, TcpListener},
+    sync::{Arc, Mutex},
     thread,
 };
 
@@ -20,7 +21,7 @@ use crate::{
     anchor::{Anchor, Target},
     model::{Content, NewComment, Role},
     pass::NewPass,
-    store::{Store, now},
+    store::{Serving, Store, now},
     test_support::{CONVERSATION, Written, http},
 };
 
@@ -124,11 +125,17 @@ fn created() -> Step {
 }
 
 fn completed(outcome: QueryOutcome) -> Step {
+    answered(outcome, None)
+}
+
+/// The turn ends, `answer` being the last thing the assistant said in it.
+fn answered(outcome: QueryOutcome, answer: Option<&str>) -> Step {
     Step::Send(HostToPlugin::QueryComplete(QueryCompleteResponse {
         id: Some("pass".to_owned()),
         conversation: CONVERSATION.to_owned(),
         outcome,
         data: None,
+        answer: answer.map(ToOwned::to_owned),
     }))
 }
 
@@ -214,6 +221,37 @@ fn init_message(
         output_format: format,
         tool: None,
     }
+}
+
+/// A browser that records the pages it is asked to open.
+#[derive(Default)]
+struct Opened(Mutex<Vec<String>>);
+
+impl Browser for Opened {
+    fn open(&self, url: &str) -> Result<(), String> {
+        self.0.lock().unwrap().push(url.to_owned());
+        Ok(())
+    }
+}
+
+impl Opened {
+    fn urls(&self) -> Vec<String> {
+        self.0.lock().unwrap().clone()
+    }
+}
+
+/// Run `args` the way the host does, printing text, opening pages in `browser`.
+fn run_opening(root: &Utf8Path, args: &[&str], browser: &Opened) -> Ran {
+    run_opening_as(root, args, OutputFormat::Text, browser)
+}
+
+fn run_opening_as(root: &Utf8Path, args: &[&str], format: OutputFormat, browser: &Opened) -> Ran {
+    let init = HostToPlugin::Init(Box::new(init_message(root, args, format, Map::new())));
+    let input = serde_json::to_string(&init).unwrap() + "\n";
+    let output = Written::default();
+    run_with(Cursor::new(input.into_bytes()), output.clone(), browser).unwrap();
+
+    ran(&output.messages())
 }
 
 /// The messages the plugin sends in answer to `message`.
@@ -856,6 +894,46 @@ fn a_sent_comment_takes_replies_and_is_resolved() {
     );
 }
 
+/// The pass sent comment 1 and its turn left it unanswered, so the reviewer
+/// wrote in it last.
+#[test]
+fn a_resolved_comment_is_opened_again() {
+    let root = workspace();
+    let id = commented(root.path());
+    session(vec![
+        init_step(root.path(), &["submit", &id]),
+        created(),
+        completed(QueryOutcome::Finished),
+    ]);
+    run_args(root.path(), &["comment", &id, "Rename it."]);
+    let (first, draft) = (format!("{id}#1"), format!("{id}#2"));
+    run_args(root.path(), &["resolve", &first]);
+
+    assert_eq!(
+        run_args(root.path(), &["reopen", &first]).text,
+        format!("Reopened {first}.\n")
+    );
+    assert_eq!(
+        run_args(root.path(), &["reopen", &first]).text,
+        format!("{first} is open already.\n")
+    );
+    assert_eq!(
+        run_args(root.path(), &["reopen", &draft]).reason,
+        Some(format!("{draft} is a draft, not yet sent."))
+    );
+
+    let reopened = run_json(root.path(), &["show", &id])["comments"][0].clone();
+    assert_eq!(reopened["status"], "open");
+    assert_eq!(reopened.get("resolved_at"), None);
+
+    run_args(root.path(), &["resolve", &first]);
+    run_args(root.path(), &["close", &id]);
+    assert_eq!(
+        run_args(root.path(), &["reopen", &first]).reason,
+        Some(format!("{id} is closed."))
+    );
+}
+
 #[test]
 fn a_closed_review_takes_no_changes() {
     let root = workspace();
@@ -874,6 +952,95 @@ fn a_closed_review_takes_no_changes() {
     assert_eq!(refused.reason, Some(format!("{id} is closed.")));
     let listed = run_args(root.path(), &["ls"]).text;
     assert!(listed.starts_with(&format!("{id}  closed  ")), "{listed}");
+}
+
+#[test]
+fn a_closed_review_is_opened_again() {
+    let root = workspace();
+    let id = start(root.path());
+    run_args(root.path(), &["close", &id]);
+
+    assert_eq!(
+        run_args(root.path(), &["reopen", &id]).text,
+        format!("Reopened {id}.\n")
+    );
+    assert_eq!(
+        run_args(root.path(), &["reopen", &id]).text,
+        format!("{id} is open already.\n")
+    );
+
+    let commented = run_args(root.path(), &["comment", &id, "Not done yet."]);
+    assert_eq!(commented.reason, None);
+    let listed = run_args(root.path(), &["ls"]).text;
+    assert!(listed.starts_with(&format!("{id}  open  ")), "{listed}");
+}
+
+#[test]
+fn a_passage_is_approved_and_a_file_read_to_a_line() {
+    let root = workspace();
+    let id = start(root.path());
+
+    assert_eq!(
+        run_args(root.path(), &["approve", &id, "--at", "docs/a.md:3"]).text,
+        "Approved docs/a.md:3, as approval 1.\n"
+    );
+    assert_eq!(
+        run_args(root.path(), &["read-until", &id, "--at", "docs/a.md:3"]).text,
+        "Read docs/a.md through line 3.\n"
+    );
+
+    let shown = run_args(root.path(), &["show", &id]).text;
+    assert!(
+        shown.contains(
+            "\n## Read so far\n\n- docs/a.md through line 3\n\n## Approved\n\n- 1: docs/a.md:3\n"
+        ),
+        "{shown}"
+    );
+
+    assert_eq!(
+        run_args(root.path(), &["unapprove", &id, "1"]).text,
+        "Took back approval 1.\n"
+    );
+    assert_eq!(
+        run_args(root.path(), &["unapprove", &id, "1"]).reason,
+        Some(format!("{id} has no approval 1."))
+    );
+    let clear = ["read-until", &id, "--at", "docs/a.md", "--clear"];
+    assert_eq!(
+        run_args(root.path(), &clear).text,
+        "Forgot how far docs/a.md was read.\n"
+    );
+    assert_eq!(
+        run_args(root.path(), &clear).text,
+        format!("{id} doesn't say how far docs/a.md was read.\n")
+    );
+}
+
+#[test]
+fn approving_and_reading_need_lines_to_name() {
+    let root = workspace();
+    let id = start(root.path());
+
+    assert_eq!(
+        run_args(root.path(), &["approve", &id, "--at", "docs/a.md"]).reason,
+        Some("An approval is of a range of a file: lines, or a span within them.".to_owned())
+    );
+    assert_eq!(
+        run_args(root.path(), &["read-until", &id, "--at", "docs/a.md"]).reason,
+        Some(
+            "`docs/a.md` names no line; name the last line read, as in `docs/a.md:120`.".to_owned()
+        )
+    );
+
+    run_args(root.path(), &["close", &id]);
+    assert_eq!(
+        run_args(root.path(), &["approve", &id, "--at", "docs/a.md:3"]).reason,
+        Some(format!("{id} is closed."))
+    );
+    assert_eq!(
+        run_args(root.path(), &["read-until", &id, "--at", "docs/a.md:3"]).reason,
+        Some(format!("{id} is closed."))
+    );
 }
 
 /// Closing is the reviewer's call, but comments left behind are easy to miss.
@@ -1659,6 +1826,59 @@ fn a_pass_left_by_a_gone_process_is_recorded_as_interrupted() {
     assert!(shown.contains("- **Passes**: 1 interrupted\n"), "{shown}");
 }
 
+/// The host reports the last thing the assistant said in the turn, which the
+/// pass keeps and `show` prints under it.
+#[test]
+fn a_pass_keeps_the_closing_message_and_show_prints_it() {
+    let root = workspace();
+    let id = commented(root.path());
+
+    let messages = session(vec![
+        init_step(root.path(), &["submit", &id]),
+        created(),
+        answered(
+            QueryOutcome::Finished,
+            Some("Renamed the first line.\n\nNothing else changed.\n"),
+        ),
+    ]);
+
+    assert_eq!(ran(&messages).code, 0);
+    assert_eq!(
+        stored(root.path(), &id)["passes"][0]["ended"]["answer"],
+        "Renamed the first line.\n\nNothing else changed.\n"
+    );
+    let shown = run_args(root.path(), &["show", &id]).text;
+    assert!(
+        shown.contains(
+            "- **Passes**: 1 completed\n\n## Pass 1 (completed)\n\nRenamed the first \
+             line.\n\nNothing else changed.\n\n## "
+        ),
+        "{shown}"
+    );
+}
+
+/// A host older than protocol 16 sends no closing message, and the pass still
+/// records how it ended.
+#[test]
+fn a_pass_without_a_closing_message_shows_none() {
+    let root = workspace();
+    let id = commented(root.path());
+
+    session(vec![
+        init_step(root.path(), &["submit", &id]),
+        created(),
+        completed(QueryOutcome::Finished),
+    ]);
+
+    let ended = &stored(root.path(), &id)["passes"][0]["ended"];
+    assert_eq!(
+        (ended["outcome"].clone(), ended["answer"].clone()),
+        (json!("completed"), Value::Null)
+    );
+    let shown = run_args(root.path(), &["show", &id]).text;
+    assert!(!shown.contains("## Pass 1"), "{shown}");
+}
+
 #[test]
 fn submit_prints_one_record_under_a_json_format() {
     let root = workspace();
@@ -1833,11 +2053,154 @@ fn serve_answers_until_the_host_shuts_it_down() {
         }
     };
 
-    assert_eq!(listed, (200, json!({ "reviews": [] })));
-    assert_eq!(allowed, (200, json!({ "reviews": [] })));
+    // The workspace is named after its root directory, a temporary one here.
+    let empty = json!({ "workspace": root.path().file_name().unwrap(), "reviews": [] });
+    assert_eq!(listed, (200, empty.clone()));
+    assert_eq!(allowed, (200, empty));
     assert_eq!(unknown.0, 403);
     assert_eq!((exit.code, exit.reason), (0, None));
     assert_eq!(plugin.join().unwrap(), Ok(()));
+}
+
+/// `jp review open` and `start --open` find the server through the store, and
+/// only while it runs; a second server for the same reviews is refused.
+#[test]
+fn serve_opens_the_list_and_tells_open_where_it_listens() {
+    let root = workspace();
+    let id = start(root.path());
+    let none = run_opening(root.path(), &["open"], &Opened::default());
+    assert_eq!(
+        (none.code, none.reason.as_deref()),
+        (
+            1,
+            Some(
+                "No `jp review serve` runs for this workspace's reviews. Start one with `jp \
+                 review serve --open`."
+            )
+        )
+    );
+
+    let init = HostToPlugin::Init(Box::new(init_message(
+        root.path(),
+        &["serve", "--port", "0", "--open"],
+        OutputFormat::Text,
+        Map::new(),
+    )));
+    let (plugin_in, mut to_plugin) = io::pipe().unwrap();
+    let (from_plugin, plugin_out) = io::pipe().unwrap();
+    writeln!(to_plugin, "{}", serde_json::to_string(&init).unwrap()).unwrap();
+    let served = Arc::new(Opened::default());
+    let serving = Arc::clone(&served);
+    let plugin = thread::spawn(move || run_with(BufReader::new(plugin_in), plugin_out, &*serving));
+    let mut from_plugin = BufReader::new(from_plugin);
+    let mut next = || -> PluginToHost {
+        let mut line = String::new();
+        from_plugin.read_line(&mut line).unwrap();
+        serde_json::from_str(&line).unwrap()
+    };
+    assert!(matches!(next(), PluginToHost::Ready(_)));
+    let PluginToHost::Print(announced) = next() else {
+        panic!("the plugin says where it listens");
+    };
+    let base = announced
+        .text
+        .trim()
+        .strip_prefix("Serving reviews at ")
+        .unwrap()
+        .to_owned();
+
+    let opened = Opened::default();
+    let review = run_opening(root.path(), &["open", &id], &opened);
+    let started = run_opening(root.path(), &["start", "docs/a.md", "--open"], &opened);
+    let missing = run_opening(root.path(), &["open", "R-0000000"], &opened);
+    let second = run_args(root.path(), &["serve", "--port", "0"]);
+
+    writeln!(
+        to_plugin,
+        "{}",
+        serde_json::to_string(&HostToPlugin::Shutdown).unwrap()
+    )
+    .unwrap();
+    while !matches!(next(), PluginToHost::Exit(_)) {}
+    assert_eq!(plugin.join().unwrap(), Ok(()));
+    let after = run_opening(root.path(), &["start", "docs/a.md", "--open"], &opened);
+
+    let new = started.text.split_once(':').unwrap().0;
+    assert_eq!(served.urls(), [format!("{base}/")]);
+    assert_eq!(review.text, format!("{base}/reviews/{id}\n"));
+    assert_eq!(
+        started.chrome,
+        format!("Opened {base}/reviews/{new}.\n"),
+        "the review is started, then opened"
+    );
+    assert_eq!(opened.urls(), [
+        format!("{base}/reviews/{id}"),
+        format!("{base}/reviews/{new}")
+    ]);
+    assert_eq!(missing.reason.as_deref(), Some("No review R-0000000."));
+    assert_eq!(
+        (second.code, second.reason),
+        (
+            1,
+            Some(format!(
+                "`jp review serve` serves these reviews already, at {base}. Open it with `jp \
+                 review open`."
+            ))
+        )
+    );
+    assert_eq!(after.code, 0, "the review is started without a server");
+    assert!(
+        after
+            .chrome
+            .starts_with("Warning: No `jp review serve` runs for this workspace's reviews."),
+        "{}",
+        after.chrome
+    );
+}
+
+/// The server acquires the store lock before binding its listener and writing
+/// its address file.
+#[test]
+fn open_while_the_server_starts_asks_to_try_again() {
+    let root = workspace();
+    let store = Store::new(root.path().join(".user/review"));
+    let Ok(Serving::Claimed(_lock)) = store.claim_server() else {
+        panic!("nothing else serves the reviews");
+    };
+    let opened = Opened::default();
+
+    let ran = run_opening(root.path(), &["open"], &opened);
+
+    assert_eq!(
+        (ran.code, ran.reason.as_deref()),
+        (
+            1,
+            Some("`jp review serve` is starting, and hasn't said where it listens yet; try again.")
+        )
+    );
+    assert_eq!(opened.urls(), Vec::<String>::new());
+}
+
+#[test]
+fn open_names_the_review_as_json() {
+    let root = workspace();
+    let id = start(root.path());
+    let store = Store::new(root.path().join(".user/review"));
+    let Ok(Serving::Claimed(_lock)) = store.claim_server() else {
+        panic!("nothing else serves the reviews");
+    };
+    store.serving_at("http://127.0.0.1:3001").unwrap();
+    let opened = Opened::default();
+
+    let ran = run_opening_as(root.path(), &["open", &id], OutputFormat::Json, &opened);
+
+    assert_eq!(
+        serde_json::from_str::<Value>(&ran.text).unwrap(),
+        json!({ "url": format!("http://127.0.0.1:3001/reviews/{id}") })
+    );
+    assert_eq!(opened.urls(), [format!(
+        "http://127.0.0.1:3001/reviews/{id}"
+    )]);
 }
 
 #[test]

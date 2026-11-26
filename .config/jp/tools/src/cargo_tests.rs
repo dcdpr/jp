@@ -8,8 +8,8 @@ use pretty_assertions::assert_eq;
 use serde_json::{Map, Value, json};
 
 use super::{
-    Tool, cargo_scope, comfort_scope, ensure_workspace_root, format_duration, note_duration,
-    packages, required_capabilities, run, rustflags,
+    Tool, browser_packages, cargo_scope, comfort_scope, ensure_workspace_root, format_duration,
+    note_duration, packages, required_capabilities, run, rustflags,
 };
 use crate::util::{
     OneOrMany,
@@ -19,6 +19,31 @@ use crate::util::{
 /// A `package` argument as the assistant sends it.
 fn package_arg(value: Value) -> Option<OneOrMany<String>> {
     serde_json::from_value(value).unwrap()
+}
+
+/// A browser crate says so in `[package.metadata.jp]`; packages named narrow
+/// the browser crates to those among them.
+#[test]
+fn browser_crates_are_those_marked_wasm() {
+    let metadata = r#"{
+      "packages": [
+        { "name": "a", "metadata": null },
+        { "name": "a-ui", "metadata": { "jp": { "wasm": true } } },
+        { "name": "b-ui", "metadata": { "jp": { "wasm": true } } },
+        { "name": "c", "metadata": { "jp": { "wasm": false } } },
+        { "name": "d" }
+      ]
+    }"#;
+
+    assert_eq!(
+        browser_packages(metadata, &[]),
+        Ok(vec!["a-ui".to_owned(), "b-ui".to_owned()])
+    );
+    assert_eq!(
+        browser_packages(metadata, &["a".to_owned(), "b-ui".to_owned()]),
+        Ok(vec!["b-ui".to_owned()])
+    );
+    assert!(browser_packages("{", &[]).is_err());
 }
 
 #[test]

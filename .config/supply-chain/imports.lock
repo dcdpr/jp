@@ -57,6 +57,13 @@ user-id = 6743
 user-login = "epage"
 user-name = "Ed Page"
 
+[[publisher.any_spawner]]
+version = "0.3.0-rc3"
+when = "2025-04-26"
+user-id = 130155
+user-login = "gbj"
+user-name = "Greg Johnston"
+
 [[publisher.async-trait]]
 version = "0.1.89"
 when = "2025-08-14"
@@ -170,6 +177,13 @@ user-id = 6743
 user-login = "epage"
 user-name = "Ed Page"
 
+[[publisher.const_str_slice_concat]]
+version = "0.1.0"
+when = "2024-04-27"
+user-id = 130155
+user-login = "gbj"
+user-name = "Greg Johnston"
+
 [[publisher.countme]]
 version = "3.0.1"
 when = "2022-03-08"
@@ -218,6 +232,13 @@ when = "2025-10-27"
 user-id = 3618
 user-login = "dtolnay"
 user-name = "David Tolnay"
+
+[[publisher.either_of]]
+version = "0.1.9"
+when = "2026-04-16"
+user-id = 130155
+user-login = "gbj"
+user-name = "Greg Johnston"
 
 [[publisher.encoding_rs]]
 version = "0.8.35"
@@ -398,15 +419,28 @@ user-login = "shepmaster"
 user-name = "Jake Goulding"
 
 [[publisher.js-sys]]
-version = "0.3.90"
-when = "2026-02-24"
+version = "0.3.95"
+when = "2026-04-10"
 user-id = 145038
 user-login = "guybedford"
 user-name = "Guy Bedford"
 
+[[publisher.leptos_dom]]
+version = "0.9.0-rc1"
+when = "2026-10-31"
+user-id = 130155
+user-login = "gbj"
+user-name = "Greg Johnston"
+
 [[publisher.libc]]
 version = "0.2.189"
 when = "2026-07-21"
+user-id = 55123
+user-login = "rust-lang-owner"
+
+[[publisher.libm]]
+version = "0.2.16"
+when = "2026-01-24"
 user-id = 55123
 user-login = "rust-lang-owner"
 
@@ -452,6 +486,13 @@ user-id = 359
 user-login = "seanmonstar"
 user-name = "Sean McArthur"
 
+[[publisher.minicov]]
+version = "0.3.8"
+when = "2025-12-05"
+user-id = 2915
+user-login = "Amanieu"
+user-name = "Amanieu d'Antras"
+
 [[publisher.mio]]
 version = "1.2.4"
 when = "2026-10-03"
@@ -465,6 +506,13 @@ when = "2024-03-15"
 user-id = 2017
 user-login = "mbrubeck"
 user-name = "Matt Brubeck"
+
+[[publisher.next_tuple]]
+version = "0.1.0"
+when = "2024-11-30"
+user-id = 130155
+user-login = "gbj"
+user-name = "Greg Johnston"
 
 [[publisher.object]]
 version = "0.36.7"
@@ -500,6 +548,13 @@ when = "2025-01-23"
 user-id = 1
 user-login = "alexcrichton"
 user-name = "Alex Crichton"
+
+[[publisher.or_poisoned]]
+version = "0.1.0"
+when = "2024-04-27"
+user-id = 130155
+user-login = "gbj"
+user-name = "Greg Johnston"
 
 [[publisher.ordered-float]]
 version = "5.5.0"
@@ -594,6 +649,13 @@ trusted-publisher = "github:rust-random/rand"
 version = "0.10.1"
 when = "2026-04-13"
 trusted-publisher = "github:rust-random/rand_core"
+
+[[publisher.reactive_graph]]
+version = "0.3.0-rc1"
+when = "2026-10-31"
+user-id = 130155
+user-login = "gbj"
+user-name = "Greg Johnston"
 
 [[publisher.ref-cast]]
 version = "1.0.24"
@@ -742,6 +804,13 @@ user-id = 189
 user-login = "BurntSushi"
 user-name = "Andrew Gallant"
 
+[[publisher.tachys]]
+version = "0.3.0-rc1"
+when = "2026-10-31"
+user-id = 130155
+user-login = "gbj"
+user-name = "Greg Johnston"
+
 [[publisher.termcolor]]
 version = "1.4.1"
 when = "2024-01-10"
@@ -769,6 +838,13 @@ when = "2026-08-08"
 user-id = 3618
 user-login = "dtolnay"
 user-name = "David Tolnay"
+
+[[publisher.throw_error]]
+version = "0.4.0-rc1"
+when = "2026-10-31"
+user-id = 130155
+user-login = "gbj"
+user-name = "Greg Johnston"
 
 [[publisher.tokio]]
 version = "1.53.3"
@@ -953,43 +1029,64 @@ user-login = "alexcrichton"
 user-name = "Alex Crichton"
 
 [[publisher.wasm-bindgen]]
-version = "0.2.113"
-when = "2026-02-24"
+version = "0.2.118"
+when = "2026-04-10"
 user-id = 145038
 user-login = "guybedford"
 user-name = "Guy Bedford"
 
 [[publisher.wasm-bindgen-futures]]
-version = "0.4.63"
-when = "2026-02-24"
+version = "0.4.68"
+when = "2026-04-10"
 user-id = 145038
 user-login = "guybedford"
 user-name = "Guy Bedford"
 
 [[publisher.wasm-bindgen-macro]]
-version = "0.2.113"
-when = "2026-02-24"
-user-id = 145038
-user-login = "guybedford"
-user-name = "Guy Bedford"
+version = "0.2.99"
+when = "2024-12-07"
+user-id = 1
+user-login = "alexcrichton"
+user-name = "Alex Crichton"
 
 [[publisher.wasm-bindgen-macro-support]]
-version = "0.2.113"
-when = "2026-02-24"
+version = "0.2.118"
+when = "2026-04-10"
 user-id = 145038
 user-login = "guybedford"
 user-name = "Guy Bedford"
 
 [[publisher.wasm-bindgen-shared]]
-version = "0.2.113"
-when = "2026-02-24"
+version = "0.2.100"
+when = "2025-01-12"
+user-id = 1
+user-login = "alexcrichton"
+user-name = "Alex Crichton"
+
+[[publisher.wasm-bindgen-test]]
+version = "0.3.68"
+when = "2026-04-10"
+user-id = 145038
+user-login = "guybedford"
+user-name = "Guy Bedford"
+
+[[publisher.wasm-bindgen-test-macro]]
+version = "0.3.68"
+when = "2026-04-10"
+user-id = 145038
+user-login = "guybedford"
+user-name = "Guy Bedford"
+
+[[publisher.wasm-bindgen-test-shared]]
+version = "0.2.118"
+when = "2026-04-10"
 user-id = 145038
 user-login = "guybedford"
 user-name = "Guy Bedford"
 
 [[publisher.web-sys]]
-version = "0.3.90"
-when = "2026-02-24"
+version = "0.3.95"
+when = "2026-04-10"
 user-id = 145038
 user-login = "guybedford"
 user-name = "Guy Bedford"
@@ -1672,6 +1769,12 @@ who = "Alex Crichton <alex@alexcrichton.com>"
 criteria = "safe-to-deploy"
 delta = "0.1.21 -> 0.1.24"
 
+[[audits.bytecode-alliance.audits.rustc_version]]
+who = "Alex Crichton <alex@alexcrichton.com>"
+criteria = "safe-to-deploy"
+delta = "0.4.0 -> 0.4.1"
+notes = "Minor changes, nothing worrisome"
+
 [[audits.bytecode-alliance.audits.rustls]]
 who = "Pat Hickey <p.hickey@f5.com>"
 criteria = "safe-to-deploy"
@@ -1941,6 +2044,12 @@ criteria = "safe-to-deploy"
 version = "1.5.0"
 notes = "Unsafe review in https://crrev.com/c/5838022"
 aggregated-from = "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
+
+[[audits.google.audits.cast]]
+who = "George Burgess IV <gbiv@google.com>"
+criteria = "safe-to-run"
+version = "0.3.0"
+aggregated-from = "https://chromium.googlesource.com/chromiumos/third_party/rust_crates/+/refs/heads/main/cargo-vet/audits.toml?format=TEXT"
 
 [[audits.google.audits.core-foundation-sys]]
 who = "Manish Goregaokar <manishearth@google.com>"
@@ -3570,6 +3679,12 @@ criteria = "safe-to-deploy"
 delta = "1.2.0 -> 1.2.1"
 aggregated-from = "https://raw.githubusercontent.com/mozilla-firefox/firefox/main/supply-chain/audits.toml"
 
+[[audits.mozilla.audits.itertools]]
+who = "Erich Gubler <erichdongubler@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.14.0 -> 0.15.0"
+aggregated-from = "https://raw.githubusercontent.com/mozilla-firefox/firefox/main/supply-chain/audits.toml"
+
 [[audits.mozilla.audits.litemap]]
 who = "Makoto Kato <m_kato@ga2.so-net.ne.jp>"
 criteria = "safe-to-deploy"
@@ -3623,6 +3738,13 @@ criteria = "safe-to-deploy"
 delta = "0.29.0 -> 0.30.1"
 notes = "Some new wrappers, support for minor platforms and lots of work around type safety that reduces the unsafe surafce."
 aggregated-from = "https://raw.githubusercontent.com/mozilla-firefox/firefox/main/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.oorandom]]
+who = "Jan-Erik Rediger <jrediger@mozilla.com>"
+criteria = "safe-to-run"
+version = "11.1.5"
+notes = "Small random number generator, explicitly not cryptographically secure, no use of unsafe code, no dependencies"
+aggregated-from = "https://raw.githubusercontent.com/mozilla/glean/main/supply-chain/audits.toml"
 
 [[audits.mozilla.audits.option-ext]]
 who = "Nika Layzell <nika@thelayzells.com>"
@@ -3752,6 +3874,16 @@ criteria = "safe-to-deploy"
 delta = "1.1.0 -> 2.1.1"
 notes = "Simple hashing crate, no unsafe code."
 aggregated-from = "https://raw.githubusercontent.com/mozilla-firefox/firefox/main/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.rustc_version]]
+who = "Nika Layzell <nika@thelayzells.com>"
+criteria = "safe-to-deploy"
+version = "0.4.0"
+notes = """
+Use of powerful capabilities is limited to invoking `rustc -vV` to get version
+information for parsing version information.
+"""
+aggregated-from = "https://raw.githubusercontent.com/mozilla/cargo-vet/main/supply-chain/audits.toml"
 
 [[audits.mozilla.audits.selectors]]
 who = "Emilio Cobos Álvarez <emilio@crisal.io>"
@@ -4089,6 +4221,24 @@ aggregated-from = "https://raw.githubusercontent.com/mozilla/cargo-vet/main/supp
 who = "Nika Layzell <nika@thelayzells.com>"
 criteria = "safe-to-deploy"
 delta = "0.2.1 -> 0.2.2"
+aggregated-from = "https://raw.githubusercontent.com/mozilla/cargo-vet/main/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.wasm-bindgen-macro]]
+who = "Lars Eggert <lars@eggert.org>"
+criteria = "safe-to-deploy"
+delta = "0.2.99 -> 0.2.100"
+aggregated-from = "https://raw.githubusercontent.com/mozilla/glean/main/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.wasm-bindgen-macro]]
+who = "Alex Franchuk <afranchuk@mozilla.com>"
+criteria = "safe-to-deploy"
+delta = "0.2.100 -> 0.2.129"
+aggregated-from = "https://raw.githubusercontent.com/mozilla/cargo-vet/main/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.wasm-bindgen-shared]]
+who = "Alex Franchuk <afranchuk@mozilla.com>"
+criteria = "safe-to-deploy"
+delta = "0.2.100 -> 0.2.129"
 aggregated-from = "https://raw.githubusercontent.com/mozilla/cargo-vet/main/supply-chain/audits.toml"
 
 [[audits.mozilla.audits.web-time]]

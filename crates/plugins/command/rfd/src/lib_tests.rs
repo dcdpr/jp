@@ -801,6 +801,7 @@ fn plan_answered(data: Value) -> [HostToPlugin; 2] {
             conversation: "jp-c17000000001".to_owned(),
             outcome: QueryOutcome::Finished,
             data: Some(data),
+            answer: None,
         }),
     ]
 }

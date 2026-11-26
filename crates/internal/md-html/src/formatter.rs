@@ -2,9 +2,12 @@
 //!
 //! Delegates structural elements to comrak and overrides text nodes, code
 //! spans, code blocks, raw HTML, and alerts so that every rendered text run is
-//! wrapped in a [`span`].
+//! wrapped in a [`span`], and headings so that they carry their anchors.
 
-use std::fmt::{self, Write as _};
+use std::{
+    collections::BTreeMap,
+    fmt::{self, Write as _},
+};
 
 use comrak::{
     html::{ChildRendering, Context, format_node_default},
@@ -16,13 +19,23 @@ use crate::{
     range, span,
 };
 
+/// What the formatter reads of the document it renders.
+pub(crate) struct Document<'a> {
+    /// The source, by line.
+    pub lines: Lines<'a>,
+
+    /// The `id` of the heading starting on each 0-based line that has one.
+    pub anchors: &'a BTreeMap<usize, String>,
+}
+
 /// Format `node` on entering it, or finish it on leaving it.
 pub(crate) fn format_node(
-    context: &mut Context<'_, '_, &Lines<'_>>,
+    context: &mut Context<'_, '_, &Document<'_>>,
     node: Node<'_>,
     entering: bool,
 ) -> Result<ChildRendering, fmt::Error> {
     match node.data().value {
+        NodeValue::Heading(ref heading) => heading_tag(context, node, heading.level, entering)?,
         NodeValue::Text(ref literal) => inline(context, node, literal, entering)?,
         NodeValue::HtmlInline(ref literal) => inline(context, node, literal, entering)?,
         NodeValue::Code(ref code) => code_span(context, node, code, entering)?,
@@ -35,9 +48,34 @@ pub(crate) fn format_node(
     Ok(ChildRendering::HTML)
 }
 
+/// Write the opening tag of a heading of `level`, with the `id` the document's
+/// anchors name for its line, or its closing tag.
+fn heading_tag(
+    context: &mut Context<'_, '_, &Document<'_>>,
+    node: Node<'_>,
+    level: u8,
+    entering: bool,
+) -> fmt::Result {
+    if !entering {
+        return writeln!(context, "</h{level}>");
+    }
+
+    let anchors = context.user.anchors;
+    context.cr()?;
+    write!(context, "<h{level}")?;
+    // Positions count lines from 1.
+    let line = node.data().sourcepos.start.line.saturating_sub(1);
+    if let Some(id) = anchors.get(&line) {
+        context.write_str(" id=\"")?;
+        context.escape(id)?;
+        context.write_str("\"")?;
+    }
+    context.write_str(">")
+}
+
 /// Write the literal of a text or raw HTML node.
 fn inline(
-    context: &mut Context<'_, '_, &Lines<'_>>,
+    context: &mut Context<'_, '_, &Document<'_>>,
     node: Node<'_>,
     literal: &str,
     entering: bool,
@@ -46,7 +84,7 @@ fn inline(
         return Ok(());
     }
 
-    let lines = context.user;
+    let lines = &context.user.lines;
     let cell = cell_start(node);
     match range::inline(lines, node.data().sourcepos, cell, literal) {
         Some(range) => span::source(context, lines.text(), range, cell.is_some()),
@@ -57,7 +95,7 @@ fn inline(
 /// Write a code span, replacing each line ending in its content with an
 /// unmapped space.
 fn code_span(
-    context: &mut Context<'_, '_, &Lines<'_>>,
+    context: &mut Context<'_, '_, &Document<'_>>,
     node: Node<'_>,
     code: &NodeCode,
     entering: bool,
@@ -66,7 +104,7 @@ fn code_span(
         return Ok(());
     }
 
-    let lines = context.user;
+    let lines = &context.user.lines;
     let cell = cell_start(node);
     context.write_str("<code>")?;
     match range::code_span(lines, node.data().sourcepos, cell, code) {
@@ -85,7 +123,7 @@ fn code_span(
 
 /// Write a code block, without syntax highlighting.
 fn code_block(
-    context: &mut Context<'_, '_, &Lines<'_>>,
+    context: &mut Context<'_, '_, &Document<'_>>,
     node: Node<'_>,
     block: &NodeCodeBlock,
     entering: bool,
@@ -94,7 +132,7 @@ fn code_block(
         return Ok(());
     }
 
-    let lines = context.user;
+    let lines = &context.user.lines;
     context.cr()?;
     context.write_str("<pre><code")?;
     if let Some(language) = block.info.split_ascii_whitespace().next() {
@@ -113,7 +151,7 @@ fn code_block(
 
 /// Write a raw HTML block as escaped preformatted text.
 fn html_block(
-    context: &mut Context<'_, '_, &Lines<'_>>,
+    context: &mut Context<'_, '_, &Document<'_>>,
     node: Node<'_>,
     block: &NodeHtmlBlock,
     entering: bool,
@@ -122,7 +160,7 @@ fn html_block(
         return Ok(());
     }
 
-    let lines = context.user;
+    let lines = &context.user.lines;
     context.cr()?;
     context.write_str("<pre>")?;
     block_lines(
@@ -156,7 +194,7 @@ fn block_lines(
 
 /// Write a GitHub alert block with its title wrapped in a span.
 fn alert_block(
-    context: &mut Context<'_, '_, &Lines<'_>>,
+    context: &mut Context<'_, '_, &Document<'_>>,
     node: Node<'_>,
     alert: &NodeAlert,
     entering: bool,
@@ -167,7 +205,7 @@ fn alert_block(
         return context.lf();
     }
 
-    let lines = context.user;
+    let lines = &context.user.lines;
     context.cr()?;
     write!(
         context,

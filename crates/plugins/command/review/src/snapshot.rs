@@ -42,6 +42,15 @@ pub fn record(
     Ok(review.record(files, None, at))
 }
 
+/// Whether the working tree in `root` holds anything other than `review`'s
+/// latest version of its tracked files, a file gone missing included; `true`
+/// for a review with no versions.
+pub fn changed(root: &Utf8Path, review: &Review) -> Result<bool, String> {
+    let files = store::manifest(&working_tree(root, &review.paths)?);
+
+    Ok(review.latest().is_none_or(|latest| latest.files != files))
+}
+
 /// Read each tracked path in `paths` (relative to `root`) from the working
 /// tree.
 ///

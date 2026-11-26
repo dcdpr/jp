@@ -13,21 +13,22 @@ use crate::{
 /// What `docs/a.md` holds when a test starts.
 const MARKDOWN: &str = "# Title\n\nFirst line.\nSecond line.\n";
 
-/// A workspace holding `docs/a.md` and `docs/b.txt`, its reviews kept in
-/// user-local storage.
+/// A workspace named `notes` holding `docs/a.md` and `docs/b.txt`, its reviews
+/// kept in user-local storage.
 fn workspace() -> (Utf8TempDir, Workspace) {
-    let root = Utf8TempDir::new().unwrap();
-    fs::create_dir_all(root.path().join("docs")).unwrap();
-    fs::write(root.path().join("docs/a.md"), MARKDOWN).unwrap();
-    fs::write(root.path().join("docs/b.txt"), "plain <text>\n").unwrap();
+    let tmp = Utf8TempDir::new().unwrap();
+    let root = tmp.path().join("notes");
+    fs::create_dir_all(root.join("docs")).unwrap();
+    fs::write(root.join("docs/a.md"), MARKDOWN).unwrap();
+    fs::write(root.join("docs/b.txt"), "plain <text>\n").unwrap();
     let workspace = Workspace {
-        root: root.path().to_owned(),
+        store: Store::new(root.join(".user/review")),
+        root,
         config: json!({ "user": { "name": "Jane Doe <jane@example.com>" } }),
         options: Options::default(),
-        store: Store::new(root.path().join(".user/review")),
     };
 
-    (root, workspace)
+    (tmp, workspace)
 }
 
 fn body(reply: &Reply) -> Value {
@@ -46,7 +47,7 @@ fn started(workspace: &Workspace) -> ReviewId {
 }
 
 /// Record what the working tree holds as the review's next version.
-fn record(workspace: &Workspace, id: ReviewId) {
+fn record_tree(workspace: &Workspace, id: ReviewId) {
     workspace
         .store
         .update(id, |review, blobs| {
@@ -91,6 +92,7 @@ fn end(workspace: &Workspace, id: ReviewId) {
                 at: now(),
                 version: Some(1),
                 error: None,
+                answer: None,
             });
             Ok::<_, String>(())
         })
@@ -103,7 +105,7 @@ fn new_comment(anchor: &Value, body: &str) -> NewCommentRequest {
 
 #[test]
 fn creating_a_review_answers_its_summary() {
-    let (_root, workspace) = workspace();
+    let (_tmp, workspace) = workspace();
 
     let reply = create(&workspace.context(), &NewReview {
         files: vec!["docs/a.md".to_owned(), "./docs/a.md".to_owned()],
@@ -121,7 +123,7 @@ fn creating_a_review_answers_its_summary() {
 
 #[test]
 fn a_review_needs_files_inside_the_workspace() {
-    let (_root, workspace) = workspace();
+    let (_tmp, workspace) = workspace();
     let start = |files: &[&str]| {
         create(&workspace.context(), &NewReview {
             files: files.iter().map(|file| (*file).to_owned()).collect(),
@@ -147,11 +149,12 @@ fn a_review_needs_files_inside_the_workspace() {
 /// One review that can't be read doesn't hide the others.
 #[test]
 fn the_list_holds_every_review_and_those_that_cant_be_read() {
-    let (root, workspace) = workspace();
+    let (_tmp, workspace) = workspace();
     let id = started(&workspace);
     let broken = started(&workspace);
     fs::write(
-        root.path()
+        workspace
+            .root
             .join(".user/review")
             .join(broken.as_str())
             .join("review.json"),
@@ -159,7 +162,7 @@ fn the_list_holds_every_review_and_those_that_cant_be_read() {
     )
     .unwrap();
 
-    let listing = body(&list(&workspace.store).unwrap());
+    let listing = body(&list(&workspace).unwrap());
 
     assert_eq!(listing["reviews"].as_array().unwrap().len(), 1);
     assert_eq!(listing["reviews"][0]["id"], id.to_string());
@@ -170,15 +173,15 @@ fn the_list_holds_every_review_and_those_that_cant_be_read() {
 /// who is running a pass.
 #[test]
 fn the_review_is_left_out_when_the_caller_has_its_revision() {
-    let (_root, workspace) = workspace();
+    let (_tmp, workspace) = workspace();
     let id = started(&workspace);
-    let first = body(&detail(&workspace.store, id, &DetailQuery::default(), None).unwrap());
+    let first = body(&detail(&workspace, id, &DetailQuery::default(), None).unwrap());
     assert_eq!(first["revision"], 1);
     assert_eq!(first["running"], Value::Null);
     assert_eq!(first["review"]["id"], id.to_string());
 
     let unchanged = detail(
-        &workspace.store,
+        &workspace,
         id,
         &DetailQuery {
             revision: Some(1),
@@ -188,17 +191,135 @@ fn the_review_is_left_out_when_the_caller_has_its_revision() {
     )
     .unwrap();
 
-    assert_eq!(body(&unchanged), json!({ "revision": 1, "running": null }));
+    assert_eq!(
+        body(&unchanged),
+        json!({
+            "workspace": "notes",
+            "revision": 1,
+            "running": null,
+            "working_tree_changed": false
+        })
+    );
+}
+
+/// Every poll says whether the files changed on disk, the caller holding the
+/// revision or not; a pass running records them itself when it ends.
+#[test]
+fn the_review_says_whether_the_working_tree_changed_since_the_latest_version() {
+    let (_tmp, workspace) = workspace();
+    let id = started(&workspace);
+    let polled = || {
+        body(
+            &detail(
+                &workspace,
+                id,
+                &DetailQuery {
+                    revision: Some(1),
+                    version: None,
+                },
+                None,
+            )
+            .unwrap(),
+        )["working_tree_changed"]
+            .clone()
+    };
+    assert_eq!(polled(), json!(false));
+
+    fs::write(workspace.root.join("docs/b.txt"), "edited\n").unwrap();
+    assert_eq!(polled(), json!(true));
+
+    let pass = send(&workspace, id);
+    assert_eq!(polled(), json!(false));
+    drop(pass);
+}
+
+#[test]
+fn the_list_names_the_workspace() {
+    let (_tmp, workspace) = workspace();
+
+    assert_eq!(
+        body(&list(&workspace).unwrap()),
+        json!({ "workspace": "notes", "reviews": [] })
+    );
+}
+
+/// The banner's button: what changed on disk becomes the latest version, once.
+#[test]
+fn the_working_tree_is_recorded_as_a_version_when_it_changed() {
+    let (_tmp, workspace) = workspace();
+    let id = started(&workspace);
+
+    let unchanged = record(&workspace.context(), id).unwrap();
+    assert_eq!(
+        (unchanged.status, body(&unchanged)),
+        (
+            StatusCode::OK,
+            json!({ "review": id.to_string(), "version": 1, "recorded": false })
+        )
+    );
+
+    fs::write(workspace.root.join("docs/a.md"), "# Title\n").unwrap();
+    let recorded = record(&workspace.context(), id).unwrap();
+    assert_eq!(
+        (recorded.status, body(&recorded)),
+        (
+            StatusCode::CREATED,
+            json!({ "review": id.to_string(), "version": 2, "recorded": true })
+        )
+    );
+}
+
+/// A pass whose process is gone holds no `.pass` lock, so recording the files
+/// takes the lock, and records the pass as interrupted.
+#[test]
+fn recording_the_working_tree_settles_a_pass_whose_process_is_gone() {
+    let (_tmp, workspace) = workspace();
+    let id = started(&workspace);
+    drop(send(&workspace, id));
+    fs::write(workspace.root.join("docs/a.md"), "# Title\n").unwrap();
+
+    let recorded = record(&workspace.context(), id).unwrap();
+
+    assert_eq!(recorded.status, StatusCode::CREATED);
+    let review = workspace.store.peek(id).unwrap();
+    assert_eq!(
+        review
+            .passes
+            .get(1)
+            .unwrap()
+            .ended
+            .as_ref()
+            .map(|ended| ended.outcome),
+        Some(Outcome::Interrupted)
+    );
+}
+
+/// The version a pass records when it ends holds the files; one recorded beside
+/// it would split the pass's edits in two.
+#[test]
+fn the_working_tree_is_not_recorded_while_a_pass_runs() {
+    let (_tmp, workspace) = workspace();
+    let id = started(&workspace);
+    fs::write(workspace.root.join("docs/a.md"), "# Title\n").unwrap();
+    let pass = send(&workspace, id);
+
+    assert_eq!(
+        record(&workspace.context(), id),
+        Err(ApiError::conflict(format!(
+            "A pass of {id} is running; wait for it to end, or stop it where it runs."
+        )))
+    );
+    drop(pass);
 }
 
 #[test]
 fn the_running_pass_says_whether_this_server_runs_it() {
-    let (_root, workspace) = workspace();
+    let (_tmp, workspace) = workspace();
     let id = started(&workspace);
     let _pass = send(&workspace, id);
 
-    let here = body(&detail(&workspace.store, id, &DetailQuery::default(), Some(1)).unwrap());
-    let elsewhere = body(&detail(&workspace.store, id, &DetailQuery::default(), None).unwrap());
+    let here = body(&detail(&workspace, id, &DetailQuery::default(), Some(1)).unwrap());
+    let elsewhere = body(&detail(&workspace, id, &DetailQuery::default(), None).unwrap());
 
     assert_eq!(here["running"], json!({ "number": 1, "stoppable": true }));
     assert_eq!(
@@ -209,7 +330,7 @@ fn the_running_pass_says_whether_this_server_runs_it() {
 
 #[test]
 fn a_review_or_version_that_isnt_there_is_not_found() {
-    let (_root, workspace) = workspace();
+    let (_tmp, workspace) = workspace();
     let id = started(&workspace);
     let other: ReviewId = "R-0000000".parse().unwrap();
 
@@ -218,12 +339,12 @@ fn a_review_or_version_that_isnt_there_is_not_found() {
         Err(ApiError::not_found("No review nope."))
     );
     assert_eq!(
-        detail(&workspace.store, other, &DetailQuery::default(), None),
+        detail(&workspace, other, &DetailQuery::default(), None),
         Err(ApiError::not_found("No review R-0000000."))
     );
     assert_eq!(
         detail(
-            &workspace.store,
+            &workspace,
             id,
             &DetailQuery {
                 revision: None,
@@ -247,7 +368,7 @@ fn a_review_or_version_that_isnt_there_is_not_found() {
 
 #[test]
 fn markdown_is_rendered_as_markdown_and_other_files_as_text() {
-    let (_root, workspace) = workspace();
+    let (_tmp, workspace) = workspace();
     let id = started(&workspace);
     let html = |path: &str| FileQuery {
         path: path.to_owned(),
@@ -258,22 +379,27 @@ fn markdown_is_rendered_as_markdown_and_other_files_as_text() {
     let text = body(&file(&workspace.store, id, 1, &html("docs/b.txt")).unwrap());
 
     assert_eq!(markdown["source"], MARKDOWN);
-    assert!(
-        markdown["html"]
-            .as_str()
-            .unwrap()
-            .starts_with(r#"<h1><span data-s="2" data-e="7">Title</span></h1>"#),
-        "{markdown}"
+    // The heading carries the anchor the site gives it.
+    assert_eq!(
+        markdown["html"],
+        "<h1 id=\"title\"><span data-s=\"2\" data-e=\"7\">Title</span></h1>\n<p><span \
+         data-s=\"9\" data-e=\"20\">First line.</span>\n<span data-s=\"21\" data-e=\"33\">Second \
+         line.</span></p>\n"
+    );
+    assert_eq!(
+        markdown["headings"],
+        json!([{ "level": 1, "text": "Title", "anchor": "title" }])
     );
     assert_eq!(
         text["html"],
         "<pre><span data-s=\"0\" data-e=\"12\">plain &lt;text&gt;</span>\n</pre>\n"
     );
+    assert_eq!(text.get("headings"), None, "a text file has none");
 }
 
 #[test]
 fn a_file_as_text_carries_only_its_source() {
-    let (_root, workspace) = workspace();
+    let (_tmp, workspace) = workspace();
     let id = started(&workspace);
 
     let reply = file(&workspace.store, id, 1, &FileQuery {
@@ -295,10 +421,10 @@ fn a_file_as_text_carries_only_its_source() {
 
 #[test]
 fn a_file_the_review_doesnt_track_or_the_version_lacks_is_not_found() {
-    let (root, workspace) = workspace();
+    let (_tmp, workspace) = workspace();
     let id = started(&workspace);
-    fs::remove_file(root.path().join("docs/b.txt")).unwrap();
-    record(&workspace, id);
+    fs::remove_file(workspace.root.join("docs/b.txt")).unwrap();
+    record_tree(&workspace, id);
     let text = |path: &str| FileQuery {
         path: path.to_owned(),
         format: Format::Text,
@@ -318,11 +444,11 @@ fn a_file_the_review_doesnt_track_or_the_version_lacks_is_not_found() {
 
 #[test]
 fn a_diff_can_be_of_one_file() {
-    let (root, workspace) = workspace();
+    let (_tmp, workspace) = workspace();
     let id = started(&workspace);
-    fs::write(root.path().join("docs/a.md"), "# Title\n").unwrap();
-    fs::write(root.path().join("docs/b.txt"), "changed\n").unwrap();
-    record(&workspace, id);
+    fs::write(workspace.root.join("docs/a.md"), "# Title\n").unwrap();
+    fs::write(workspace.root.join("docs/b.txt"), "changed\n").unwrap();
+    record_tree(&workspace, id);
 
     let both = body(&diff(&workspace.store, id, &DiffQuery::default()).unwrap());
     let one = body(
@@ -344,11 +470,40 @@ fn a_diff_can_be_of_one_file() {
     assert_eq!(one["files"][0]["path"], "docs/b.txt");
 }
 
+/// The changes are placed in the later version, for a page rendering it to
+/// highlight: the lines removed from `docs/a.md` were at its end, and the one
+/// line of `docs/b.txt` changed.
+#[test]
+fn a_diff_places_what_changed_in_the_later_version() {
+    let (_tmp, workspace) = workspace();
+    let id = started(&workspace);
+    fs::write(workspace.root.join("docs/a.md"), "# Title\n").unwrap();
+    fs::write(workspace.root.join("docs/b.txt"), "changed\n").unwrap();
+    record_tree(&workspace, id);
+
+    let changes = body(&diff(&workspace.store, id, &DiffQuery::default()).unwrap());
+
+    assert_eq!(
+        (
+            changes["files"][0]["added"].clone(),
+            changes["files"][0]["removed"].clone()
+        ),
+        (json!([]), json!([8]))
+    );
+    assert_eq!(
+        (
+            changes["files"][1]["added"].clone(),
+            changes["files"][1]["removed"].clone()
+        ),
+        (json!([[0, 7]]), json!([]))
+    );
+}
+
 /// What a pass changed is from the version it was sent against to the one
 /// recorded when it ended, which only an ended pass has.
 #[test]
 fn a_diff_can_be_of_what_a_pass_changed() {
-    let (root, workspace) = workspace();
+    let (_tmp, workspace) = workspace();
     let id = started(&workspace);
     let pass = send(&workspace, id);
     let of_pass = |pass, from| DiffQuery {
@@ -364,8 +519,8 @@ fn a_diff_can_be_of_what_a_pass_changed() {
         )))
     );
 
-    fs::write(root.path().join("docs/b.txt"), "changed\n").unwrap();
-    record(&workspace, id);
+    fs::write(workspace.root.join("docs/b.txt"), "changed\n").unwrap();
+    record_tree(&workspace, id);
     workspace
         .store
         .update(id, |review, _| {
@@ -374,6 +529,7 @@ fn a_diff_can_be_of_what_a_pass_changed() {
                 at: now(),
                 version: Some(2),
                 error: None,
+                answer: None,
             });
             Ok::<_, String>(())
         })
@@ -402,7 +558,7 @@ fn a_diff_can_be_of_what_a_pass_changed() {
 /// and gives the bytes back in every projection.
 #[test]
 fn a_comment_on_bytes_is_kept_as_lines_and_columns() {
-    let (_root, workspace) = workspace();
+    let (_tmp, workspace) = workspace();
     let id = started(&workspace);
 
     let reply = comment(
@@ -421,6 +577,10 @@ fn a_comment_on_bytes_is_kept_as_lines_and_columns() {
     assert_eq!(made["status"], "draft");
     assert_eq!(made["excerpt"], "First");
     assert_eq!(
+        made["body_html"],
+        "<p><span data-s=\"0\" data-e=\"8\">Name it.</span></p>\n"
+    );
+    assert_eq!(
         made["anchor"],
         json!({
             "version": 1,
@@ -434,7 +594,7 @@ fn a_comment_on_bytes_is_kept_as_lines_and_columns() {
 
 #[test]
 fn a_comment_without_an_anchor_is_on_the_review_in_its_latest_version() {
-    let (_root, workspace) = workspace();
+    let (_tmp, workspace) = workspace();
     let id = started(&workspace);
 
     let reply = comment(
@@ -452,7 +612,7 @@ fn a_comment_without_an_anchor_is_on_the_review_in_its_latest_version() {
 
 #[test]
 fn a_range_names_its_file_and_the_version_it_was_read_in() {
-    let (_root, workspace) = workspace();
+    let (_tmp, workspace) = workspace();
     let id = started(&workspace);
     let refused =
         |anchor: Value| comment(&workspace.context(), id, new_comment(&anchor, "x")).unwrap_err();
@@ -488,7 +648,7 @@ fn a_range_names_its_file_and_the_version_it_was_read_in() {
 
 #[test]
 fn a_comment_the_review_refuses_answers_with_the_status_that_fits() {
-    let (_root, workspace) = workspace();
+    let (_tmp, workspace) = workspace();
     let id = started(&workspace);
 
     let empty = comment(
@@ -505,7 +665,7 @@ fn a_comment_the_review_refuses_answers_with_the_status_that_fits() {
 
 #[test]
 fn a_draft_is_edited_and_withdrawn() {
-    let (_root, workspace) = workspace();
+    let (_tmp, workspace) = workspace();
     let id = started(&workspace);
     comment(
         &workspace.context(),
@@ -528,7 +688,7 @@ fn a_draft_is_edited_and_withdrawn() {
         .unwrap(),
     )
     .unwrap();
-    let withdrawn = withdraw(&workspace.store, first).unwrap();
+    let withdrawn = withdraw(&workspace.store, first, &WithdrawQuery::default()).unwrap();
 
     assert_eq!(body(&edited)["suggestion"], "Line one.");
     assert_eq!(body(&edited)["body"], "Draft.");
@@ -537,7 +697,7 @@ fn a_draft_is_edited_and_withdrawn() {
         json!({ "id": format!("{id}#1"), "withdrawn": "comment" })
     );
     assert_eq!(
-        withdraw(&workspace.store, first),
+        withdraw(&workspace.store, first, &WithdrawQuery::default()),
         Err(ApiError::not_found(format!("{id}#1 was withdrawn.")))
     );
 }
@@ -545,7 +705,7 @@ fn a_draft_is_edited_and_withdrawn() {
 /// A reply goes on a sent comment, and resolving one closes it.
 #[test]
 fn a_sent_comment_takes_a_reply_and_is_resolved() {
-    let (_root, workspace) = workspace();
+    let (_tmp, workspace) = workspace();
     let id = started(&workspace);
     comment(&workspace.context(), id, new_comment(&json!(null), "Hm.")).unwrap();
     let first = CommentRef {
@@ -568,7 +728,7 @@ fn a_sent_comment_takes_a_reply_and_is_resolved() {
     let replied = reply(&workspace.context(), first, &replying).unwrap();
     assert_eq!(body(&replied)["draft_reply"]["body"], "Why?");
 
-    withdraw(&workspace.store, first).unwrap();
+    withdraw(&workspace.store, first, &WithdrawQuery::default()).unwrap();
     let resolved = resolve(&workspace.store, first).unwrap();
     assert_eq!(
         body(&resolved),
@@ -576,10 +736,57 @@ fn a_sent_comment_takes_a_reply_and_is_resolved() {
     );
 }
 
+#[test]
+fn a_resolved_comment_is_opened_again() {
+    let (_tmp, workspace) = workspace();
+    let id = started(&workspace);
+    comment(&workspace.context(), id, new_comment(&json!(null), "Hm.")).unwrap();
+    comment(
+        &workspace.context(),
+        id,
+        new_comment(&json!(null), "Later."),
+    )
+    .unwrap();
+    let first = CommentRef {
+        review: id,
+        number: 1,
+    };
+    let pass = send(&workspace, id);
+    end(&workspace, id);
+    drop(pass);
+    comment(&workspace.context(), id, new_comment(&json!(null), "New.")).unwrap();
+    resolve(&workspace.store, first).unwrap();
+
+    let reopened = reopen_comment(&workspace.store, first).unwrap();
+    let again = reopen_comment(&workspace.store, first).unwrap();
+
+    assert_eq!(reopened.status, StatusCode::OK);
+    assert_eq!(body(&reopened)["id"], format!("{id}#1"));
+    assert_eq!(body(&reopened)["status"], "open");
+    assert_eq!(body(&reopened).get("resolved_at"), None);
+    assert_eq!(body(&again)["status"], "open");
+    assert_eq!(
+        reopen_comment(&workspace.store, CommentRef {
+            review: id,
+            number: 3,
+        }),
+        Err(ApiError::conflict(format!(
+            "{id}#3 is a draft, not yet sent."
+        )))
+    );
+    assert_eq!(
+        reopen_comment(&workspace.store, CommentRef {
+            review: id,
+            number: 9,
+        }),
+        Err(ApiError::not_found(format!("No comment {id}#9.")))
+    );
+}
+
 /// The assistant answering a running pass could no longer write its replies.
 #[test]
 fn a_review_with_a_pass_running_is_not_closed() {
-    let (_root, workspace) = workspace();
+    let (_tmp, workspace) = workspace();
     let id = started(&workspace);
     let pass = send(&workspace, id);
 
@@ -595,6 +802,305 @@ fn a_review_with_a_pass_running_is_not_closed() {
     );
 }
 
+fn place(anchor: &Value) -> AnchorRequest {
+    serde_json::from_value(anchor.clone()).unwrap()
+}
+
+/// The review as `GET /api/reviews/{id}` answers it, in its latest version.
+fn shown(workspace: &Workspace, id: ReviewId) -> Value {
+    let reply = detail(workspace, id, &DetailQuery::default(), None).unwrap();
+
+    body(&reply)["review"].clone()
+}
+
+#[test]
+fn a_closed_review_is_opened_again() {
+    let (_tmp, workspace) = workspace();
+    let id = started(&workspace);
+    close(&workspace.store, id).unwrap();
+
+    let reopened = reopen(&workspace.store, id).unwrap();
+    let again = reopen(&workspace.store, id).unwrap();
+    let commented = comment(&workspace.context(), id, new_comment(&json!(null), "More."));
+
+    assert_eq!(reopened.status, StatusCode::OK);
+    assert_eq!(body(&reopened)["status"], "open");
+    assert_eq!(body(&reopened).get("closed_at"), None);
+    assert_eq!(body(&again)["status"], "open");
+    assert_eq!(commented.map(|reply| reply.status), Ok(StatusCode::CREATED));
+}
+
+#[test]
+fn a_passage_approved_is_listed_with_the_review() {
+    let (_tmp, workspace) = workspace();
+    let id = started(&workspace);
+
+    let reply = approve(
+        &workspace.context(),
+        id,
+        place(&json!({ "version": 1, "path": "docs/a.md", "bytes": [9, 14] })),
+    )
+    .unwrap();
+
+    let made = body(&reply);
+    assert_eq!(reply.status, StatusCode::CREATED);
+    assert_eq!(made["number"], 1);
+    assert_eq!(made["author"], "Jane Doe <jane@example.com>");
+    assert_eq!(made["excerpt"], "First");
+    assert_eq!(
+        made["anchor"],
+        json!({
+            "version": 1,
+            "path": "docs/a.md",
+            "range": "3:1-3:6",
+            "projected": { "version": 1, "range": "3:1-3:6", "bytes": [9, 14] },
+            "outdated": false
+        })
+    );
+    assert_eq!(shown(&workspace, id)["approvals"], json!([made]));
+}
+
+/// The approval was of the text as it stood.
+#[test]
+fn an_approval_is_outdated_once_a_line_of_its_passage_changes() {
+    let (_tmp, workspace) = workspace();
+    let id = started(&workspace);
+    approve(
+        &workspace.context(),
+        id,
+        place(&json!({ "version": 1, "path": "docs/a.md", "range": "3" })),
+    )
+    .unwrap();
+    approve(
+        &workspace.context(),
+        id,
+        place(&json!({ "version": 1, "path": "docs/a.md", "range": "4" })),
+    )
+    .unwrap();
+
+    fs::write(
+        workspace.root.join("docs/a.md"),
+        "# Title\n\nFirst line, changed.\nSecond line.\n",
+    )
+    .unwrap();
+    record_tree(&workspace, id);
+
+    let approvals = shown(&workspace, id)["approvals"].clone();
+    assert_eq!(
+        approvals[0]["anchor"],
+        json!({
+            "version": 1,
+            "path": "docs/a.md",
+            "range": "3",
+            "outdated": true,
+            "resolved": { "version": 1, "range": "3", "bytes": [9, 20] }
+        })
+    );
+    assert_eq!(
+        approvals[1]["anchor"]["projected"],
+        json!({ "version": 2, "range": "4", "bytes": [30, 42] })
+    );
+}
+
+/// An approval is anchored to the passage text: if a later version restores the
+/// modified lines, the approval resolves again.
+#[test]
+fn an_approval_holds_again_once_its_passage_is_restored() {
+    let (_tmp, workspace) = workspace();
+    let id = started(&workspace);
+    approve(
+        &workspace.context(),
+        id,
+        place(&json!({ "version": 1, "path": "docs/a.md", "range": "3" })),
+    )
+    .unwrap();
+    fs::write(
+        workspace.root.join("docs/a.md"),
+        "# Title\n\nFirst line, changed.\nSecond line.\n",
+    )
+    .unwrap();
+    record_tree(&workspace, id);
+    assert_eq!(
+        shown(&workspace, id)["approvals"][0]["anchor"]["outdated"],
+        true
+    );
+
+    fs::write(workspace.root.join("docs/a.md"), MARKDOWN).unwrap();
+    record_tree(&workspace, id);
+
+    assert_eq!(
+        shown(&workspace, id)["approvals"][0]["anchor"],
+        json!({
+            "version": 1,
+            "path": "docs/a.md",
+            "range": "3",
+            "projected": { "version": 3, "range": "3", "bytes": [9, 20] },
+            "outdated": false
+        })
+    );
+}
+
+#[test]
+fn an_approval_is_taken_back_by_its_number() {
+    let (_tmp, workspace) = workspace();
+    let id = started(&workspace);
+    approve(
+        &workspace.context(),
+        id,
+        place(&json!({ "version": 1, "path": "docs/a.md", "range": "3" })),
+    )
+    .unwrap();
+
+    let taken = unapprove(&workspace.store, id, 1).unwrap();
+    let again = unapprove(&workspace.store, id, 1);
+
+    assert_eq!(
+        body(&taken),
+        json!({ "review": id.to_string(), "approval": 1 })
+    );
+    assert_eq!(
+        again,
+        Err(ApiError::not_found(format!("{id} has no approval 1.")))
+    );
+    assert_eq!(shown(&workspace, id).get("approvals"), None);
+}
+
+#[test]
+fn only_a_range_is_approved_or_read_to() {
+    let (_tmp, workspace) = workspace();
+    let id = started(&workspace);
+    let whole_file = json!({ "version": 1, "path": "docs/a.md" });
+
+    assert_eq!(
+        approve(&workspace.context(), id, place(&whole_file)),
+        Err(ApiError::invalid(
+            "An approval is of a range of a file: lines, or a span within them."
+        ))
+    );
+    assert_eq!(
+        read_until(&workspace.context(), id, place(&whole_file)),
+        Err(ApiError::invalid(
+            "Name the last line read, as a range in `path`."
+        ))
+    );
+}
+
+/// The browser names the end of the block read by its bytes; the review keeps
+/// the line, which moves with the lines added above it.
+#[test]
+fn a_file_is_read_through_the_last_line_of_a_range() {
+    let (_tmp, workspace) = workspace();
+    let id = started(&workspace);
+
+    let reply = read_until(
+        &workspace.context(),
+        id,
+        place(&json!({ "version": 1, "path": "docs/a.md", "bytes": [20, 20] })),
+    )
+    .unwrap();
+
+    let read = body(&reply);
+    assert_eq!(reply.status, StatusCode::OK);
+    assert_eq!(read["path"], "docs/a.md");
+    assert_eq!(read["author"], "Jane Doe <jane@example.com>");
+    assert_eq!((&read["version"], &read["line"]), (&json!(1), &json!(3)));
+    assert_eq!(
+        read["projected"],
+        json!({ "version": 1, "range": "3", "bytes": [9, 20] })
+    );
+
+    fs::write(
+        workspace.root.join("docs/a.md"),
+        format!("Intro.\n{MARKDOWN}"),
+    )
+    .unwrap();
+    record_tree(&workspace, id);
+
+    let listed = shown(&workspace, id)["read_until"].clone();
+    assert_eq!(listed.as_array().map(Vec::len), Some(1));
+    assert_eq!(
+        (&listed[0]["version"], &listed[0]["line"]),
+        (&json!(1), &json!(3))
+    );
+    assert_eq!(
+        listed[0]["projected"],
+        json!({ "version": 2, "range": "4", "bytes": [16, 27] })
+    );
+}
+
+#[test]
+fn reading_a_file_further_replaces_how_far_it_was_read() {
+    let (_tmp, workspace) = workspace();
+    let id = started(&workspace);
+    let read = |range: &str| {
+        read_until(
+            &workspace.context(),
+            id,
+            place(&json!({ "version": 1, "path": "docs/a.md", "range": range })),
+        )
+        .unwrap()
+    };
+
+    read("1");
+    read("3-4");
+
+    let listed = shown(&workspace, id)["read_until"].clone();
+    assert_eq!(listed.as_array().map(Vec::len), Some(1));
+    assert_eq!(listed[0]["line"], 4);
+}
+
+#[test]
+fn how_far_a_file_was_read_is_forgotten() {
+    let (_tmp, workspace) = workspace();
+    let id = started(&workspace);
+    read_until(
+        &workspace.context(),
+        id,
+        place(&json!({ "version": 1, "path": "docs/a.md", "range": "3" })),
+    )
+    .unwrap();
+    let forget = |path: &str| {
+        unread(&workspace.store, id, &ReadQuery {
+            path: path.to_owned(),
+        })
+    };
+
+    let cleared = forget("docs/a.md").unwrap();
+    let again = forget("docs/a.md").unwrap();
+
+    assert_eq!(
+        body(&cleared),
+        json!({ "review": id.to_string(), "path": "docs/a.md", "cleared": true })
+    );
+    assert_eq!(body(&again)["cleared"], false);
+    assert_eq!(
+        forget("docs/c.md").map_err(|error| error.status),
+        Err(StatusCode::NOT_FOUND)
+    );
+    assert_eq!(shown(&workspace, id).get("read_until"), None);
+}
+
+#[test]
+fn a_closed_review_takes_no_approval_and_no_line_read() {
+    let (_tmp, workspace) = workspace();
+    let id = started(&workspace);
+    let line = json!({ "version": 1, "path": "docs/a.md", "range": "3" });
+    approve(&workspace.context(), id, place(&line)).unwrap();
+    read_until(&workspace.context(), id, place(&line)).unwrap();
+    close(&workspace.store, id).unwrap();
+    let closed = || Err(ApiError::conflict(format!("{id} is closed.")));
+
+    assert_eq!(approve(&workspace.context(), id, place(&line)), closed());
+    assert_eq!(unapprove(&workspace.store, id, 1), closed());
+    assert_eq!(read_until(&workspace.context(), id, place(&line)), closed());
+    assert_eq!(
+        unread(&workspace.store, id, &ReadQuery {
+            path: "docs/a.md".to_owned(),
+        }),
+        closed()
+    );
+}
+
 #[test]
 fn a_refusal_answers_with_the_status_that_fits_it() {
     let id: ReviewId = "R-1h4k2m9".parse().unwrap();
@@ -607,6 +1113,11 @@ fn a_refusal_answers_with_the_status_that_fits_it() {
     assert_eq!(
         status(Refusal::Comment(2, Why::Withdrawn)),
         StatusCode::NOT_FOUND
+    );
+    assert_eq!(status(Refusal::Approval(2)), StatusCode::NOT_FOUND);
+    assert_eq!(
+        status(Refusal::ApprovalWithoutRange),
+        StatusCode::BAD_REQUEST
     );
     assert_eq!(status(Refusal::NothingToChange), StatusCode::BAD_REQUEST);
     assert_eq!(

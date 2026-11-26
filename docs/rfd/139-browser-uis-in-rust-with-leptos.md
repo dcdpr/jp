@@ -1,6 +1,6 @@
 # RFD 139: Browser UIs in Rust with Leptos
 
-- **Status**: Discussion
+- **Status**: Accepted
 - **Category**: Decision
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-11-18
@@ -71,6 +71,14 @@ div().child((
 Builder syntax is standard Rust: `rustfmt` formats it, `rust-analyzer` completes
 it, and `clippy` lints it without macro-expansion indirection or `leptosfmt`.
 
+UI crates depend directly on the Leptos subcrates used by client-side builder
+syntax rather than on the top-level `leptos` crate: `tachys` for the renderer
+and builder API, `reactive_graph` for signals and effects, `any_spawner` for
+task spawning, and `leptos_dom` for DOM helpers.
+The `leptos` meta-crate unconditionally compiles server functions,
+configuration-file loading, and the `view!` macro parser, which account for more
+than half of the code it adds to the dependency tree.
+
 The repository contains no JavaScript source files for these UIs.
 At build time, `wasm-bindgen` generates the JS glue module, and the HTML shell
 loads it with a one-line `<script type="module">`.
@@ -103,6 +111,29 @@ Because `ui` also compiles on the host target, `cargo check`, `clippy`,
 `rustqual`, `rust-analyzer`, and `cargo test` check it alongside the rest of the
 workspace.
 
+### Styling
+
+UIs are styled with [Tailwind CSS] utility classes applied directly to view
+elements.
+Each UI crate provides a `style.css` input file that Tailwind compiles.
+`style.css` defines rules that cannot be expressed as element classes: theme
+tokens (fonts and light/dark color variables), styles for server-rendered HTML
+(Markdown output from `md-html`), and pseudo-element rules such as
+`::highlight()`.
+
+- Tailwind scans the `ui` crate's source files as plain text to extract class
+  names.
+  Every class name must therefore appear as a complete string literal rather
+  than being assembled dynamically.
+- `just build-ui` compiles the stylesheet with Tailwind's [standalone CLI], a
+  single executable that requires no Node.js runtime, `package.json`, or
+  JavaScript dependencies.
+  The recipe downloads a pinned version of the CLI into Cargo's target directory
+  and verifies its SHA-256 checksum.
+- Touch target sizing uses the `pointer-coarse:` variant and responsive layout
+  changes use breakpoint variants, keeping all viewport and input rules on the
+  elements themselves.
+
 ### Testing
 
 - Pure UI logic is unit-tested on the host in `_tests.rs` files, matching the
@@ -116,8 +147,8 @@ workspace.
 - `rust-toolchain.toml` includes the `wasm32-unknown-unknown` target.
 - `just build-ui <plugin>` compiles the `ui` crate for `wasm32-unknown-unknown`
   using a size-optimized `wasm-release` profile, runs `wasm-bindgen --target
-  web` into `target/ui/<plugin>/`, and copies the UI's stylesheet into that
-  directory.
+  web` into `target/ui/<plugin>/`, and compiles the UI's stylesheet into that
+  directory with Tailwind CSS (see [Styling](#styling)).
   The recipe installs the `wasm-bindgen` CLI at the exact version pinned for the
   `wasm-bindgen` crate in `Cargo.lock`, because the CLI rejects modules compiled
   against a mismatched crate version.
@@ -186,8 +217,11 @@ Benefits:
 
 Costs:
 
-- Building a full plugin UI requires a `wasm-bindgen` post-processing step and
-  the `wasm32-unknown-unknown` target outside a plain `cargo build`.
+- Building a full plugin UI requires a `wasm-bindgen` post-processing step, a
+  Tailwind CSS compilation step, and the `wasm32-unknown-unknown` target in
+  addition to `cargo build`.
+- The first UI build downloads the Tailwind CSS standalone CLI (~100 MB) and
+  re-downloads it whenever the pinned version changes.
 - Installing a plugin with plain `cargo install` (without building the bundle
   first) serves the placeholder page instead of the UI.
 - Leptos and its dependency tree must be audited in `cargo-vet` and `cargo-deny`
@@ -220,8 +254,15 @@ Costs:
   and produces diagnostics that point into macro expansions.
 - **Trunk or `cargo-leptos`**.
   Both tools download external `wasm-bindgen` and `wasm-opt` binaries during
-  builds, whereas JP's client-only bundles require only `cargo build` and
-  `wasm-bindgen`.
+  builds, whereas JP's client-only bundles require only `cargo build`,
+  `wasm-bindgen`, and the Tailwind CSS CLI, each pinned by the workspace.
+- **Hand-written CSS**.
+  Requires no build step, but forces each UI to maintain its own spacing,
+  typography, and color scales, and scatters responsive and pointer-specific
+  rules across separate media queries.
+- **Tailwind CSS through npm**.
+  Produces the same stylesheet, but introduces Node.js, `package.json`, and a JS
+  lockfile into a Rust build.
 - **Compiling the WebAssembly bundle inside `build.rs`**.
   Would allow a plain `cargo install` to embed the UI, but still requires an
   external `wasm-bindgen` binary (or compiling `wasm-bindgen-cli-support` into
@@ -257,7 +298,8 @@ A single phase, landing alongside the first plugin browser UI ([RFD 140]):
 
 1. Add `wasm32-unknown-unknown` to `rust-toolchain.toml`, configure the
    `wasm-release` profile, add workspace glob patterns for `*/api` and `*/ui`,
-   and add `just build-ui` and bundle building in `just install-plugin`.
+   add `just build-ui` (using the pinned Tailwind CSS CLI), and wire bundle
+   building into `just install-plugin`.
 2. Add `wasm_check` and `wasm_test` to `cargo_check` and `cargo_test`, and
    create the `web-development` skill and `web-dev` persona.
 3. Add the path-filtered `web` CI workflow.
@@ -273,10 +315,14 @@ Release builds remain unchanged until a published plugin gains a `ui` crate (see
 - [Leptos's `counter_without_macros` example][counter]
 - [`wasm-bindgen-test`][wbt]
 - [CSS Custom Highlight API][highlight]
+- [Tailwind CSS]
+- [Tailwind CSS standalone CLI][standalone CLI]
 
 [RFD 124]: 124-source-mapped-markdown-rendering.md
 [RFD 136]: 136-review-engine-for-workspace-files.md
 [RFD 140]: 140-browser-frontend-for-the-review-engine.md
+[Tailwind CSS]: https://tailwindcss.com/
 [counter]: https://github.com/leptos-rs/leptos/tree/main/examples/counter_without_macros
 [highlight]: https://developer.mozilla.org/en-US/docs/Web/API/CSS_Custom_Highlight_API
+[standalone CLI]: https://tailwindcss.com/blog/standalone-cli
 [wbt]: https://docs.rs/wasm-bindgen-test

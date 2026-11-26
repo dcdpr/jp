@@ -210,14 +210,8 @@ impl Commands {
             }
             Commands::Config(args) => args.run(ctx, handles).await,
             Commands::Conversation(args) => args.run(ctx, handles).await,
-            Commands::Attachment(args) => {
-                debug_assert!(handles.is_empty(), "Attachment commands don't use handles");
-                args.run(ctx).await
-            }
-            Commands::AttachmentAdd(args) => {
-                debug_assert!(handles.is_empty(), "Attachment commands don't use handles");
-                args.run(ctx)
-            }
+            Commands::Attachment(args) => args.run(ctx, handles).await,
+            Commands::AttachmentAdd(args) => args.run(ctx, handles).await,
             Commands::External(args) => plugin::dispatch::run_external(&args, ctx).await,
             Commands::Init(_)
             | Commands::Plugin(_)
@@ -238,9 +232,9 @@ impl<S: Stage> Commands<S> {
             Commands::Query(args) => args.conversation_load_request(),
             Commands::Config(args) => args.conversation_load_request(),
             Commands::Conversation(args) => args.conversation_load_request(),
+            Commands::Attachment(args) => args.conversation_load_request(),
+            Commands::AttachmentAdd(args) => args.conversation_load_request(),
             Commands::Init(_)
-            | Commands::Attachment(_)
-            | Commands::AttachmentAdd(_)
             | Commands::Plugin(_)
             | Commands::Provider(_)
             | Commands::Workspace(_)
@@ -342,14 +336,12 @@ impl IntoPartialAppConfig for Commands {
     ) -> Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
         match self {
             Commands::Query(args) => args.apply_cli_config(workspace, partial, merged_config),
-            Commands::Attachment(args) => args.apply_cli_config(workspace, partial, merged_config),
-            Commands::AttachmentAdd(args) => {
-                args.apply_cli_config(workspace, partial, merged_config)
-            }
             Commands::Conversation(args) => {
                 args.apply_cli_config(workspace, partial, merged_config)
             }
-            Commands::Config(_)
+            Commands::Attachment(_)
+            | Commands::AttachmentAdd(_)
+            | Commands::Config(_)
             | Commands::Init(_)
             | Commands::Plugin(_)
             | Commands::Provider(_)

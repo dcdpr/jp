@@ -1,84 +1,48 @@
-//! What the commands show of a review: the records `jp -F json` prints, which
-//! `render` lays out as text for a terminal.
+//! What the commands show of a review: the records `jp -F json` prints and the
+//! HTTP API answers with, which `render` lays out as text for a terminal.
 //!
+//! The records are `jp_review_api`'s types, built here from the review as
+//! `review.json` holds it.
 //! [`detail`] and [`comment`] place each comment's anchor in the version being
 //! shown, the way `text::LineMap` carries a range from one version to another,
-//! or mark it outdated there.
+//! or mark it outdated there, and render each comment's and reply's body as
+//! HTML.
+//! [`approval`] places an approved passage the same way, and [`read_until`] the
+//! last line read of a file.
 
 use std::collections::{BTreeSet, HashMap};
 
-use chrono::{DateTime, Utc};
+use jp_review_api as wire;
 use serde::Serialize;
 
 use crate::{
     anchor::{Anchor, Target},
     id::{CommentRef, ReviewId},
-    model::{Comment, Reply, Review, Role, State, Status, Version},
-    pass::Pass,
-    text::{LineMap, Range, Text, hunks},
+    model::{Comment, Reply, Review, Role, Status, Version},
+    pass::{Ended, Pass},
+    progress::{Approval, ReadUntil},
+    text::{self, LineMap, Range, Text, hunks},
 };
 
 /// File contents, by the name of the blob holding them.
 pub(crate) type Texts = HashMap<String, String>;
 
 /// What every record of a review opens with.
-#[derive(Debug, Serialize)]
-pub(crate) struct Head<'a> {
-    pub id: ReviewId,
-    pub title: &'a str,
-
-    #[serde(rename = "status")]
-    pub state: State,
-
-    pub author: &'a str,
-    pub created_at: DateTime<Utc>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub closed_at: Option<DateTime<Utc>>,
-
-    pub files: &'a [String],
-}
-
-impl<'a> Head<'a> {
-    fn of(id: ReviewId, review: &'a Review) -> Self {
-        Self {
-            id,
-            title: &review.title,
-            state: review.state(),
-            author: &review.author,
-            created_at: review.created_at,
-            closed_at: review.closed_at,
-            files: &review.paths,
-        }
+fn head(id: ReviewId, review: &Review) -> wire::Head {
+    wire::Head {
+        id: id.to_string(),
+        title: review.title.clone(),
+        status: review.state(),
+        author: review.author.clone(),
+        created_at: review.created_at,
+        closed_at: review.closed_at,
+        files: review.paths.clone(),
     }
 }
 
-/// A review in a listing.
-#[derive(Debug, Serialize)]
-pub(crate) struct Summary<'a> {
-    #[serde(flatten)]
-    pub head: Head<'a>,
-
-    /// The number of the latest version.
-    pub latest: u32,
-
-    /// The version labelled `base`, if there is one.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub base: Option<u32>,
-
-    pub comments: Counts,
-}
-
-/// How many of a review's comments stand where.
-#[derive(Debug, Default, PartialEq, Eq, Serialize)]
-pub(crate) struct Counts {
-    pub draft: usize,
-    pub open: usize,
-    pub resolved: usize,
-}
-
-pub(crate) fn summary(id: ReviewId, review: &Review) -> Summary<'_> {
-    let mut comments = Counts::default();
+/// The review `id`, as a listing shows it.
+pub(crate) fn summary(id: ReviewId, review: &Review) -> wire::Summary {
+    let mut comments = wire::Counts::default();
     for comment in &review.comments {
         match comment.status() {
             Status::Draft => comments.draft += 1,
@@ -87,179 +51,251 @@ pub(crate) fn summary(id: ReviewId, review: &Review) -> Summary<'_> {
         }
     }
 
-    Summary {
-        head: Head::of(id, review),
+    wire::Summary {
+        head: head(id, review),
         latest: review.latest().map_or(0, |latest| latest.number),
         base: review.base(),
         comments,
+        running: review.passes.running().map(|pass| pass.number),
     }
-}
-
-/// A review, with its comments placed in one version.
-#[derive(Debug, Serialize)]
-pub(crate) struct Detail<'a> {
-    #[serde(flatten)]
-    pub head: Head<'a>,
-
-    pub revision: u64,
-
-    /// The version the comments are placed in.
-    pub version: u32,
-
-    pub versions: &'a [Version],
-
-    /// The conversation the review's passes run in.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub conversation: Option<&'a str>,
-
-    #[serde(skip_serializing_if = "<[Pass]>::is_empty")]
-    pub passes: &'a [Pass],
-
-    pub comments: Vec<CommentView<'a>>,
 }
 
 /// `review`, with its comments placed in version `shown`.
 ///
 /// `texts` holds every blob [`blobs_needed`] names.
-pub(crate) fn detail<'a>(
-    id: ReviewId,
-    review: &'a Review,
-    shown: u32,
-    texts: &'a Texts,
-) -> Detail<'a> {
-    Detail {
-        head: Head::of(id, review),
+pub(crate) fn detail(id: ReviewId, review: &Review, shown: u32, texts: &Texts) -> wire::Detail {
+    wire::Detail {
+        head: head(id, review),
         revision: review.revision,
         version: shown,
-        versions: &review.versions,
-        conversation: review.passes.conversation.as_deref(),
-        passes: &review.passes.list,
+        versions: review.versions.iter().map(version).collect(),
+        conversation: review.passes.conversation.clone(),
+        passes: review.passes.list.iter().map(pass).collect(),
         comments: review
             .comments
             .iter()
             .map(|found| comment(id, review, found, shown, texts))
             .collect(),
+        approvals: review
+            .progress
+            .approvals
+            .iter()
+            .map(|found| approval(review, found, shown, texts))
+            .collect(),
+        read_until: review
+            .progress
+            .read_until
+            .iter()
+            .map(|(path, found)| read_until(review, path, found, shown, texts))
+            .collect(),
     }
 }
 
-/// A comment, with its anchor placed in the version shown.
-#[derive(Debug, Serialize)]
-pub(crate) struct CommentView<'a> {
-    pub id: CommentRef,
-    pub status: Status,
-    pub role: Role,
-    pub author: &'a str,
-    pub created_at: DateTime<Utc>,
-    pub anchor: AnchorView<'a>,
-
-    /// The text the anchor covers, in the version it was written against.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub excerpt: Option<&'a str>,
-
-    pub body: &'a str,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub suggestion: Option<&'a str>,
-
-    #[serde(skip_serializing_if = "<[Reply]>::is_empty")]
-    pub replies: &'a [Reply],
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub draft_reply: Option<&'a Reply>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub resolved_at: Option<DateTime<Utc>>,
+fn version(version: &Version) -> wire::Version {
+    wire::Version {
+        number: version.number,
+        label: version.label.clone(),
+        created_at: version.created_at,
+        files: version.files.clone(),
+    }
 }
 
-/// An anchor as it is stored, and where it falls in the version shown.
-#[derive(Debug, Serialize)]
-pub(crate) struct AnchorView<'a> {
-    #[serde(flatten)]
-    pub anchor: &'a Anchor,
-
-    /// Where the anchor falls in the version shown; absent when it is outdated
-    /// there.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub projected: Option<Placed>,
-
-    pub outdated: bool,
-
-    /// Where the anchor last stood, for one outdated in the version shown: the
-    /// latest version before it that still holds the anchor's text unchanged.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub resolved: Option<Placed>,
+pub(crate) fn pass(pass: &Pass) -> wire::Pass {
+    wire::Pass {
+        number: pass.number,
+        author: pass.author.clone(),
+        created_at: pass.created_at,
+        version: pass.version,
+        comments: pass.comments.clone(),
+        message: pass.message.clone(),
+        conversation: pass.conversation.clone(),
+        ended: pass.ended.as_ref().map(ended),
+    }
 }
 
-/// Where an anchor falls in a version.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub(crate) struct Placed {
-    pub version: u32,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub range: Option<Range>,
-
-    /// The UTF-8 byte offsets `range` covers in the version, end exclusive: how
-    /// a browser addresses the text.
-    /// A range of whole lines covers them without the last one's line ending.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub bytes: Option<[usize; 2]>,
+fn ended(ended: &Ended) -> wire::Ended {
+    wire::Ended {
+        outcome: ended.outcome,
+        at: ended.at,
+        version: ended.version,
+        error: ended.error.clone(),
+        answer: ended.answer.clone(),
+    }
 }
 
 /// `found`, a comment on `review`, with its anchor placed in version `shown`.
 ///
 /// `texts` holds every blob [`blobs_of`] names for the comment.
-pub(crate) fn comment<'a>(
+pub(crate) fn comment(
     id: ReviewId,
-    review: &'a Review,
-    found: &'a Comment,
+    review: &Review,
+    found: &Comment,
     shown: u32,
-    texts: &'a Texts,
-) -> CommentView<'a> {
+    texts: &Texts,
+) -> wire::Comment {
     let content = &found.content;
-    let projected = place(review, &content.anchor, shown, texts);
-    let resolved = projected
-        .is_none()
-        .then(|| last_resolved(review, &content.anchor, shown, texts))
-        .flatten();
 
-    CommentView {
+    wire::Comment {
         id: CommentRef {
             review: id,
             number: found.number,
-        },
+        }
+        .to_string(),
         status: found.status(),
         role: found.role,
-        author: &found.author,
+        author: found.author.clone(),
         created_at: found.created_at,
-        anchor: AnchorView {
-            anchor: &content.anchor,
-            projected,
-            outdated: projected.is_none(),
-            resolved,
-        },
-        excerpt: excerpt(review, &content.anchor, texts),
-        body: &content.body,
-        suggestion: content.suggestion.as_deref(),
-        replies: &found.replies,
-        draft_reply: found.draft_reply.as_ref(),
+        anchor: anchor_view(review, &content.anchor, shown, texts),
+        excerpt: excerpt(review, &content.anchor, texts).map(ToOwned::to_owned),
+        body: content.body.clone(),
+        body_html: html(&content.body),
+        suggestion: content.suggestion.clone(),
+        replies: found.replies.iter().map(reply).collect(),
+        draft_reply: found.draft_reply.as_ref().map(reply),
         resolved_at: found.resolved_at,
     }
 }
 
-/// The blobs [`detail`] reads to place the comments of `review` in version
+/// `anchor` as written, and where it falls in version `shown`.
+fn anchor_view(review: &Review, anchor: &Anchor, shown: u32, texts: &Texts) -> wire::AnchorView {
+    let projected = place(review, anchor, shown, texts);
+    let resolved = projected
+        .is_none()
+        .then(|| last_resolved(review, anchor, shown, texts))
+        .flatten();
+    let (path, range) = match &anchor.target {
+        Target::Review => (None, None),
+        Target::File(path) => (Some(path.clone()), None),
+        Target::Range(path, range) => (Some(path.clone()), Some(range.to_string())),
+    };
+
+    wire::AnchorView {
+        version: anchor.version,
+        path,
+        range,
+        outdated: projected.is_none(),
+        projected,
+        resolved,
+    }
+}
+
+/// `found`, an approval in `review`, with its passage placed in version
 /// `shown`.
+///
+/// `texts` holds every blob [`blobs_needed`] names.
+pub(crate) fn approval(
+    review: &Review,
+    found: &Approval,
+    shown: u32,
+    texts: &Texts,
+) -> wire::Approval {
+    wire::Approval {
+        number: found.number,
+        author: found.author.clone(),
+        created_at: found.created_at,
+        anchor: anchor_view(review, &found.anchor, shown, texts),
+        excerpt: excerpt(review, &found.anchor, texts).map(ToOwned::to_owned),
+    }
+}
+
+/// How far `path` was read, as `found` says, with the last line read placed in
+/// version `shown`.
+///
+/// `texts` holds every blob [`blobs_needed`] names.
+pub(crate) fn read_until(
+    review: &Review,
+    path: &str,
+    found: &ReadUntil,
+    shown: u32,
+    texts: &Texts,
+) -> wire::ReadUntil {
+    wire::ReadUntil {
+        path: path.to_owned(),
+        author: found.author.clone(),
+        created_at: found.created_at,
+        version: found.version,
+        line: found.line,
+        projected: read_line(review, path, found, shown, texts),
+    }
+}
+
+/// The last line of `path` read, as version `shown` holds the file; `None` when
+/// the file is absent from a version, or none of the lines read are left.
+fn read_line(
+    review: &Review,
+    path: &str,
+    found: &ReadUntil,
+    shown: u32,
+    texts: &Texts,
+) -> Option<wire::Placed> {
+    let old = Text::new(text_at(review, found.version, path, texts)?);
+    let new = Text::new(text_at(review, shown, path, texts)?);
+    let line = LineMap::new(&old, &new).through(found.line);
+    let bytes = new.bytes(Range::Lines {
+        first: line,
+        last: line,
+    })?;
+
+    Some(wire::Placed {
+        version: shown,
+        range: Some(line.to_string()),
+        bytes: Some([bytes.start, bytes.end]),
+    })
+}
+
+fn reply(reply: &Reply) -> wire::Reply {
+    wire::Reply {
+        role: reply.role,
+        author: reply.author.clone(),
+        created_at: reply.created_at,
+        body: reply.body.clone(),
+        body_html: html(&reply.body),
+        verdict: reply.verdict,
+        pass: reply.pass,
+    }
+}
+
+/// `markdown` rendered as HTML, raw HTML in it escaped.
+fn html(markdown: &str) -> String {
+    md_html::render(markdown).html
+}
+
+/// The blobs [`detail`] reads to place the comments of `review`, and what its
+/// reviewer approved and read, in version `shown`.
 pub(crate) fn blobs_needed(review: &Review, shown: u32) -> BTreeSet<&str> {
     review
         .comments
         .iter()
         .flat_map(|found| blobs_of(review, found, shown))
+        .chain(progress_blobs(review, shown))
         .collect()
 }
 
-/// The blobs [`comment`] reads to place `found` in version `shown`: the file
-/// its range is in, as each version from the anchor's to `shown` holds it.
+/// The blobs [`comment`] reads to place `found` in version `shown`.
 pub(crate) fn blobs_of<'a>(review: &'a Review, found: &Comment, shown: u32) -> Vec<&'a str> {
-    let anchor = &found.content.anchor;
+    anchor_blobs(review, &found.content.anchor, shown)
+}
+
+/// The blobs [`approval`] and [`read_until`] read to place what the reviewer of
+/// `review` approved and read in version `shown`.
+pub(crate) fn progress_blobs(review: &Review, shown: u32) -> Vec<&str> {
+    let progress = &review.progress;
+    let approved = progress
+        .approvals
+        .iter()
+        .flat_map(|found| anchor_blobs(review, &found.anchor, shown));
+    let read = progress.read_until.iter().flat_map(|(path, found)| {
+        [found.version, shown]
+            .into_iter()
+            .filter_map(|version| review.blob(version, path))
+    });
+
+    approved.chain(read).collect()
+}
+
+/// The blobs read to place `anchor` in version `shown`: the file its range is
+/// in, as each version from the anchor's to `shown` holds it.
+fn anchor_blobs<'a>(review: &'a Review, anchor: &Anchor, shown: u32) -> Vec<&'a str> {
     let Target::Range(path, _) = &anchor.target else {
         return vec![];
     };
@@ -272,7 +308,12 @@ pub(crate) fn blobs_of<'a>(review: &'a Review, found: &Comment, shown: u32) -> V
 /// The latest version after the anchor's and before `shown` where `anchor`
 /// still stands, or the anchor's own; `None` when `shown` comes before the
 /// anchor's version.
-fn last_resolved(review: &Review, anchor: &Anchor, shown: u32, texts: &Texts) -> Option<Placed> {
+fn last_resolved(
+    review: &Review,
+    anchor: &Anchor,
+    shown: u32,
+    texts: &Texts,
+) -> Option<wire::Placed> {
     (anchor.version..shown)
         .rev()
         .find_map(|version| place(review, anchor, version, texts))
@@ -280,7 +321,7 @@ fn last_resolved(review: &Review, anchor: &Anchor, shown: u32, texts: &Texts) ->
 
 /// Where `anchor` falls in version `shown`, or `None` when it is outdated
 /// there: its file is absent, or a line its range covers changed.
-fn place(review: &Review, anchor: &Anchor, shown: u32, texts: &Texts) -> Option<Placed> {
+fn place(review: &Review, anchor: &Anchor, shown: u32, texts: &Texts) -> Option<wire::Placed> {
     let (range, bytes) = match &anchor.target {
         Target::Review => (None, None),
         Target::File(path) => {
@@ -292,11 +333,11 @@ fn place(review: &Review, anchor: &Anchor, shown: u32, texts: &Texts) -> Option<
             let new = Text::new(text_at(review, shown, path, texts)?);
             let projected = LineMap::new(&old, &new).project(*range)?;
             let bytes = new.bytes(projected)?;
-            (Some(projected), Some([bytes.start, bytes.end]))
+            (Some(projected.to_string()), Some([bytes.start, bytes.end]))
         }
     };
 
-    Some(Placed {
+    Some(wire::Placed {
         version: shown,
         range,
         bytes,
@@ -408,53 +449,30 @@ pub(crate) fn pass_report(id: ReviewId, review: &Review, number: u32) -> Option<
     })
 }
 
-/// What changed in a review's files from one version to another.
-#[derive(Debug, Serialize)]
-pub(crate) struct DiffView<'a> {
-    pub review: ReviewId,
-    pub from: u32,
-    pub to: u32,
-
-    /// Changed files; unchanged files are omitted.
-    pub files: Vec<FileDiff<'a>>,
-}
-
-/// How one file changed.
-#[derive(Debug, Serialize)]
-pub(crate) struct FileDiff<'a> {
-    pub path: &'a str,
-    pub change: Change,
-
-    /// The unified diff hunks, without file headers.
-    pub diff: String,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum Change {
-    Added,
-    Deleted,
-    Modified,
-}
-
 /// How `path` changed from `old` to `new`, each `None` when the file was
 /// absent; `None` when it didn't change.
-pub(crate) fn file_diff<'a>(
-    path: &'a str,
+///
+/// The lines added, modified, and removed are placed in `new`, which a deleted
+/// file has none of.
+pub(crate) fn file_diff(
+    path: &str,
     old: Option<&str>,
     new: Option<&str>,
-) -> Option<FileDiff<'a>> {
+) -> Option<wire::FileDiff> {
     let change = match (old, new) {
         (None, None) => return None,
         (Some(old), Some(new)) if old == new => return None,
-        (None, Some(_)) => Change::Added,
-        (Some(_), None) => Change::Deleted,
-        (Some(_), Some(_)) => Change::Modified,
+        (None, Some(_)) => wire::Change::Added,
+        (Some(_), None) => wire::Change::Deleted,
+        (Some(_), Some(_)) => wire::Change::Modified,
     };
+    let placed = new.map_or_default(|new| text::changes(old.unwrap_or_default(), new));
 
-    Some(FileDiff {
-        path,
+    Some(wire::FileDiff {
+        path: path.to_owned(),
         change,
         diff: hunks(old.unwrap_or_default(), new.unwrap_or_default()),
+        added: placed.added,
+        removed: placed.removed,
     })
 }

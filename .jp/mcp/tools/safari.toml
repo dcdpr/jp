@@ -1,0 +1,35 @@
+# Safari's MCP server, which ships with Safari 27 as `safaridriver --mcp`. It
+# drives an automation window in the user's Safari, apart from their browsing
+# data, and needs Safari > Settings > Developer > "Allow remote automation and
+# external agents" turned on. See
+# <https://webkit.org/blog/18136/introducing-the-safari-mcp-server-for-web-developers/>.
+#
+# The server starts only when a conversation has one of its tools enabled, as
+# the `safari` skill does. Optional, so a machine without Safari 27 skips the
+# server and its tools instead of failing the query.
+[providers.mcp.safari]
+type = "stdio"
+command = "/usr/bin/safaridriver"
+arguments = ["--mcp"]
+optional = true
+
+# The server's tools, under a `safari_` prefix: their own names (`screenshot`,
+# `close_tab`) don't say what they act on. The server defines their parameters.
+[conversation.tools]
+safari_browser_console_messages = { enable = false, source = "mcp.safari.browser_console_messages" }
+safari_browser_dialogs = { enable = false, source = "mcp.safari.browser_dialogs" }
+safari_close_tab = { enable = false, source = "mcp.safari.close_tab" }
+safari_create_tab = { enable = false, source = "mcp.safari.create_tab" }
+safari_evaluate_javascript = { enable = false, source = "mcp.safari.evaluate_javascript" }
+safari_get_network_request = { enable = false, source = "mcp.safari.get_network_request" }
+safari_get_page_content = { enable = false, source = "mcp.safari.get_page_content" }
+safari_list_network_requests = { enable = false, source = "mcp.safari.list_network_requests" }
+safari_list_tabs = { enable = false, source = "mcp.safari.list_tabs" }
+safari_navigate_to_url = { enable = false, source = "mcp.safari.navigate_to_url" }
+safari_page_info = { enable = false, source = "mcp.safari.page_info" }
+safari_page_interactions = { enable = false, source = "mcp.safari.page_interactions" }
+safari_screenshot = { enable = false, source = "mcp.safari.screenshot" }
+safari_set_emulated_media = { enable = false, source = "mcp.safari.set_emulated_media" }
+safari_set_viewport_size = { enable = false, source = "mcp.safari.set_viewport_size" }
+safari_switch_tab = { enable = false, source = "mcp.safari.switch_tab" }
+safari_wait_for_navigation = { enable = false, source = "mcp.safari.wait_for_navigation" }
