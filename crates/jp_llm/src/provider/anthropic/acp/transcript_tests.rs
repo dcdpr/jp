@@ -219,5 +219,5 @@ fn an_empty_thread_opens_a_new_session_with_the_continue_message() {
     let model = super::super::model_details(&"claude-opus-5".parse().unwrap());
     let prepared = PreparedRequest::new(&model, query).unwrap();
     assert_eq!(prepared.prompt, vec![CONTINUE_MESSAGE]);
-    assert!(prepared.history.is_empty());
+    assert_eq!(prepared.history, Vec::<Message>::new());
 }
