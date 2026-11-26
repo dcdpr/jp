@@ -745,6 +745,106 @@ async fn runtime_model_rejection_preserves_its_classification() {
     assert!(receiver.recv().await.is_none());
 }
 
+#[tokio::test]
+async fn a_rate_limited_model_selection_exhausts_the_subscription_for_that_family() {
+    let agent = scripted(|method, params, _notifier| async move {
+        match method.as_str() {
+            m if m == agent_method::INITIALIZE => {
+                Ok(json!({"protocolVersion": 1, "agentCapabilities": {"loadSession": true}}))
+            }
+            m if m == agent_method::SESSION_LOAD => Ok(json!({})),
+            m if m == agent_method::SESSION_SET_CONFIG_OPTION => {
+                assert_eq!(params["configId"], "model");
+                Err(RpcError::internal_error().data(json!({
+                    "details": "API error: 429 This request would exceed your account's rate \
+                                limit. Please try again later · model not changed",
+                })))
+            }
+            other => panic!("unexpected request: {other}"),
+        }
+    });
+    let mut prepared = prepared();
+    prepared.model = "claude-fable-5-2".parse().unwrap();
+    let environment = options::environment(&prepared, CachePolicy::Short);
+    let (sender, mut receiver) = mpsc::channel(16);
+    let before = Utc::now();
+    let error = timeout(
+        Duration::from_secs(5),
+        drive(
+            prepared,
+            QueryContext {
+                root: "/work/project".into(),
+                mcp_endpoint: None,
+                invocation: None,
+            },
+            vec![],
+            environment,
+            NativeArtifact {
+                session: Some(Uuid::parse_str("11111111-1111-4111-8111-111111111111").unwrap()),
+                path: None,
+            },
+            agent,
+            sender,
+        ),
+    )
+    .await
+    .unwrap()
+    .unwrap_err();
+    let after = Utc::now();
+    let Error::Stream(error) = error else {
+        panic!("expected classified failure, got {error:?}")
+    };
+    assert_eq!(error.kind, StreamErrorKind::SubscriptionExhausted);
+    // The limit covers every model of the family, and only that family.
+    assert_eq!(error.quota_scope.as_deref(), Some("fable"));
+    // The refusal reports no reset, so the cooldown is kept short.
+    let reset = error.quota_reset.unwrap();
+    assert!(
+        reset >= before + MODEL_REFUSAL_COOLDOWN && reset <= after + MODEL_REFUSAL_COOLDOWN,
+        "{reset}"
+    );
+    assert!(matches!(
+        error.source().unwrap().downcast_ref::<Error>(),
+        Some(Error::ModelSelection { model, .. }) if model.as_ref() == "claude-fable-5-2"
+    ));
+    assert!(receiver.recv().await.is_none());
+}
+
+#[test]
+fn a_rate_limited_model_outside_the_known_families_exhausts_the_account() {
+    let refused = RpcError::internal_error().data(json!({
+        "details": "API error: 429 This request would exceed your account's rate limit. Please \
+                    try again later · model not changed",
+    }));
+    let error = model_selection_failure(&"claude-ballad-1".parse().unwrap(), refused);
+    assert_eq!(error.kind, StreamErrorKind::SubscriptionExhausted);
+    assert_eq!(error.quota_scope, None);
+}
+
+#[test]
+fn a_429_in_the_error_data_is_a_rate_limited_model() {
+    let refused = RpcError::internal_error().data(json!({
+        "details": "API error: 429 This request would exceed your account's rate limit. Please \
+                    try again later · model not changed",
+    }));
+    assert!(refuses_rate_limited_model(&refused));
+
+    // Per-minute token limits clear quickly and do not indicate an account-level
+    // model refusal.
+    let burst = RpcError::internal_error().data(json!({
+        "details": "API error: 429 This request would exceed the rate limit for your \
+                    organization of 30,000 input tokens per minute.",
+    }));
+    assert!(!refuses_rate_limited_model(&burst));
+    let overloaded =
+        RpcError::internal_error().data(json!({"details": "API error: 529 Overloaded"}));
+    assert!(!refuses_rate_limited_model(&overloaded));
+    let missing =
+        RpcError::internal_error().data(json!({"details": "Model 'foobarbaz' not found"}));
+    assert!(!refuses_rate_limited_model(&missing));
+    assert!(!refuses_rate_limited_model(&RpcError::internal_error()));
+}
+
 #[test]
 fn a_missing_model_in_the_error_data_is_an_unknown_model() {
     let refused =

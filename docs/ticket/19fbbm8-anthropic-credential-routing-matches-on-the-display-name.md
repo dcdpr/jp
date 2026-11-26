@@ -1,6 +1,6 @@
 # Anthropic credential routing matches on the display name
 
-- **Status**: Todo
+- **Status**: Done
 - **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-10-27
@@ -41,3 +41,18 @@ carry a display name such as "Claude Opus 4.5", and assert the profile is
 skipped.
 
 Found while reviewing RFD 125.
+
+## Comments
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-25T14:33:12Z
+
+Fixed in PR #1395.
+The five Anthropic call sites (`start_query`, `chat_completion_stream`,
+`with_acp_fallback`, and both `advance` paths in the stream) resolve credentials
+by `model.id.name`.
+`a_family_scoped_refusal_switches_a_model_with_a_display_name` in
+`fallback_tests.rs` covers a model whose details carry a display name.
+It fails against the display-name lookup.
