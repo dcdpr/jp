@@ -25,13 +25,16 @@
 //!   tool calls, and `definitions` writes `review.toml` and the tool
 //!   definitions.
 //! - `server`, `api`, and `running` implement `jp review serve`, exposing the
-//!   JSON HTTP API and managing background pass turns.
+//!   JSON HTTP API, whose types live in the `jp-review-api` crate, and managing
+//!   background pass turns; `ui` holds the pages and files the browser UI is
+//!   served from, and `browser` opens them.
 //! - `options` parses `plugins.command.review.options`.
 //!
 //! See: `docs/rfd/136-review-engine-for-workspace-files.md`
 
 mod anchor;
 mod api;
+mod browser;
 mod cmd;
 mod comments;
 mod definitions;
@@ -40,7 +43,9 @@ mod model;
 mod options;
 mod pass;
 mod paths;
+mod progress;
 mod prompt;
+mod reading;
 mod render;
 mod running;
 mod server;
@@ -51,6 +56,7 @@ mod submit;
 mod test_support;
 mod text;
 mod tool;
+mod ui;
 mod view;
 
 use std::{
@@ -68,8 +74,10 @@ use jp_plugin::{
     server::{Listen, parse_bind},
     stdio::{self, print_json, print_to, send_exit},
 };
+use serde_json::json;
 
 use crate::{
+    browser::{Browser, SystemBrowser},
     cmd::Context,
     id::{CommentRef, Conversation, ReviewId},
     options::{Options, Overrides},
@@ -262,11 +270,94 @@ enum Command {
         accepted: Option<ReviewId>,
     },
 
+    /// Approve a passage in one of a review's files.
+    ///
+    /// Each pass informs the assistant which passages are approved.
+    /// An approval remains in effect while its passage matches the approved
+    /// version: a version that modifies a line in the range marks the approval
+    /// outdated, and a version that restores the text makes it active again.
+    Approve {
+        /// The review: `R-1h4k2m9`.
+        id: ReviewId,
+
+        /// The passage: whole lines, `docs/a.md:42` or `docs/a.md:42-45`, or
+        /// the text from a line and column up to but not including another,
+        /// `docs/a.md:42:5-43:18`.
+        #[arg(long, value_name = "PATH:RANGE")]
+        at: String,
+    },
+
+    /// Take back an approval.
+    Unapprove {
+        /// The review: `R-1h4k2m9`.
+        id: ReviewId,
+
+        /// The approval's number, as `jp review show` lists it.
+        number: u32,
+    },
+
+    /// Say how far down a file the reviewer has read.
+    ///
+    /// Each pass tells the assistant that the lines after are unread, so that
+    /// they carry no comment says nothing about them.
+    /// It says nothing of the lines before: only `approve` approves.
+    ReadUntil {
+        /// The review: `R-1h4k2m9`.
+        id: ReviewId,
+
+        /// The last line read, `docs/a.md:120`; with `--clear`, the file alone.
+        #[arg(long, value_name = "PATH[:LINE]")]
+        at: String,
+
+        /// Stop saying how far the file was read.
+        #[arg(long)]
+        clear: bool,
+    },
+
     /// Close a review, after which it takes no changes.
     Close {
         /// The review: `R-1h4k2m9`.
         id: ReviewId,
     },
+
+    /// Open a closed review again, or a resolved comment.
+    ///
+    /// A comment opened again waits on the assistant when the reviewer wrote in
+    /// it last, and the next pass sends it.
+    Reopen {
+        /// The review, `R-1h4k2m9`, or the comment, `R-1h4k2m9#2`.
+        #[arg(value_name = "ID|COMMENT")]
+        target: Reopened,
+    },
+
+    /// Open the review list, or a review, in the browser, as the running `jp
+    /// review serve` serves it.
+    Open {
+        /// The review: `R-1h4k2m9`; the review list when not given.
+        id: Option<ReviewId>,
+    },
+}
+
+/// What `jp review reopen` opens again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Reopened {
+    Review(ReviewId),
+    Comment(CommentRef),
+}
+
+impl FromStr for Reopened {
+    type Err = String;
+
+    /// Read a comment, which names its number after a `#`, or else a review.
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        if text.contains('#') {
+            return text.parse().map(Self::Comment);
+        }
+
+        text.parse()
+            .map(Self::Review)
+            .map_err(|_| format!("`{text}` is not a review (try R-1h4k2m9)."))
+    }
 }
 
 #[derive(Debug, clap::Args)]
@@ -289,18 +380,35 @@ struct StartArgs {
     /// Record no base, whatever `plugins.command.review.options.base` says.
     #[arg(long)]
     no_base: bool,
+
+    /// Open the review in the browser, as the running `jp review serve` serves
+    /// it.
+    #[arg(long)]
+    open: bool,
 }
 
 impl StartArgs {
-    /// Start the review these arguments ask for.
-    fn run(self, ctx: &Context<'_>) -> Result<Output, String> {
+    /// Start the review these arguments ask for, and open it in `browser` when
+    /// they say to.
+    ///
+    /// The review is started whether or not it can be opened.
+    fn run(self, ctx: &Context<'_>, browser: &dyn Browser) -> Result<Output, String> {
         let base = match (self.base, self.no_base) {
             (_, true) => None,
             (Some(Words(command)), false) => Some(command),
             (None, false) => ctx.options.base.clone(),
         };
 
-        cmd::start(ctx, &self.files, self.title.as_deref(), base.as_deref())
+        let (id, mut output) =
+            cmd::start(ctx, &self.files, self.title.as_deref(), base.as_deref())?;
+        if self.open {
+            match cmd::open(ctx, Some(id), browser) {
+                Ok(url) => output.notes.push(format!("Opened {url}.")),
+                Err(error) => output.warnings.push(error),
+            }
+        }
+
+        Ok(output)
     }
 }
 
@@ -405,6 +513,19 @@ struct ServeArgs {
     /// it too.
     #[arg(long = "allowed-host", value_name = "NAME", value_parser = parse_host)]
     allowed_hosts: Vec<String>,
+
+    /// Open the review list in the browser once the server listens.
+    #[arg(long)]
+    open: bool,
+
+    /// Serve the browser UI from DIR, as `just build-ui review` writes it,
+    /// instead of the one built in; for developing the UI.
+    ///
+    /// DIR is read on every request, and an open page reloads itself when `just
+    /// build-ui` writes a new build there.
+    /// A relative DIR is relative to the workspace root.
+    #[arg(long, value_name = "DIR")]
+    ui_dir: Option<Utf8PathBuf>,
 }
 
 impl ServeArgs {
@@ -530,9 +651,19 @@ pub static MANIFEST: &str = jp_plugin::manifest!(
 ///
 /// A `describe` is answered and ends the session; an `init` runs the command
 /// its arguments name.
+/// A command that opens a page does so in the user's default browser.
 pub fn run(
+    stdin: impl BufRead + Send + 'static,
+    stdout: impl Write + Send + 'static,
+) -> Result<(), String> {
+    run_with(stdin, stdout, &SystemBrowser)
+}
+
+/// [`run`], opening pages in `browser`.
+fn run_with(
     mut stdin: impl BufRead + Send + 'static,
     mut stdout: impl Write + Send + 'static,
+    browser: &dyn Browser,
 ) -> Result<(), String> {
     match stdio::read(&mut stdin, BINARY)? {
         HostToPlugin::Describe => stdio::describe(
@@ -550,7 +681,7 @@ pub fn run(
 
             match &init.tool {
                 Some(call) => answer_tool_call(&init, call, &mut stdout),
-                None => handle_command(&init, stdin, stdout),
+                None => handle_command(&init, stdin, stdout, browser),
             }
         }
         other => Err(format!("expected init or describe, got: {other:?}")),
@@ -585,6 +716,7 @@ fn handle_command(
     init: &InitMessage,
     mut stdin: impl BufRead + Send + 'static,
     mut stdout: impl Write + Send + 'static,
+    browser: &dyn Browser,
 ) -> Result<(), String> {
     let parsed = Args::try_parse_from(iter::once("jp review".to_owned()).chain(init.args.clone()));
     let args = match parsed {
@@ -599,19 +731,24 @@ fn handle_command(
 
     let mut overrides = Overrides {
         dir: args.dir.map(|StoreDir(dir)| dir),
-        listen: Listen::default(),
+        ..Overrides::default()
     };
     let result = match args.command {
         Commands::Setup(setup) => setup.run(&init.workspace.root),
         Commands::Review(command) => read_options(init, &overrides)
-            .and_then(|options| execute(&Context::new(init, &options)?, command)),
+            .and_then(|options| execute(&Context::new(init, &options)?, command, browser)),
         Commands::Submit(submit) => read_options(init, &overrides).and_then(|options| {
             let ctx = Context::new(init, &options)?;
             submit::submit(&ctx, &submit.request(), &mut stdin, &mut stdout)
         }),
         Commands::Serve(serve) => {
+            let open = serve.open.then_some(browser);
+            overrides.ui = serve
+                .ui_dir
+                .as_deref()
+                .map(|dir| init.workspace.root.join(dir));
             overrides.listen = serve.listen();
-            return server::run(init, &overrides, stdin, stdout);
+            return server::run(init, &overrides, open, stdin, stdout);
         }
     };
 
@@ -627,9 +764,9 @@ fn read_options(init: &InitMessage, overrides: &Overrides) -> Result<Options, St
     Options::read(&init.options).map(|options| options.with(overrides))
 }
 
-fn execute(ctx: &Context<'_>, command: Command) -> Result<Output, String> {
+fn execute(ctx: &Context<'_>, command: Command, browser: &dyn Browser) -> Result<Output, String> {
     match command {
-        Command::Start(start) => start.run(ctx),
+        Command::Start(start) => start.run(ctx, browser),
         Command::Ls => cmd::list(ctx),
         Command::Show { id, version } => cmd::show(ctx, id, version),
         Command::Diff { id, from, to, pass } => match pass {
@@ -651,7 +788,33 @@ fn execute(ctx: &Context<'_>, command: Command) -> Result<Output, String> {
         } => comments::edit(ctx, comment, at.as_deref(), replace, body),
         Command::Withdraw { comment } => comments::withdraw(ctx, comment),
         Command::Resolve { comments, accepted } => comments::resolve(ctx, &comments, accepted),
+        Command::Approve { id, at } => reading::approve(ctx, id, &at),
+        Command::Unapprove { id, number } => reading::unapprove(ctx, id, number),
+        Command::ReadUntil {
+            id,
+            at,
+            clear: true,
+        } => reading::unread(ctx, id, &at),
+        Command::ReadUntil {
+            id,
+            at,
+            clear: false,
+        } => reading::read_until(ctx, id, &at),
         Command::Close { id } => cmd::close(ctx, id),
+        Command::Reopen {
+            target: Reopened::Review(id),
+        } => cmd::reopen(ctx, id),
+        Command::Reopen {
+            target: Reopened::Comment(comment),
+        } => comments::reopen(ctx, comment),
+        Command::Open { id } => {
+            let url = cmd::open(ctx, id, browser)?;
+            if ctx.format.is_json() {
+                return cmd::json(&json!({ "url": url }));
+            }
+
+            Ok(format!("{url}\n").into())
+        }
     }
 }
 

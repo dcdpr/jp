@@ -5,7 +5,8 @@
 //! a background task to await `query_complete` and record the post-turn
 //! snapshot and outcome while holding the `.pass` lock.
 //!
-//! [`Passes::stop`] sends a `stop` interrupt for a running pass.
+//! [`Passes::stop`] sends a `stop` interrupt for a running pass, when it is the
+//! one the request named.
 //! On server shutdown, [`Passes::stop_all`] stops all active passes and rejects
 //! new submissions, and [`Passes::wait`] awaits completion of all in-flight
 //! pass tasks.
@@ -23,7 +24,7 @@ use jp_plugin::{
     log::{Level, Log, fields},
     message::{HostToPlugin, InterruptRequest, PluginToHost, QueryRequest},
 };
-use serde::Serialize;
+use jp_review_api::Started;
 use tokio::{
     sync::oneshot,
     task::{self, JoinSet},
@@ -33,8 +34,8 @@ use tokio::{
 use crate::{
     api::{self, ApiError, Reply, Workspace},
     id::ReviewId,
-    pass::Pass,
     submit::{self, Ending, Request},
+    view,
 };
 
 /// How long starting a pass waits for the host to create the conversation a
@@ -101,13 +102,18 @@ struct Asked {
     lock: File,
 }
 
-/// What `POST /api/reviews/{id}/passes` answers: the pass as recorded.
-#[derive(Debug, Serialize)]
-struct Started<'a> {
-    review: ReviewId,
+/// What asking to stop a review's pass found among the passes this server runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Stop {
+    /// The pass with this number is asked to stop.
+    Stopping(u32),
 
-    #[serde(flatten)]
-    pass: &'a Pass,
+    /// Pass `running` runs and the request named pass `asked`, so nothing was
+    /// stopped.
+    Other { running: u32, asked: u32 },
+
+    /// This server runs no pass of the review.
+    None,
 }
 
 impl Passes {
@@ -188,22 +194,29 @@ impl Passes {
     }
 
     /// Ask the host to stop the turn of the pass this server runs for the
-    /// review `id`, returning the pass's number; `None` when it runs none.
+    /// review `id`, when it is pass `asked`, or whichever it is when `asked` is
+    /// `None`.
     ///
     /// A pass whose conversation the host hasn't named yet is stopped as soon
     /// as it is.
-    pub(crate) fn stop(&self, id: ReviewId) -> Result<Option<u32>, ApiError> {
+    pub(crate) fn stop(&self, id: ReviewId, asked: Option<u32>) -> Result<Stop, ApiError> {
         let mut flights = lock(&self.flights);
         let Some(flight) = flights.running.get_mut(&id) else {
-            return Ok(None);
+            return Ok(Stop::None);
         };
+        if let Some(asked) = asked.filter(|asked| *asked != flight.number) {
+            return Ok(Stop::Other {
+                running: flight.number,
+                asked,
+            });
+        }
         flight.stop = true;
         if let Some(conversation) = &flight.conversation {
             self.interrupt(conversation)
                 .map_err(|error| ApiError::from(error.to_string()))?;
         }
 
-        Ok(Some(flight.number))
+        Ok(Stop::Stopping(flight.number))
     }
 
     /// Stop every pass this server runs, and refuse new ones.
@@ -449,7 +462,10 @@ async fn started(workspace: &Arc<Workspace>, id: ReviewId, number: u32) -> Resul
             .get(number)
             .ok_or_else(|| ApiError::from(format!("{id} has no pass {number}.")))?;
 
-        Reply::new(StatusCode::ACCEPTED, &Started { review: id, pass })
+        Reply::new(StatusCode::ACCEPTED, &Started {
+            review: id.to_string(),
+            pass: view::pass(pass),
+        })
     })
     .await
 }
@@ -499,7 +515,7 @@ fn open(workspace: &Workspace, request: &Request, query: String) -> Result<Opene
 /// How the turn ended, by the host's last answer to its query.
 fn ending(answer: Result<HostToPlugin, client::Error>) -> Ending {
     match answer {
-        Ok(HostToPlugin::QueryComplete(done)) => Ending::of(done.outcome),
+        Ok(HostToPlugin::QueryComplete(done)) => Ending::of(done),
         Ok(HostToPlugin::Error(error)) => Ending::failed(error.message),
         Ok(other) => Ending::failed(format!("unexpected answer to a pass's query: {other:?}")),
         Err(error) => Ending::lost(error.to_string()),

@@ -960,6 +960,14 @@ pub struct QueryCompleteResponse {
         skip_serializing_if = "Option::is_none"
     )]
     pub data: Option<Value>,
+
+    /// The last message text the assistant wrote in the turn.
+    ///
+    /// Absent when the turn holds none, as when it was stopped before the
+    /// assistant wrote anything, or answered only with structured data.
+    /// Hosts older than protocol version 16 never send it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answer: Option<String>,
 }
 
 /// How a delegated turn ended.

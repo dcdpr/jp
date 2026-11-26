@@ -11,6 +11,12 @@
 //! The diff includes the assistant's own edits from that pass, because edits
 //! made outside the turn while it ran can't be told apart from them.
 //!
+//! Under `## Read so far` and `## Approved`, every pass says how far the
+//! reviewer has read each file and which passages they approved, as the pass's
+//! starting version holds them.
+//! An approved passage that changed since is left out: the approval was of the
+//! text as it stood.
+//!
 //! Under `## Comments`, each submitted comment is rendered with its anchor in
 //! the pass's starting version (e.g. `### R-1h4k2m9#1 at docs/a.md:3:1-3:6`),
 //! the quoted excerpt or suggestion diff from its anchored version, and any
@@ -19,14 +25,15 @@
 
 use std::collections::BTreeSet;
 
+use jp_review_api::{Comment as CommentView, DiffView};
+
 use crate::{
-    anchor::Target,
     id::ReviewId,
     model::{Comment, Review, Role},
     pass::{Carry, Pass},
     render,
     text::Text,
-    view::{self, CommentView, DiffView, Texts},
+    view::{self, Texts},
 };
 
 /// What a pass message is made of.
@@ -61,7 +68,10 @@ pub(crate) fn blobs<'a>(review: &'a Review, pass: &Pass, carry: Carry) -> BTreeS
         .filter_map(|number| review.comment(*number).ok())
         .flat_map(|comment| view::blobs_of(review, comment, pass.version));
 
-    files.chain(comments).collect()
+    files
+        .chain(comments)
+        .chain(view::progress_blobs(review, pass.version))
+        .collect()
 }
 
 /// The message `prompt` describes.
@@ -75,6 +85,8 @@ pub(crate) fn message(prompt: &Prompt<'_>) -> String {
         Carry::Files => out.push_str(&files(prompt)),
         Carry::Changes { pass, version } => out.push_str(&changes(prompt, pass, version)),
     }
+    out.push_str(&read_so_far(prompt));
+    out.push_str(&approved(prompt));
 
     let comments: Vec<&Comment> = prompt
         .pass
@@ -147,7 +159,7 @@ fn changes(prompt: &Prompt<'_>, since: u32, from: u32) -> String {
     }
 
     let diff = render::diff(&DiffView {
-        review: prompt.id,
+        review: prompt.id.to_string(),
         from,
         to,
         files,
@@ -156,6 +168,63 @@ fn changes(prompt: &Prompt<'_>, since: u32, from: u32) -> String {
     format!(
         "\n## Changes since pass {since} was sent\n\nThis includes your own edits from that \
          pass.\n\n```diff\n{diff}```\n"
+    )
+}
+
+/// How far the reviewer has read each file they said so of, as the pass's
+/// version holds it; nothing when they said so of none.
+fn read_so_far(prompt: &Prompt<'_>) -> String {
+    let (review, shown) = (prompt.review, prompt.pass.version);
+    let files: String = review
+        .progress
+        .read_until
+        .iter()
+        .filter_map(|(path, found)| {
+            let line = view::read_until(review, path, found, shown, prompt.texts)
+                .projected?
+                .range?;
+
+            Some(format!("- {path}: through line {line}\n"))
+        })
+        .collect();
+    if files.is_empty() {
+        return String::new();
+    }
+
+    format!(
+        "\n## Read so far\n\nThe reviewer has read these files this far, and no further. The \
+         lines after are unread: that they carry no comment says nothing about them, and comments \
+         on them may follow in a later pass.\n\n{files}"
+    )
+}
+
+/// The passages the reviewer approved that stand unchanged in the pass's
+/// version; nothing when there are none.
+fn approved(prompt: &Prompt<'_>) -> String {
+    let (review, shown) = (prompt.review, prompt.pass.version);
+    let passages: String = review
+        .progress
+        .approvals
+        .iter()
+        .filter_map(|found| {
+            let view = view::approval(review, found, shown, prompt.texts);
+            view.anchor.projected.as_ref()?;
+            let opening = render::opening(view.excerpt.as_deref().unwrap_or_default());
+
+            Some(format!(
+                "- {}, from \"{opening}\"\n",
+                render::place(&view.anchor, shown)
+            ))
+        })
+        .collect();
+    if passages.is_empty() {
+        return String::new();
+    }
+
+    format!(
+        "\n## Approved\n\nThe reviewer read these passages and approved them as they stand. Leave \
+         them as they are, unless acting on a comment needs one changed; say so in your reply \
+         when it does.\n\n{passages}"
     )
 }
 
@@ -180,10 +249,11 @@ fn comment(prompt: &Prompt<'_>, found: &Comment) -> String {
 }
 
 /// A comment's heading: `R-1h4k2m9#2 at docs/a.md:60-64, suggestion`.
-fn heading(view: &CommentView<'_>, shown: u32) -> String {
-    let on = match view.anchor.anchor.target {
-        Target::Range(..) => "at",
-        Target::Review | Target::File(_) => "on",
+fn heading(view: &CommentView, shown: u32) -> String {
+    let on = if view.anchor.range.is_some() {
+        "at"
+    } else {
+        "on"
     };
     let mut heading = format!("{} {on} {}", view.id, render::place(&view.anchor, shown));
     if view.suggestion.is_some() {

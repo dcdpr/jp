@@ -3,6 +3,7 @@ set fallback
 # see: <https://github.com/cargo-bins/cargo-quickinstall/releases>
 bacon_version        := "3.25.0"
 binstall_version     := "1.22.0"
+cargo_watch_version  := "8.5.3"
 cbindgen_version     := "0.29.4"
 deny_version         := "0.20.2"
 expand_version       := "1.0.126"
@@ -12,6 +13,7 @@ llvm_cov_version     := "0.9.2"
 nextest_version      := "0.9.143"
 rustqual_version     := "1.8.2"
 shear_version        := "1.13.4"
+tailwindcss_version  := "4.3.5"
 vet_version          := "0.10.2"
 
 quiet_flag := if env_var_or_default("CI", "") == "true" { "" } else { "--quiet" }
@@ -2128,6 +2130,19 @@ shear *FLAGS="--fix": (_install "cargo-shear@" + shear_version)
 typecheck-js:
     npx --yes --package=typescript@5 -- tsc --project crates/plugins/command/serve-web/tsconfig.json
 
+# Source files excluded from the host coverage report in addition to
+# `cargo llvm-cov`'s defaults (tests, `*_tests.rs`, and dependencies).
+#
+# These `jp-review-ui` modules depend on browser APIs and only run under
+# `wasm-bindgen-test` in a headless browser, although they compile on the host.
+# Tracked in T-1rms9dy; remove this regex once browser test coverage is merged
+# into the report. Pure UI modules remain included and are covered by host
+# unit tests.
+#
+# LLVM's regex engine does not support lookahead, so each browser-only module
+# is listed explicitly.
+coverage_ignore := 'crates/plugins/command/review/ui/src/((app|capture|card|compose|dom|highlight|lib|list|seat|widget)\.rs$|review(\.rs$|/))'
+
 # Generate code coverage into `target/lcov.info`, the way `coverage-ci` does.
 #
 # Tests run under nextest, one process per test, as they do everywhere else.
@@ -2149,7 +2164,7 @@ coverage: _coverage-setup
 
     cargo llvm-cov --branch --no-cfg-coverage --no-cfg-coverage-nightly --cargo-profile=coverage --no-report nextest
     cargo llvm-cov --branch --no-cfg-coverage --no-cfg-coverage-nightly --profile=coverage --no-report --doc
-    cargo llvm-cov report --branch --doctests --lcov --output-path=target/lcov.info --profile=coverage
+    cargo llvm-cov report --branch --doctests --lcov --output-path=target/lcov.info --profile=coverage --ignore-filename-regex '{{coverage_ignore}}'
 
 _bacon CMD *FLAGS: (_install "bacon@" + bacon_version)
     @bacon {{CMD}} -- {{FLAGS}}
@@ -2236,6 +2251,10 @@ plugin-build-local: _install-jp (plugin-build "")
 # The `_install-*` recipes skip their rebuild whenever the binary is already on
 # `$PATH`, so a plugin built before a source change keeps running until this
 # replaces it.
+#
+# A plugin with a browser UI (a `ui` crate) has the UI built first, with
+# `build-ui`, and embedded through `JP_<PLUGIN>_UI`; a plain `cargo install`
+# serves a placeholder page in its place.
 [group('plugins')]
 install-plugin PLUGIN:
     #!/usr/bin/env sh
@@ -2248,7 +2267,182 @@ install-plugin PLUGIN:
         exit 1
     fi
 
+    if [ -f "${dir}/ui/Cargo.toml" ]; then
+        just build-ui "{{PLUGIN}}"
+        target=$(cargo metadata --no-deps --format-version=1 | jq -r .target_directory)
+        variable="JP_$(echo "{{PLUGIN}}" | tr 'a-z-' 'A-Z_')_UI"
+        env "${variable}=${target}/ui/{{PLUGIN}}" \
+            cargo install {{quiet_flag}} --locked --path "$dir" --debug
+        exit 0
+    fi
+
     cargo install {{quiet_flag}} --locked --path "$dir" --debug
+
+# Serve the review UI to work on it: the page reloads itself a moment after a
+# change to the UI's sources is saved.
+#
+# Installs `jp-review` as `install-plugin` does, then serves the UI from a
+# `wasm-dev` build (`jp review serve --ui-dir`) that `cargo watch` rebuilds on
+# every change to the `ui` and `api` crates. A change that doesn't compile
+# leaves the page as it was, with the error here.
+#
+# A change to the server itself, under `src/`, needs this started again:
+# stopping the server stops the passes it runs.
+#
+# Takes `jp review serve`'s own flags, such as `--open` or `--port`. Ctrl-C
+# stops both.
+[group('plugins')]
+[positional-arguments]
+review-ui-watch *ARGS: (_install "cargo-watch@" + cargo_watch_version)
+    #!/usr/bin/env sh
+    set -eu
+
+    just install-plugin review
+    just build-ui review wasm-dev
+    target=$(cargo metadata --no-deps --format-version=1 | jq -r .target_directory)
+
+    # `--postpone`: the UI was just built. `--why`: name the files that
+    # started each build.
+    cargo watch --postpone --why --delay 1 \
+        --watch crates/plugins/command/review/ui \
+        --watch crates/plugins/command/review/api \
+        --shell "just build-ui review wasm-dev" &
+    watcher=$!
+    trap 'kill "$watcher" 2>/dev/null || true' EXIT TERM
+    # Ctrl-C is for `jp`, which stops the server; this script then exits, and
+    # the trap above stops the watcher.
+    trap '' INT
+
+    # Every rebuild of the plugin changes its checksum, which an approval is
+    # pinned to.
+    cargo run {{quiet_flag}} --package jp_cli -- \
+        --cfg plugins.command.review.run=allow \
+        review serve --ui-dir "${target}/ui/review.wasm-dev" "$@"
+
+# Build the browser UI of a command plugin into `<target>/ui/<plugin>/`, in
+# cargo's target directory.
+#
+# Compiles the plugin's `ui` crate to WebAssembly under the size-optimized
+# `wasm-release` profile, runs `wasm-bindgen --target web` over it, and compiles
+# the UI's stylesheet beside it with Tailwind CSS, which writes the utility
+# classes the crate's sources name. Installs the `wasm-bindgen` CLI at the
+# version `Cargo.lock` pins for the `wasm-bindgen` crate, since the CLI refuses
+# a module compiled against another, and the Tailwind CSS CLI at
+# `tailwindcss_version`. See `docs/rfd/139-browser-uis-in-rust-with-leptos.md`.
+#
+# Another PROFILE, such as `wasm-dev`, builds into `<target>/ui/<plugin>.<profile>/`
+# instead, leaving the bundle `install-plugin` embeds alone.
+#
+# The file `build`, written last, names the build by its contents: a page served
+# from the directory (`jp review serve --ui-dir`) reloads once it names another.
+# A change that doesn't compile, in the crate or the stylesheet, leaves the last
+# build in place.
+[group('plugins')]
+build-ui PLUGIN PROFILE="wasm-release": (_rustup_target "wasm32-unknown-unknown")
+    #!/usr/bin/env sh
+    set -eu
+
+    dir="crates/plugins/command/{{PLUGIN}}/ui"
+    if [ ! -f "${dir}/Cargo.toml" ]; then
+        echo "The command plugin '{{PLUGIN}}' has no browser UI (no ${dir})." >&2
+        exit 1
+    fi
+    package=$(sed -n 's/^name = "\(.*\)"$/\1/p' "${dir}/Cargo.toml" | head -n 1)
+    library=$(echo "$package" | tr '-' '_')
+
+    target=$(cargo metadata --no-deps --format-version=1 | jq -r .target_directory)
+
+    just _install-wasm-bindgen
+    just _install-tailwindcss
+    cargo build {{quiet_flag}} --locked --package "$package" --lib \
+        --target wasm32-unknown-unknown --profile "{{PROFILE}}"
+
+    case "{{PROFILE}}" in
+        wasm-release) out="${target}/ui/{{PLUGIN}}" ;;
+        *) out="${target}/ui/{{PLUGIN}}.{{PROFILE}}" ;;
+    esac
+    # Build the bundle in a staging directory and swap it into place so a page
+    # loading concurrently sees a complete build, and a failed Tailwind build
+    # leaves the previous bundle intact.
+    next="${out}.next"
+    rm -rf "$next"
+    mkdir -p "$next"
+    "${target}/tools/tailwindcss-{{tailwindcss_version}}" --minify \
+        --input "${dir}/style.css" --output "${next}/style.css"
+    wasm-bindgen --target web --no-typescript --out-dir "$next" \
+        "${target}/wasm32-unknown-unknown/{{PROFILE}}/${library}.wasm"
+    cat "$next"/*.js "$next"/*.wasm "$next/style.css" | cksum | cut -d ' ' -f 1 > "$next/build"
+    rm -rf "${out}.old"
+    if [ -d "$out" ]; then
+        mv "$out" "${out}.old"
+    fi
+    mv "$next" "$out"
+    rm -rf "${out}.old"
+    echo "Built the browser UI of jp-{{PLUGIN}} into ${out}."
+
+# Install the `wasm-bindgen` CLI, `wasm-bindgen-test-runner` included, at the
+# version `Cargo.lock` pins for the `wasm-bindgen` crate, unless that version
+# is installed already.
+_install-wasm-bindgen:
+    #!/usr/bin/env sh
+    set -eu
+    version=$(awk '$0 == "name = \"wasm-bindgen\"" { getline; gsub(/"/, "", $3); print $3; exit }' Cargo.lock)
+    installed=$(wasm-bindgen --version 2>/dev/null | cut -d ' ' -f 2 || true)
+    if [ "$installed" != "$version" ]; then
+        cargo install {{quiet_flag}} --locked wasm-bindgen-cli --version "$version"
+    fi
+
+# Download the Tailwind CSS standalone CLI at `tailwindcss_version` into
+# `<target>/tools/`, unless it is there already.
+#
+# The CLI is one executable, which needs no Node.js. The download is checked
+# against the SHA-256 its release publishes for the file: bump the sums below
+# together with `tailwindcss_version`, from the release's `sha256sums.txt`.
+_install-tailwindcss:
+    #!/usr/bin/env sh
+    set -eu
+    target=$(cargo metadata --no-deps --format-version=1 | jq -r .target_directory)
+    bin="${target}/tools/tailwindcss-{{tailwindcss_version}}"
+    if [ -x "$bin" ]; then
+        exit 0
+    fi
+
+    case "$(uname -s) $(uname -m)" in
+        "Darwin arm64")
+            asset="tailwindcss-macos-arm64"
+            sum="f3f4f5d1727e2b693b8f1c9a1492b5dd87008c86ea286bee1589cb458e6235fc"
+            ;;
+        "Darwin x86_64")
+            asset="tailwindcss-macos-x64"
+            sum="a63702686a3ed048b3135d84a73be49ea9d47f880c9b20e54b3ef60934ad8cdf"
+            ;;
+        "Linux x86_64")
+            asset="tailwindcss-linux-x64"
+            sum="e47695cee3f0d90623a91f3939b08bdee610eb5ad99340adff9d4145b284d6cc"
+            ;;
+        "Linux aarch64")
+            asset="tailwindcss-linux-arm64"
+            sum="ffcd0d21dbd7c605dc12743ff0c0b47debc963c86b399674084c1c8f2c96ecad"
+            ;;
+        *)
+            echo "No Tailwind CSS standalone CLI is pinned for $(uname -s) $(uname -m)." >&2
+            exit 1
+            ;;
+    esac
+
+    mkdir -p "${target}/tools"
+    curl --proto '=https' --tlsv1.2 -fsSL -o "${bin}.download" \
+        "https://github.com/tailwindlabs/tailwindcss/releases/download/v{{tailwindcss_version}}/${asset}"
+    if ! echo "${sum}  ${bin}.download" | shasum -a 256 --check --status -; then
+        rm -f "${bin}.download"
+        echo "${asset} v{{tailwindcss_version}} is not the file its pinned SHA-256 names." >&2
+        exit 1
+    fi
+    chmod +x "${bin}.download"
+    mv "${bin}.download" "$bin"
+
+@_rustup_target +TARGETS:
+    rustup target add {{TARGETS}}
 
 # Run all formatting-related tasks
 fmt: (_rustup_component "rustfmt") _install-comfort
@@ -2553,7 +2747,7 @@ coverage-ci: _coverage-setup _install_ci_matchers
     cargo clean --locked --workspace --profile=coverage --target-dir=target/llvm-cov-target
     cargo llvm-cov --locked --branch --no-cfg-coverage --no-cfg-coverage-nightly --cargo-profile=coverage --no-report nextest
     cargo llvm-cov --locked --branch --no-cfg-coverage --no-cfg-coverage-nightly --profile=coverage --no-report --doc
-    cargo llvm-cov report --branch --doctests --lcov --output-path lcov.info --profile=coverage
+    cargo llvm-cov report --branch --doctests --lcov --output-path lcov.info --profile=coverage --ignore-filename-regex '{{coverage_ignore}}'
 
 _coverage-setup: (_rustup_component "llvm-tools") _install-llvm-cov (_install "cargo-nextest@" + nextest_version + " cargo-expand@" + expand_version)
 
@@ -2595,6 +2789,61 @@ shear-ci SCOPE="expand": (_install "cargo-expand@" + expand_version)
 [group('ci')]
 vet-ci: (_install "cargo-vet@" + vet_version)
     cargo vet --locked
+
+# Lint the browser crates for `wasm32-unknown-unknown` on CI.
+#
+# A browser crate sets `[package.metadata.jp] wasm = true`. `lint-ci` lints the
+# same crates for the host.
+[group('ci')]
+lint-web-ci: (_rustup_target "wasm32-unknown-unknown") _install_ci_matchers
+    #!/usr/bin/env sh
+    set -eu
+    packages=$(just _browser-crates | sed 's/^/--package=/' | tr '\n' ' ')
+    if [ -z "$packages" ]; then
+        echo "No browser crates to lint."
+        exit 0
+    fi
+    cargo clippy --locked --target wasm32-unknown-unknown --all-targets $packages -- --deny warnings
+
+# Run the browser crates' browser tests in a headless browser on CI.
+#
+# `wasm-bindgen-test-runner` drives the browser whose WebDriver a variable
+# names: `CHROMEDRIVER`, `GECKODRIVER`, `SAFARIDRIVER`, or `MSEDGEDRIVER`
+# (or its `_REMOTE` form). Without one, this uses Chrome, which CI runs, when
+# `chromedriver` is on the `PATH`; otherwise the runner takes the first of
+# `geckodriver`, `safaridriver`, and `chromedriver` it finds on the `PATH`.
+[group('ci')]
+test-web-ci: (_rustup_target "wasm32-unknown-unknown") _install-wasm-bindgen
+    #!/usr/bin/env sh
+    set -eu
+    packages=$(just _browser-crates | sed 's/^/--package=/' | tr '\n' ' ')
+    if [ -z "$packages" ]; then
+        echo "No browser crates to test."
+        exit 0
+    fi
+    named=$(env | grep -E '^(GECKO|SAFARI|CHROME|MSEDGE)DRIVER(_REMOTE)?=' || true)
+    if [ -z "$named" ] && command -v chromedriver >/dev/null 2>&1; then
+        CHROMEDRIVER=$(command -v chromedriver)
+        export CHROMEDRIVER
+    fi
+    CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner \
+        cargo test --locked --target wasm32-unknown-unknown --test '*' $packages
+
+# Build every browser UI bundle on CI.
+[group('ci')]
+build-web-ci:
+    #!/usr/bin/env sh
+    set -eu
+    for manifest in crates/plugins/command/*/ui/Cargo.toml; do
+        [ -f "$manifest" ] || continue
+        just build-ui "$(basename "$(dirname "$(dirname "$manifest")")")"
+    done
+
+# The workspace's browser crates, one per line: those whose `Cargo.toml` sets
+# `[package.metadata.jp] wasm = true`.
+_browser-crates:
+    @cargo metadata --locked --no-deps --format-version=1 \
+        | jq -r '.packages[] | select(.metadata.jp.wasm == true) | .name'
 
 @_install_ci_matchers:
     echo "::add-matcher::.github/matchers.json"

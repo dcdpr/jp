@@ -9,3 +9,6 @@ channel = "nightly-2026-11-24"
 # rust-analyzer cannot expand `std` macros such as `assert_eq!`, and the
 # `code_symbol` tool misses every reference inside one.
 components = ["cargo", "rustfmt", "clippy", "rust-analyzer", "rust-src", "llvm-tools"]
+# The browser UIs of command plugins compile to WebAssembly
+# (`docs/rfd/139-browser-uis-in-rust-with-leptos.md`).
+targets = ["wasm32-unknown-unknown"]

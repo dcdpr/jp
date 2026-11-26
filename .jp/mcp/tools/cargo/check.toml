@@ -58,6 +58,13 @@ options.qual_check = true
 # the site files. Builds `jp-vite`'s tests from the working tree.
 options.site_check = true
 
+# Also run clippy for `wasm32-unknown-unknown` on the browser crates, those
+# whose `Cargo.toml` sets `[package.metadata.jp] wasm = true` (see
+# `docs/rfd/139-browser-uis-in-rust-with-leptos.md`). The host pass checks the
+# same crates for the host, so this catches only what the browser build trips
+# on. Off here; the `web-development` skill turns it on.
+options.wasm_check = false
+
 [conversation.tools.cargo_check.style]
 inline_results = "full"
 results_file_link = "off"

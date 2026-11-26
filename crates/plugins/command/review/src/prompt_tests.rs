@@ -5,9 +5,10 @@ use pretty_assertions::assert_eq;
 
 use super::*;
 use crate::{
-    anchor::Anchor,
+    anchor::{Anchor, Target},
     model::{Content, Files, NewComment, Reply, Verdict},
     pass::{Ended, NewPass, Outcome},
+    progress::ReadUntil,
     text::Range,
 };
 
@@ -149,6 +150,7 @@ fn second_pass() -> Review {
         at: at(4),
         version: Some(1),
         error: None,
+        answer: None,
     });
 
     review.record(version("second"), None, at(5));
@@ -299,6 +301,7 @@ fn a_pass_with_only_a_message_carries_only_the_message() {
         at: at(4),
         version: Some(1),
         error: None,
+        answer: None,
     });
     review.submit(new_pass(1, Some("Carry on."))).unwrap();
 
@@ -306,6 +309,88 @@ fn a_pass_with_only_a_message_carries_only_the_message() {
         message_of(&review, 2),
         "# Review R-1h4k2m9, pass 2\n\nCarry on.\n"
     );
+}
+
+/// A review of `docs/a.md` whose reviewer approved lines 3 and 4 and read
+/// through line 3 in version 1, before version 2 changed line 4.
+fn read_and_approved() -> Review {
+    let mut review = Review::new(
+        "Review".to_owned(),
+        "Jane Doe <jane@example.com>".to_owned(),
+        at(0),
+        vec!["docs/a.md".to_owned(), "docs/b.md".to_owned()],
+    );
+    review.record(version("first"), None, at(0));
+    for lines in ["3", "4"] {
+        let anchor = Anchor {
+            version: 1,
+            target: range("docs/a.md", lines),
+        };
+        review
+            .progress
+            .approve(anchor, "Jane".to_owned(), at(1))
+            .unwrap();
+    }
+    review.progress.read("docs/a.md".to_owned(), ReadUntil {
+        version: 1,
+        line: 3,
+        author: "Jane".to_owned(),
+        created_at: at(1),
+    });
+    review.record(version("second"), None, at(2));
+
+    review
+}
+
+/// The approval of line 4 was of the text as it stood, which version 2 changed.
+#[test]
+fn a_pass_says_how_far_the_reviewer_read_and_what_they_approved() {
+    let mut review = read_and_approved();
+    review.submit(new_pass(2, Some("Go on."))).unwrap();
+
+    assert_eq!(
+        message_of(&review, 1),
+        "# Review R-1h4k2m9, pass 1
+
+Go on.
+
+## docs/a.md (version 2)
+
+```
+1 | # Title
+2 |
+3 | First line.
+4 | Second line, longer.
+```
+
+## docs/b.md (absent from version 2)
+
+## Read so far
+
+The reviewer has read these files this far, and no further. The lines after are unread: that they \
+         carry no comment says nothing about them, and comments on them may follow in a later \
+         pass.
+
+- docs/a.md: through line 3
+
+## Approved
+
+The reviewer read these passages and approved them as they stand. Leave them as they are, unless \
+         acting on a comment needs one changed; say so in your reply when it does.
+
+- docs/a.md:3, from \"First line.\"
+"
+    );
+}
+
+#[test]
+fn the_blobs_read_place_what_was_approved_and_read() {
+    let mut review = read_and_approved();
+    review.submit(new_pass(2, Some("Go on."))).unwrap();
+
+    let read = blobs(&review, review.passes.get(1).unwrap(), Carry::Files);
+
+    assert_eq!(read.into_iter().collect::<Vec<_>>(), ["first", "second"]);
 }
 
 #[test]

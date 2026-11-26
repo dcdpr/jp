@@ -26,7 +26,10 @@ use std::{
 
 use doc::author;
 use jp_plugin::{
-    message::{HostToPlugin, InterruptRequest, PluginToHost, QueryOutcome, QueryRequest},
+    message::{
+        HostToPlugin, InterruptRequest, PluginToHost, QueryCompleteResponse, QueryOutcome,
+        QueryRequest,
+    },
     stdio::{self, print_to},
 };
 
@@ -258,7 +261,8 @@ pub(crate) fn query(
 }
 
 /// Snapshot the working tree after pass `number` and record the pass outcome,
-/// returning the updated [`Review`].
+/// with the assistant's closing message when the host reported one, returning
+/// the updated [`Review`].
 ///
 /// If the working tree cannot be snapshotted, records `version: None` and
 /// appends the snapshot error to the pass's error message.
@@ -287,6 +291,7 @@ pub(crate) fn finish(
             at,
             version,
             error,
+            answer: ending.answer,
         });
 
         Ok::<_, String>(review.clone())
@@ -337,12 +342,16 @@ fn failure(report: &PassReport<'_>) -> Option<String> {
 pub(crate) struct Ending {
     pub outcome: Outcome,
     pub error: Option<String>,
+
+    /// The assistant's closing message, which a host from protocol 16 on
+    /// reports when the turn holds one.
+    pub answer: Option<String>,
 }
 
 impl Ending {
     /// The turn ended the way the host's `query_complete` says.
-    pub(crate) fn of(outcome: QueryOutcome) -> Self {
-        let outcome = match outcome {
+    pub(crate) fn of(done: QueryCompleteResponse) -> Self {
+        let outcome = match done.outcome {
             QueryOutcome::Finished => Outcome::Completed,
             QueryOutcome::Stopped | QueryOutcome::Aborted => Outcome::Stopped,
         };
@@ -350,6 +359,7 @@ impl Ending {
         Self {
             outcome,
             error: None,
+            answer: done.answer,
         }
     }
 
@@ -358,6 +368,7 @@ impl Ending {
         Self {
             outcome: Outcome::Failed,
             error: Some(error),
+            answer: None,
         }
     }
 
@@ -366,6 +377,7 @@ impl Ending {
         Self {
             outcome: Outcome::Interrupted,
             error: Some(error),
+            answer: None,
         }
     }
 }
@@ -394,7 +406,7 @@ impl Turn<'_> {
 
             match message {
                 HostToPlugin::Created(created) => self.created(&created.conversation, out),
-                HostToPlugin::QueryComplete(done) => return Ending::of(done.outcome),
+                HostToPlugin::QueryComplete(done) => return Ending::of(done),
                 HostToPlugin::Error(error) => return Ending::failed(error.message),
                 HostToPlugin::Shutdown => self.stop(out),
                 _ => {}
