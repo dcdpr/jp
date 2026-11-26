@@ -33,6 +33,14 @@ Run all tests across the workspace:
 # defaults to off so the tool also works on stable Rust.
 options.checksum_freshness = true
 
+# Also run the browser crates' browser tests (their `tests/`) in a headless
+# browser, through `wasm-bindgen-test-runner` (`just _install-wasm-bindgen`),
+# and report them after the nextest run. The tests run in Chrome when
+# `chromedriver` is on the `PATH`, unless `CHROMEDRIVER`, `GECKODRIVER`, or
+# `SAFARIDRIVER` names a WebDriver. Off here; the `web-development` skill turns
+# it on.
+options.wasm_test = false
+
 [conversation.tools.cargo_test.style]
 inline_results = "full"
 results_file_link = "off"

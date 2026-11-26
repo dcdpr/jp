@@ -1679,6 +1679,27 @@ pub(crate) fn turn_structured_data(
     Ok(data)
 }
 
+/// The last message text the assistant wrote in the turn a run started.
+///
+/// `before` is the [`last_request_id`] from before the run, and bounds the
+/// search the way it does for [`turn_structured_data`]: a run that appended no
+/// request has no message of its own, and only the conversation's last turn is
+/// searched.
+/// A message holding only whitespace is skipped.
+pub(crate) fn turn_answer(events: &ConversationStream, before: Option<&EventId>) -> Option<String> {
+    if last_request_id(events).as_ref() == before {
+        return None;
+    }
+
+    events
+        .last_turn_events()
+        .rev()
+        .filter_map(ConversationEvent::as_chat_response)
+        .filter_map(ChatResponse::as_message)
+        .find(|message| !message.trim().is_empty())
+        .map(ToOwned::to_owned)
+}
+
 /// Return the most recent assistant message text in the stream.
 ///
 /// Walks the stream in reverse and returns the first `ChatResponse::Message` it

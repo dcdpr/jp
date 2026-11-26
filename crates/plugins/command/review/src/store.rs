@@ -3,6 +3,8 @@
 //! ```text
 //! <store>/
 //!   .epoch
+//!   .serve
+//!   .serve.lock
 //!   1h4k2m9/
 //!     review.json
 //!     .lock
@@ -25,6 +27,10 @@
 //! If a review has a pass with `ended == None` and `.pass` is unlocked, the
 //! process that started that pass has exited, and [`Store::read`] /
 //! [`Store::update`] mark the pass `interrupted`.
+//!
+//! The `jp review serve` serving the store holds `.serve.lock` while it runs
+//! ([`Store::claim_server`]), and writes the address it serves at to `.serve`.
+//! A store has at most one server, and [`Store::server`] finds it.
 
 use std::{
     collections::BTreeMap,
@@ -55,6 +61,17 @@ const PASS_FILE: &str = ".pass";
 
 /// What a new `review.json` is written to before it replaces the old one.
 const TEMP_FILE: &str = ".review.json.tmp";
+
+/// The file `jp review serve` writes the address it serves at to, in the
+/// store's directory.
+const SERVER_FILE: &str = ".serve";
+
+/// The file the running `jp review serve` holds locked, in the store's
+/// directory.
+///
+/// Apart from [`SERVER_FILE`] because on Windows no other process can read a
+/// file one holds `File::lock` on.
+const SERVER_LOCK: &str = ".serve.lock";
 
 /// The directory holding a review's blobs, inside its directory.
 const BLOB_DIR: &str = "blobs";
@@ -200,6 +217,65 @@ impl Store {
         }
 
         Ok(value)
+    }
+}
+
+/// Whether a `jp review serve` serves the store.
+#[derive(Debug)]
+pub enum Serving {
+    /// None did, and this process holds the store's server lock until the
+    /// [`File`] is dropped.
+    Claimed(File),
+
+    /// Another process does, at this address; empty while it has not written
+    /// one yet.
+    Running(String),
+}
+
+impl Store {
+    /// Take the lock a store's one `jp review serve` holds, creating the store
+    /// when there is none yet; [`Serving::Running`] when another process holds
+    /// it.
+    pub fn claim_server(&self) -> Result<Serving, String> {
+        fs::create_dir_all(&self.dir).map_err(|error| format!("{}: {error}", self.dir))?;
+        let held = lock::try_exclusive(&self.dir.join(SERVER_LOCK))
+            .map_err(|error| format!("{}: {error}", self.dir))?;
+
+        Ok(match held {
+            Some(lock) => Serving::Claimed(lock),
+            None => Serving::Running(self.server_address()),
+        })
+    }
+
+    /// Write `url` as the address the store's server serves at.
+    ///
+    /// The caller holds the lock [`Store::claim_server`] took.
+    pub fn serving_at(&self, url: &str) -> Result<(), String> {
+        replace(
+            &self.dir.join(format!("{SERVER_FILE}.tmp")),
+            &self.dir.join(SERVER_FILE),
+            format!("{url}\n").as_bytes(),
+        )
+    }
+
+    /// The address of the `jp review serve` serving the store; `None` when none
+    /// runs.
+    ///
+    /// The address is empty while the server has not written it yet.
+    pub fn server(&self) -> Result<Option<String>, String> {
+        if !self.dir.is_dir() {
+            return Ok(None);
+        }
+        let free = lock::try_exclusive(&self.dir.join(SERVER_LOCK))
+            .map_err(|error| format!("{}: {error}", self.dir))?;
+
+        Ok(free.is_none().then(|| self.server_address()))
+    }
+
+    /// What [`SERVER_FILE`] holds; empty when it can't be read.
+    fn server_address(&self) -> String {
+        fs::read_to_string(self.dir.join(SERVER_FILE))
+            .map_or_default(|address| address.trim().to_owned())
     }
 }
 

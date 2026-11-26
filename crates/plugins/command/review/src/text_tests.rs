@@ -183,6 +183,46 @@ fn a_changed_line_ending_leaves_the_line_in_place() {
     assert_eq!(project("a\nb", "a\nb\n", "2").as_deref(), Some("2"));
 }
 
+fn through(old: &str, new: &str, count: usize) -> usize {
+    LineMap::new(&Text::new(old), &Text::new(new)).through(count)
+}
+
+#[test]
+fn the_lines_read_move_with_the_lines_added_and_removed_above_them() {
+    assert_eq!(through("a\nb\nc\n", "a\nb\nc\n", 2), 2);
+    assert_eq!(through("a\nb\nc\n", "x\na\nb\nc\n", 2), 3);
+    assert_eq!(through("a\nb\nc\n", "b\nc\n", 2), 1);
+}
+
+/// The reader read the old line 2, and its replacement sits where it did.
+#[test]
+fn a_line_read_that_changed_keeps_its_place() {
+    assert_eq!(through("a\nb\nc\n", "a\nB\nc\n", 2), 2);
+    // Lines 2 and 3 became one line, which is as far as either reaches.
+    assert_eq!(through("a\nb\nc\nd\n", "a\nX\nd\n", 2), 2);
+    assert_eq!(through("a\nb\nc\nd\n", "a\nX\nd\n", 3), 2);
+}
+
+/// A line added right after the last line read was not read.
+#[test]
+fn lines_added_after_the_last_line_read_are_not_counted() {
+    assert_eq!(through("a\nb\n", "a\nx\nb\n", 1), 1);
+}
+
+#[test]
+fn nothing_is_left_of_lines_read_that_were_all_removed() {
+    assert_eq!(through("a\nb\n", "b\n", 1), 0);
+    assert_eq!(through("a\nb\n", "a\nb\n", 0), 0);
+}
+
+#[test]
+fn the_last_line_of_a_span_ending_at_a_line_start_is_the_line_before() {
+    assert_eq!(range("2-4").last_line(), 4);
+    assert_eq!(range("2:1-4:3").last_line(), 4);
+    assert_eq!(range("2:1-4:1").last_line(), 3);
+    assert_eq!(range("2:1-2:1").last_line(), 2);
+}
+
 #[test]
 fn the_contents_of_each_line_leave_its_line_ending_out() {
     assert_eq!(Text::new("a\nb\r\nc\rd").contents(), ["a", "b", "c", "d"]);
@@ -301,6 +341,65 @@ fn hunks_show_the_changed_lines_with_context() {
         "@@ -1,3 +1,3 @@\n a\n-b\n+B\n c\n"
     );
     assert_eq!(hunks("", "a\n"), "@@ -0,0 +1 @@\n+a\n");
+}
+
+#[test]
+fn changes_place_added_and_modified_lines_in_the_new_text() {
+    // Line 2 changed, and line 4 is new: `B` at 2..3 and `d` at 6..7.
+    assert_eq!(changes("a\nb\nc\n", "a\nB\nc\nd\n"), Changes {
+        added: vec![[2, 3], [6, 7]],
+        removed: vec![],
+    });
+    assert_eq!(changes("a\nb\n", "a\nb\n"), Changes::default());
+}
+
+/// A removed run is marked where the line after it starts, and at the end of
+/// the text when nothing follows it.
+#[test]
+fn changes_mark_where_removed_lines_were() {
+    assert_eq!(changes("a\nb\nc\n", "a\nc\n"), Changes {
+        added: vec![],
+        removed: vec![2],
+    });
+    assert_eq!(changes("a\nb\nc\n", "a\n"), Changes {
+        added: vec![],
+        removed: vec![2],
+    });
+    assert_eq!(changes("a\nb", "a\n"), Changes {
+        added: vec![],
+        removed: vec![2],
+    });
+}
+
+/// Lines put in place of removed ones are modified, and the removal leaves no
+/// mark of its own.
+#[test]
+fn changes_count_a_replaced_run_as_modified() {
+    assert_eq!(changes("a\nb\nc\nd\n", "a\nX\nd\n"), Changes {
+        added: vec![[2, 3]],
+        removed: vec![],
+    });
+}
+
+/// The unified diff shows the line as changed, so the highlight agrees.
+#[test]
+fn changes_take_a_changed_line_ending_as_a_modified_line() {
+    assert_eq!(changes("a\nb", "a\nb\n"), Changes {
+        added: vec![[2, 3]],
+        removed: vec![],
+    });
+    assert_eq!(changes("a\r\nb\n", "a\nb\n"), Changes {
+        added: vec![[0, 1]],
+        removed: vec![],
+    });
+}
+
+#[test]
+fn changes_in_a_new_file_add_every_line() {
+    assert_eq!(changes("", "a\n\nb"), Changes {
+        added: vec![[0, 1], [2, 2], [3, 4]],
+        removed: vec![],
+    });
 }
 
 #[test]

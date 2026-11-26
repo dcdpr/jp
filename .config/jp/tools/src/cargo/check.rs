@@ -5,7 +5,7 @@ use indoc::indoc;
 use jp_process::{ProcessOutput, ProcessRunner, SystemProcessRunner};
 use serde::Deserialize;
 
-use super::{MAX_DIAGNOSTIC_BYTES, cargo_scope, comfort_scope};
+use super::{MAX_DIAGNOSTIC_BYTES, WASM_TARGET, browser_crates, cargo_scope, comfort_scope};
 use crate::util::{ToolResult, error, truncate};
 
 /// Run clippy and comfort over `packages` (or the whole workspace when
@@ -47,6 +47,9 @@ pub(crate) struct Checks {
 
     /// Run `jp-vite`'s `jp_site_is_synced` test as well.
     pub site: bool,
+
+    /// Run clippy for `wasm32-unknown-unknown` on the browser crates as well.
+    pub wasm: bool,
 }
 
 fn cargo_check_impl<R: ProcessRunner>(
@@ -138,6 +141,15 @@ fn cargo_check_impl<R: ProcessRunner>(
     }
     if checks.site {
         notes.extend(site_check(root, profile_arg.as_deref(), &env, runner));
+    }
+    if checks.wasm {
+        notes.extend(wasm_check(
+            root,
+            packages,
+            profile_arg.as_deref(),
+            &env,
+            runner,
+        ));
     }
 
     if notes.is_empty() {
@@ -329,6 +341,71 @@ fn site_check<R: ProcessRunner>(
     Some(format!(
         "JP's site wasn't checked: `cargo test -p jp-vite` failed: {}",
         truncate(output.stderr.trim(), MAX_DIAGNOSTIC_BYTES)
+    ))
+}
+
+/// Run clippy for [`WASM_TARGET`] on the browser crates among `packages`, or
+/// every browser crate when `packages` is empty, returning what it found as a
+/// note; `None` when it found nothing, or there is no browser crate to check.
+///
+/// The host pass checks the same crates for the host, so this catches what only
+/// the browser build trips on: code gated on `target_arch = "wasm32"`, and
+/// dependencies that don't build for it.
+fn wasm_check<R: ProcessRunner>(
+    root: &Utf8Path,
+    packages: &[String],
+    profile: Option<&str>,
+    env: &[(&str, &str)],
+    runner: &R,
+) -> Option<String> {
+    let crates = match browser_crates(root, packages, runner) {
+        Ok(crates) if crates.is_empty() => return None,
+        Ok(crates) => crates,
+        Err(reason) => {
+            return Some(format!(
+                "The browser crates weren't checked for {WASM_TARGET}: {reason}"
+            ));
+        }
+    };
+
+    let scope = cargo_scope(&crates, "--workspace");
+    let mut args = vec![
+        "clippy",
+        "--color=never",
+        "--quiet",
+        "--keep-going",
+        "--all-targets",
+        "--target",
+        WASM_TARGET,
+    ];
+    args.extend(scope.iter().map(String::as_str));
+    args.extend(profile);
+
+    let output = match runner.run_with_env("cargo", &args, root, env) {
+        Ok(output) => output,
+        Err(error) => {
+            return Some(format!(
+                "The browser crates weren't checked for {WASM_TARGET}: `cargo` couldn't be run: \
+                 {error}"
+            ));
+        }
+    };
+    let diagnostics = strip_ansi_escapes::strip_str(&output.stderr);
+    let diagnostics = truncate(diagnostics.trim(), MAX_DIAGNOSTIC_BYTES);
+
+    if !output.status.is_success() {
+        return Some(format!(
+            "`cargo clippy --target {WASM_TARGET}` failed on the browser \
+             crates:\n```\n{diagnostics}\n```"
+        ));
+    }
+    if diagnostics.is_empty() {
+        return None;
+    }
+
+    Some(format!(
+        "`cargo clippy --target {WASM_TARGET}` found, in the browser \
+         crates:\n```\n{diagnostics}\n```"
     ))
 }
 

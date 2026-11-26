@@ -207,6 +207,7 @@ async fn two_answers_to_one_request_reach_their_waiters_in_order() {
             conversation: "jp-c7".to_owned(),
             outcome: QueryOutcome::Stopped,
             data: None,
+            answer: None,
         }),
     );
 
