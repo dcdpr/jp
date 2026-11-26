@@ -9,6 +9,7 @@ use std::{
 };
 
 use jp_config::{AppConfig, providers::llm::AuthEntry, types::api_key_env::ApiKeyEnv};
+use jp_conversation::thread::Thread;
 use jp_credentials::{
     CATEGORY_LLM, CredentialBackend, CredentialSecret, InMemoryCredentialBackend,
     PROVIDER_ANTHROPIC, StoreError, StoredCredential,
@@ -16,6 +17,7 @@ use jp_credentials::{
 use jp_storage::resource_lock::InMemoryResourceLocker;
 
 use super::*;
+use crate::query::Truncation;
 
 const SET_ENV_VAR: &str = if cfg!(windows) { "USERNAME" } else { "USER" };
 
@@ -113,6 +115,12 @@ fn notices(events: &[result::Result<Event, StreamError>]) -> Vec<&str> {
         .collect()
 }
 
+fn family_refused(family: &str) -> EventStream {
+    Box::pin(stream::iter(vec![Err(
+        StreamError::subscription_exhausted("refused", None, Some(family.into())),
+    )]))
+}
+
 fn exhausted() -> EventStream {
     Box::pin(stream::iter(vec![Err(
         StreamError::subscription_exhausted("spent", None, Some("five_hour".into())),
@@ -180,6 +188,81 @@ async fn acp_stream_advances_before_requesting_a_host_rebuild() {
         Some(AuthEntry::ApiKey(None))
     );
     assert!(matches!(next.route, Route::Http(Credential::ApiKey(_))));
+}
+
+#[tokio::test]
+async fn acp_stream_moves_only_the_exhausted_family_to_the_next_credential() {
+    let (provider, model, store) = provider(&["sub:sub", "sub:sub2"]);
+    let attempt = provider.resolve(&model.id.name).await.unwrap();
+    let events = provider
+        .with_acp_fallback(&model, attempt, family_refused("sonnet"))
+        .collect::<Vec<_>>()
+        .await;
+    assert_eq!(
+        events.last().unwrap().as_ref().unwrap_err().kind,
+        StreamErrorKind::CredentialChanged
+    );
+
+    for refused in ["claude-sonnet-5", "claude-sonnet-5-5"] {
+        let next = provider.resolve(refused).await.unwrap();
+        assert_eq!(
+            next.selected.map(|selected| selected.entry),
+            Some(AuthEntry::Subscription(Some("sub2".into()))),
+            "{refused}"
+        );
+    }
+    let other = provider.resolve("claude-opus-5").await.unwrap();
+    assert_eq!(
+        other.selected.map(|selected| selected.entry),
+        Some(AuthEntry::Subscription(Some("sub".into())))
+    );
+    let snapshot = store.load().unwrap();
+    let profiles = snapshot.profiles(CATEGORY_LLM, PROVIDER_ANTHROPIC).unwrap();
+    assert_eq!(
+        profiles["sub"]
+            .cooldowns
+            .keys()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        vec!["sonnet"]
+    );
+}
+
+#[tokio::test]
+async fn a_family_scoped_refusal_switches_a_model_with_a_display_name() {
+    let (provider, mut model, _) = provider(&["sub:sub", "api_key"]);
+    // The API's model listing sets `display_name`; credential routing must key
+    // on `model.id.name` so family-scoped cooldowns still match.
+    model.display_name = Some("Claude Sonnet 5".into());
+    let attempt = provider.resolve(&model.id.name).await.unwrap();
+    let events = provider
+        .with_acp_fallback(&model, attempt, family_refused("sonnet"))
+        .collect::<Vec<_>>()
+        .await;
+    assert_eq!(
+        events.last().unwrap().as_ref().unwrap_err().kind,
+        StreamErrorKind::CredentialChanged
+    );
+
+    // The rebuilt request goes to the API key, not back to the refused login.
+    let query = ChatQuery {
+        thread: Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events: ConversationStream::new_test().with_turn("test"),
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
+    };
+    let context = QueryContext {
+        root: "/work/project".into(),
+        mcp_endpoint: None,
+        invocation: None,
+    };
+    let stream = provider.start_query(&model, query, context).await.unwrap();
+    assert!(matches!(stream.execution, ToolExecution::Caller));
 }
 
 #[tokio::test]

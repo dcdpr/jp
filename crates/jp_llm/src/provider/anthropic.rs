@@ -321,7 +321,7 @@ impl Anthropic {
                 match item {
                     Err(error) if error.kind == StreamErrorKind::SubscriptionExhausted => {
                         if let Some(mut next) =
-                            this.advance_for_rebuild(&attempt, &error, model.name()).await
+                            this.advance_for_rebuild(&attempt, &error, &model.id.name).await
                         {
                             for notice in next.take_notices(&this.seen_notices) {
                                 yield Ok(Event::Notice(notice));
@@ -417,7 +417,7 @@ impl Provider for Anthropic {
         query: ChatQuery,
         context: QueryContext,
     ) -> Result<QueryStream> {
-        let attempt = self.resolve(model.name()).await?;
+        let attempt = self.resolve(&model.id.name).await?;
         if let Route::Acp(directory) = &attempt.route {
             acp::inspect(directory.as_deref()).await?;
             let stream = acp::stream(model, query, context, directory.clone())?;
@@ -528,7 +528,7 @@ impl Provider for Anthropic {
         // The initial resolution happens here so a doomed request fails as an
         // ordinary error before a stream exists; switches re-resolve inside
         // the stream.
-        let attempt = self.resolve(model.name()).await?;
+        let attempt = self.resolve(&model.id.name).await?;
         if let Route::Acp(directory) = &attempt.route {
             let directory = directory.clone();
             return self
@@ -606,10 +606,10 @@ impl Provider for Anthropic {
                         }
                         Err(error) if error.needs_credential_switch() => {
                             let next = if content_seen {
-                                this.advance_for_rebuild(&attempt, &error, model.name())
+                                this.advance_for_rebuild(&attempt, &error, &model.id.name)
                                     .await
                             } else {
-                                this.advance(&attempt, &error, model.name()).await
+                                this.advance(&attempt, &error, &model.id.name).await
                             };
                             let Some(mut next) = next else {
                                 // No usable switch: the failure that prompted
