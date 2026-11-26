@@ -9,7 +9,9 @@ use crate::{
         ConversationLoadRequest, Output,
         conversation_id::{ConversationIds as _, PositionalIds},
         lock::wait_until_free,
-        target::{ConversationTarget, PickerFilter, TargetGrammar, resolve_archived_picker},
+        target::{
+            ConversationTarget, PickerFilter, TargetGrammar, dedup_ids, resolve_archived_picker,
+        },
     },
     ctx::Ctx,
 };
@@ -94,7 +96,10 @@ impl Unarchive {
                 }
             }
         }
-        Ok(ids)
+
+        // Deduplicate so a repeated ID is not visited again after the first
+        // occurrence unarchives it.
+        Ok(dedup_ids(ids))
     }
 }
 

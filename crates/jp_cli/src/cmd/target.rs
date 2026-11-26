@@ -17,7 +17,7 @@
 //! produce [`ConversationTarget`] values.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     io::{self, BufRead as _, IsTerminal as _},
 };
 
@@ -26,6 +26,7 @@ use jp_config::conversation::DefaultConversationId;
 use jp_conversation::ConversationId;
 use jp_term::sanitize::strip_controls;
 use jp_workspace::{ConversationHandle, Workspace, session::Session};
+use tracing::debug;
 
 use crate::{
     cmd::conversation_id::ConversationIds,
@@ -67,6 +68,12 @@ pub(crate) struct ConversationLoadRequest {
     /// `Some(0)` is the common case for commands that need config from their
     /// target conversation.
     pub config_conversation: Option<usize>,
+
+    /// Whether a duplicate conversation ID yields one handle per occurrence.
+    ///
+    /// When `false`, duplicate IDs are dropped so the command processes each
+    /// conversation at most once.
+    pub keep_repeats: bool,
 }
 
 impl ConversationLoadRequest {
@@ -77,6 +84,7 @@ impl ConversationLoadRequest {
             multi: false,
             session: true,
             config_conversation: None,
+            keep_repeats: false,
         }
     }
 
@@ -87,6 +95,7 @@ impl ConversationLoadRequest {
             multi: false,
             session: true,
             config_conversation: None,
+            keep_repeats: false,
         }
     }
 
@@ -97,6 +106,7 @@ impl ConversationLoadRequest {
             multi: false,
             session: true,
             config_conversation: Some(0),
+            keep_repeats: false,
         }
     }
 
@@ -107,6 +117,7 @@ impl ConversationLoadRequest {
             multi: false,
             session: true,
             config_conversation: None,
+            keep_repeats: false,
         }
     }
 
@@ -117,7 +128,15 @@ impl ConversationLoadRequest {
             multi: false,
             session: true,
             config_conversation: Some(0),
+            keep_repeats: false,
         }
+    }
+
+    /// Preserve duplicate conversation IDs so each occurrence yields its own
+    /// handle.
+    pub fn with_repeats(mut self) -> Self {
+        self.keep_repeats = true;
+        self
     }
 
     /// Use explicit targets if non-empty, otherwise resolve from
@@ -239,6 +258,9 @@ pub(crate) struct ResolveOutcome {
 ///
 /// This is the single resolution entry point called by `run_inner`.
 ///
+/// Duplicate conversation IDs are deduplicated in first-seen order unless
+/// [`ConversationLoadRequest::keep_repeats`] is `true`.
+///
 /// `default_id` is the configured fallback from `conversation.default_id`,
 /// consulted when no session mapping exists and no explicit `--id` is given.
 ///
@@ -276,6 +298,13 @@ pub(crate) fn resolve_request(
         interactive,
     )?;
 
+    // Deduplicate before acquiring handles so the command processes each
+    // target conversation once.
+    let ids = if request.keep_repeats {
+        ids
+    } else {
+        dedup_ids(ids)
+    };
     let handles = ids
         .iter()
         .map(|id| workspace.acquire_conversation(id).map_err(Into::into))
@@ -604,11 +633,24 @@ fn non_empty(ids: Vec<ConversationId>, empty: &'static str) -> Result<Vec<Conver
     Ok(ids)
 }
 
+/// Deduplicate conversation IDs in first-seen order.
+pub(crate) fn dedup_ids(mut ids: Vec<ConversationId>) -> Vec<ConversationId> {
+    let mut seen = HashSet::with_capacity(ids.len());
+    ids.retain(|id| {
+        let first = seen.insert(*id);
+        if !first {
+            debug!(%id, "Dropping repeated conversation target.");
+        }
+        first
+    });
+    ids
+}
+
 /// Read conversation IDs from standard input, one per line.
 ///
 /// Blank lines are skipped.
-/// Order and duplicates are preserved, so the result is identical to passing
-/// the same IDs on the command line.
+/// Order and duplicates are preserved here so stdin targets behave identically
+/// to command-line targets; [`resolve_request`] handles deduplication for both.
 /// Errors when stdin is a terminal (nothing piped) or when no IDs are provided.
 fn read_stdin_ids() -> Result<Vec<ConversationId>> {
     if io::stdin().is_terminal() {

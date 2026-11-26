@@ -1,4 +1,4 @@
-use std::{env, fs, path::PathBuf};
+use std::{collections::BTreeSet, env, fs, path::PathBuf};
 
 use clap::{
     Arg, ArgAction, ArgMatches, Command,
@@ -14,7 +14,9 @@ use jp_config::{
 use jp_conversation::{
     ByteSize, Compaction, CompactionRange, ConversationId, ConversationStream, PolicySpec,
     ReasoningPolicy, SummaryOverlap, SummaryPolicy, SummarySource, ToolCallPolicy,
-    compaction::extend_summary_range, stream::AffectedItem,
+    compaction::extend_summary_range,
+    position::{PositionSpec, ResolvePositionError},
+    stream::AffectedItem,
 };
 use jp_llm::event::NoticeSink;
 use jp_workspace::{ConversationHandle, ConversationMut, Workspace};
@@ -22,13 +24,13 @@ use tracing::warn;
 
 use crate::{
     cli::{
-        CommandArgs,
-        flag::{Flag, FlagValues, OptionalValue, flag_arg},
+        CommandArgs, Spelling,
+        flag::{Claim, Flag, FlagValues, OptionalValue, flag_arg},
     },
     cmd::{
         ConversationLoadRequest, Output,
         compact_flag::{CompactFlag, combine_rules},
-        conversation_id::PositionalIds,
+        conversation_id::{PositionalIds, TargetWords},
         lock::{LockOutcome, LockRequest, acquire_lock},
         query::apply_model,
         turn_selection::{
@@ -36,9 +38,13 @@ use crate::{
         },
     },
     ctx::{Ctx, IntoPartialAppConfig},
-    format::compaction_policy_label,
+    format::{compaction_detail_item, compaction_policy_label},
     output::notice_sink,
+    parser::split_list_with,
 };
+
+/// Noun passed to position error formatters for compaction events.
+const COMPACTION: &str = "compaction";
 
 /// `jp conversation compact`.
 #[derive(Debug)]
@@ -77,9 +83,11 @@ pub(crate) struct Compact {
     /// Preview what would change without applying.
     dry_run: bool,
 
-    /// Remove compaction events from the stream: every one when `Some(None)`,
-    /// the one at this 1-based index otherwise.
-    reset: Option<Option<usize>>,
+    /// Remove the compaction events these specs name, numbered from 1 in stream
+    /// order.
+    ///
+    /// A bare `--reset` is `..`, which names every compaction event.
+    reset: Option<Vec<PositionSpec>>,
 
     /// Compact using inline DSL rules.
     ///
@@ -161,8 +169,22 @@ impl CommandArgs for Compact {
     }
 
     fn from_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
+        // Without a spelling every value reads as attached to its flag, and so
+        // as the flag's own.
+        Self::from_spelled_matches(matches, &Spelling::default())
+    }
+
+    fn from_spelled_matches(
+        matches: &ArgMatches,
+        spelling: &Spelling,
+    ) -> Result<Self, clap::Error> {
+        // `--reset` returns any non-list argument to the positional
+        // conversation targets, so resolve `--reset` before building targets.
+        let mut targets = TargetWords::read(matches);
+        let reset = Flag::<Reset>::decide_now(matches, spelling, &mut targets)?;
+
         Ok(Self {
-            target: PositionalIds::from_matches(matches)?,
+            target: PositionalIds::from_words(targets)?,
             range: TurnSelection::from_matches(matches)?,
             reasoning: matches.get_flag("reasoning"),
             tools: Flag::<Tools>::strict(matches)?,
@@ -171,7 +193,7 @@ impl CommandArgs for Compact {
             over: matches.get_one("over").copied(),
             model: matches.get_one("model").cloned(),
             dry_run: matches.get_flag("dry_run"),
-            reset: Flag::<Reset>::strict(matches)?,
+            reset,
             compact_flag: CompactFlag::from_matches(matches)?,
         })
     }
@@ -245,22 +267,29 @@ impl OptionalValue for Summary {
     }
 }
 
-/// `--reset[=INDEX]`: remove every compaction event, or the one at `INDEX`.
+/// `--reset[=COMPACTIONS]`: remove every compaction event, or the ones
+/// `COMPACTIONS` names.
 enum Reset {}
 
 impl OptionalValue for Reset {
+    // A list of compaction numbers is never a conversation target, and any
+    // other word is always a target, so classify every space-separated value
+    // by its content regardless of position.
+    const CLAIMS_EVERY_SEPARATE_VALUE: bool = true;
     const ID: &'static str = "reset";
 
     type Context = ();
-    type Output = Option<Option<usize>>;
-    type Value = usize;
+    type Output = Option<Vec<PositionSpec>>;
+    type Value = Vec<PositionSpec>;
 
     fn declare(arg: Arg) -> Arg {
-        // The index requires `=`, so a bare `--reset` followed by a
-        // conversation target still targets the conversation.
+        // `allow_negative_numbers` lets clap accept a single negative offset
+        // (`--reset -1`) as a separate word. Ranges and lists starting with a
+        // negative offset (`--reset -3..-1`) are not single numbers and are
+        // attached by `attach_from_end_values`.
         arg.long("reset")
-            .value_name("INDEX")
-            .require_equals(true)
+            .value_name("COMPACTIONS")
+            .allow_negative_numbers(true)
             .conflicts_with_all([
                 "keep_first",
                 "keep_last",
@@ -281,19 +310,48 @@ impl OptionalValue for Reset {
             .long_help(
                 "Remove compaction events from the stream.\n\nWithout a value, removes every \
                  compaction event, restoring the raw event history so the LLM sees all original \
-                 events. With a value (`--reset=2`), removes only that compaction event, numbered \
-                 as `jp conversation show` lists them. Mutually exclusive with the policy, range, \
-                 and DSL flags: `--reset` undoes compaction, it does not re-compact in the same \
-                 invocation. Composes with `--dry-run` to preview the removal.",
+                 events.\n\nWith a value, removes only the compaction events it names, numbered \
+                 as `jp conversation show` lists them: a single one (`2`), an inclusive range \
+                 (`1..5`, `3..`, `..3`), or several of either separated by commas (`1,3..5`). \
+                 `-N` counts from the end, so `--reset -1` removes the most recent one and \
+                 `--reset -3..-1` the last three. A number that names no compaction event is an \
+                 error, and nothing is removed.\n\nA word after `--reset` that is no such value \
+                 is read as the conversation to target, so `--reset recent` removes every \
+                 compaction event of the most recent conversation.\n\nMutually exclusive with the \
+                 policy, range, and DSL flags: `--reset` undoes compaction, it does not \
+                 re-compact in the same invocation. Composes with `--dry-run` to preview the \
+                 removal.",
             )
     }
 
-    fn parser() -> impl TypedValueParser<Value = usize> {
-        parse_compaction_index
+    /// A comma-separated list of compaction numbers and inclusive ranges of
+    /// them, each 1-based among the conversation's compaction events.
+    fn parser() -> impl TypedValueParser<Value = Vec<PositionSpec>> {
+        |value: &str| {
+            split_list_with(value, "compaction number", |item| {
+                item.parse::<PositionSpec>()
+                    .map_err(|error| error.describe(COMPACTION))
+            })
+        }
     }
 
-    fn collect(values: FlagValues<usize>) -> Result<Self::Output, clap::Error> {
-        Ok(values.last())
+    /// Claim any word shaped like a compaction list even if parsing failed:
+    /// treating `--reset 0` as a conversation target would leave `--reset` bare
+    /// and remove every compaction event.
+    fn claim(word: &str, parsed: Option<Vec<PositionSpec>>, (): &()) -> Claim<Vec<PositionSpec>> {
+        match parsed {
+            Some(specs) => Claim::Value(specs),
+            None if looks_like_compaction_numbers(word) => Claim::Invalid,
+            None => Claim::Text,
+        }
+    }
+
+    fn collect(values: FlagValues<Vec<PositionSpec>>) -> Result<Self::Output, clap::Error> {
+        // Written bare, or with its word given to the conversation targets,
+        // the flag names every compaction event.
+        Ok(values
+            .last()
+            .map(|specs| specs.unwrap_or_else(|| vec![PositionSpec::ALL])))
     }
 }
 
@@ -434,46 +492,71 @@ fn parse_tool_calls_mode(s: &str) -> Result<ToolCallsMode, String> {
     })
 }
 
-/// Parse the `--reset=INDEX` value: a 1-based position among the conversation's
-/// compaction events.
-fn parse_compaction_index(s: &str) -> Result<usize, String> {
-    match s.parse() {
-        Ok(0) => Err("compaction indices are 1-based; `0` is not a valid index".to_owned()),
-        Ok(n) => Ok(n),
-        Err(_) => Err(format!("invalid compaction index '{s}'")),
-    }
+/// Returns `true` if `word` has the character shape of a `--reset` compaction
+/// list: at least one ASCII digit, and only digits, whitespace, `-`, `.`, `,`,
+/// `=`, or `+`.
+///
+/// Matches any whitespace trimmed by the list parser.
+/// `=` and `+` are not valid list syntax, but near-misses such as `1..=3` or
+/// `+2` are malformed lists rather than conversation targets.
+/// No conversation ID or target keyword matches this shape (`.`, `-`, and
+/// `+live` are targets, but contain no digits).
+fn looks_like_compaction_numbers(word: &str) -> bool {
+    word.contains(|c: char| c.is_ascii_digit())
+        && word.chars().all(|c| {
+            c.is_ascii_digit() || c.is_whitespace() || matches!(c, '-' | '.' | ',' | '=' | '+')
+        })
 }
 
-/// Look up the compaction event a 1-based `--reset=INDEX` addresses.
+/// Resolve `--reset` specs into a deduplicated set of 0-based indices into the
+/// stream's compaction events.
 ///
-/// Returns its 0-based position among the stream's compaction events, plus a
-/// `turns X..Y` label for the removal message (turn numbers 1-based, as the
-/// user sees them elsewhere).
-/// An index naming no event is an error rather than a silent no-op, matching
-/// how `--turn` treats an out-of-range turn.
-fn resolve_reset_index(
+/// # Errors
+///
+/// Returns an error if any spec is out of range or inverted (`from > to`).
+fn resolve_reset(
     events: &ConversationStream,
-    index: usize,
-) -> Result<(usize, String), String> {
-    let Some(position) = index.checked_sub(1) else {
-        return Err("compaction indices are 1-based; `0` is not a valid index".to_owned());
-    };
+    specs: &[PositionSpec],
+) -> Result<BTreeSet<usize>, ResolvePositionError> {
+    let count = events.compactions().count();
 
-    let Some(compaction) = events.compactions().nth(position) else {
-        let count = events.compactions().count();
-        return Err(format!(
-            "compaction {index} out of range (conversation has {count} compaction event(s))"
-        ));
-    };
+    let mut selected = BTreeSet::new();
+    for spec in specs {
+        selected.extend(spec.resolve(count)?);
+    }
 
-    Ok((
-        position,
-        format!(
-            "turns {}..{}",
-            compaction.from_turn + 1,
-            compaction.to_turn + 1
-        ),
-    ))
+    Ok(selected)
+}
+
+/// Format the status lines reporting which compaction events `--reset` removes.
+///
+/// `selected` holds 0-based indices into the compaction events of `events`
+/// before removal.
+/// Each line uses the 1-based compaction number and description from `jp
+/// conversation show`.
+fn reset_lines(
+    events: &ConversationStream,
+    selected: &BTreeSet<usize>,
+    dry_run: bool,
+) -> Vec<String> {
+    if selected.is_empty() {
+        return vec!["No compaction events to remove.".to_owned()];
+    }
+
+    let verb = if dry_run { "Would remove" } else { "Removed" };
+
+    events
+        .compactions()
+        .enumerate()
+        .filter(|(index, _)| selected.contains(index))
+        .map(|(index, compaction)| {
+            format!(
+                "{verb} compaction {}: {}.",
+                index + 1,
+                compaction_detail_item(compaction).text
+            )
+        })
+        .collect()
 }
 
 /// Resolve the turn range a single rule would compact within one selected
@@ -1068,27 +1151,29 @@ impl Compact {
     /// Covers the out-of-range and malformed `--turn` values, an empty plan, an
     /// unresolvable summary overlap, and a blank verbatim summary — every
     /// refusal that needs no provider.
-    /// `--reset` plans no compaction, so it has nothing to resolve.
+    /// For `--reset`, validates that every compaction spec resolves against
+    /// every target conversation.
     fn preflight(&self, ctx: &Ctx, handles: &[ConversationHandle]) -> Output {
+        if let Some(specs) = &self.reset {
+            for handle in handles {
+                let events = ctx.workspace.events(handle)?;
+                resolve_reset(&events, specs)
+                    .map_err(|error| error.describe_in(COMPACTION, handle.id()))?;
+            }
+            return Ok(());
+        }
+
         // Config is resolved once per invocation and fixed from then on, so the
         // rules planned here are the ones `compact_one` will plan again.
-        let rules = match self.reset {
-            Some(_) => None,
-            None => Some(
-                self.effective_rules(&ctx.config())
-                    .map_err(|e| crate::error::Error::Compaction(e.to_string()))?,
-            ),
-        };
+        let rules = self
+            .effective_rules(&ctx.config())
+            .map_err(|e| crate::error::Error::Compaction(e.to_string()))?;
 
         for handle in handles {
             let events = ctx.workspace.events(handle)?;
             self.range.check_turn_range(events.turn_count())?;
 
-            let Some(rules) = rules.as_deref() else {
-                continue;
-            };
-
-            if plan_compactions(&events, rules, &self.range)?.is_empty() {
+            if plan_compactions(&events, &rules, &self.range)?.is_empty() {
                 return Err(crate::error::Error::NothingToCompact {
                     id: handle.id(),
                     turns: events.turn_count(),
@@ -1112,8 +1197,8 @@ impl Compact {
         let mut conv = lock.into_mut();
         let events_snapshot = conv.events().clone();
 
-        if let Some(index) = self.reset {
-            return self.run_reset(ctx, conv, &events_snapshot, index);
+        if let Some(specs) = &self.reset {
+            return self.run_reset(ctx, conv, &events_snapshot, specs);
         }
 
         self.range.check_turn_range(events_snapshot.turn_count())?;
@@ -1171,46 +1256,36 @@ impl Compact {
         Ok(())
     }
 
-    /// Handle `--reset[=INDEX]`: remove every compaction event, or just the one
-    /// at `index` (1-based, in stream order).
+    /// Handle `--reset[=COMPACTIONS]`: remove the compaction events selected by
+    /// `specs`, numbered from 1 in stream order.
     ///
-    /// Under `--dry-run` nothing is mutated and the message describes what
-    /// would be removed.
-    /// An `index` past the last compaction event is an error rather than a
-    /// silent no-op (matching `--turn`).
+    /// Every spec resolves against `events` before any event is removed, so an
+    /// out-of-range number fails with the stream intact (matching `--turn`),
+    /// and removing one event does not shift the numbering of the rest.
+    /// Under `--dry-run`, nothing is removed and the output previews the
+    /// removals.
     fn run_reset(
         &self,
         ctx: &Ctx,
         conv: ConversationMut,
         events: &ConversationStream,
-        index: Option<usize>,
+        specs: &[PositionSpec],
     ) -> Output {
-        let Some(index) = index else {
-            let count = if self.dry_run {
-                events.compactions().count()
-            } else {
-                conv.update_events_and_flush(ConversationStream::remove_compactions)?
-            };
+        let selected = resolve_reset(events, specs)
+            .map_err(|error| error.describe_in(COMPACTION, conv.id()))?;
+        let lines = reset_lines(events, &selected, self.dry_run);
 
-            ctx.printer.println(match (count, self.dry_run) {
-                (0, _) => "No compaction events to remove.".to_owned(),
-                (count, true) => format!("Would remove {count} compaction event(s)."),
-                (count, false) => format!("Removed {count} compaction event(s)."),
-            });
-            return Ok(());
-        };
-
-        let (position, range) = resolve_reset_index(events, index)?;
-
-        if self.dry_run {
-            ctx.printer
-                .println(format!("Would remove compaction {index} ({range})."));
-            return Ok(());
+        // Write before reporting, so a failed write is an error rather than a
+        // confirmation the user cannot trust.
+        if !self.dry_run && !selected.is_empty() {
+            conv.update_events_and_flush(|stream| {
+                stream.remove_compactions_where(|index, _| selected.contains(&index))
+            })?;
         }
 
-        conv.update_events_and_flush(|stream| stream.remove_compaction(position))?;
-        ctx.printer
-            .println(format!("Removed compaction {index} ({range})."));
+        for line in lines {
+            ctx.printer.println(line);
+        }
 
         Ok(())
     }

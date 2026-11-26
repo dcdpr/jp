@@ -12,6 +12,7 @@
 use std::{
     error::Error,
     fmt::{self, Write as _},
+    ops::Range,
     str::FromStr,
 };
 
@@ -347,7 +348,7 @@ fn uri_to_entry(uri: &Url) -> Result<Entry, Box<dyn Error + Send + Sync>> {
 /// should treat that as a valid but empty attachment rather than an error, so
 /// the assistant can still see the source reference.
 fn render_stream(stream: &ConversationStream, selector: Selector) -> String {
-    let Some((start, end)) = selector.range.resolve(stream.turn_count()) else {
+    let Some(Range { start, end }) = selector.range.clamp(stream.turn_count()) else {
         return String::new();
     };
 
@@ -509,13 +510,13 @@ fn collect_selected_events(
     stream: &ConversationStream,
     selector: Selector,
 ) -> Vec<&ConversationEvent> {
-    let Some((start, end)) = selector.range.resolve(stream.turn_count()) else {
+    let Some(turns) = selector.range.clamp(stream.turn_count()) else {
         return vec![];
     };
 
     stream
         .iter_events_by_turn()
-        .filter(|e| (start..end).contains(&e.turn) && content_matches(&e.kind, selector.content))
+        .filter(|e| turns.contains(&e.turn) && content_matches(&e.kind, selector.content))
         .map(|e| e.event)
         .collect()
 }

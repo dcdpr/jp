@@ -2,8 +2,9 @@ use clap::{Arg, ArgAction};
 
 use super::*;
 
-/// A command with an optional-value option `--opt` / `-o`, a flag `-x`, a root
-/// option `--cfg` that requires a value, and a subcommand `sub` taking words.
+/// A command with an optional-value option `--opt` / `-o`, a flag `-x`, an
+/// option `--raw` whose value may look like a flag, a root option `--cfg` that
+/// requires a value, and a subcommand `sub` taking words.
 fn command() -> Command {
     let opt = Arg::new("opt")
         .short('o')
@@ -20,6 +21,7 @@ fn command() -> Command {
             Command::new("sub")
                 .alias("s")
                 .arg(opt)
+                .arg(Arg::new("raw").long("raw").allow_hyphen_values(true))
                 .arg(Arg::new("x").short('x').action(ArgAction::SetTrue))
                 .arg(Arg::new("words").action(ArgAction::Append).num_args(1..)),
         );
@@ -121,6 +123,126 @@ fn a_plugin_command_is_not_walked() {
     let spelling = Spelling::of(&cmd, &matches, &argv);
 
     assert!(spelling.attached.is_empty());
+}
+
+/// `argv` (after the program name) with each from-end value attached to its
+/// option, its words joined by a space, or `None` when it holds none to attach.
+fn from_end_attached(argv: &[&str]) -> Option<String> {
+    let argv: Vec<OsString> = ["prog"].iter().chain(argv).map(OsString::from).collect();
+
+    let words = attach_from_end_values(&command(), &argv)?;
+    let words: Vec<_> = words.iter().skip(1).map(|w| w.to_string_lossy()).collect();
+
+    Some(words.join(" "))
+}
+
+#[test]
+fn a_from_end_value_is_attached_to_the_option_before_it() {
+    assert_eq!(
+        from_end_attached(&["sub", "--opt", "-3..-1"]).as_deref(),
+        Some("sub --opt=-3..-1")
+    );
+    assert_eq!(
+        from_end_attached(&["sub", "-o", "-3,-1", "words"]).as_deref(),
+        Some("sub -o=-3,-1 words")
+    );
+    assert_eq!(
+        from_end_attached(&["sub", "--option", "-3"]).as_deref(),
+        Some("sub --option=-3")
+    );
+}
+
+#[test]
+fn a_from_end_value_is_attached_to_the_option_that_ends_a_short_cluster() {
+    assert_eq!(
+        from_end_attached(&["sub", "-xo", "-3.."]).as_deref(),
+        Some("sub -xo=-3..")
+    );
+}
+
+#[test]
+fn every_from_end_value_is_attached() {
+    assert_eq!(
+        from_end_attached(&["--cfg", "-1", "sub", "--opt", "-2..", "--opt", "-3"]).as_deref(),
+        Some("--cfg=-1 sub --opt=-2.. --opt=-3")
+    );
+}
+
+// Any other word that starts with `-` may be a flag, known or mistyped, and is
+// clap's to read.
+#[test]
+fn only_a_word_that_starts_with_a_dash_and_a_digit_is_attached() {
+    for word in ["-x", "-y3", "--3", "-", "-.3", "3..-1", "words"] {
+        assert_eq!(
+            from_end_attached(&["sub", "--opt", word]),
+            None,
+            "attached {word:?}"
+        );
+    }
+}
+
+#[test]
+fn an_option_that_has_its_value_takes_no_from_end_value() {
+    assert_eq!(from_end_attached(&["sub", "--opt=a", "-3"]), None);
+    assert_eq!(from_end_attached(&["sub", "-oa", "-3"]), None);
+    assert_eq!(from_end_attached(&["sub", "-o=a", "-3"]), None);
+    assert_eq!(from_end_attached(&["sub", "--opt", "a", "-3"]), None);
+}
+
+#[test]
+fn a_from_end_value_after_anything_but_an_open_option_is_kept() {
+    // A flag that takes no value.
+    assert_eq!(from_end_attached(&["sub", "-x", "-3"]), None);
+    // An option the command does not declare.
+    assert_eq!(from_end_attached(&["sub", "--nope", "-3"]), None);
+    // A positional word.
+    assert_eq!(from_end_attached(&["sub", "words", "-3"]), None);
+    // An option of another command: `--opt` is declared on `sub` alone.
+    assert_eq!(from_end_attached(&["--opt", "-3", "sub"]), None);
+}
+
+#[test]
+fn nothing_after_a_double_dash_is_attached() {
+    assert_eq!(from_end_attached(&["sub", "--opt", "--", "-3"]), None);
+    assert_eq!(from_end_attached(&["sub", "--", "--opt", "-3"]), None);
+
+    // A value before it still is, and the words after it are kept as written.
+    assert_eq!(
+        from_end_attached(&["sub", "--opt", "-3", "--", "--opt", "-4"]).as_deref(),
+        Some("sub --opt=-3 -- --opt -4")
+    );
+}
+
+// `--cfg` takes the next argument even when it names a subcommand, so the walk
+// must not descend into `sub` there.
+#[test]
+fn the_walk_does_not_descend_into_a_value_that_names_a_subcommand() {
+    assert_eq!(from_end_attached(&["--cfg", "sub", "--opt", "-3"]), None);
+    assert_eq!(
+        from_end_attached(&["--cfg", "sub", "s", "--opt", "-3"]).as_deref(),
+        Some("--cfg sub s --opt=-3")
+    );
+}
+
+// `--raw` consumes `--opt` as its value, so `--opt` is not parsed as an option
+// and does not attach `-3`.
+#[test]
+fn an_option_read_as_another_options_value_takes_no_from_end_value() {
+    assert_eq!(from_end_attached(&["sub", "--raw", "--opt", "-3"]), None);
+    assert_eq!(
+        from_end_attached(&["sub", "--raw", "--opt", "--opt", "-3"]).as_deref(),
+        Some("sub --raw --opt --opt=-3")
+    );
+}
+
+// Everything after a plugin command name is passed to the plugin untouched.
+#[test]
+fn a_plugin_commands_arguments_are_kept_as_written() {
+    assert_eq!(from_end_attached(&["plugin", "--cfg", "-3"]), None);
+    assert_eq!(
+        from_end_attached(&["--cfg", "-3", "plugin", "--cfg", "-4"]).as_deref(),
+        Some("--cfg=-3 plugin --cfg -4")
+    );
 }
 
 // A count the walk disagrees with is answered with every value attached, which

@@ -165,10 +165,14 @@ as integers.
 from the stream so the LLM sees the uncompacted history.
 
 > [!NOTE]
-> `--reset` accepts an optional 1-based index (`--reset=2`) to remove a single
-> compaction event, numbered as listed by `jp conversation show`.
-> Passing an index requires `=`, so a bare `--reset` followed by a positional
-> argument still parses that argument as the conversation ID.
+> `--reset` accepts an optional value naming the compaction events to remove,
+> numbered from 1 as listed by `jp conversation show`: a single number (`--reset
+> 2`), an inclusive range (`--reset 1..5`), or a comma-separated list of either
+> (`--reset 1,3..5`).
+> `-N` counts from the end, so `--reset -1` removes the most recent compaction
+> event.
+> Any other word after `--reset` is treated as a conversation target, so a bare
+> `--reset` can still be followed by a positional target argument.
 
 #### The `--compact` Flag (DSL)
 

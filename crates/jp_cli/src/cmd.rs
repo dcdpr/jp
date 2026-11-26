@@ -137,7 +137,9 @@ impl Commands<Parsed> {
             "query" => Self::Query(query::Query::from_matches(sub, spelling)?),
             "attachment" => Self::Attachment(attachment::Attachment::from_matches(sub)?),
             "aa" => Self::AttachmentAdd(attachment::add::Add::from_matches(sub)?),
-            "conversation" => Self::Conversation(conversation::Conversation::from_matches(sub)?),
+            "conversation" => Self::Conversation(conversation::Conversation::from_spelled_matches(
+                sub, spelling,
+            )?),
             "plugin" => Self::Plugin(plugin::PluginManagement::from_matches(sub)?),
             "workspace" => Self::Workspace(workspace::Workspace::from_matches(sub)?),
             "provider" => Self::Provider(provider::Provider::from_matches(sub)?),

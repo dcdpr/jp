@@ -50,6 +50,40 @@ fn split_list_reports_the_item_that_failed_to_parse() {
     );
 }
 
+/// A parser that names the item itself, as a flag's own parser does.
+fn even(part: &str) -> std::result::Result<u8, String> {
+    match part.parse::<u8>() {
+        Ok(n) if n % 2 == 0 => Ok(n),
+        _ => Err(format!("`{part}` is not an even number")),
+    }
+}
+
+#[test]
+fn split_list_with_reads_each_trimmed_item_with_the_parser() {
+    assert_eq!(
+        split_list_with("2, 4 ,6", "number", even),
+        Ok(vec![2, 4, 6])
+    );
+}
+
+#[test]
+fn split_list_with_reports_the_parser_s_own_error() {
+    assert_eq!(
+        split_list_with("2,3,4", "number", even),
+        Err("`3` is not an even number".to_owned())
+    );
+}
+
+#[test]
+fn split_list_with_rejects_an_empty_item() {
+    for value in ["", "2,,4", "2,", ",2", "2, ,4"] {
+        assert_eq!(
+            split_list_with(value, "number", even),
+            Err(format!("empty number in '{value}'"))
+        );
+    }
+}
+
 #[test]
 fn already_a_url_passes_through() {
     assert_url("https://example.com/x", "https://example.com/x");

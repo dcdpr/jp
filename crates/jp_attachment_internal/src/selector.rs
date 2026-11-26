@@ -8,6 +8,8 @@
 
 use std::{fmt, str::FromStr};
 
+use jp_conversation::position::PositionSpec;
+
 /// What content kinds to include from a selected turn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(super) struct Content {
@@ -67,100 +69,21 @@ impl fmt::Display for Content {
     }
 }
 
-/// Which turns to include.
-/// Both bounds are inclusive.
-///
-/// Negative values count from the end (`-1` = last turn).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) struct Range {
-    /// Left bound, 1-based.
-    /// `None` means "from the start".
-    pub start: Option<i64>,
-    /// Right bound, 1-based.
-    /// `None` means "to the end".
-    pub end: Option<i64>,
-}
-
-impl Range {
-    /// Select just the last turn.
-    pub const fn last() -> Self {
-        Self {
-            start: Some(-1),
-            end: Some(-1),
-        }
-    }
-
-    /// Select all turns.
-    #[allow(dead_code)]
-    pub const fn all() -> Self {
-        Self {
-            start: None,
-            end: None,
-        }
-    }
-
-    /// Resolve the 0-based half-open `[start, end)` interval over a stream of
-    /// `total` turns.
-    /// Returns `None` if the selection is empty.
-    pub fn resolve(self, total: usize) -> Option<(usize, usize)> {
-        if total == 0 {
-            return None;
-        }
-
-        let total_i = i64::try_from(total).ok()?;
-
-        let start = normalize(self.start.unwrap_or(1), total_i).max(0);
-        let end_inclusive = normalize(self.end.unwrap_or(total_i), total_i).min(total_i - 1);
-
-        if start > end_inclusive {
-            return None;
-        }
-
-        let start_usize = usize::try_from(start).ok()?;
-        let end_exclusive = usize::try_from(end_inclusive).ok()?.saturating_add(1);
-
-        Some((start_usize, end_exclusive))
-    }
-}
-
-/// Map a 1-based signed index to a 0-based unsigned index.
-///
-/// Positive `N` → `N - 1`.
-/// Negative `-N` → `total - N`.
-/// `0` is clamped to `0`.
-fn normalize(idx: i64, total: i64) -> i64 {
-    use std::cmp::Ordering;
-    match idx.cmp(&0) {
-        Ordering::Equal => 0,
-        Ordering::Greater => idx - 1,
-        Ordering::Less => total + idx,
-    }
-}
-
-impl fmt::Display for Range {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match (self.start, self.end) {
-            (None, None) => f.write_str(".."),
-            (Some(s), None) => write!(f, "{s}.."),
-            (None, Some(e)) => write!(f, "..{e}"),
-            (Some(s), Some(e)) if s == e => write!(f, "{s}"),
-            (Some(s), Some(e)) => write!(f, "{s}..{e}"),
-        }
-    }
-}
-
 /// A parsed selector spec: `CONTENT[:RANGE]`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(super) struct Selector {
     pub content: Content,
-    pub range: Range,
+
+    /// Which turns to include: one 1-based turn or an inclusive range, where a
+    /// negative number counts from the end (`-1` is the last turn).
+    pub range: PositionSpec,
 }
 
 impl Default for Selector {
     fn default() -> Self {
         Self {
             content: Content::assistant_only(),
-            range: Range::last(),
+            range: PositionSpec::LAST,
         }
     }
 }
@@ -191,8 +114,18 @@ impl FromStr for Selector {
         };
 
         let range = match range_str {
-            None => Range::last(),
-            Some(r) => parse_range(r)?,
+            None => PositionSpec::LAST,
+            Some("") => return Err("empty range".into()),
+            Some(r) => match r.parse::<PositionSpec>() {
+                // A range whose ends are one turn selects that turn, so it is
+                // stored as one: `-1..-1` is the default selector, and
+                // displays as `-1`.
+                Ok(PositionSpec::Range(Some(from), Some(to))) if from == to => {
+                    PositionSpec::Single(from)
+                }
+                Ok(spec) => spec,
+                Err(error) => return Err(error.describe("turn")),
+            },
         };
 
         Ok(Self { content, range })
@@ -240,40 +173,6 @@ fn parse_content(s: &str) -> Result<Content, String> {
     }
 
     Ok(content)
-}
-
-fn parse_range(s: &str) -> Result<Range, String> {
-    if s.is_empty() {
-        return Err("empty range".into());
-    }
-
-    if let Some((left, right)) = s.split_once("..") {
-        let start = parse_signed_bound(left, "start")?;
-        let end = parse_signed_bound(right, "end")?;
-        return Ok(Range { start, end });
-    }
-
-    // Shorthand: a single signed index selects that one turn.
-    let n = parse_signed_index(s, "turn")?;
-    Ok(Range {
-        start: Some(n),
-        end: Some(n),
-    })
-}
-
-fn parse_signed_bound(s: &str, label: &str) -> Result<Option<i64>, String> {
-    if s.is_empty() {
-        return Ok(None);
-    }
-    Ok(Some(parse_signed_index(s, label)?))
-}
-
-fn parse_signed_index(s: &str, label: &str) -> Result<i64, String> {
-    let n: i64 = s.parse().map_err(|_| format!("invalid {label} '{s}'"))?;
-    if n == 0 {
-        return Err(format!("{label} must be non-zero (indices are 1-based)"));
-    }
-    Ok(n)
 }
 
 #[cfg(test)]
