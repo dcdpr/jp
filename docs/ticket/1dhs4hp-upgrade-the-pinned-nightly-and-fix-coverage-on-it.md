@@ -190,3 +190,41 @@ The cerebras/llamacpp/vllm "open SSE source with reconnect off" step moved into
 `openai_compat::event_source`.
 `DynExecutor`/`DynFanOutCall` carry `qual:allow(coupling, sit)`: their single
 impl is the blanket impl.
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-25T21:22:21Z
+
+Coveralls reports 79.52% against main's 81.25% (-1.7).
+Two causes:
+
+- About 0.7 points: Coveralls folds branch coverage into the headline once
+  `--branch` is on.
+  Line coverage alone is 80.28%.
+- About 1.0 point: the new nightly reports more never-executed lines as
+  uncovered.
+  Running `jp_md` and `jp_conversation` without `--branch` gives the same 68
+  uncovered lines in `jp_md/src/buffer/state.rs`, so `--branch` is not the
+  cause.
+  Those lines are the arms of `Tag::from_str` for HTML tags no test passes in;
+  main credited the file with 94.7%.
+  The drop is a measurement change, not lost tests.
+
+Not yet explained: about 1,150 lines leave the count entirely (133,192 relevant
+lines on main, 132,042 here).
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-25T21:25:57Z
+
+Confirmed against a report from main's toolchain (`nightly-2026-03-26`), `jp_md`
+only.
+In `jp_md/src/buffer/state.rs`, `Tag::from_str` lines 269-330 were each recorded
+as executed 7-9 times on the old toolchain, the same number of times the
+function was called, whether or not that arm was taken.
+The new toolchain records only the arms that are taken, so 60 of them are 0.
+The old 94.7% counted a string comparison running as the arm running.
+The coverage drop is a correction in how lines are attributed, not tests that
+stopped running.
