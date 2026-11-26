@@ -209,7 +209,7 @@ fn test_a_member_github_cannot_merge_shows_conflicts_anywhere_in_line() {
 fn test_a_stack_without_a_label_is_not_in_the_queue() {
     let prs = vec![stacked(1, 1, 2, false), stacked(2, 2, 2, false)];
 
-    assert!(entries(&prs).is_empty());
+    assert_eq!(entries(&prs), [] as [Entry<'_>; 0]);
 }
 
 #[test]

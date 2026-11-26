@@ -464,7 +464,7 @@ fn building_a_turn_assigns_ids_to_its_events() {
         .unwrap();
 
     assert_eq!(ids(&stream).len(), 4);
-    assert!(!ids(&stream)[3].is_empty());
+    assert_ne!(ids(&stream)[3], "");
 }
 
 #[test]
@@ -475,7 +475,7 @@ fn adding_a_config_delta_assigns_it_an_id() {
         timestamp: DateTime::<Utc>::UNIX_EPOCH,
     });
 
-    assert!(!ids(&stream)[0].is_empty());
+    assert_ne!(ids(&stream)[0], "");
 }
 
 #[test]
@@ -484,7 +484,7 @@ fn adding_a_compaction_assigns_it_an_id() {
 
     stream.add_compaction(Compaction::new(0, 0));
 
-    assert!(!ids(&stream)[0].is_empty());
+    assert_ne!(ids(&stream)[0], "");
 }
 
 #[test]
@@ -493,7 +493,7 @@ fn adding_an_overlay_assigns_it_an_id() {
 
     stream.add_overlay(Vec::new());
 
-    assert!(!ids(&stream)[0].is_empty());
+    assert_ne!(ids(&stream)[0], "");
 }
 
 #[test]
@@ -604,7 +604,7 @@ fn extending_with_bare_events_assigns_fresh_ids() {
 
     stream.extend([event(ChatRequest::from("question"))]);
 
-    assert!(!ids(&stream)[0].is_empty());
+    assert_ne!(ids(&stream)[0], "");
 }
 
 // ---------------------------------------------------------------------------

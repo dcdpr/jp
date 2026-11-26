@@ -141,8 +141,7 @@ fn swift_test_impl<R: ProcessRunner>(
         if check_names {
             let executed = bundle_document(ctx, RESULT_BUNDLE, runner)
                 .as_ref()
-                .map(executed_tests)
-                .unwrap_or_default();
+                .map_or_default(executed_tests);
             let missed = unmatched(testnames, &executed);
             if !missed.is_empty() {
                 return error(format!(

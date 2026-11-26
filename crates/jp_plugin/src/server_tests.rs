@@ -98,11 +98,8 @@ fn the_allowed_hosts_are_the_flags_then_the_options() {
         ".ts.net"
     ]);
     assert_eq!(options.allowed_hosts(&flags), ["other.local"]);
-    assert!(
-        Listen::default()
-            .allowed_hosts(&Listen::default())
-            .is_empty()
-    );
+    assert_eq!(Listen::default().allowed_hosts(&Listen::default()), []
+        as [String; 0]);
 }
 
 /// A flag wins over the option, and the option over the default.

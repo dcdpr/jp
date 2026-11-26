@@ -4,7 +4,7 @@
 //! spawning a process.
 
 use std::{
-    io::{self, BufReader, IsTerminal as _},
+    io::{self, IsTerminal as _},
     process,
 };
 
@@ -16,7 +16,7 @@ fn main() {
         "gui",
         io::stdin().is_terminal(),
         || HELP_TEXT.to_owned(),
-        || run(BufReader::new(io::stdin()), io::stdout(), &SystemLauncher),
+        || run(io::stdin().lock(), io::stdout(), &SystemLauncher),
         &mut io::stderr(),
     );
 

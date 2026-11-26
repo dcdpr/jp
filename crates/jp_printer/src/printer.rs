@@ -1983,7 +1983,7 @@ fn release_pending(delay_control: &DelayControl, count: usize) {
     let _ =
         delay_control
             .pending_chars
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
                 Some(current.saturating_sub(count))
             });
 }

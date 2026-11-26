@@ -5,7 +5,6 @@ use std::{
     time::Duration,
 };
 
-use async_trait::async_trait;
 use base64::Engine as _;
 use chrono::{DateTime, Utc};
 use futures::{StreamExt as _, TryStreamExt as _, future, stream};
@@ -499,7 +498,6 @@ fn env_override(env_key: &str, configured: &str) -> String {
     std::env::var(env_key).unwrap_or_else(|_| configured.to_owned())
 }
 
-#[async_trait]
 impl Provider for Openai {
     async fn model_details(&self, name: &Name) -> Result<ModelDetails> {
         let attempt = self.resolve(name.as_ref()).await?;
@@ -2105,13 +2103,12 @@ fn process_strict(schema: &mut Value, root: &Value) -> ArgumentDecoding {
             let prev_required: Vec<String> = map
                 .get("required")
                 .and_then(Value::as_array)
-                .map(|arr| {
+                .map_or_default(|arr| {
                     arr.iter()
                         .filter_map(Value::as_str)
                         .map(str::to_owned)
                         .collect()
-                })
-                .unwrap_or_default();
+                });
 
             let newly_required: Vec<String> = props
                 .keys()

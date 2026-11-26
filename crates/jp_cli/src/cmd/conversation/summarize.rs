@@ -10,7 +10,7 @@ use jp_conversation::{
     thread::ThreadBuilder,
 };
 use jp_llm::{
-    Provider, StreamErrorKind,
+    DynProvider, StreamErrorKind,
     event::{Event, EventPatch, FinishReason, NoticeSink, record_patches},
     event_builder::EventBuilder,
     model::ModelDetails,
@@ -126,7 +126,7 @@ pub async fn generate_summary(
 /// set of metadata entries.
 /// A round that changes nothing ends it.
 async fn summarize_stream(
-    provider: &dyn Provider,
+    provider: &dyn DynProvider,
     model_details: &ModelDetails,
     model_id: &ModelIdConfig,
     mut stream: ConversationStream,

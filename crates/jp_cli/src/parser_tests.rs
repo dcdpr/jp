@@ -1,5 +1,3 @@
-use std::str::FromStr as _;
-
 use super::*;
 
 fn parse(s: &str) -> AttachmentUrlOrPath {

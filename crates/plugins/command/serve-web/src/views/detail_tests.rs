@@ -11,10 +11,7 @@ use super::*;
 #[test]
 fn the_configuration_dialog_takes_focus_itself() {
     let markup = config_modal().into_string();
-    let opening = markup
-        .split_once('>')
-        .map(|(tag, _)| tag)
-        .unwrap_or_default();
+    let opening = markup.split_once('>').map_or_default(|(tag, _)| tag);
 
     assert_eq!(
         opening,

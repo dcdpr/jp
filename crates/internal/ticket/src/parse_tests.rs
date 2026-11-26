@@ -55,7 +55,7 @@ fn reads_title_metadata_and_description() {
         ticket.description,
         "The header renders one column left of the body below 80 columns."
     );
-    assert!(ticket.comments.is_empty());
+    assert_eq!(ticket.comments, [] as [Comment; 0]);
 }
 
 #[test]
@@ -317,7 +317,7 @@ fn separator_without_a_metadata_block_is_not_a_boundary() {
 
     let ticket = document(source).unwrap();
 
-    assert!(ticket.comments.is_empty());
+    assert_eq!(ticket.comments, [] as [Comment; 0]);
     assert!(ticket.description.contains("Below the rule."));
 }
 
@@ -339,7 +339,7 @@ fn comments_heading_alone_creates_no_comments() {
 
     let ticket = document(source).unwrap();
 
-    assert!(ticket.comments.is_empty());
+    assert_eq!(ticket.comments, [] as [Comment; 0]);
     assert!(ticket.description.contains("Still the description."));
 }
 

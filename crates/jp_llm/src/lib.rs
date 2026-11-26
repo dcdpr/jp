@@ -19,9 +19,12 @@ pub(crate) mod test;
 #[path = "cross_route_tests.rs"]
 mod cross_route_tests;
 
-pub use credential::{AccountIdentity, Credential, ProviderAuth, provider_auth};
+pub use credential::{
+    AccountIdentity, Credential, DynExternalAuth, DynProviderAuth, ExternalAuth, ProviderAuth,
+    provider_auth,
+};
 pub use error::{Error, StreamError, StreamErrorKind};
-pub use provider::Provider;
+pub use provider::{DynProvider, Provider};
 pub use retry::{exponential_backoff, retry_delay};
 pub use stream::{
     EventStream, chain::EventChain, with_idle_timeout, with_output_limit, with_tool_call_keepalive,

@@ -1,6 +1,5 @@
 use std::str::FromStr as _;
 
-use async_trait::async_trait;
 use base64::Engine as _;
 use futures::{StreamExt as _, TryStreamExt as _, stream};
 use jp_attachment::AttachmentContent;
@@ -45,7 +44,6 @@ pub struct Ollama {
     client: Client,
 }
 
-#[async_trait]
 impl Provider for Ollama {
     async fn model_details(&self, name: &Name) -> Result<ModelDetails> {
         let id: ModelIdConfig = (PROVIDER, name.as_ref()).try_into()?;

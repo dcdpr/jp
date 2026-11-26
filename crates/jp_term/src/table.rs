@@ -435,8 +435,7 @@ fn push_md_row(out: &mut String, row: &Row, widths: &[usize], col_count: usize) 
         let content = row
             .cell_iter()
             .nth(idx)
-            .map(|c| strip_ansi_escapes::strip_str(c.content()))
-            .unwrap_or_default();
+            .map_or_default(|c| strip_ansi_escapes::strip_str(c.content()));
 
         let w = widths.get(idx).copied().unwrap_or(1);
         out.push_str(&format!(" {content:<w$} |"));

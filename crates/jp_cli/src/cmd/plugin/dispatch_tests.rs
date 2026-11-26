@@ -1,8 +1,14 @@
+#![cfg_attr(
+    unix,
+    expect(
+        clippy::unused_async_trait_impl,
+        reason = "test doubles implement async traits synchronously"
+    )
+)]
+
 #[cfg(unix)]
 use std::task::Poll;
 
-#[cfg(unix)]
-use async_trait::async_trait;
 use camino_tempfile::{Utf8TempDir, tempdir};
 #[cfg(unix)]
 use chrono::Utc;
@@ -23,7 +29,7 @@ use jp_inquire::InlineOption;
 use jp_llm::turn_summary::{GeneratedTurnSummary, transcripts};
 #[cfg(unix)]
 use jp_llm::{
-    Error as LlmError, EventStream, Provider, error::StreamError, event::Event,
+    DynProvider, Error as LlmError, EventStream, error::StreamError, event::Event,
     model::ModelDetails, provider::mock::MockProvider, query::ChatQuery,
 };
 #[cfg(unix)]
@@ -33,6 +39,7 @@ use jp_plugin::{
     registry::{PluginKind, RegistryPlugin},
 };
 use jp_storage::backend::{FsStorageBackend, PersistBackend as _};
+use jp_test::env_var::EnvVarGuard;
 use relative_path::RelativePathBuf;
 use serde_json::json;
 use serial_test::serial;
@@ -41,7 +48,7 @@ use tokio::sync::{Notify, oneshot};
 use super::*;
 #[cfg(unix)]
 use crate::signals::testing::test_router;
-use crate::{Globals, editor::CUT_MARKER, env_testing::EnvVarGuard, shutdown::until_shutdown};
+use crate::{Globals, editor::CUT_MARKER, shutdown::until_shutdown};
 
 /// A workspace no request in these tests reaches into, so it needs no storage.
 fn bare_workspace() -> Workspace {
@@ -2521,8 +2528,7 @@ struct ParkedProvider {
 }
 
 #[cfg(unix)]
-#[async_trait]
-impl Provider for ParkedProvider {
+impl jp_llm::Provider for ParkedProvider {
     async fn model_details(&self, name: &Name) -> Result<ModelDetails, LlmError> {
         Ok(ModelDetails::empty(ModelIdConfig {
             provider: ProviderId::Test,
@@ -2559,7 +2565,7 @@ impl Provider for ParkedProvider {
 /// the notification fires.
 #[cfg(unix)]
 fn reply_to_query(
-    provider: Arc<dyn Provider>,
+    provider: Arc<dyn DynProvider>,
     follow_up: &str,
     press_once_parked: Option<Arc<Notify>>,
 ) -> String {
@@ -3044,7 +3050,7 @@ fn a_describe_answer_is_compared_with_the_manifest_field_by_field() {
         command: vec!["titles".to_owned()],
     };
 
-    assert!(manifest_differences(&manifest, &manifest).is_empty());
+    assert_eq!(manifest_differences(&manifest, &manifest), [] as [&str; 0]);
     assert_eq!(
         manifest_differences(&manifest, &Manifest {
             protocol: 2,

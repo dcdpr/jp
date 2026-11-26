@@ -349,11 +349,8 @@ fn conversation_locations_name_the_live_or_archived_directories() {
         StorageLocation::new(user.join(ARCHIVE_DIR).join("17941219992").as_str()),
     ]);
 
-    assert!(
-        backend
-            .conversation_locations(&id("17941219993"))
-            .is_empty()
-    );
+    assert_eq!(backend.conversation_locations(&id("17941219993")), []
+        as [StorageLocation; 0]);
 }
 
 #[test]

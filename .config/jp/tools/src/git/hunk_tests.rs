@@ -52,8 +52,9 @@ fn split_hunks_preserves_order_and_headers() {
 
 #[test]
 fn split_hunks_empty_for_no_diff() {
-    assert!(split_hunks("").is_empty());
-    assert!(split_hunks("diff --git a/f b/f\n--- a/f\n+++ b/f\n").is_empty());
+    assert_eq!(split_hunks(""), [] as [String; 0]);
+    assert_eq!(split_hunks("diff --git a/f b/f\n--- a/f\n+++ b/f\n"), []
+        as [String; 0]);
 }
 
 #[test]

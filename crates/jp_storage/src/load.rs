@@ -126,15 +126,11 @@ impl Storage {
             .valid_conversation_ids(&partition(&self.root))
             .into_iter()
             .collect();
-        let user_ids: HashSet<ConversationId> = self
-            .user
-            .as_deref()
-            .map(|user| {
-                self.valid_conversation_ids(&partition(user))
-                    .into_iter()
-                    .collect()
-            })
-            .unwrap_or_default();
+        let user_ids: HashSet<ConversationId> = self.user.as_deref().map_or_default(|user| {
+            self.valid_conversation_ids(&partition(user))
+                .into_iter()
+                .collect()
+        });
 
         let mut entries: Vec<ConversationIndexEntry> = workspace_ids
             .union(&user_ids)
@@ -320,11 +316,7 @@ impl Storage {
         ids: &[ConversationId],
     ) -> Vec<(ConversationId, Result<Conversation>)> {
         let workspace_dirs = conversation_dirs_by_id(&self.root);
-        let user_dirs = self
-            .user
-            .as_deref()
-            .map(conversation_dirs_by_id)
-            .unwrap_or_default();
+        let user_dirs = self.user.as_deref().map_or_default(conversation_dirs_by_id);
 
         ids.par_iter()
             .map(|id| {

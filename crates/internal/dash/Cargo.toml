@@ -5,7 +5,6 @@ name = "dash"
 authors.workspace = true
 documentation.workspace = true
 edition.workspace = true
-homepage.workspace = true
 license-file.workspace = true
 publish.workspace = true
 readme.workspace = true
@@ -26,6 +25,11 @@ serde = { workspace = true, features = ["derive", "std"] }
 serde_json = { workspace = true, features = ["std"] }
 thiserror = { workspace = true }
 unicode-width = { workspace = true }
+
+[dev-dependencies]
+jp_test = { workspace = true }
+
+serial_test = { workspace = true }
 
 [lints]
 workspace = true

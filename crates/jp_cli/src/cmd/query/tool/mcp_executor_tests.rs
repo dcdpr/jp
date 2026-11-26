@@ -1,3 +1,8 @@
+#![expect(
+    clippy::unused_async_trait_impl,
+    reason = "test doubles implement async traits synchronously"
+)]
+
 use std::{
     future::pending,
     sync::{
@@ -6,7 +11,6 @@ use std::{
     },
 };
 
-use async_trait::async_trait;
 use jp_config::{
     AppConfig, Config as _,
     conversation::tool::{PartialToolConfig, ToolConfig},
@@ -22,7 +26,7 @@ use serde_json::json;
 use tokio::time::{Duration, timeout};
 
 use super::*;
-use crate::cmd::query::tool::executor::mock::no_commands;
+use crate::cmd::query::tool::executor::{DynFanOutCall, mock::no_commands};
 
 /// A tool that asks one question, then echoes the arguments and the answer.
 ///
@@ -31,7 +35,6 @@ use crate::cmd::query::tool::executor::mock::no_commands;
 /// pairs the outcome with a count.
 struct InquiringTool(Arc<AtomicUsize>);
 
-#[async_trait]
 impl BuiltinTool for InquiringTool {
     async fn execute(&self, arguments: &Value, answers: &IndexMap<String, Value>) -> Outcome {
         self.0.fetch_add(1, Ordering::SeqCst);
@@ -48,7 +51,6 @@ impl BuiltinTool for InquiringTool {
 /// which arguments it ran with.
 struct EchoName(Arc<AtomicUsize>);
 
-#[async_trait]
 impl BuiltinTool for EchoName {
     async fn execute(&self, arguments: &Value, _: &IndexMap<String, Value>) -> Outcome {
         self.0.fetch_add(1, Ordering::SeqCst);
@@ -62,7 +64,6 @@ impl BuiltinTool for EchoName {
 /// lands while it is still in flight.
 struct BlockingTool(Arc<AtomicUsize>);
 
-#[async_trait]
 impl BuiltinTool for BlockingTool {
     async fn execute(&self, _: &Value, _: &IndexMap<String, Value>) -> Outcome {
         self.0.fetch_add(1, Ordering::SeqCst);
@@ -128,7 +129,7 @@ impl Fixture {
         fixture
     }
 
-    fn executor(&self, arguments: &Value) -> Box<dyn Executor> {
+    fn executor(&self, arguments: &Value) -> Box<dyn DynExecutor> {
         self.source
             .create(
                 ToolCallRequest {
@@ -197,7 +198,7 @@ fn envelope(names: &[&str]) -> ToolCallRequest {
 }
 
 /// Run an approved operation to its result.
-async fn run(executor: &dyn Executor) -> ToolCallResponse {
+async fn run(executor: &dyn DynExecutor) -> ToolCallResponse {
     let prepared = executor.prepare(false, CancellationToken::new()).await;
     assert!(
         matches!(prepared, ExecutorResult::AwaitingAdmission),
@@ -226,7 +227,7 @@ fn skipped() -> Review {
 }
 
 /// Wait for a fanned-out call's folded response, failing rather than hanging.
-async fn folded(fan_out: &dyn FanOutCall) -> ToolCallResponse {
+async fn folded(fan_out: &dyn DynFanOutCall) -> ToolCallResponse {
     timeout(Duration::from_secs(5), fan_out.recorded())
         .await
         .expect("the call is recorded")
@@ -999,7 +1000,6 @@ async fn a_call_on_a_lost_connection_reports_the_connection_lost() {
 /// A tool that does its work and then never reports back.
 struct VanishingTool(Arc<AtomicUsize>);
 
-#[async_trait]
 impl BuiltinTool for VanishingTool {
     async fn execute(&self, _: &Value, _: &IndexMap<String, Value>) -> Outcome {
         self.0.fetch_add(1, Ordering::SeqCst);

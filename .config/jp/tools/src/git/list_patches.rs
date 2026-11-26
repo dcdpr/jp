@@ -110,8 +110,7 @@ fn git_list_patches_impl<R: ProcessRunner>(
             .run_with_env("git", &["show", &format!(":{path}")], root, env)
             .ok()
             .filter(|o| o.status.is_success())
-            .map(|o| o.stdout)
-            .unwrap_or_default();
+            .map_or_default(|o| o.stdout);
         let source_lines: Vec<_> = index_content.lines().collect();
 
         for hunk_with_header in hunks {

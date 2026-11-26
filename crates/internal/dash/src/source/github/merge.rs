@@ -771,8 +771,7 @@ fn mark_front(prs: &mut [PullRequest], key: u64, step: Step) {
     let members = queue::entries(prs)
         .into_iter()
         .find(|entry| entry.key() == key)
-        .map(|entry| entry.numbers())
-        .unwrap_or_default();
+        .map_or_default(|entry| entry.numbers());
 
     for pr in prs.iter_mut().filter(|pr| members.contains(&pr.number)) {
         pr.queue = Some(QueueState::Front(step));

@@ -62,7 +62,7 @@ fn a_draft_is_its_template_filled_in() {
     .unwrap();
 
     assert_eq!(output.text, "Created docs/rfd/drafts/D01-my-feature.md\n");
-    assert!(output.warnings.is_empty());
+    assert_eq!(output.warnings, [] as [String; 0]);
     assert_eq!(
         workspace.read("docs/rfd/drafts/D01-my-feature.md"),
         "\

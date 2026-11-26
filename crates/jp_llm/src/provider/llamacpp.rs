@@ -1,6 +1,5 @@
-use std::time::Duration;
+use std::{future, time::Duration};
 
-use async_trait::async_trait;
 use base64::Engine as _;
 use jp_attachment::AttachmentContent;
 use jp_config::{
@@ -11,7 +10,6 @@ use jp_config::{
     providers::llm::llamacpp::LlamacppConfig,
 };
 use jp_conversation::thread::text_attachments_to_xml;
-use reqwest_eventsource::{EventSource, retry::Never};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tracing::{debug, trace, warn};
@@ -20,7 +18,7 @@ use super::{
     EventStream, ModelDetails,
     lookup::find_listed,
     openai_compat::{
-        assemble_event_stream, convert_events, convert_tool_choice, convert_tools,
+        assemble_event_stream, convert_events, convert_tool_choice, convert_tools, event_source,
         to_system_messages,
     },
 };
@@ -44,7 +42,6 @@ pub struct Llamacpp {
     base_url: String,
 }
 
-#[async_trait]
 impl Provider for Llamacpp {
     async fn model_details(&self, name: &Name) -> Result<ModelDetails, Error> {
         let id: ModelIdConfig = (PROVIDER, name.as_ref()).try_into()?;
@@ -73,11 +70,18 @@ impl Provider for Llamacpp {
             .collect::<Result<_, _>>()
     }
 
-    async fn chat_completion_stream(
+    fn chat_completion_stream(
         &self,
         model: &ModelDetails,
         query: ChatQuery,
-    ) -> Result<EventStream, Error> {
+    ) -> impl Future<Output = Result<EventStream, Error>> + Send {
+        future::ready(self.open_stream(model, query))
+    }
+}
+
+impl Llamacpp {
+    /// Build the chat completion request and open its event stream.
+    fn open_stream(&self, model: &ModelDetails, query: ChatQuery) -> Result<EventStream, Error> {
         debug!(
             model = %model.id.name,
             "Starting Llamacpp chat completion stream."
@@ -96,12 +100,7 @@ impl Provider for Llamacpp {
             .header("content-type", "application/json")
             .json(&body);
 
-        let mut es =
-            EventSource::new(request).map_err(|e| Error::InvalidResponse(e.to_string()))?;
-        // Retries are owned by the stream retry layer; disable EventSource's
-        // own auto-reconnect so a closed connection ends the stream instead of
-        // silently re-issuing the request.
-        es.set_retry_policy(Box::new(Never));
+        let es = event_source(request)?;
 
         Ok(decoders.attach(with_tool_call_keepalive(
             assemble_event_stream(es, "llamacpp", is_structured),

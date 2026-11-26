@@ -1,8 +1,8 @@
 use std::io;
 
 use camino::Utf8Path;
-use crossterm::style::Stylize as _;
 use jp_conversation::ConversationId;
+use serde_json::Value;
 use test_log::test;
 
 use super::*;
@@ -95,7 +95,7 @@ fn an_existing_error_survives_when_nothing_was_recorded() {
         .expect_err("the primary error is preserved");
 
     assert_eq!(error.message.as_deref(), Some("Rate limited"));
-    assert!(error.metadata.is_empty());
+    assert_eq!(error.metadata, [] as [(String, Value); 0]);
 }
 
 #[cfg(unix)]

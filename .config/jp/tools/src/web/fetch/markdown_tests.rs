@@ -331,7 +331,7 @@ mod extract_sections {
     #[test]
     fn unknown_id_returns_empty() {
         let md = "## Real\n\ntext\n";
-        assert!(extract_sections(md, &["fake".to_owned()]).is_empty());
+        assert_eq!(extract_sections(md, &["fake".to_owned()]), "");
     }
 }
 

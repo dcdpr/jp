@@ -1,5 +1,10 @@
 //! Independent HTTP client fixtures for the MCP Host/third-party boundary.
 
+#![expect(
+    clippy::unused_async_trait_impl,
+    reason = "test doubles implement async traits synchronously"
+)]
+
 use std::{
     fs, io,
     sync::{
@@ -8,7 +13,6 @@ use std::{
     },
 };
 
-use async_trait::async_trait;
 use camino_tempfile::{Utf8TempDir, tempdir};
 use indexmap::IndexMap;
 use jp_config::{
@@ -344,7 +348,6 @@ async fn fixture_reporting_every(
 }
 
 struct Ordinal(Arc<AtomicUsize>);
-#[async_trait]
 impl BuiltinTool for Ordinal {
     async fn execute(&self, _: &Value, _: &IndexMap<String, Value>) -> Outcome {
         format!("execution-{}", self.0.fetch_add(1, Ordering::SeqCst) + 1).into()
@@ -964,7 +967,6 @@ async fn malformed_arguments_are_rejected_before_approval() {
 }
 
 struct Inquiring(Arc<AtomicUsize>);
-#[async_trait]
 impl BuiltinTool for Inquiring {
     async fn execute(&self, _: &Value, answers: &IndexMap<String, Value>) -> Outcome {
         self.0.fetch_add(1, Ordering::SeqCst);
@@ -1067,7 +1069,6 @@ async fn cancellation_is_scoped_to_the_requesting_client_session() {
 }
 
 struct LargeResult(String);
-#[async_trait]
 impl BuiltinTool for LargeResult {
     async fn execute(&self, _: &Value, _: &IndexMap<String, Value>) -> Outcome {
         self.0.clone().into()

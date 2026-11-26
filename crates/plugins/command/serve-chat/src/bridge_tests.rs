@@ -555,8 +555,8 @@ async fn a_message_from_a_stranger_is_dropped() {
 
     f.receive(from("+31699999999", "Hello?"));
 
-    assert!(f.host.calls().is_empty());
-    assert!(f.outbox.take().is_empty());
+    assert_eq!(f.host.calls(), [] as [String; 0]);
+    assert_eq!(f.outbox.take(), [] as [String; 0]);
     assert_eq!(f.host.logs(), vec![
         "Dropped message from unconfigured sender."
     ]);
@@ -625,7 +625,7 @@ async fn a_stranger_is_printed_once_with_the_configuration_to_answer_them() {
          it:\n\n[plugins.command.serve-chat.options.people.unknown]\nname = \"Unknown\"\nsignal = \
          \"+31699999999\"\n",
     ]);
-    assert!(f.host.calls().is_empty());
+    assert_eq!(f.host.calls(), [] as [String; 0]);
 }
 
 #[tokio::test]
@@ -1068,7 +1068,7 @@ async fn a_group_message_the_decider_ignores_gets_no_turn() {
     f.receive(in_group(CLIENT, "Thanks!"));
     f.settle().await;
 
-    assert!(f.host.calls().is_empty());
+    assert_eq!(f.host.calls(), [] as [String; 0]);
     assert_eq!(*decider.asked.lock().unwrap(), vec![
         "Last message:\nAda Client: Thanks!".to_owned()
     ]);
@@ -1424,7 +1424,7 @@ async fn asking_to_compact_before_any_conversation_says_there_is_none() {
     assert_eq!(f.outbox.take(), vec![format!(
         "send direct:+31611111111: {NOTHING_TO_COMPACT}"
     )]);
-    assert!(f.host.calls().is_empty());
+    assert_eq!(f.host.calls(), [] as [String; 0]);
 }
 
 #[tokio::test]
@@ -1600,7 +1600,7 @@ async fn a_turn_whose_tools_cant_be_read_does_not_start() {
     f.receive(from(CLIENT, "Hi"));
     f.settle().await;
 
-    assert!(f.host.calls().is_empty());
+    assert_eq!(f.host.calls(), [] as [String; 0]);
     assert_eq!(f.outbox.take(), vec![
         "typing direct:+31611111111 on".to_owned(),
         "typing direct:+31611111111 off".to_owned(),

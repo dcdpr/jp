@@ -163,9 +163,8 @@ impl Use {
             |id| id.to_string().bold().grey().to_string(),
         );
         let to = id.to_string().bold().yellow();
-        let title_suffix = conversation_title(ctx, id)
-            .map(|t| format!(": {}", t.yellow()))
-            .unwrap_or_default();
+        let title_suffix =
+            conversation_title(ctx, id).map_or_default(|t| format!(": {}", t.yellow()));
 
         ctx.printer.println(format!(
             "Switched active conversation from {from} to {to}{title_suffix}"
@@ -322,9 +321,7 @@ fn source_ids(
             .collect();
     }
 
-    let session_ids: Vec<_> = session
-        .map(|s| workspace.session_conversation_ids(s))
-        .unwrap_or_default();
+    let session_ids: Vec<_> = session.map_or_default(|s| workspace.session_conversation_ids(s));
     workspace
         .conversations()
         .filter(|(id, c)| {

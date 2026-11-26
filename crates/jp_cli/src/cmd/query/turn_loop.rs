@@ -31,7 +31,7 @@ use jp_conversation::{
 };
 use jp_inquire::prompt::PromptBackend;
 use jp_llm::{
-    Error as LlmError, EventStream, Provider,
+    DynProvider, Error as LlmError, EventStream,
     error::{StreamError, StreamErrorKind},
     event::{Event, EventPart, FinishReason, NoticeSink, ToolCallPart},
     model::ModelDetails,
@@ -60,7 +60,7 @@ use super::{
         Host, PendingTools, ToolCallState, ToolCoordinator, ToolEvent, ToolPrompter, ToolRenderer,
         build_execution_plan,
         executor::Review,
-        inquiry::{InquiryBackend, InquiryConfig, LlmInquiryBackend},
+        inquiry::{DynInquiryBackend, InquiryConfig, LlmInquiryBackend},
         unresponded_requests,
     },
     turn::{Action, CommittedEvent, TurnCoordinator, TurnEnding, TurnPhase, TurnState},
@@ -200,7 +200,7 @@ fn event_keeps_waiting_indicator(event: &StreamingLoopEvent) -> bool {
 /// - Workspace persistence fails
 #[expect(clippy::too_many_arguments)]
 pub(super) async fn run_turn_loop(
-    provider: Arc<dyn Provider>,
+    provider: Arc<dyn DynProvider>,
     model: &ModelDetails,
     cfg: &AppConfig,
     signals: &SignalRouter,
@@ -252,7 +252,7 @@ pub(super) async fn run_turn_loop(
 /// questions once this returns.
 #[expect(clippy::too_many_lines, clippy::too_many_arguments)]
 async fn drive_turn(
-    provider: Arc<dyn Provider>,
+    provider: Arc<dyn DynProvider>,
     model: &ModelDetails,
     cfg: &AppConfig,
     signals: &SignalRouter,
@@ -310,7 +310,7 @@ async fn drive_turn(
     turn_coordinator.set_tool_separator(tool_renderer.separator_flag());
     turn_coordinator.set_tool_drawn(tool_renderer.drawn_flag());
 
-    let mut inquiry_backend: Arc<dyn InquiryBackend> = build_inquiry_backend(
+    let mut inquiry_backend: Arc<dyn DynInquiryBackend> = build_inquiry_backend(
         cfg,
         tools.to_vec(),
         model.clone(),
@@ -1235,7 +1235,7 @@ async fn build_inquiry_backend(
     cfg: &AppConfig,
     tools: Vec<ToolDefinition>,
     model: ModelDetails,
-    provider: Arc<dyn Provider>,
+    provider: Arc<dyn DynProvider>,
     attachments: Vec<Attachment>,
     notices: NoticeSink,
 ) -> Result<Arc<LlmInquiryBackend>, Error> {
@@ -1253,7 +1253,7 @@ async fn build_inquiry_backend(
     let default_assistant = inquiry_cfg.to_partial();
 
     // Track providers we've already constructed to avoid duplicates.
-    let mut providers: IndexMap<ProviderId, Arc<dyn Provider>> = IndexMap::new();
+    let mut providers: IndexMap<ProviderId, Arc<dyn DynProvider>> = IndexMap::new();
 
     // Inquiries reuse the caller's provider and model details unless the config
     // points them at a different model than the assistant uses, in which case a
@@ -1282,7 +1282,7 @@ async fn build_inquiry_backend(
                 source,
             };
 
-        let inquiry_provider: Arc<dyn Provider> = Arc::from(
+        let inquiry_provider: Arc<dyn DynProvider> = Arc::from(
             get_provider(inquiry_model_id.provider, &cfg.providers.llm)
                 .map_err(|e| wrap_err(Box::new(e)))?,
         );
@@ -1333,7 +1333,7 @@ async fn build_inquiry_backend(
 async fn build_inquiry_overrides(
     cfg: &AppConfig,
     default_config: &InquiryConfig,
-    providers: &mut IndexMap<ProviderId, Arc<dyn Provider>>,
+    providers: &mut IndexMap<ProviderId, Arc<dyn DynProvider>>,
 ) -> Result<IndexMap<(String, String), InquiryConfig>, Error> {
     let mut overrides = IndexMap::new();
 
@@ -1372,7 +1372,7 @@ async fn build_inquiry_overrides(
                 let prov = if let Some(p) = providers.get(&model_id.provider) {
                     Arc::clone(p)
                 } else {
-                    let p: Arc<dyn Provider> = Arc::from(
+                    let p: Arc<dyn DynProvider> = Arc::from(
                         get_provider(model_id.provider, &cfg.providers.llm)
                             .map_err(|e| wrap_err(Box::new(e)))?,
                     );
@@ -1543,7 +1543,7 @@ fn flush_rendered_arguments(coordinator: &mut ToolCoordinator, conv: &mut Conver
 /// Returns `None` if fetching the model list fails, no other models are
 /// available, or the user cancels the prompt.
 async fn pick_served_model(
-    provider: &dyn Provider,
+    provider: &dyn DynProvider,
     model: &ModelDetails,
     prompt_backend: &dyn PromptBackend,
     printer: &Printer,
@@ -1586,7 +1586,11 @@ async fn pick_served_model(
 ///
 /// Returns other errors unchanged.
 /// If fetching the model list fails, `available` is left empty.
-async fn with_served_models(error: Error, provider: &dyn Provider, model: &ModelDetails) -> Error {
+async fn with_served_models(
+    error: Error,
+    provider: &dyn DynProvider,
+    model: &ModelDetails,
+) -> Error {
     let unknown_model = match &error {
         Error::Llm(LlmError::UnknownModel(_)) => true,
         Error::Llm(LlmError::Stream(error)) => error.kind == StreamErrorKind::UnknownModel,

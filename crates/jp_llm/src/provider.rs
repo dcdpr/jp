@@ -16,8 +16,8 @@ pub mod vllm;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use anthropic::Anthropic;
-use async_trait::async_trait;
 use cerebras::Cerebras;
+use futures::future::BoxFuture;
 use google::Google;
 use jp_config::{
     model::id::{Name, ProviderId},
@@ -51,26 +51,33 @@ use crate::{
 pub(crate) const CONTINUE_MESSAGE: &str = "Continue your response exactly from where you left \
                                            off. Do not repeat content you already produced.";
 
-#[async_trait]
+/// An LLM provider.
+///
+/// Implement this trait, writing each method as an `async fn`.
+/// Code that holds a provider without knowing its type uses [`DynProvider`],
+/// which every `Provider` implements.
 pub trait Provider: Send + Sync {
     /// Provider-specific hints advertised by the Host on its MCP tool
     /// descriptions.
     fn mcp_tool_metadata(&self, _model: &ModelDetails) -> Map<String, Value> {
         Map::new()
     }
+
     /// Start a request with Host resources for provider-owned tool
     /// continuation.
     /// API providers use the ordinary response stream and caller-side dispatch.
-    async fn start_query(
+    fn start_query(
         &self,
         model: &ModelDetails,
         query: ChatQuery,
         _context: QueryContext,
-    ) -> Result<QueryStream> {
-        Ok(QueryStream {
-            events: self.chat_completion_stream(model, query).await?,
-            execution: ToolExecution::Caller,
-        })
+    ) -> impl Future<Output = Result<QueryStream>> + Send {
+        async move {
+            Ok(QueryStream {
+                events: self.chat_completion_stream(model, query).await?,
+                execution: ToolExecution::Caller,
+            })
+        }
     }
 
     /// Look up capability metadata for `name`.
@@ -80,17 +87,75 @@ pub trait Provider: Send + Sync {
     /// [`ModelDetails::empty`].
     /// Returns an error only when a pre-request check fails, such as credential
     /// resolution or a model unsupported by the active credential.
-    async fn model_details(&self, name: &Name) -> Result<ModelDetails>;
+    fn model_details(&self, name: &Name) -> impl Future<Output = Result<ModelDetails>> + Send;
 
     /// Get a list of available models.
-    async fn models(&self) -> Result<Vec<ModelDetails>>;
+    fn models(&self) -> impl Future<Output = Result<Vec<ModelDetails>>> + Send;
 
     /// Perform a streaming chat completion.
-    async fn chat_completion_stream(
+    fn chat_completion_stream(
         &self,
         model: &ModelDetails,
         query: ChatQuery,
-    ) -> Result<EventStream>;
+    ) -> impl Future<Output = Result<EventStream>> + Send;
+}
+
+/// A [`Provider`] behind a pointer: `Box<dyn DynProvider>`, `Arc<dyn
+/// DynProvider>`.
+///
+/// Every `Provider` implements this trait, and each method does what the
+/// `Provider` method of the same name does, returning a boxed future.
+/// Implement [`Provider`], not this trait.
+pub trait DynProvider: Send + Sync {
+    fn mcp_tool_metadata(&self, model: &ModelDetails) -> Map<String, Value>;
+
+    fn start_query<'a>(
+        &'a self,
+        model: &'a ModelDetails,
+        query: ChatQuery,
+        context: QueryContext,
+    ) -> BoxFuture<'a, Result<QueryStream>>;
+
+    fn model_details<'a>(&'a self, name: &'a Name) -> BoxFuture<'a, Result<ModelDetails>>;
+
+    fn models(&self) -> BoxFuture<'_, Result<Vec<ModelDetails>>>;
+
+    fn chat_completion_stream<'a>(
+        &'a self,
+        model: &'a ModelDetails,
+        query: ChatQuery,
+    ) -> BoxFuture<'a, Result<EventStream>>;
+}
+
+impl<T: Provider> DynProvider for T {
+    fn mcp_tool_metadata(&self, model: &ModelDetails) -> Map<String, Value> {
+        Provider::mcp_tool_metadata(self, model)
+    }
+
+    fn start_query<'a>(
+        &'a self,
+        model: &'a ModelDetails,
+        query: ChatQuery,
+        context: QueryContext,
+    ) -> BoxFuture<'a, Result<QueryStream>> {
+        Box::pin(Provider::start_query(self, model, query, context))
+    }
+
+    fn model_details<'a>(&'a self, name: &'a Name) -> BoxFuture<'a, Result<ModelDetails>> {
+        Box::pin(Provider::model_details(self, name))
+    }
+
+    fn models(&self) -> BoxFuture<'_, Result<Vec<ModelDetails>>> {
+        Box::pin(Provider::models(self))
+    }
+
+    fn chat_completion_stream<'a>(
+        &'a self,
+        model: &'a ModelDetails,
+        query: ChatQuery,
+    ) -> BoxFuture<'a, Result<EventStream>> {
+        Box::pin(Provider::chat_completion_stream(self, model, query))
+    }
 }
 
 /// Get a provider by ID.
@@ -105,8 +170,8 @@ pub trait Provider: Send + Sync {
 /// [`Error::MissingEnv`] when its API key environment variable is unset.
 ///
 /// [`Error::MissingEnv`]: crate::Error::MissingEnv
-pub fn get_provider(id: ProviderId, config: &LlmProviderConfig) -> Result<Box<dyn Provider>> {
-    let provider: Box<dyn Provider> = match id {
+pub fn get_provider(id: ProviderId, config: &LlmProviderConfig) -> Result<Box<dyn DynProvider>> {
+    let provider: Box<dyn DynProvider> = match id {
         ProviderId::Anthropic => Box::new(Anthropic::new(&config.anthropic)?),
         ProviderId::Cerebras => Box::new(Cerebras::try_from(&config.cerebras)?),
         ProviderId::Google => Box::new(Google::try_from(&config.google)?),
@@ -252,7 +317,7 @@ pub(crate) trait ProviderTestRoute: Sync {
         &self,
         config: &LlmProviderConfig,
         recording: bool,
-    ) -> std::result::Result<Box<dyn Provider>, String>;
+    ) -> std::result::Result<Box<dyn DynProvider>, String>;
 
     /// The model this route records against.
     fn model(&self) -> ModelDetails;
@@ -416,7 +481,7 @@ impl ProviderTestRoute for ApiTestRoute {
         &self,
         config: &LlmProviderConfig,
         _recording: bool,
-    ) -> std::result::Result<Box<dyn Provider>, String> {
+    ) -> std::result::Result<Box<dyn DynProvider>, String> {
         // Built through the same entry point production uses, so a change to
         // construction cannot pass tests while breaking the binary.
         get_provider(self.id, config).map_err(|error| error.to_string())
@@ -456,7 +521,7 @@ impl ProviderTestRoute for UnsupportedTestRoute {
         &self,
         _config: &LlmProviderConfig,
         _recording: bool,
-    ) -> std::result::Result<Box<dyn Provider>, String> {
+    ) -> std::result::Result<Box<dyn DynProvider>, String> {
         unimplemented!("{} has no recorded test support", self.0)
     }
 

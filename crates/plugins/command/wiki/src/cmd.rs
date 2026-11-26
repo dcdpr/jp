@@ -92,7 +92,7 @@ pub(crate) fn add(ctx: &Context<'_>, add: &Add<'_>) -> Result<Output, String> {
         .map_err(|error| error.to_string())?;
     unique(&vocabulary, &labels, &wiki, None)?;
 
-    let summary = add.summary.map(str::trim).unwrap_or_default();
+    let summary = add.summary.map_or_default(str::trim);
     if summary.contains(['\n', '\r']) {
         return Err("A summary is one sentence on one line.".to_owned());
     }

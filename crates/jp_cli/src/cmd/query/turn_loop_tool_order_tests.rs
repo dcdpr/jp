@@ -6,6 +6,11 @@
 //! Each test records a transcript: the chrome the printer wrote, with a marker
 //! where each prompt opened.
 
+#![expect(
+    clippy::unused_async_trait_impl,
+    reason = "test doubles implement async traits synchronously"
+)]
+
 use std::{
     collections::VecDeque,
     io::Write,
@@ -14,7 +19,7 @@ use std::{
 
 use camino::Utf8PathBuf;
 use inquire::InquireError;
-use jp_config::{AppConfig, Config as _, conversation::tool::PartialToolConfig};
+use jp_config::{AppConfig, conversation::tool::PartialToolConfig};
 use jp_conversation::event::InquiryId;
 use jp_inquire::{InlineOption, ReplyEditMode, ReplyOutcome, prompt::PromptBackend};
 use jp_printer::{Printer, SharedBuffer};
@@ -308,7 +313,6 @@ impl StagedExecutor {
     }
 }
 
-#[async_trait]
 impl Executor for StagedExecutor {
     async fn prepare(
         &self,
@@ -415,7 +419,7 @@ fn call_events(calls: &[(&str, &str)]) -> Vec<Vec<Event>> {
 
 /// A provider that requests `calls` in one response, then ends the turn with a
 /// message.
-fn calling_provider(calls: &[(&str, &str)]) -> Arc<dyn Provider> {
+fn calling_provider(calls: &[(&str, &str)]) -> Arc<dyn DynProvider> {
     let mut events: Vec<Event> = call_events(calls).into_iter().flatten().collect();
     events.push(Event::Finished(FinishReason::Completed));
 
@@ -452,8 +456,7 @@ impl GatedProvider {
     }
 }
 
-#[async_trait]
-impl Provider for GatedProvider {
+impl jp_llm::Provider for GatedProvider {
     async fn model_details(&self, name: &id::Name) -> Result<ModelDetails, LlmError> {
         let mut model = inquiry_mock_model();
         model.id.name = name.clone();
@@ -492,8 +495,7 @@ struct StallingInquiryProvider {
     requests: AtomicUsize,
 }
 
-#[async_trait]
-impl Provider for StallingInquiryProvider {
+impl jp_llm::Provider for StallingInquiryProvider {
     async fn model_details(&self, name: &id::Name) -> Result<ModelDetails, LlmError> {
         let mut model = inquiry_mock_model();
         model.id.name = name.clone();
@@ -533,8 +535,7 @@ struct FailingWhileAskedProvider {
     requests: AtomicUsize,
 }
 
-#[async_trait]
-impl Provider for FailingWhileAskedProvider {
+impl jp_llm::Provider for FailingWhileAskedProvider {
     async fn model_details(&self, name: &id::Name) -> Result<ModelDetails, LlmError> {
         let mut model = inquiry_mock_model();
         model.id.name = name.clone();
@@ -599,7 +600,7 @@ struct Turn {
 struct Scenario<'a> {
     config: &'a AppConfig,
     source: TestExecutorSource,
-    provider: Arc<dyn Provider>,
+    provider: Arc<dyn DynProvider>,
 
     /// Answers for inline selects, in order, whether they open a tool's
     /// approval prompt or the tool interrupt menu.
@@ -619,7 +620,7 @@ impl<'a> Scenario<'a> {
     fn new(
         config: &'a AppConfig,
         source: TestExecutorSource,
-        provider: Arc<dyn Provider>,
+        provider: Arc<dyn DynProvider>,
         answers: &'a [char],
     ) -> Self {
         Self {

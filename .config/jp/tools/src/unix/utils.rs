@@ -58,7 +58,7 @@ fn unix_utils_impl<R: ProcessRunner>(
         ));
     }
 
-    let args: Vec<String> = args.map(OneOrMany::into_vec).unwrap_or_default();
+    let args: Vec<String> = args.map_or_default(OneOrMany::into_vec);
 
     if util == "now" {
         return now();

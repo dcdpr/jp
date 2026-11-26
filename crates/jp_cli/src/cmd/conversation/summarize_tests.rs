@@ -409,7 +409,7 @@ fn empty_for_out_of_bounds_range() {
     let stream = build_stream_with_turns(4);
     let events = collect_range_events(&stream, 10, 20);
 
-    assert!(events.is_empty());
+    assert_eq!(events, [] as [ConversationEvent; 0]);
 }
 
 #[test]
@@ -417,7 +417,7 @@ fn empty_for_empty_stream() {
     let stream = ConversationStream::new_test();
     let events = collect_range_events(&stream, 0, 5);
 
-    assert!(events.is_empty());
+    assert_eq!(events, [] as [ConversationEvent; 0]);
 }
 
 #[test]

@@ -1,6 +1,8 @@
 use std::{fs, process::Command, sync::mpsc, thread, time::Duration};
 
 use camino_tempfile::Utf8TempDir;
+use jp_test::env_var::EnvVarGuard;
+use serial_test::serial;
 
 use super::*;
 
@@ -37,14 +39,10 @@ fn only_paths_under_a_writable_directory_are_allowed() {
     ]);
 }
 
-/// Run git to set up a test, without the user's or the system's git
-/// configuration, which can ask for a signature on every commit.
 fn setup(dir: &Utf8Path, args: &[&str]) {
     let output = Command::new("git")
         .current_dir(dir)
         .args(args)
-        .env("GIT_CONFIG_GLOBAL", "")
-        .env("GIT_CONFIG_SYSTEM", "")
         .output()
         .unwrap();
 
@@ -78,7 +76,10 @@ fn commit_upstream(origin: &Utf8Path, file: &str) {
 }
 
 #[test]
+#[serial(env_vars)]
 fn a_clean_checkout_pulls_before_a_turn() {
+    let _git_global = EnvVarGuard::set("GIT_CONFIG_GLOBAL", "");
+    let _git_system = EnvVarGuard::set("GIT_CONFIG_SYSTEM", "");
     let (origin, clone) = repository();
     let mut checkout = GitCheckout::open(clone.path(), writable()).unwrap();
     commit_upstream(origin.path(), "docs/ticket/b.md");
@@ -89,7 +90,10 @@ fn a_clean_checkout_pulls_before_a_turn() {
 }
 
 #[test]
+#[serial(env_vars)]
 fn a_checkout_with_changes_is_not_pulled() {
+    let _git_global = EnvVarGuard::set("GIT_CONFIG_GLOBAL", "");
+    let _git_system = EnvVarGuard::set("GIT_CONFIG_SYSTEM", "");
     let (origin, clone) = repository();
     let mut checkout = GitCheckout::open(clone.path(), writable()).unwrap();
     fs::write(clone.path().join("docs/ticket/new.md"), "filed\n").unwrap();
@@ -105,7 +109,10 @@ fn a_checkout_with_changes_is_not_pulled() {
 }
 
 #[test]
+#[serial(env_vars)]
 fn a_change_outside_the_writable_directories_is_reported() {
+    let _git_global = EnvVarGuard::set("GIT_CONFIG_GLOBAL", "");
+    let _git_system = EnvVarGuard::set("GIT_CONFIG_SYSTEM", "");
     let (_origin, clone) = repository();
     let mut checkout = GitCheckout::open(clone.path(), writable()).unwrap();
 
@@ -117,7 +124,10 @@ fn a_change_outside_the_writable_directories_is_reported() {
 }
 
 #[test]
+#[serial(env_vars)]
 fn begin_waits_for_the_lock() {
+    let _git_global = EnvVarGuard::set("GIT_CONFIG_GLOBAL", "");
+    let _git_system = EnvVarGuard::set("GIT_CONFIG_SYSTEM", "");
     let (_origin, clone) = repository();
     let mut checkout = GitCheckout::open(clone.path(), writable()).unwrap();
     let held = checkout.lock().unwrap();
@@ -144,7 +154,10 @@ fn begin_waits_for_the_lock() {
 }
 
 #[test]
+#[serial(env_vars)]
 fn a_directory_outside_git_is_refused() {
+    let _git_global = EnvVarGuard::set("GIT_CONFIG_GLOBAL", "");
+    let _git_system = EnvVarGuard::set("GIT_CONFIG_SYSTEM", "");
     let dir = Utf8TempDir::new().unwrap();
 
     let error = GitCheckout::open(dir.path(), writable()).unwrap_err();

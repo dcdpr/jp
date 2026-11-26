@@ -681,8 +681,7 @@ impl CommandArgs for TurnSelection {
             last: Flag::<Last>::strict(matches)?,
             turn: matches
                 .get_many("turn")
-                .map(|specs| specs.cloned().collect())
-                .unwrap_or_default(),
+                .map_or_default(|specs| specs.cloned().collect()),
             from: matches.get_one("from").cloned(),
             to: matches.get_one("to").cloned(),
             keep_first: matches.get_one("keep_first").cloned(),

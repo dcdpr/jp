@@ -195,7 +195,6 @@ fn test_parse_all_reads_both_families_from_a_live_response() {
 }
 
 #[test]
-#[expect(clippy::float_cmp, reason = "the header's value is an exact literal")]
 fn test_account_family_reports_only_its_primary_window() {
     let snapshots = parse_all(&headers(LIVE_HEADERS));
     let account = snapshots.iter().find(|s| s.limit_id == "codex").unwrap();
@@ -295,7 +294,6 @@ fn test_spent_window_is_reported() {
 }
 
 #[test]
-#[expect(clippy::float_cmp, reason = "the header's value is an exact literal")]
 fn test_warning_picks_the_fullest_unspent_window() {
     let map = headers(&[
         ("x-codex-primary-used-percent", "85"),

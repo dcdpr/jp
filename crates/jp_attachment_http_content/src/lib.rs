@@ -1,10 +1,9 @@
 use std::{collections::BTreeSet, error::Error, marker::PhantomData};
 
-use async_trait::async_trait;
 use camino::Utf8Path;
 use htmd::HtmlToMarkdown;
 use jp_attachment::{
-    Attachment, BoxedHandler, HANDLERS, Handler, distributed_slice, linkme, typetag,
+    Attachment, BoxedHandler, HANDLERS, Handler, HandlerFuture, distributed_slice, linkme, typetag,
 };
 use reqwest::header::{CONTENT_TYPE, HeaderMap, HeaderValue, USER_AGENT};
 use serde::{Deserialize, Serialize};
@@ -42,7 +41,6 @@ struct Http;
 struct Https;
 
 #[typetag::serde(name = "http_content")]
-#[async_trait]
 impl Handler for HttpContent<Http> {
     fn scheme(&self) -> &'static str {
         "http"
@@ -52,32 +50,33 @@ impl Handler for HttpContent<Http> {
         Ok(canonical_url(uri))
     }
 
-    async fn add(
-        &mut self,
-        uri: &Url,
-        _cwd: &Utf8Path,
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        self.urls.insert(uri.clone());
-        Ok(())
+    fn add<'a>(&'a mut self, uri: &'a Url, _cwd: &'a Utf8Path) -> HandlerFuture<'a, ()> {
+        Box::pin(async move {
+            self.urls.insert(uri.clone());
+            Ok(())
+        })
     }
 
-    async fn remove(&mut self, uri: &Url) -> Result<(), Box<dyn Error + Send + Sync>> {
-        self.urls.remove(uri);
-        Ok(())
+    fn remove<'a>(&'a mut self, uri: &'a Url) -> HandlerFuture<'a, ()> {
+        Box::pin(async move {
+            self.urls.remove(uri);
+            Ok(())
+        })
     }
 
-    async fn list(&self) -> Result<Vec<Url>, Box<dyn Error + Send + Sync>> {
-        Ok(self.urls.iter().cloned().collect())
+    fn list(&self) -> HandlerFuture<'_, Vec<Url>> {
+        Box::pin(async move { Ok(self.urls.iter().cloned().collect()) })
     }
 
-    async fn get(&self, _: &Utf8Path) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>> {
-        debug!(id = "http", "Getting http attachment contents.");
-        fetch_all(&self.urls).await
+    fn get<'a>(&'a self, _: &'a Utf8Path) -> HandlerFuture<'a, Vec<Attachment>> {
+        Box::pin(async move {
+            debug!(id = "http", "Getting http attachment contents.");
+            fetch_all(&self.urls).await
+        })
     }
 }
 
 #[typetag::serde(name = "https_content")]
-#[async_trait]
 impl Handler for HttpContent<Https> {
     fn scheme(&self) -> &'static str {
         "https"
@@ -87,29 +86,31 @@ impl Handler for HttpContent<Https> {
         Ok(canonical_url(uri))
     }
 
-    async fn add(
-        &mut self,
-        uri: &Url,
-        _cwd: &Utf8Path,
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        self.urls.insert(uri.clone());
+    fn add<'a>(&'a mut self, uri: &'a Url, _cwd: &'a Utf8Path) -> HandlerFuture<'a, ()> {
+        Box::pin(async move {
+            self.urls.insert(uri.clone());
 
-        Ok(())
+            Ok(())
+        })
     }
 
-    async fn remove(&mut self, uri: &Url) -> Result<(), Box<dyn Error + Send + Sync>> {
-        self.urls.remove(uri);
+    fn remove<'a>(&'a mut self, uri: &'a Url) -> HandlerFuture<'a, ()> {
+        Box::pin(async move {
+            self.urls.remove(uri);
 
-        Ok(())
+            Ok(())
+        })
     }
 
-    async fn list(&self) -> Result<Vec<Url>, Box<dyn Error + Send + Sync>> {
-        Ok(self.urls.iter().cloned().collect())
+    fn list(&self) -> HandlerFuture<'_, Vec<Url>> {
+        Box::pin(async move { Ok(self.urls.iter().cloned().collect()) })
     }
 
-    async fn get(&self, _: &Utf8Path) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>> {
-        debug!(id = "https", "Getting https attachment contents.");
-        fetch_all(&self.urls).await
+    fn get<'a>(&'a self, _: &'a Utf8Path) -> HandlerFuture<'a, Vec<Attachment>> {
+        Box::pin(async move {
+            debug!(id = "https", "Getting https attachment contents.");
+            fetch_all(&self.urls).await
+        })
     }
 }
 

@@ -5,7 +5,6 @@ authors.workspace = true
 description.workspace = true
 documentation.workspace = true
 edition.workspace = true
-homepage.workspace = true
 license-file.workspace = true
 publish.workspace = true
 readme.workspace = true
@@ -20,7 +19,6 @@ jp_macro = { workspace = true }
 jp_term = { workspace = true }
 jp_workspace = { workspace = true }
 
-async-trait = { workspace = true }
 futures = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }

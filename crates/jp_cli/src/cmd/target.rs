@@ -558,9 +558,7 @@ impl ConversationTarget {
                 "no live conversations",
             ),
             Self::AllSession => non_empty(
-                session
-                    .map(|s| workspace.session_conversation_ids(s))
-                    .unwrap_or_default(),
+                session.map_or_default(|s| workspace.session_conversation_ids(s)),
                 "no conversations in this session",
             ),
             Self::AllPinned => non_empty(
@@ -846,9 +844,7 @@ fn build_picker_items(
     session: Option<&Session>,
     filter: &PickerFilter,
 ) -> Vec<(ConversationId, String)> {
-    let session_ids: Vec<_> = session
-        .map(|s| workspace.session_conversation_ids(s))
-        .unwrap_or_default();
+    let session_ids: Vec<_> = session.map_or_default(|s| workspace.session_conversation_ids(s));
 
     let mut rows: Vec<PickerRow> = workspace
         .conversations()

@@ -6,7 +6,7 @@ use std::sync::{
 use serde::Deserialize;
 use serde_json::json;
 use tokio::{
-    io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader, DuplexStream},
+    io::{BufReader, DuplexStream},
     sync::mpsc,
     time::{Duration, timeout},
 };

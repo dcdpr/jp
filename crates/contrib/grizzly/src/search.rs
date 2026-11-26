@@ -580,14 +580,14 @@ fn build_match(
 
     let is_archived = meta.is_some_and(|m| m.is_archived);
     if is_archived {
-        line_hits = vec![];
+        line_hits.clear();
         snippet = None;
     }
 
     SearchMatch {
         note_id,
         title,
-        tags: meta.map(|m| m.tags.clone()).unwrap_or_default(),
+        tags: meta.map_or_default(|m| m.tags.clone()),
         updated_at: meta.and_then(|m| m.updated_at.clone()),
         created_at: meta.and_then(|m| m.created_at.clone()),
         line_hits,

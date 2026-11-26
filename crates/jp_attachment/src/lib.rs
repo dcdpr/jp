@@ -4,9 +4,9 @@ use std::{
     ffi::OsString,
     hash::Hasher,
     ops::{Deref, DerefMut},
+    pin::Pin,
 };
 
-use async_trait::async_trait;
 use camino::Utf8Path;
 use dyn_clone::DynClone;
 use dyn_hash::DynHash;
@@ -143,8 +143,11 @@ pub enum AttachmentContent {
 /// For example, a `file` handler could handle attachments that are files on the
 /// local file system, while a `web` handler could handle attachments that are
 /// URLs pointing to web pages.
+///
+/// Handlers are stored and serialized as `Box<dyn Handler>`, so each async
+/// method returns a [`HandlerFuture`]; an implementation writes its body as
+/// `Box::pin(async move { … })`.
 #[typetag::serde(tag = "type")]
-#[async_trait]
 pub trait Handler: std::fmt::Debug + DynClone + DynHash + Send + Sync {
     /// The URI scheme of the handler.
     ///
@@ -176,20 +179,24 @@ pub trait Handler: std::fmt::Debug + DynClone + DynHash + Send + Sync {
     /// The `cwd` parameter is the current working directory, used by handlers
     /// that need to resolve relative paths for validation (e.g. checking file
     /// existence or size).
-    async fn add(&mut self, uri: &Url, cwd: &Utf8Path) -> Result<(), Box<dyn Error + Send + Sync>>;
+    fn add<'a>(&'a mut self, uri: &'a Url, cwd: &'a Utf8Path) -> HandlerFuture<'a, ()>;
 
     /// Remove an attachment, using the given URL.
-    async fn remove(&mut self, uri: &Url) -> Result<(), Box<dyn Error + Send + Sync>>;
+    fn remove<'a>(&'a mut self, uri: &'a Url) -> HandlerFuture<'a, ()>;
 
     /// List all attachment URIs handled by this handler.
-    async fn list(&self) -> Result<Vec<Url>, Box<dyn Error + Send + Sync>>;
+    fn list(&self) -> HandlerFuture<'_, Vec<Url>>;
 
     /// Return all the attachments handled by this handler.
     ///
     /// The `cwd` parameter is the current working directory, and can be used to
     /// resolve relative paths.
-    async fn get(&self, cwd: &Utf8Path) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>>;
+    fn get<'a>(&'a self, cwd: &'a Utf8Path) -> HandlerFuture<'a, Vec<Attachment>>;
 }
+
+/// The future a [`Handler`] method returns, resolving to `T` or an error.
+pub type HandlerFuture<'a, T> =
+    Pin<Box<dyn Future<Output = Result<T, Box<dyn Error + Send + Sync>>> + Send + 'a>>;
 
 dyn_clone::clone_trait_object!(Handler);
 dyn_hash::hash_trait_object!(Handler);

@@ -62,7 +62,7 @@ impl ApprovalStore {
 
     /// Read the store at `path`, treating a missing or malformed file as empty.
     pub(crate) fn load_from(path: Option<Utf8PathBuf>) -> Self {
-        let approvals = path.as_deref().map(read).unwrap_or_default();
+        let approvals = path.as_deref().map_or_default(read);
         Self { path, approvals }
     }
 

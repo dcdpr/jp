@@ -38,16 +38,13 @@ impl PluginsConfig {
     /// empty map if the plugin is not configured.
     #[must_use]
     pub fn command_options(&self, name: &str) -> Map<String, Value> {
-        self.command
-            .get(name)
-            .map(|plugin| {
-                plugin
-                    .options
-                    .iter()
-                    .map(|(key, value)| (key.clone(), value.0.clone()))
-                    .collect()
-            })
-            .unwrap_or_default()
+        self.command.get(name).map_or_default(|plugin| {
+            plugin
+                .options
+                .iter()
+                .map(|(key, value)| (key.clone(), value.0.clone()))
+                .collect()
+        })
     }
 }
 

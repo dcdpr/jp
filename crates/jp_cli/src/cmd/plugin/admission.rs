@@ -208,8 +208,7 @@ pub(crate) fn question_lines(
     let command = plugin
         .manifest
         .valid()
-        .map(|manifest| manifest.command.join(" "))
-        .unwrap_or_default();
+        .map_or_default(|manifest| manifest.command.join(" "));
     let third_party = emphasis("third-party");
 
     let mut lines = vec![match (candidate.replaces, candidate.official) {
@@ -225,8 +224,7 @@ pub(crate) fn question_lines(
             let description = plugin
                 .manifest
                 .valid()
-                .map(|manifest| format!(": {}", manifest.description))
-                .unwrap_or_default();
+                .map_or_default(|manifest| format!(": {}", manifest.description));
             format!("`jp {command}` is provided by the {third_party} plugin `{name}`{description}")
         }
     }];

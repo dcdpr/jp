@@ -10,7 +10,6 @@
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use futures::future::BoxFuture;
 use indexmap::IndexMap;
 use jp_config::conversation::tool::{RunMode, ToolConfigWithDefaults, ToolSource};
@@ -34,25 +33,31 @@ pub(crate) use error::ExecutorError;
 /// A question is answered the same way whichever step raised it, the tool's or
 /// its argument formatter's: with [`execute`] and the answers so far.
 ///
+/// Implement this trait, writing its async methods as `async fn`.
+/// The coordinator holds executors as `Box<dyn DynExecutor>`, which every
+/// `Executor` implements.
+///
 /// [`execute`]: Self::execute
-#[async_trait]
 pub(crate) trait Executor: Send + Sync {
     /// Submit the call, and return the first thing it needs from the Host.
     ///
     /// `render_arguments` is whether the Host wants the argument formatter's
     /// description of the call.
-    async fn prepare(
+    fn prepare(
         &self,
         _render_arguments: bool,
         _cancellation: CancellationToken,
-    ) -> ExecutorResult {
-        ExecutorResult::AwaitingAdmission
+    ) -> impl Future<Output = ExecutorResult> + Send {
+        async { ExecutorResult::AwaitingAdmission }
     }
 
     /// Admit the call with its current arguments, and return the next thing it
     /// needs from the Host.
-    async fn approve(&self, _cancellation: CancellationToken) -> ExecutorResult {
-        ExecutorResult::AwaitingRelease
+    fn approve(
+        &self,
+        _cancellation: CancellationToken,
+    ) -> impl Future<Output = ExecutorResult> + Send {
+        async { ExecutorResult::AwaitingRelease }
     }
 
     /// Custom argument rendering provided by the execution service.
@@ -168,12 +173,12 @@ pub(crate) trait Executor: Send + Sync {
     ///   caller showing progress while it runs.
     ///   `None` when nothing is watching; the lines still reach tracing and the
     ///   accumulated buffer either way.
-    async fn execute(
+    fn execute(
         &self,
         answers: &IndexMap<String, Value>,
         cancellation_token: CancellationToken,
         stderr: Option<StderrSink>,
-    ) -> ExecutorResult;
+    ) -> impl Future<Output = ExecutorResult> + Send;
 
     /// Resolve this operation of a fanned-out call with what the Host settled
     /// on.
@@ -183,8 +188,127 @@ pub(crate) trait Executor: Send + Sync {
     /// answered now rather than on acknowledgement.
     /// An operation that already ended is left as it is, and an ordinary call
     /// has nothing to resolve here.
-    async fn settle(&self, _review: Review) -> Result<(), ExecutorError> {
-        Ok(())
+    fn settle(&self, _review: Review) -> impl Future<Output = Result<(), ExecutorError>> + Send {
+        async { Ok(()) }
+    }
+}
+
+/// An [`Executor`] behind a pointer: `Box<dyn DynExecutor>`.
+///
+/// Every `Executor` implements this trait, and each method does what the
+/// `Executor` method of the same name does, the async ones returning a boxed
+/// future.
+/// Implement [`Executor`], not this trait.
+// qual:allow(coupling, sit) reason: "its one impl is the blanket impl over every `Executor`"
+pub(crate) trait DynExecutor: Send + Sync {
+    fn prepare(
+        &self,
+        render_arguments: bool,
+        cancellation: CancellationToken,
+    ) -> BoxFuture<'_, ExecutorResult>;
+
+    fn approve(&self, cancellation: CancellationToken) -> BoxFuture<'_, ExecutorResult>;
+
+    fn formatted_arguments(&self) -> Option<String>;
+
+    fn tool_id(&self) -> &str;
+
+    fn tool_name(&self) -> &str;
+
+    fn op_index(&self) -> Option<usize>;
+
+    fn state_key(&self) -> String;
+
+    fn arguments(&self) -> Map<String, Value>;
+
+    fn permission_info(&self) -> Option<PermissionInfo>;
+
+    fn needs_permission(&self) -> bool;
+
+    fn set_arguments(&self, args: Value);
+
+    fn pause_for_restart(&self) -> bool;
+
+    fn hold_for_response(&self) -> bool;
+
+    fn execute<'a>(
+        &'a self,
+        answers: &'a IndexMap<String, Value>,
+        cancellation_token: CancellationToken,
+        stderr: Option<StderrSink>,
+    ) -> BoxFuture<'a, ExecutorResult>;
+
+    fn settle(&self, review: Review) -> BoxFuture<'_, Result<(), ExecutorError>>;
+}
+
+impl<T: Executor> DynExecutor for T {
+    fn prepare(
+        &self,
+        render_arguments: bool,
+        cancellation: CancellationToken,
+    ) -> BoxFuture<'_, ExecutorResult> {
+        Box::pin(Executor::prepare(self, render_arguments, cancellation))
+    }
+
+    fn approve(&self, cancellation: CancellationToken) -> BoxFuture<'_, ExecutorResult> {
+        Box::pin(Executor::approve(self, cancellation))
+    }
+
+    fn formatted_arguments(&self) -> Option<String> {
+        Executor::formatted_arguments(self)
+    }
+
+    fn tool_id(&self) -> &str {
+        Executor::tool_id(self)
+    }
+
+    fn tool_name(&self) -> &str {
+        Executor::tool_name(self)
+    }
+
+    fn op_index(&self) -> Option<usize> {
+        Executor::op_index(self)
+    }
+
+    fn state_key(&self) -> String {
+        Executor::state_key(self)
+    }
+
+    fn arguments(&self) -> Map<String, Value> {
+        Executor::arguments(self)
+    }
+
+    fn permission_info(&self) -> Option<PermissionInfo> {
+        Executor::permission_info(self)
+    }
+
+    fn needs_permission(&self) -> bool {
+        Executor::needs_permission(self)
+    }
+
+    fn set_arguments(&self, args: Value) {
+        Executor::set_arguments(self, args);
+    }
+
+    fn pause_for_restart(&self) -> bool {
+        Executor::pause_for_restart(self)
+    }
+
+    fn hold_for_response(&self) -> bool {
+        Executor::hold_for_response(self)
+    }
+
+    fn execute<'a>(
+        &'a self,
+        answers: &'a IndexMap<String, Value>,
+        cancellation_token: CancellationToken,
+        stderr: Option<StderrSink>,
+    ) -> BoxFuture<'a, ExecutorResult> {
+        Box::pin(Executor::execute(self, answers, cancellation_token, stderr))
+    }
+
+    fn settle(&self, review: Review) -> BoxFuture<'_, Result<(), ExecutorError>> {
+        Box::pin(Executor::settle(self, review))
     }
 }
 
@@ -233,16 +357,16 @@ pub(crate) trait ExecutorSource: Send + Sync {
 pub(crate) struct CallExecutors {
     /// One executor for an ordinary call; one per operation, in the order the
     /// assistant wrote them, for a fanned-out call.
-    pub operations: Vec<Box<dyn Executor>>,
+    pub operations: Vec<Box<dyn DynExecutor>>,
 
     /// For a fanned-out call, the call as a whole: what it records once every
     /// operation is resolved.
-    pub fan_out: Option<Arc<dyn FanOutCall>>,
+    pub fan_out: Option<Arc<dyn DynFanOutCall>>,
 }
 
 impl CallExecutors {
     /// An ordinary call, run by one executor.
-    pub fn call(executor: Box<dyn Executor>) -> Self {
+    pub fn call(executor: Box<dyn DynExecutor>) -> Self {
         Self {
             operations: vec![executor],
             fan_out: None,
@@ -251,14 +375,31 @@ impl CallExecutors {
 }
 
 /// The Host's view of a fanned-out call as a whole.
-#[async_trait]
 pub(crate) trait FanOutCall: Send + Sync {
     /// Wait for the call's folded result, which the service offers for
     /// recording once every operation is resolved.
     ///
     /// The call stays parked on that barrier until
     /// [`ExecutorSource::acknowledge`] releases it.
-    async fn recorded(&self) -> Result<ToolCallResponse, ExecutorError>;
+    fn recorded(&self) -> impl Future<Output = Result<ToolCallResponse, ExecutorError>> + Send;
+}
+
+/// A [`FanOutCall`] behind a pointer: `Arc<dyn DynFanOutCall>`.
+///
+/// Every `FanOutCall` implements this trait, and [`recorded`] does what
+/// [`FanOutCall::recorded`] does, returning a boxed future.
+/// Implement [`FanOutCall`], not this trait.
+///
+/// [`recorded`]: Self::recorded
+// qual:allow(coupling, sit) reason: "its one impl is the blanket impl over every `FanOutCall`"
+pub(crate) trait DynFanOutCall: Send + Sync {
+    fn recorded(&self) -> BoxFuture<'_, Result<ToolCallResponse, ExecutorError>>;
+}
+
+impl<T: FanOutCall> DynFanOutCall for T {
+    fn recorded(&self) -> BoxFuture<'_, Result<ToolCallResponse, ExecutorError>> {
+        Box::pin(FanOutCall::recorded(self))
+    }
 }
 
 /// The display-state key for operation `op` of tool call `tool_id`.

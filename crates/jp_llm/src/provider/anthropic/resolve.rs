@@ -751,8 +751,7 @@ impl QuotaWatch {
                     window.claim, window.surpassed_threshold
                 ))
             })
-            .map(|window| vec![warning_notice(window)])
-            .unwrap_or_default()
+            .map_or_default(|window| vec![warning_notice(window)])
     }
 
     /// Record a cooldown against the watched profile, best-effort.
@@ -1137,8 +1136,7 @@ fn classify(
     } else {
         store
             .and_then(|document| document.profiles(CATEGORY_LLM, PROVIDER_ANTHROPIC))
-            .map(|profiles| profiles.keys().map(String::as_str).collect())
-            .unwrap_or_default()
+            .map_or_default(|profiles| profiles.keys().map(String::as_str).collect())
     };
 
     subscriptions.sort_unstable();

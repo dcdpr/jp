@@ -1,9 +1,13 @@
+#![expect(
+    clippy::unused_async_trait_impl,
+    reason = "test doubles implement async traits synchronously"
+)]
+
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicUsize, Ordering},
 };
 
-use async_trait::async_trait;
 use futures::stream;
 use jp_config::{
     assistant::tool_choice::ToolChoice,
@@ -16,7 +20,7 @@ use crate::{
     error::{Error, StreamError, StreamErrorKind},
     event::{Event, FinishReason, NoticeSink},
     model::ModelDetails,
-    provider::mock::MockProvider,
+    provider::{Provider, mock::MockProvider},
     query::Truncation,
     stream::EventStream,
 };
@@ -50,7 +54,6 @@ const TEST_MAX_BACKOFF_SECS: u64 = 60;
 
 struct ChangingCredential(AtomicUsize);
 
-#[async_trait]
 impl Provider for ChangingCredential {
     async fn model_details(&self, _: &Name) -> Result<ModelDetails> {
         Ok(model())

@@ -143,7 +143,19 @@ fn test_only_one_driver_holds_the_queue_lock() {
 
     // Releasing the lock lets the second driver acquire it.
     drop(first);
-    assert!(second.acquire_at(&path));
+
+    // A child process spawned by a test running in parallel can hold a copy of
+    // `first`'s descriptor until it execs and close-on-exec closes it, which
+    // keeps the lock held for a few milliseconds after the drop. Drivers retry
+    // the lock on every poll; the test retries too, up to a deadline.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !second.acquire_at(&path) {
+        assert!(
+            Instant::now() < deadline,
+            "lock still held 5s after the first driver released it"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
 }
 
 #[test]
@@ -204,7 +216,7 @@ fn test_a_hold_lasts_until_the_head_commit_changes() {
             "merging it failed: HTTP 405: no".to_owned()
         ))
     );
-    assert!(poll.events.is_empty());
+    assert_eq!(poll.events, [] as [Event; 0]);
 }
 
 #[test]
@@ -293,7 +305,8 @@ fn test_a_branch_another_pull_request_builds_on_stays() {
         ..pr(2, "b")
     }];
 
-    assert!(deletable(&[merged(1, "feature", None)], &prs, "main").is_empty());
+    assert_eq!(deletable(&[merged(1, "feature", None)], &prs, "main"), []
+        as [(u64, String); 0]);
 }
 
 #[test]
@@ -327,7 +340,10 @@ fn test_a_stacks_top_branch_stays_while_the_stack_goes_on() {
 
 #[test]
 fn test_the_default_branch_is_never_deleted() {
-    assert!(deletable(&[merged(1, "main", None)], &[pr(1, "a")], "main").is_empty());
+    assert_eq!(
+        deletable(&[merged(1, "main", None)], &[pr(1, "a")], "main"),
+        [] as [(u64, String); 0]
+    );
 }
 
 #[test]

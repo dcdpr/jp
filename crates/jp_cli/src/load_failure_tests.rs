@@ -1,7 +1,6 @@
 use std::fs;
 
 use camino::Utf8Path;
-use crossterm::style::Stylize as _;
 use jp_conversation::ConversationId;
 use jp_printer::{Chrome, OutputFormat};
 use jp_storage::{

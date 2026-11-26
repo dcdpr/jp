@@ -27,7 +27,7 @@ fn the_keys_default_to_tracking_rfd_and_relevant_rfd() {
 
     assert_eq!(links.tracking, "tracking-rfd");
     assert_eq!(links.relevant, "relevant-rfd");
-    assert!(links.filed_with.is_empty());
+    assert_eq!(links.filed_with, [] as [String; 0]);
 }
 
 /// A value is read the way `jp rfd` reads an id anywhere, and a key matches

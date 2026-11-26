@@ -1,3 +1,8 @@
+#![expect(
+    clippy::unused_async_trait_impl,
+    reason = "test doubles implement async traits synchronously"
+)]
+
 use std::{
     fs,
     future::pending,
@@ -9,7 +14,6 @@ use std::{
 };
 
 use assert_matches::assert_matches;
-use async_trait::async_trait;
 use camino::Utf8Path;
 use camino_tempfile::tempdir;
 use jp_config::{
@@ -35,7 +39,6 @@ use crate::server::{
 
 struct CountingTool(Arc<AtomicUsize>);
 
-#[async_trait]
 impl BuiltinTool for CountingTool {
     async fn execute(&self, arguments: &Value, answers: &IndexMap<String, Value>) -> Outcome {
         self.0.fetch_add(1, Ordering::SeqCst);
@@ -397,7 +400,6 @@ async fn preparation_release_input_and_delivery_use_distinct_acknowledgements() 
 /// order it ran in.
 struct PathTool(Arc<std::sync::Mutex<Vec<String>>>);
 
-#[async_trait]
 impl BuiltinTool for PathTool {
     async fn execute(&self, arguments: &Value, _: &IndexMap<String, Value>) -> Outcome {
         let path = arguments["path"].as_str().unwrap_or_default().to_owned();
@@ -1279,7 +1281,6 @@ impl Drop for RunningAttempt {
     }
 }
 
-#[async_trait]
 impl BuiltinTool for BlockedTool {
     async fn execute(&self, _: &Value, _: &IndexMap<String, Value>) -> Outcome {
         let _attempt = RunningAttempt(self.dropped.clone());

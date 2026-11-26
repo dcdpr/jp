@@ -294,7 +294,7 @@ fn draft_takes_a_category_and_a_title_or_a_ticket() {
         Command::Draft {
             title, from_ticket, ..
         } => {
-            assert!(title.is_empty());
+            assert_eq!(title, [] as [String; 0]);
             assert_eq!(from_ticket, Some("T-02wt0kx".parse().unwrap()));
         }
         other => panic!("expected draft, got {other:?}"),
@@ -1107,7 +1107,7 @@ fn start_and_stop_move_the_tracking_ticket() {
     let (text, code, _) = printed(&stopped);
     assert_eq!(code, 0);
     assert!(text.ends_with(": In Progress -> Todo\n"), "{text}");
-    assert!(queries(&stopped).is_empty());
+    assert_eq!(queries(&stopped), [] as [&QueryRequest; 0]);
 }
 
 /// An RFD far enough along to carry a tracking ticket, and without one, is

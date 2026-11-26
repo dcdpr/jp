@@ -120,8 +120,7 @@ impl Jp {
     #[must_use]
     pub fn new(dir: Utf8PathBuf) -> Self {
         let file = cache::file(&dir, "jp");
-        let mut ran: BTreeMap<String, ConversationId> =
-            file.as_deref().map(cache::load).unwrap_or_default();
+        let mut ran: BTreeMap<String, ConversationId> = file.as_deref().map_or_default(cache::load);
 
         // Prune entries for worktree directories that no longer exist on disk.
         let remembered = ran.len();

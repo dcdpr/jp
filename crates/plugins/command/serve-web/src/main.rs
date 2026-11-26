@@ -11,6 +11,10 @@ use std::{
 use jp_plugin::{log, stdio};
 use jp_serve_web::{HELP_TEXT, run};
 
+#[expect(
+    clippy::bufreader_stdin,
+    reason = "`run` moves stdin to another thread, and a `StdinLock` is not `Send`"
+)]
 fn main() {
     let log_handle = log::install("jp_serve_web");
 

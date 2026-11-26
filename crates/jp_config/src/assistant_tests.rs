@@ -18,7 +18,10 @@ fn test_assistant_config_instructions() {
         .unwrap()
         .unwrap();
 
-    assert!(p.instructions[0].title.as_deref() == Some("How to respond to the user"));
+    assert_eq!(
+        p.instructions[0].title.as_deref(),
+        Some("How to respond to the user")
+    );
 
     let kv = KvAssignment::try_from_cli("instructions:", r#"[{"title":"foo"}]"#).unwrap();
     p.assign(kv).unwrap();

@@ -58,8 +58,7 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
         "test" => {
             let testnames = t
                 .opt::<OneOrMany<String>>("testname")?
-                .map(OneOrMany::into_vec)
-                .unwrap_or_default();
+                .map_or_default(OneOrMany::into_vec);
             swift_test(&ctx, &testnames, t.opt("target")?).await
         }
         "test_ui" => swift_test_ui(&ctx, t.opt("tests")?).await,

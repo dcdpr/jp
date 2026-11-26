@@ -108,7 +108,7 @@ use jp_conversation::{
     thread::{Thread, ThreadBuilder},
 };
 use jp_inquire::prompt::{PromptBackend, TerminalPromptBackend};
-use jp_llm::{Provider, event::NoticeSink, provider};
+use jp_llm::{DynProvider, event::NoticeSink, provider};
 use jp_mcp::{
     StartupSet,
     server::{
@@ -1039,7 +1039,7 @@ impl Query {
     #[expect(clippy::too_many_arguments)]
     pub(crate) async fn run_turn(
         cfg: &AppConfig,
-        provider: Arc<dyn Provider>,
+        provider: Arc<dyn DynProvider>,
         signals: &SignalRouter,
         mcp_client: &jp_mcp::Client,
         root: Utf8PathBuf,
@@ -1391,7 +1391,7 @@ pub(crate) struct TurnInputs {
     interrupts: TurnInterrupts,
 
     #[cfg(test)]
-    stubbed_provider: Option<Arc<dyn Provider>>,
+    stubbed_provider: Option<Arc<dyn DynProvider>>,
 }
 
 impl TurnInputs {
@@ -2567,8 +2567,7 @@ fn create_mount_effects(
     let approvals_path = approval_store_path(fs_backend);
     let mut store = approvals_path
         .as_deref()
-        .map(ApprovalStore::load)
-        .unwrap_or_default();
+        .map_or_default(ApprovalStore::load);
 
     let resolve = existing_mount_target(&cwd);
     let mut rules = Vec::new();
@@ -2702,8 +2701,7 @@ fn approval_store_path(fs_backend: Option<&FsStorageBackend>) -> Option<Utf8Path
 fn load_approval_store(fs_backend: Option<&FsStorageBackend>) -> ApprovalStore {
     approval_store_path(fs_backend)
         .as_deref()
-        .map(ApprovalStore::load)
-        .unwrap_or_default()
+        .map_or_default(ApprovalStore::load)
 }
 
 /// Output of [`Query::build_conversation`].

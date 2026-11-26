@@ -260,8 +260,7 @@ fn extract_anchor_html(html: &str, anchor: &str) -> Option<String> {
     let head_html = Selector::parse("head")
         .ok()
         .and_then(|s| doc.select(&s).next())
-        .map(|el| el.html())
-        .unwrap_or_default();
+        .map_or_default(|el| el.html());
 
     Some(format!(
         "<html>{head_html}<body>{section_html}</body></html>"
@@ -852,8 +851,7 @@ pub(super) fn extract_sections(html: &str, ids: &[String]) -> Result<String, Vec
     let head_html = Selector::parse("head")
         .ok()
         .and_then(|s| doc.select(&s).next())
-        .map(|el| el.html())
-        .unwrap_or_default();
+        .map_or_default(|el| el.html());
 
     let mut body_parts = Vec::new();
     let mut unknown = Vec::new();

@@ -22,10 +22,10 @@
 
 use std::{collections::BTreeSet, error::Error};
 
-use async_trait::async_trait;
 use camino::Utf8Path;
 use jp_attachment::{
-    Attachment, BoxedHandler, HANDLERS, Handler, child_env, distributed_slice, linkme, typetag,
+    Attachment, BoxedHandler, HANDLERS, Handler, HandlerFuture, child_env, distributed_slice,
+    linkme, typetag,
 };
 use serde::{Deserialize, Serialize};
 use tracing::debug;
@@ -58,7 +58,6 @@ pub struct AgenticShepherd {
 }
 
 #[typetag::serde(name = "agentic_shepherd")]
-#[async_trait]
 impl Handler for AgenticShepherd {
     fn scheme(&self) -> &'static str {
         "ag"
@@ -68,37 +67,39 @@ impl Handler for AgenticShepherd {
         Reference::parse(uri)?.to_url()
     }
 
-    async fn add(
-        &mut self,
-        uri: &Url,
-        _cwd: &Utf8Path,
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        // Validate the URI shape now so a typo fails at attach time rather than
-        // at the next conversation turn.
-        self.references.insert(Reference::parse(uri)?);
-        Ok(())
+    fn add<'a>(&'a mut self, uri: &'a Url, _cwd: &'a Utf8Path) -> HandlerFuture<'a, ()> {
+        Box::pin(async move {
+            // Validate the URI shape now so a typo fails at attach time rather than
+            // at the next conversation turn.
+            self.references.insert(Reference::parse(uri)?);
+            Ok(())
+        })
     }
 
-    async fn remove(&mut self, uri: &Url) -> Result<(), Box<dyn Error + Send + Sync>> {
-        self.references.remove(&Reference::parse(uri)?);
-        Ok(())
+    fn remove<'a>(&'a mut self, uri: &'a Url) -> HandlerFuture<'a, ()> {
+        Box::pin(async move {
+            self.references.remove(&Reference::parse(uri)?);
+            Ok(())
+        })
     }
 
-    async fn list(&self) -> Result<Vec<Url>, Box<dyn Error + Send + Sync>> {
-        self.references.iter().map(Reference::to_url).collect()
+    fn list(&self) -> HandlerFuture<'_, Vec<Url>> {
+        Box::pin(async move { self.references.iter().map(Reference::to_url).collect() })
     }
 
-    async fn get(&self, root: &Utf8Path) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>> {
-        debug!(
-            count = self.references.len(),
-            "Fetching agentic-shepherd attachments."
-        );
+    fn get<'a>(&'a self, root: &'a Utf8Path) -> HandlerFuture<'a, Vec<Attachment>> {
+        Box::pin(async move {
+            debug!(
+                count = self.references.len(),
+                "Fetching agentic-shepherd attachments."
+            );
 
-        let mut attachments = Vec::with_capacity(self.references.len());
-        for reference in &self.references {
-            attachments.push(fetch(reference, root)?);
-        }
-        Ok(attachments)
+            let mut attachments = Vec::with_capacity(self.references.len());
+            for reference in &self.references {
+                attachments.push(fetch(reference, root)?);
+            }
+            Ok(attachments)
+        })
     }
 }
 

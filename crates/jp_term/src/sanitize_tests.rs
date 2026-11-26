@@ -1,5 +1,3 @@
-use std::fmt::Write as _;
-
 use super::*;
 
 /// Run `chunks` through one writer as separate writes, then finish it.

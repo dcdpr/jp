@@ -47,7 +47,7 @@ fn env_rules_carry_through_to_the_policy() {
     })
     .unwrap();
 
-    assert!(warnings.is_empty());
+    assert_eq!(warnings, [] as [String; 0]);
     assert_eq!(policy.env, vec![
         EnvRule {
             name: "AWS_*".to_owned(),
@@ -88,7 +88,7 @@ fn env_only_config_leaves_fs_unrestricted() {
 
     let (policy, _) = compile_policy(&config, dir.path(), |_, _| unreachable!()).unwrap();
 
-    assert!(policy.fs.is_empty());
+    assert_eq!(policy.fs, [] as [FsRule; 0]);
     assert!(!policy.is_restricted());
 }
 
@@ -165,7 +165,7 @@ fn ordinary_rules_compile_without_approval() {
     .unwrap();
 
     assert_eq!(compiled.rules.len(), 2);
-    assert!(compiled.warnings.is_empty());
+    assert_eq!(compiled.warnings, [] as [String; 0]);
     assert_eq!(compiled.rules[1].lexical_path(), "src");
     assert!(!compiled.rules[1].external());
 }
@@ -302,7 +302,7 @@ fn external_rule_containing_the_workspace_excludes_it() {
             .with_write(true),
         FsRule::new("w/a/b"),
     ]);
-    assert!(compiled.warnings.is_empty());
+    assert_eq!(compiled.warnings, [] as [String; 0]);
 }
 
 #[cfg(unix)]
@@ -321,7 +321,7 @@ fn external_rule_rejected_is_dropped_with_warning() {
     let compiled =
         compile_fs(&config, workspace.path(), |_, _| ApprovalDecision::Rejected).unwrap();
 
-    assert!(compiled.rules.is_empty());
+    assert_eq!(compiled.rules, [] as [FsRule; 0]);
     assert_eq!(compiled.warnings.len(), 1);
 }
 
@@ -356,6 +356,6 @@ fn external_rule_with_broken_symlink_is_dropped() {
 
     let compiled =
         compile_fs(&config, workspace.path(), |_, _| ApprovalDecision::Approved).unwrap();
-    assert!(compiled.rules.is_empty());
+    assert_eq!(compiled.rules, [] as [FsRule; 0]);
     assert_eq!(compiled.warnings.len(), 1);
 }

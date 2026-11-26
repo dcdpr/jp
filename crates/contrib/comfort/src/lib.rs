@@ -54,7 +54,6 @@ pub const DEFAULT_MAX_WIDTH: usize = 80;
 /// keeps fatal-error reporting in one place.
 #[cfg(feature = "cli")]
 #[allow(clippy::print_stderr)]
-#[must_use]
 pub fn cli_main() -> ExitCode {
     let raw: Vec<OsString> = std::env::args_os().collect();
     let (invocation, args) = parse_invocation(raw);

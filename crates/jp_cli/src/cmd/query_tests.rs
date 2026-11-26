@@ -1,7 +1,11 @@
+#![expect(
+    clippy::unused_async_trait_impl,
+    reason = "test doubles implement async traits synchronously"
+)]
+
 use std::{future, sync::Arc};
 
 use assert_matches::assert_matches;
-use async_trait::async_trait;
 use camino_tempfile::Utf8TempDir;
 use chrono::{DateTime, Utc};
 use indexmap::IndexMap;
@@ -27,7 +31,7 @@ use jp_conversation::{
 };
 use jp_inquire::{InlineOption, ReplyEditMode, ReplyOutcome, prompt::MockPromptBackend};
 use jp_llm::{
-    Error as LlmError, EventStream, Provider, model::ModelDetails, provider::mock::MockProvider,
+    DynProvider, Error as LlmError, EventStream, model::ModelDetails, provider::mock::MockProvider,
     query::ChatQuery,
 };
 use jp_mcp::{Startup, StartupSet, id::McpServerId, server::tool_definitions};
@@ -59,6 +63,7 @@ use crate::{
     cli::flag::{ArgPrompts, Parsed, SettleError},
     cmd::{
         Commands,
+        compact_flag::CompactSpec,
         target::{ConversationTarget, PickerFilter},
     },
     config_pipeline::ConfigPipeline,
@@ -660,7 +665,7 @@ async fn an_interrupt_during_the_model_lookup_stops_the_turn_before_it_runs() {
         .unwrap();
 
     let asked = Arc::new(Notify::new());
-    let provider: Arc<dyn Provider> = Arc::new(UnansweredLookup {
+    let provider: Arc<dyn DynProvider> = Arc::new(UnansweredLookup {
         asked: Arc::clone(&asked),
     });
 
@@ -709,7 +714,7 @@ async fn a_client_abort_during_the_model_lookup_ends_the_turn_as_aborted() {
         .unwrap();
 
     let asked = Arc::new(Notify::new());
-    let provider: Arc<dyn Provider> = Arc::new(UnansweredLookup {
+    let provider: Arc<dyn DynProvider> = Arc::new(UnansweredLookup {
         asked: Arc::clone(&asked),
     });
 
@@ -757,8 +762,7 @@ struct UnansweredLookup {
     asked: Arc<Notify>,
 }
 
-#[async_trait]
-impl Provider for UnansweredLookup {
+impl jp_llm::Provider for UnansweredLookup {
     async fn model_details(&self, _name: &Name) -> LlmResult<ModelDetails> {
         self.asked.notify_one();
         future::pending().await
@@ -792,7 +796,7 @@ fn turn_inputs(
     router: &SignalRouter,
     mcp_servers: StartupSet,
     interrupts: TurnInterrupts,
-    stubbed_provider: Option<Arc<dyn Provider>>,
+    stubbed_provider: Option<Arc<dyn DynProvider>>,
 ) -> TurnInputs {
     TurnInputs {
         config,
@@ -819,7 +823,7 @@ async fn run_mock_turn(
     prompt: &str,
     response: &str,
 ) {
-    let provider: Arc<dyn Provider> = Arc::new(MockProvider::with_message(response));
+    let provider: Arc<dyn DynProvider> = Arc::new(MockProvider::with_message(response));
     let model = provider
         .model_details(&cfg.assistant.model.id.resolved().name)
         .await
@@ -3002,21 +3006,21 @@ fn query_words(query: &Query) -> &[String] {
 fn bare_quote_uses_the_blockquote_prefix() {
     let query = parse_query(&["--quote"]).unwrap();
     assert_eq!(query.quote, Some(true));
-    assert!(query_words(&query).is_empty());
+    assert_eq!(query_words(&query), [] as [String; 0]);
 }
 
 #[test]
 fn quote_true_is_the_same_as_a_bare_quote() {
     let query = parse_query(&["--quote=true"]).unwrap();
     assert_eq!(query.quote, Some(true));
-    assert!(query_words(&query).is_empty());
+    assert_eq!(query_words(&query), [] as [String; 0]);
 }
 
 #[test]
 fn quote_false_still_quotes_but_drops_the_prefix() {
     let query = parse_query(&["--quote=false"]).unwrap();
     assert_eq!(query.quote, Some(false));
-    assert!(query_words(&query).is_empty());
+    assert_eq!(query_words(&query), [] as [String; 0]);
 }
 
 #[test]
@@ -3029,11 +3033,11 @@ fn quote_is_absent_when_not_given() {
 fn quote_takes_an_unattached_bool() {
     let query = parse_query(&["--quote", "false"]).unwrap();
     assert_eq!(query.quote, Some(false));
-    assert!(query_words(&query).is_empty());
+    assert_eq!(query_words(&query), [] as [String; 0]);
 
     let query = parse_query(&["--quote", "true"]).unwrap();
     assert_eq!(query.quote, Some(true));
-    assert!(query_words(&query).is_empty());
+    assert_eq!(query_words(&query), [] as [String; 0]);
 }
 
 #[test]
@@ -4271,15 +4275,13 @@ fn run_failing_no_persist_query_leaves_no_conversation_directory() {
         .user_storage_path()
         .unwrap()
         .join("conversations");
-    let dirs: Vec<String> = std::fs::read_dir(&user_conversations)
-        .map(|entries| {
-            entries
-                .map(|entry| entry.unwrap())
-                .filter(|entry| entry.path().is_dir())
-                .map(|entry| entry.file_name().to_string_lossy().into_owned())
-                .collect()
-        })
-        .unwrap_or_default();
+    let dirs: Vec<String> = std::fs::read_dir(&user_conversations).map_or_default(|entries| {
+        entries
+            .map(|entry| entry.unwrap())
+            .filter(|entry| entry.path().is_dir())
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect()
+    });
     assert_eq!(dirs, Vec::<String>::new());
 
     assert_store_holds_only_conversations(root);
@@ -5122,7 +5124,7 @@ fn a_word_after_compact_that_is_no_spec_starts_the_query() {
     let query = parse_query(&["-k", "what", "did", "we", "decide"]).unwrap();
 
     assert!(query.compact.use_config_rules);
-    assert!(query.compact.specs.is_empty());
+    assert_eq!(query.compact.specs, [] as [CompactSpec; 0]);
     assert_eq!(query.query, words(&["what", "did", "we", "decide"]));
 }
 

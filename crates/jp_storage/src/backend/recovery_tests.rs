@@ -429,7 +429,7 @@ fn the_diagnosis_of_a_store_without_conversations_is_empty() {
     let diagnosis = fs.diagnose().unwrap();
 
     assert!(diagnosis.invalid.is_empty());
-    assert!(diagnosis.strays.is_empty());
+    assert_eq!(diagnosis.strays, [] as [StrayEntry; 0]);
 }
 
 #[test]

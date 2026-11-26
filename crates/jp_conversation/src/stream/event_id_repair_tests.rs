@@ -141,14 +141,14 @@ fn repair_does_not_sanitize_the_stream() {
 fn an_entry_without_an_id_is_assigned_one() {
     let stream = load(vec![json!({"type": "future_event"})]);
 
-    assert!(!ids(&stream)[0].is_empty());
+    assert_ne!(ids(&stream)[0], "");
 }
 
 #[test]
 fn an_entry_with_an_empty_id_is_assigned_one() {
     let stream = load(vec![json!({"type": "future_event", "event_id": ""})]);
 
-    assert!(!ids(&stream)[0].is_empty());
+    assert_ne!(ids(&stream)[0], "");
 }
 
 #[test]

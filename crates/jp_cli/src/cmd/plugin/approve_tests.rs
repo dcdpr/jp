@@ -7,11 +7,12 @@ use jp_config::{
     plugins::command::PartialCommandPluginConfig,
     providers::mcp::{AlgorithmConfig, PartialChecksumConfig},
 };
+use jp_test::env_var::EnvVarGuard;
 use pretty_assertions::assert_eq;
 use serial_test::serial;
 
 use super::*;
-use crate::{CfgKeyword, env_testing::EnvVarGuard};
+use crate::CfgKeyword;
 
 fn denied_message() -> String {
     "plugin `titles` is denied by configuration (plugins.command.titles.run = \"deny\"), so it is \

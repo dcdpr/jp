@@ -139,8 +139,7 @@ async fn test_with_backoff_basic() {
             result.as_ref().unwrap_err(),
             AnthropicError::RateLimit { .. }
         ),
-        "actual: {:?}",
-        &result
+        "actual: {result:?}"
     );
 
     // The first attempt plus the backoff's three retries.
@@ -252,8 +251,7 @@ async fn test_error_handling_bad_request() {
             result.as_ref().unwrap_err(),
             AnthropicError::Api(ApiError { error_type, .. }) if error_type == "invalid_request_error"
         ),
-        "actual: {:?}",
-        &result
+        "actual: {result:?}"
     );
 }
 
@@ -285,7 +283,6 @@ async fn test_error_handling_unauthorized() {
                 error: ApiError { error_type, .. },
             } if error_type == "authentication_error"
         ),
-        "actual: {:?}",
-        &result
+        "actual: {result:?}"
     );
 }

@@ -1,4 +1,3 @@
-use schematic::PartialConfig as _;
 use serde_json::json;
 
 use super::*;

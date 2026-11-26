@@ -235,9 +235,8 @@ impl<'a, S: AsRef<str>> Header<'a, S> {
 /// The value of the field spanning `range`: what follows its key, and its
 /// continuation lines, with each run of whitespace read as one space.
 fn joined<S: AsRef<str>>(lines: &[S], range: Range<usize>) -> String {
-    let mut value = split(lines[range.start].as_ref())
-        .map(|(_, value)| value.to_owned())
-        .unwrap_or_default();
+    let mut value =
+        split(lines[range.start].as_ref()).map_or_default(|(_, value)| value.to_owned());
     for line in &lines[range.start + 1..range.end] {
         value.push(' ');
         value.push_str(line.as_ref());

@@ -1,6 +1,7 @@
 //! The `describe_tools` builtin implementation.
 
-use async_trait::async_trait;
+use std::future;
+
 use indexmap::IndexMap;
 use jp_tool::{Outcome, ToolDocs};
 use serde_json::Value;
@@ -71,11 +72,9 @@ impl DescribeTools {
 
         out
     }
-}
 
-#[async_trait]
-impl BuiltinTool for DescribeTools {
-    async fn execute(&self, arguments: &Value, _answers: &IndexMap<String, Value>) -> Outcome {
+    /// Render the documentation of each tool named in the `tools` argument.
+    fn describe(&self, arguments: &Value) -> Outcome {
         let tool_names = match arguments.get("tools").and_then(Value::as_array) {
             Some(arr) => arr.iter().filter_map(Value::as_str).collect::<Vec<_>>(),
             None => {
@@ -118,6 +117,16 @@ impl BuiltinTool for DescribeTools {
         }
 
         Outcome::Success { content: output }
+    }
+}
+
+impl BuiltinTool for DescribeTools {
+    fn execute(
+        &self,
+        arguments: &Value,
+        _answers: &IndexMap<String, Value>,
+    ) -> impl Future<Output = Outcome> + Send {
+        future::ready(self.describe(arguments))
     }
 }
 

@@ -509,8 +509,7 @@ fn validate_root(
 
     let entries: Vec<_> = dir_entries(conversations_dir)
         .filter(|entry| {
-            entry.file_type().ok().is_some_and(|ft| ft.is_dir())
-                && !entry.file_name().starts_with('.')
+            entry.file_type().is_ok_and(|ft| ft.is_dir()) && !entry.file_name().starts_with('.')
         })
         .collect();
 

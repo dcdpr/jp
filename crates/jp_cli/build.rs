@@ -8,8 +8,7 @@ fn main() {
         .output()
         .ok()
         .and_then(|out| String::from_utf8(out.stdout).ok())
-        .map(|s| s.trim().to_owned())
-        .unwrap_or_default();
+        .map_or_default(|s| s.trim().to_owned());
 
     let build_date = Utc::now().format("%Y-%m-%d").to_string();
     let pkg_version = env!("CARGO_PKG_VERSION");
