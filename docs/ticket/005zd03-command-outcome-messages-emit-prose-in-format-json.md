@@ -46,7 +46,6 @@ in `crates/jp_cli/src/output.rs`.
 Outcome messages, one per line, all currently prose-in-JSON:
 
 - `cmd/init.rs:87` — "Initialized workspace at {loc}"
-- `cmd/attachment/ls.rs:14` — "No attachments in current context."
 - `cmd/config/fmt.rs:67` — formatting result
 - `cmd/conversation/archive.rs:79,101` — no-match, and "Conversation {id}
   archived."
@@ -61,15 +60,14 @@ Outcome messages, one per line, all currently prose-in-JSON:
   Title"
 - `cmd/query.rs:464` — "Query is empty, ignoring."
 
-Twelve commands.
+Eleven commands.
 
 ## Two things to decide while converting
 
-**Empty results should be empty collections, not messages.** `jp a ls` prints a
-details table when attachments exist and `{"message":"No attachments in current
-context."}` when they don't, so the JSON shape changes with the result.
-An empty listing should be `[]` or an empty object.
-The same applies to the no-match lines in `archive`, `rm`, and `unarchive`.
+**Empty results should be empty collections, not messages.** `jp a ls` already
+does this: an empty listing is `{"title":"Attachments","details":[]}` under
+`--format=json`, and only the text views print a sentence.
+The no-match lines in `archive`, `rm`, and `unarchive` should follow it.
 
 **`jp c path` is a value, not a status.** It prints a path for a script to
 consume.
@@ -155,8 +153,7 @@ wasteful.
 - **From**: jp
 - **Date**: 2026-08-23T16:12:54Z
 
-Two details above have moved since this was filed, both while implementing [RFD
-103].
+Two details above have moved since this was filed, while implementing [RFD 103].
 
 `cmd/conversation/fork.rs:190` is off the list.
 `jp c fork` prints the IDs it created — one per line in text mode, a JSON array
@@ -182,6 +179,18 @@ That left `output::print_outcome` and `output::print_details_with_json` with no
 callers, so both were removed; `git log` has them.
 A command being converted needs the same two decisions rather than a helper:
 what is chrome (stderr), and what is the data a script would read (stdout).
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-25T14:47:50Z
+
+`cmd/attachment/ls.rs` is off the list, and the description is edited to match.
+The JSON listing already kept its `details` array when empty before PR #1389,
+and only the text views print a sentence (now `No attachments in conversation
+<id>.`).
+`an_empty_listing_is_still_an_array_in_json` pins it.
+With `fork` off the list (#2), ten sites remain.
 
 [RFD 048]: ../rfd/048-four-channel-output-model.md
 [RFD 086]: ../rfd/086-line-oriented-stdin-input-for-cli-arguments.md
