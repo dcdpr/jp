@@ -187,8 +187,8 @@ what is chrome (stderr), and what is the data a script would read (stdout).
 
 `cmd/attachment/ls.rs` is off the list, and the description is edited to match.
 The JSON listing already kept its `details` array when empty before PR #1389,
-and only the text views print a sentence (now "No attachments in conversation
-<id>.").
+and only the text views print a sentence (now `No attachments in conversation
+<id>.`).
 `an_empty_listing_is_still_an_array_in_json` pins it.
 With `fork` off the list (#2), ten sites remain.
 
