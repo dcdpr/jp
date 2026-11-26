@@ -8,6 +8,21 @@ use crate::{
     model::id::{ModelIdOrAliasConfig, PartialModelIdOrAliasConfig},
 };
 
+#[path = "list_strategy_tests.rs"]
+mod list_strategy_tests;
+
+#[path = "schema_probe_tests.rs"]
+mod schema_probe_tests;
+
+#[path = "schema_shape_tests.rs"]
+mod schema_shape_tests;
+
+#[path = "test_support.rs"]
+pub mod test_support;
+
+#[path = "unset_tests.rs"]
+mod unset_tests;
+
 #[test]
 fn test_partial_app_config_empty_serialize() {
     insta::assert_debug_snapshot!(PartialAppConfig::empty());
@@ -35,7 +50,7 @@ fn test_app_config_fields() {
 /// Read it against the parser before accepting one.
 #[test]
 fn test_app_config_schema_shape() {
-    insta::assert_snapshot!(crate::schema_shape::render(&AppConfig::schema()));
+    insta::assert_snapshot!(test_support::render(&AppConfig::schema()));
 }
 
 #[test]

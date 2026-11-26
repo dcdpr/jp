@@ -5,10 +5,10 @@ use chrono::{DateTime, Utc};
 use jp_config::PartialAppConfig;
 use serde_json::{from_str, json, to_string};
 
-use super::{ConversationStream, EventPayload, InternalEvent, StoredEvent};
 use crate::{
     ConversationEvent, EventId,
     event::{ChatRequest, ChatResponse, TurnStart},
+    stream::{ConversationStream, EventPayload, InternalEvent, StoredEvent},
 };
 
 fn entry(id: &str, event: ConversationEvent) -> InternalEvent {

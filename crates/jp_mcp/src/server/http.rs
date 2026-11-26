@@ -402,9 +402,4 @@ fn protocol_error(error: ServiceError) -> ErrorData {
 }
 
 #[cfg(test)]
-#[path = "http_tests.rs"]
 mod tests;
-
-#[cfg(test)]
-#[path = "conformance_tests.rs"]
-mod conformance_tests;

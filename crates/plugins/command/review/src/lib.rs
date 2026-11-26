@@ -52,8 +52,6 @@ mod server;
 mod snapshot;
 mod store;
 mod submit;
-#[cfg(test)]
-mod test_support;
 mod text;
 mod tool;
 mod ui;
@@ -847,5 +845,5 @@ pub fn help_text() -> String {
 }
 
 #[cfg(test)]
-#[path = "lib_tests.rs"]
+#[path = "lib/tests.rs"]
 mod tests;

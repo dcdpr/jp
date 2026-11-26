@@ -647,14 +647,6 @@ fn spawn_stderr_forwarder(
     });
 }
 
-#[cfg(test)]
-#[path = "client_tests.rs"]
-mod tests;
-
-#[cfg(all(test, feature = "server"))]
-#[path = "client_protocol_tests.rs"]
-mod protocol_tests;
-
 pub fn verify_file_checksum(
     server: &str,
     command: &Path,
@@ -687,3 +679,6 @@ pub fn verify_file_checksum(
         got: digest,
     })
 }
+
+#[cfg(test)]
+mod tests;

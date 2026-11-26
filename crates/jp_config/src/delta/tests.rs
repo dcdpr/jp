@@ -10,6 +10,9 @@ use crate::{
     },
 };
 
+#[path = "law_tests.rs"]
+mod law_tests;
+
 /// A server entry with `arguments` set and every other field unset.
 fn server(arguments: &[&str]) -> PartialMcpProviderConfig {
     PartialMcpProviderConfig::Stdio(PartialStdioConfig {

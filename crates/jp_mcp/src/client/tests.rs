@@ -11,6 +11,10 @@ use tokio::{process::Command, runtime::Handle};
 use super::{Startup, render_command, render_stderr_tail};
 use crate::{Client, Error, id::McpServerId};
 
+#[cfg(feature = "server")]
+#[path = "protocol_tests.rs"]
+mod protocol_tests;
+
 fn stdio_config(command: &str, optional: bool) -> McpProviderConfig {
     McpProviderConfig::Stdio(StdioConfig {
         command: PathBuf::from(command),

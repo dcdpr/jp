@@ -47,10 +47,6 @@ pub mod model;
 mod partial;
 pub mod plugins;
 pub mod providers;
-#[cfg(test)]
-mod schema_probe;
-#[cfg(test)]
-mod schema_shape;
 pub mod style;
 pub mod template;
 pub mod types;
@@ -882,13 +878,5 @@ impl From<Arc<Self>> for AppConfig {
 }
 
 #[cfg(test)]
-#[path = "lib_tests.rs"]
+#[path = "lib/tests.rs"]
 mod tests;
-
-#[cfg(test)]
-#[path = "unset_tests.rs"]
-mod unset_tests;
-
-#[cfg(test)]
-#[path = "list_strategy_tests.rs"]
-mod list_strategy_tests;

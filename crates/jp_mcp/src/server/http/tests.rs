@@ -29,9 +29,12 @@ use crate::{
             Admission, CallRequest, ConfiguredTool, HostReceiver, Interaction, ReleaseDecision,
             ServiceError,
         },
-        testing::no_commands,
+        tests::test_support::no_commands,
     },
 };
+
+#[path = "conformance_tests.rs"]
+mod conformance_tests;
 
 struct Count(Arc<AtomicUsize>);
 impl BuiltinTool for Count {

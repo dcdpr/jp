@@ -34,7 +34,7 @@ use crate::server::{
     AdmittedPlugin, PluginInit,
     builtin::BuiltinTool,
     command::sha256_file,
-    testing::{echoing, no_commands, printed},
+    tests::test_support::{echoing, no_commands, printed},
 };
 
 struct CountingTool(Arc<AtomicUsize>);

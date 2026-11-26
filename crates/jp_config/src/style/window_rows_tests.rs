@@ -1,7 +1,7 @@
 use schematic::SchemaBuilder;
 
 use super::*;
-use crate::schema_shape::render;
+use crate::tests::test_support::render;
 
 /// Parse a TOML scalar as a `stderr_rows` value.
 fn parse(toml: &str) -> WindowRows {

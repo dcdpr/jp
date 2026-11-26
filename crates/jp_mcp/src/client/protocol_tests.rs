@@ -32,9 +32,9 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
-use super::{Client, McpServerId};
 use crate::{
-    Content,
+    Client, Content,
+    id::McpServerId,
     server::{
         Answers, CommandPlugins, Execution, ExecutionOutcome,
         builtin::BuiltinExecutors,
@@ -44,7 +44,7 @@ use crate::{
             Admission, CallRequest, ConfiguredTool, HostReceiver, Interaction, ReleaseDecision,
             Service,
         },
-        testing::no_commands,
+        tests::test_support::no_commands,
         tool_definitions,
     },
 };

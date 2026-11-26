@@ -19,7 +19,7 @@ use crate::{
     options::Options,
     pass::{Ended, Outcome, Pass},
     store::{Store, now},
-    test_support::{CONVERSATION, Host, Written, eventually, within},
+    tests::test_support::{CONVERSATION, Host, Written, eventually, within},
 };
 
 /// A review of `docs/a.md` with one draft comment, and the passes of a server

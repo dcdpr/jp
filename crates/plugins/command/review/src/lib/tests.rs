@@ -16,14 +16,17 @@ use jp_plugin::message::{
 use pretty_assertions::assert_eq;
 use serde_json::{Map, Value, json};
 
+use self::test_support::{CONVERSATION, Written, http};
 use super::*;
 use crate::{
     anchor::{Anchor, Target},
     model::{Content, NewComment, Role},
     pass::NewPass,
     store::{Serving, Store, now},
-    test_support::{CONVERSATION, Written, http},
 };
+
+#[path = "test_support.rs"]
+pub(crate) mod test_support;
 
 /// What the file under review holds when a test starts.
 const SOURCE: &str = "# Title\n\nFirst line.\nSecond line.\n";

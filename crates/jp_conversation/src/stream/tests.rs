@@ -20,6 +20,15 @@ use crate::{
     resolve_range,
 };
 
+#[path = "event_id_repair_tests.rs"]
+mod event_id_repair_tests;
+
+#[path = "event_id_tests.rs"]
+mod event_id_tests;
+
+#[path = "turn_summary_tests.rs"]
+mod turn_summary_tests;
+
 /// Wrap a payload with a fixed ID for serialization assertions.
 fn fixed_entry(payload: EventPayload) -> InternalEvent {
     InternalEvent {

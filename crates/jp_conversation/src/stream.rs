@@ -1929,17 +1929,4 @@ pub enum StreamError {
 }
 
 #[cfg(test)]
-#[path = "stream_tests.rs"]
 mod tests;
-
-#[cfg(test)]
-#[path = "stream/event_id_tests.rs"]
-mod event_id_tests;
-
-#[cfg(test)]
-#[path = "stream/event_id_repair_tests.rs"]
-mod event_id_repair_tests;
-
-#[cfg(test)]
-#[path = "stream/turn_summary_tests.rs"]
-mod turn_summary_tests;

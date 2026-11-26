@@ -29,17 +29,17 @@ use tokio::{
     time::{Duration, timeout},
 };
 
-use super::Endpoint;
 use crate::{
     Client, Content,
     server::{
         CommandPlugins, InvocationContext,
         builtin::{BuiltinExecutors, BuiltinTool},
+        http::{Endpoint, PROGRESS_HEARTBEAT},
         service::{
             Admission, ConfiguredTool, HostError, HostReceiver, HostRequest, InputAnswer,
             Interaction, ReleaseDecision, Service,
         },
-        testing::{no_commands, printed},
+        tests::test_support::{no_commands, printed},
         tool_definitions,
     },
 };
@@ -281,18 +281,12 @@ impl Fixture {
 }
 
 async fn fixture(config: Value, builtins: BuiltinExecutors) -> Fixture {
-    fixture_reporting_every(config, builtins, no_commands(), super::PROGRESS_HEARTBEAT).await
+    fixture_reporting_every(config, builtins, no_commands(), PROGRESS_HEARTBEAT).await
 }
 
 /// A fixture whose `probe` tool is a local command, played by `runner`.
 async fn local_fixture(config: Value, runner: Arc<dyn ProcessRunner>) -> Fixture {
-    fixture_reporting_every(
-        config,
-        BuiltinExecutors::new(),
-        runner,
-        super::PROGRESS_HEARTBEAT,
-    )
-    .await
+    fixture_reporting_every(config, BuiltinExecutors::new(), runner, PROGRESS_HEARTBEAT).await
 }
 
 async fn fixture_reporting_every(

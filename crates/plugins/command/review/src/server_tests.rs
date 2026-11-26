@@ -11,7 +11,7 @@ use pretty_assertions::assert_eq;
 use serde_json::json;
 
 use super::*;
-use crate::test_support::{CONVERSATION, Host, Written, eventually, http, http_text};
+use crate::tests::test_support::{CONVERSATION, Host, Written, eventually, http, http_text};
 
 /// What a page of the server's own sends.
 const SAME_ORIGIN: [(&str, &str); 1] = [("Sec-Fetch-Site", "same-origin")];

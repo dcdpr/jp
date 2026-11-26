@@ -18,14 +18,12 @@ use jp_process::{ExitCode, MockProcessRunner, ProcessOutput};
 use jp_tool::{AnswerType, EnvRule, Outcome, ToolDefinition, ToolDocs};
 use serde_json::Map;
 
+use self::test_support::{echoing, no_commands};
 use super::*;
-use crate::{
-    Client,
-    server::{
-        command::sha256_file,
-        testing::{echoing, no_commands},
-    },
-};
+use crate::{Client, server::command::sha256_file};
+
+#[path = "test_support.rs"]
+pub(crate) mod test_support;
 
 struct EchoArguments;
 

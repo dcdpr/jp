@@ -1,6 +1,6 @@
 ---
-source: crates/jp_config/src/lib_tests.rs
-expression: "crate::schema_shape::render(&AppConfig::schema())"
+source: crates/jp_config/src/lib/tests.rs
+expression: "test_support::render(&AppConfig::schema())"
 ---
 assistant: AssistantConfig
   instructions?: MergeableVec_InstructionsConfig

@@ -1283,9 +1283,4 @@ async fn resolve_mcp_tool(
 }
 
 #[cfg(test)]
-#[path = "server_testing.rs"]
-pub(crate) mod testing;
-
-#[cfg(test)]
-#[path = "server_tests.rs"]
-mod tests;
+pub(crate) mod tests;

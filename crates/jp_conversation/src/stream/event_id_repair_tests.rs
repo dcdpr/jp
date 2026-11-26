@@ -5,8 +5,7 @@ use std::collections::HashSet;
 use jp_config::PartialAppConfig;
 use serde_json::{Value, json};
 
-use super::ConversationStream;
-use crate::EventId;
+use crate::{EventId, stream::ConversationStream};
 
 /// An entry a build does not recognize, kept verbatim.
 ///

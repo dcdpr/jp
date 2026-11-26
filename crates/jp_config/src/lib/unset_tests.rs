@@ -2,8 +2,10 @@
 
 use test_log::test;
 
-use super::*;
-use crate::providers::mcp::{PartialMcpProviderConfig, PartialStdioConfig};
+use crate::{
+    providers::mcp::{PartialMcpProviderConfig, PartialStdioConfig},
+    *,
+};
 
 /// A partial holding one MCP server with two arguments.
 fn partial_with_server() -> PartialAppConfig {

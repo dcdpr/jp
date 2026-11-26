@@ -209,7 +209,3 @@ fn write_labelled(
     let _ = writeln!(out, "{pad}{label}:");
     write_body(out, schema, depth + 1, enclosing);
 }
-
-#[cfg(test)]
-#[path = "schema_shape_tests.rs"]
-mod tests;

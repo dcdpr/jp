@@ -11,4 +11,5 @@ pub use handlers::{CurrentHandler, IssuesHandler, PullsHandler, ReposHandler, Se
 pub use page::Page;
 
 #[cfg(test)]
+#[path = "lib_tests.rs"]
 mod tests;

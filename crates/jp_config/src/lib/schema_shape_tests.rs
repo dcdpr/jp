@@ -6,7 +6,7 @@ use schematic::{
     },
 };
 
-use super::render;
+use super::test_support::render;
 
 #[test]
 fn renders_a_scalar_on_one_line() {

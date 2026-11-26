@@ -6,13 +6,13 @@ use chrono::{DateTime, Utc};
 use jp_config::PartialAppConfig;
 use serde_json::{Map, Value, from_str, from_value, json, to_string};
 
-use super::{
-    ConversationEventWithConfig, ConversationStream, EventPayload, InternalEvent, ResetDelta,
-    StoredEvent,
-};
 use crate::{
     Compaction, ConversationEvent, EventId, SummaryPolicy, ToolCallPolicy,
     event::{ChatRequest, ChatResponse, ToolCallRequest, TurnStart},
+    stream::{
+        ConversationEventWithConfig, ConversationStream, EventPayload, InternalEvent, ResetDelta,
+        StoredEvent,
+    },
 };
 
 /// A stream entry with a known ID, for assertions that name one.
