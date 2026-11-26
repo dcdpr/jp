@@ -7,6 +7,7 @@ pub mod cerebras;
 pub mod llamacpp;
 pub(crate) mod lookup;
 pub mod mock;
+pub(crate) mod notices;
 pub mod ollama;
 pub mod openai;
 pub(crate) mod openai_compat;

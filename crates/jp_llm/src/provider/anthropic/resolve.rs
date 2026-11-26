@@ -19,11 +19,7 @@
 //! Without it either would resolve again and strand the request on a credential
 //! already known to be out.
 
-use std::{
-    collections::HashSet,
-    mem,
-    sync::{Arc, Mutex},
-};
+use std::{collections::HashSet, mem};
 
 use async_anthropic::errors::{UnifiedRateLimit, WindowUtilization};
 use camino::Utf8PathBuf;
@@ -36,7 +32,11 @@ use jp_credentials::{
 use tracing::{debug, warn};
 
 use super::{acp::Error as AcpError, oauth};
-use crate::{credential::Credential, error::StreamError, provider::api_key_chain};
+use crate::{
+    credential::Credential,
+    error::StreamError,
+    provider::{api_key_chain, notices::SeenNotices},
+};
 
 /// Errors from walking the credential chain.
 #[derive(Debug, thiserror::Error)]
@@ -221,10 +221,10 @@ impl Attempt {
         }
     }
 
-    /// The notices to surface for this attempt, leaving none behind.
+    /// Drain and return the notices to surface for this attempt.
     ///
-    /// A skip notice `seen` already holds is dropped; the switch notice is
-    /// always kept.
+    /// Skip notices already present in `seen` are filtered out; the switch
+    /// notice is always retained.
     pub(super) fn take_notices(&mut self, seen: &SeenNotices) -> Vec<String> {
         let mut notices: Vec<String> = mem::take(&mut self.notices)
             .into_iter()
@@ -234,21 +234,18 @@ impl Attempt {
         notices.extend(self.switch.take());
         notices
     }
-}
 
-/// Notices one provider has already surfaced.
-///
-/// A notice that restates a standing condition (a credential skipped for the
-/// same reason, a warning threshold already crossed) is shown once per provider
-/// rather than on every request it sends.
-/// Clones share one record.
-#[derive(Debug, Clone, Default)]
-pub(super) struct SeenNotices(Arc<Mutex<HashSet<String>>>);
-
-impl SeenNotices {
-    /// Record `key`, returning whether it had not been seen before.
-    pub(super) fn first(&self, key: &str) -> bool {
-        self.0.lock().expect("poisoned").insert(key.to_owned())
+    /// Log and drain this attempt's notices as warnings without marking them as
+    /// seen.
+    ///
+    /// Used by requests without an event stream (such as model lookup), so a
+    /// subsequent stream request on the same provider still emits any skip
+    /// notices to the user.
+    pub(super) fn log_notices(&mut self) {
+        let skips = mem::take(&mut self.notices);
+        for notice in skips.into_iter().chain(self.switch.take()) {
+            warn!("{notice}");
+        }
     }
 }
 

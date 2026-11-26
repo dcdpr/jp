@@ -29,8 +29,36 @@ fn notice_sink_prints_to_stderr() {
 
     assert_eq!(
         err.lock().as_str(),
-        "subscription limit reached (personal)\n"
+        "WARN subscription limit reached (personal)\n"
     );
+    assert_eq!(out.lock().as_str(), "");
+}
+
+/// On a terminal the line is dim, with `WARN` in yellow.
+#[test]
+fn notice_sink_prints_a_dim_line_with_a_yellow_label_on_a_pretty_printer() {
+    let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
+
+    notice_sink(&printer).emit("subscription limit reached (personal)");
+    printer.flush();
+
+    assert_eq!(
+        err.lock().as_str(),
+        "\x1b[38;5;11m\x1b[2mWARN\x1b[0m \x1b[2msubscription limit reached (personal)\x1b[0m\n"
+    );
+}
+
+/// A background request (an inquiry, a title, a turn summary) runs on a model
+/// other than the one the user is talking to, so its notices stay off the
+/// terminal.
+#[test]
+fn background_notice_sink_prints_nothing() {
+    let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
+
+    background_notice_sink("title generation").emit("subscription limit reached (personal)");
+    printer.flush();
+
+    assert_eq!(err.lock().as_str(), "");
     assert_eq!(out.lock().as_str(), "");
 }
 

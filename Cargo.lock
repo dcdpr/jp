@@ -2499,6 +2499,7 @@ dependencies = [
 name = "jp_attachment_file_content"
 version = "0.1.0"
 dependencies = [
+ "assert_matches",
  "camino",
  "camino-tempfile",
  "crossbeam-channel",
@@ -2506,8 +2507,11 @@ dependencies = [
  "ignore",
  "infer",
  "jp_attachment",
+ "jp_tool",
+ "relative-path",
  "serde",
  "test-log",
+ "thiserror 2.0.20",
  "tokio",
  "tracing",
  "url",

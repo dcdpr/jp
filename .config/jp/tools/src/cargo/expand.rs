@@ -1,7 +1,7 @@
 use camino::Utf8Path;
 use jp_process::{ProcessOutput, ProcessRunner, SystemProcessRunner};
 
-use super::MAX_DIAGNOSTIC_BYTES;
+use super::{CHECKSUM_FRESHNESS_ENV, MAX_DIAGNOSTIC_BYTES};
 use crate::util::{ToolResult, truncate};
 
 /// Cap for expanded source.
@@ -51,11 +51,7 @@ fn cargo_expand_impl<R: ProcessRunner>(
 
     let mut env = vec![("RUST_BACKTRACE", "1"), ("RUSTFLAGS", rustflags)];
     if checksum_freshness {
-        // Use content checksums instead of file mtimes for cargo's freshness
-        // checks, so that sibling checkouts (git worktrees) sharing a target
-        // dir cannot serve each other's stale artifacts. Matches CI. Requires
-        // nightly cargo. See rust-lang/cargo#14136.
-        env.push(("CARGO_UNSTABLE_CHECKSUM_FRESHNESS", "true"));
+        env.extend(CHECKSUM_FRESHNESS_ENV);
     }
 
     let ProcessOutput {

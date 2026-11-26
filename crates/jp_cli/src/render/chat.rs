@@ -83,6 +83,9 @@ enum ContentKind {
     Reasoning,
     Message,
     ToolCall,
+
+    /// A provider notice: a line of chrome that is not part of the response.
+    Notice,
 }
 
 /// What raised the blank-line separator owed before the next rendered content.
@@ -435,6 +438,10 @@ impl ChatRenderer {
             self.flush();
             if prev == ContentKind::ToolCall {
                 self.blank_line_after_tool_call(next);
+            } else if prev == ContentKind::Notice {
+                // A notice ends the reasoning region, so the gap below it is
+                // never shaded.
+                self.printer.eprintln("");
             }
         }
 
@@ -745,7 +752,7 @@ impl ChatRenderer {
         match kind {
             ContentKind::Reasoning => Some(&mut self.reasoning_filter),
             ContentKind::Message => Some(&mut self.message_filter),
-            ContentKind::ToolCall => None,
+            ContentKind::ToolCall | ContentKind::Notice => None,
         }
     }
 
@@ -1222,6 +1229,53 @@ impl ChatRenderer {
             | ReasoningDisplayConfig::Progress
             | ReasoningDisplayConfig::Summary => false,
         }
+    }
+
+    /// Render a provider notice as a line of chrome outside the response.
+    ///
+    /// Flushes any buffered content first so a notice that arrives mid-stream
+    /// appears after the current paragraph, and ends any active reasoning
+    /// region.
+    ///
+    /// Ensures a single blank line above the notice (response content and the
+    /// role header already end with a blank line; tool chrome and prior notices
+    /// do not).
+    /// The blank line below the notice is emitted by the next rendered element,
+    /// or by [`close_notice`] when the notice is the last output of the
+    /// response.
+    ///
+    /// [`close_notice`]: Self::close_notice
+    pub fn render_notice(&mut self, line: &str) {
+        // Flush before ending the reasoning region so any pending separator is
+        // emitted unshaded.
+        self.flush();
+
+        let below_chrome = match self.last_content_kind {
+            Some(ContentKind::ToolCall) => self
+                .tool_drawn
+                .as_ref()
+                .is_none_or(|drawn| drawn.load(Ordering::Relaxed)),
+            Some(ContentKind::Notice) => true,
+            Some(ContentKind::Reasoning | ContentKind::Message) | None => false,
+        };
+        let gap = if below_chrome { "\n" } else { "" };
+        self.printer.eprintln(format!("{gap}{line}"));
+
+        self.last_content_kind = Some(ContentKind::Notice);
+        self.set_response_kind(None);
+    }
+
+    /// Emit a trailing blank line if the last rendered element was a notice.
+    ///
+    /// Returns `true` if a trailing notice was closed.
+    pub fn close_notice(&mut self) -> bool {
+        if self.last_content_kind != Some(ContentKind::Notice) {
+            return false;
+        }
+
+        self.printer.eprintln("");
+        self.last_content_kind = None;
+        true
     }
 
     /// Transition renderer state to tool call mode.

@@ -1,11 +1,14 @@
-use std::time::Duration;
+use std::{collections::BTreeMap, time::Duration};
 
 use assert_matches::assert_matches;
 use async_anthropic::errors::UnifiedRateLimit;
 use indexmap::IndexMap;
-use jp_config::model::{
-    id::ModelIdConfig,
-    parameters::{PartialCustomReasoningConfig, PartialReasoningConfig, ReasoningEffort},
+use jp_config::{
+    model::{
+        id::ModelIdConfig,
+        parameters::{PartialCustomReasoningConfig, PartialReasoningConfig, ReasoningEffort},
+    },
+    types::api_key_env::ApiKeyEnv,
 };
 use jp_conversation::{event::ChatRequest, thread::Thread};
 use jp_test::{
@@ -242,6 +245,69 @@ async fn a_refused_credential_still_fails_the_lookup() {
         result.is_err(),
         "expected the refusal to fail, got {result:?}"
     );
+}
+
+/// A query looks the model up before it sends the turn's first request, both
+/// through one provider.
+/// The lookup has no event stream to report a skipped credential on, so the
+/// request still reports it.
+#[test(tokio::test)]
+async fn a_credential_skipped_during_the_model_lookup_is_reported_by_the_request() {
+    let server = MockServer::start_async().await;
+    let mut config = jp_config::providers::llm::LlmProviderConfig::default().anthropic;
+    config.base_url = server.base_url();
+    config.auth = vec![
+        "api_key:work".parse().unwrap(),
+        "api_key:personal".parse().unwrap(),
+    ];
+    config.api_key_env = ApiKeyEnv::Many(BTreeMap::from([
+        (
+            "work".to_owned(),
+            "JP_TEST_ANTHROPIC_NOTICE_KEY_UNSET".into(),
+        ),
+        (
+            "personal".to_owned(),
+            if cfg!(windows) { "USERNAME" } else { "USER" }.into(),
+        ),
+    ]));
+    let mut provider = Anthropic::with_credential(&config, Credential::ApiKey("unused".to_owned()));
+    provider.fixed_credential = None;
+
+    let model = provider
+        .model_details(&"claude-opus-4-5".parse().unwrap())
+        .await
+        .unwrap();
+    let query = ChatQuery {
+        thread: Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events: ConversationStream::new_test().with_turn("test"),
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
+    };
+
+    // The mock server answers the request itself with a 404. The notice is
+    // yielded before the request is sent, so the failure does not matter here.
+    let events: Vec<_> = provider
+        .chat_completion_stream(&model, query)
+        .await
+        .unwrap()
+        .collect()
+        .await;
+
+    let notices: Vec<_> = events
+        .iter()
+        .filter_map(|event| match event {
+            Ok(Event::Notice(notice)) => Some(notice.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(notices, [
+        "skipping api_key:work: environment variable JP_TEST_ANTHROPIC_NOTICE_KEY_UNSET is not set"
+    ]);
 }
 
 /// An SSE response that always truncates on `max_tokens`, which is the

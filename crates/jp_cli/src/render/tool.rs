@@ -101,6 +101,7 @@ pub struct ToolRenderer {
     /// debt: when text or reasoning renders after a tool result, it supplies
     /// its own spacing and the next tool header must not add a second blank
     /// line.
+    /// The view also raises the debt for a provider notice it renders.
     ///
     /// [`TurnView`]: super::TurnView
     separator: Arc<AtomicBool>,

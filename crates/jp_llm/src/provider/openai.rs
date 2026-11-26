@@ -34,7 +34,7 @@ use serde_json::{Map, Value};
 use tokio::time::{Instant, sleep};
 use tracing::{debug, trace, warn};
 
-use super::{EventStream, ModelDetails, Provider};
+use super::{EventStream, ModelDetails, Provider, notices::SeenNotices};
 use crate::{
     credential::Credential,
     decoding::{ArgumentDecoders, ArgumentDecoding},
@@ -180,6 +180,13 @@ pub struct Openai {
     /// into the clients' default headers, and so does a change of conversation,
     /// which the session header carries.
     client_cache: Arc<Mutex<Option<CachedClients>>>,
+
+    /// Notices this provider has already yielded.
+    ///
+    /// A skipped credential stays skipped for every request a turn sends, and
+    /// the API withholds the same replayed reasoning from each of them, so each
+    /// is reported once rather than on every tool-call cycle.
+    seen_notices: SeenNotices,
 }
 
 /// The clients built for one credential and session, and the pair that
@@ -232,6 +239,7 @@ impl Openai {
             reset_interval: RESET_RETRY_INTERVAL,
             pending_redemption: Arc::new(Mutex::new(None)),
             client_cache: Arc::new(Mutex::new(None)),
+            seen_notices: SeenNotices::default(),
         };
 
         // No model is named at construction, so only account-scoped cooldowns
@@ -577,7 +585,12 @@ impl Provider for Openai {
             // either sends or retires one entry, so the loop is bounded by the
             // chain.
             loop {
-                let notices = std::mem::take(&mut attempt.notices);
+                // Yield notices before sending the request so any notice
+                // marked as seen reaches the caller even if the request fails.
+                for notice in attempt.take_notices(&this.seen_notices) {
+                    yield Ok(Event::Notice(notice));
+                }
+
                 let subscription = attempt.is_subscription();
                 let (client, _) = match this.clients(&attempt, &session) {
                     Ok(clients) => clients,
@@ -602,11 +615,19 @@ impl Provider for Openai {
                     "Request payload."
                 );
 
+                let seen = &this.seen_notices;
                 let started = if buffered {
-                    start_buffered(&client, outgoing, is_structured, reasoning_enabled).await
+                    start_buffered(&client, outgoing, is_structured, reasoning_enabled, seen).await
                 } else {
-                    start_streaming(&client, outgoing, is_structured, reasoning_enabled, &name)
-                        .await
+                    start_streaming(
+                        &client,
+                        outgoing,
+                        is_structured,
+                        reasoning_enabled,
+                        &name,
+                        seen,
+                    )
+                    .await
                 };
 
                 match started {
@@ -614,9 +635,6 @@ impl Provider for Openai {
                         // Admitted, so any credit spent on this entry reached
                         // the host.
                         this.settle_redemption(&attempt);
-                        for notice in notices {
-                            yield Ok(Event::Notice(notice));
-                        }
                         while let Some(event) = response.next().await {
                             yield event;
                         }
@@ -658,9 +676,6 @@ impl Provider for Openai {
                         {
                             redeemed = true;
                             this.record_redemption(&attempt);
-                            for notice in notices {
-                                yield Ok(Event::Notice(notice));
-                            }
                             yield Ok(Event::Notice(notice));
                             continue;
                         }
@@ -677,20 +692,16 @@ impl Provider for Openai {
                                 .redemption_deadline(&attempt)
                                 .is_some_and(|until| Instant::now() < until)
                         {
-                            for notice in notices {
-                                yield Ok(Event::Notice(notice));
-                            }
                             yield Ok(Event::KeepAlive);
                             sleep(this.reset_interval).await;
                             continue;
                         }
 
                         let after_redemption = this.settle_redemption(&attempt);
-                        if let Some(mut next) = this
+                        if let Some(next) = this
                             .advance(&attempt, &error, &name, after_redemption)
                             .await
                         {
-                            next.notices.splice(..0, notices);
                             attempt = next;
                         } else {
                             yield Err(error);
@@ -711,6 +722,7 @@ async fn start_buffered(
     request: Request,
     is_structured: bool,
     reasoning_enabled: bool,
+    seen: &SeenNotices,
 ) -> std::result::Result<EventStream, StreamError> {
     let response = client
         .create(request)
@@ -724,7 +736,7 @@ async fn start_buffered(
         })?
         .map_err(classify_stream_error)?;
 
-    let events = map_non_streaming_response(response, is_structured, reasoning_enabled)
+    let events = map_non_streaming_response(response, is_structured, reasoning_enabled, seen)
         .map_err(|error| StreamError::other(error.to_string()))?;
 
     Ok(stream::iter(events.into_iter().map(Ok::<_, StreamError>)).boxed())
@@ -742,10 +754,12 @@ async fn start_streaming(
     is_structured: bool,
     reasoning_enabled: bool,
     model: &str,
+    seen: &SeenNotices,
 ) -> std::result::Result<EventStream, StreamError> {
     let mut reasoning = ReasoningState::default();
     let mut arguments = StreamedArguments::default();
     let model = model.to_owned();
+    let seen = seen.clone();
     let stream = client
         .stream(request)
         .filter_map(skip_unknown_events)
@@ -757,6 +771,7 @@ async fn start_streaming(
                 reasoning_enabled,
                 &mut reasoning,
                 &mut arguments,
+                &seen,
             ))
         })
         .try_flatten()
@@ -831,6 +846,7 @@ fn map_non_streaming_response(
     response: types::response::Response,
     is_structured: bool,
     reasoning_enabled: bool,
+    seen: &SeenNotices,
 ) -> Result<Vec<Event>> {
     let incomplete_reason = response.incomplete_details.map(|details| details.reason);
     let notices = input_transformation_notices(
@@ -838,6 +854,7 @@ fn map_non_streaming_response(
             .input_transformations
             .as_deref()
             .unwrap_or_default(),
+        seen,
     );
     let mut reasoning = ReasoningState::default();
     let mut arguments = StreamedArguments::default();
@@ -853,6 +870,7 @@ fn map_non_streaming_response(
                 reasoning_enabled,
                 &mut reasoning,
                 &mut arguments,
+                seen,
             )
         })
         .collect::<std::result::Result<Vec<_>, StreamError>>()?;
@@ -1543,6 +1561,7 @@ fn map_event(
     reasoning_enabled: bool,
     reasoning: &mut ReasoningState,
     arguments: &mut StreamedArguments,
+    seen: &SeenNotices,
 ) -> Vec<std::result::Result<Event, StreamError>> {
     use types::Event::*;
 
@@ -1713,6 +1732,7 @@ fn map_event(
                     .input_transformations
                     .as_deref()
                     .unwrap_or_default(),
+                seen,
             );
             notices.into_iter().map(Ok).chain([finished]).collect()
         }
@@ -2731,6 +2751,10 @@ mod fold_tests;
 #[cfg(test)]
 #[path = "openai/latency_tests.rs"]
 mod latency_tests;
+
+#[cfg(test)]
+#[path = "openai/notice_tests.rs"]
+mod notice_tests;
 
 #[cfg(test)]
 #[path = "openai/redeem_tests.rs"]

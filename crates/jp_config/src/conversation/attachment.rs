@@ -35,8 +35,7 @@ impl AssignKeyValue for PartialAttachmentConfig {
             _ => match self {
                 Self::Object(object) => object.assign(kv)?,
                 // A field assigned to a URL attachment edits that part of the
-                // URL: the URL becomes the table that rebuilds it, and the field
-                // is assigned there.
+                // URL: the field is assigned to the table that rebuilds the URL.
                 Self::Url(url) => {
                     let mut object = object_form(url).ok_or_else(|| {
                         format!(
@@ -44,8 +43,19 @@ impl AssignKeyValue for PartialAttachmentConfig {
                              after its scheme; set the whole attachment instead"
                         )
                     })?;
+                    let edits_params = kv.key().clone().trim_prefix("params");
                     object.assign(kv)?;
-                    *self = Self::Object(object);
+
+                    // Editing `params` leaves the URL's path untouched, so keep
+                    // the attachment as a `Url` rebuilt via `<type>://<path>`.
+                    // Editing `path` or `type` converts it to an `Object` table
+                    // so the handler's `table_url` interprets `path`.
+                    *self = if edits_params {
+                        let object = AttachmentObjectConfig::from_partial(object, vec![])?;
+                        Self::Url(object.to_url()?)
+                    } else {
+                        Self::Object(object)
+                    };
                 }
             },
         }
@@ -58,8 +68,8 @@ impl AssignKeyValue for PartialAttachmentConfig {
 /// and everything else after `//` as `path`.
 ///
 /// `None` for a URL without `//` after its scheme, such as `gh:pull/544/diff`.
-/// A table always rebuilds `<type>://<path>`, which an attachment handler reads
-/// as a different URL.
+/// [`AttachmentObjectConfig::to_url`] rebuilds `<type>://<path>`, which an
+/// attachment handler reads as a different URL.
 fn object_form(url: &Url) -> Option<PartialAttachmentObjectConfig> {
     if !url.has_authority() {
         return None;
@@ -166,6 +176,9 @@ impl From<Url> for PartialAttachmentConfig {
 ///
 /// Its URL is `<type>://<path>`, with each `params` entry added as a query
 /// parameter.
+/// For `type = "file"`, `path` is a path relative to the workspace root, taken
+/// exactly as written: a `?`, `#` or `%` in it is part of the file name.
+/// Write options such as exclusions as `params = { exclude = "" }`.
 #[derive(Debug, Clone, PartialEq, Config)]
 pub struct AttachmentObjectConfig {
     /// The type of the attachment.
@@ -221,16 +234,28 @@ impl ToPartial for AttachmentObjectConfig {
 }
 
 impl AttachmentObjectConfig {
-    /// Convert an attachment configuration to a URL.
+    /// Convert an attachment configuration to the generic `<type>://<path>`
+    /// URL, with `params` added as query parameters.
     ///
     /// # Errors
     ///
     /// Returns an error if the URL cannot be constructed due to invalid parts.
     pub fn to_url(&self) -> Result<Url, Error> {
-        let mut url = format!("{}://{}", self.kind, self.path)
+        let url = format!("{}://{}", self.kind, self.path)
             .parse::<Url>()
             .map_err(|e| Error::Custom(Box::new(e)))?;
 
+        self.with_params(url)
+    }
+
+    /// Append `params` to `url` as query parameters, repeating the key for
+    /// array values.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a parameter value is neither a string nor an array
+    /// of strings.
+    pub fn with_params(&self, mut url: Url) -> Result<Url, Error> {
         for (key, value) in &self.params {
             match &value.0 {
                 Value::String(value) => {

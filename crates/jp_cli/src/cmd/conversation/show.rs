@@ -5,7 +5,9 @@ use jp_workspace::ConversationHandle;
 
 use crate::{
     cli::CommandArgs,
-    cmd::{ConversationLoadRequest, Output, conversation_id::PositionalIds},
+    cmd::{
+        ConversationLoadRequest, Output, attachment::attachment_url, conversation_id::PositionalIds,
+    },
     ctx::Ctx,
     format::{
         attachment_detail_item, compaction_detail_item, conversation::DetailsFmt,
@@ -51,7 +53,7 @@ impl Show {
 
             let mut attachments = vec![];
             for attachment in &config.conversation.attachments {
-                attachments.push(attachment_detail_item(&attachment.to_url()?));
+                attachments.push(attachment_detail_item(&attachment_url(attachment)?));
             }
 
             let labels = label_detail_items(&conversation.labels);

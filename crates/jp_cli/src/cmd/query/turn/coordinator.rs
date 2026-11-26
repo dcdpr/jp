@@ -397,7 +397,7 @@ impl TurnCoordinator {
                 if has_unresponded_tool_calls_in_current_turn(stream) {
                     self.view.flush_for_continuation();
                 } else {
-                    self.view.flush();
+                    self.view.finish_response();
                 }
                 // The provider has stopped emitting. Switch the printer's
                 // bounded-latency controller into drain mode so its
@@ -434,7 +434,7 @@ impl TurnCoordinator {
             // credential switch): chrome on stderr, never part of the
             // conversation.
             Event::Notice(notice) => {
-                self.printer.eprintln(notice);
+                self.view.render_notice(&notice);
                 HandleEventOutcome::new(Action::Continue)
             }
         }
