@@ -372,12 +372,9 @@ impl Query {
         // `setup`, so the composed request and the editor's history preview see
         // the compacted stream while nothing is written yet.
         if self.compact.should_compact() {
-            self.apply_pre_query_compaction(
-                &setup,
-                &cfg,
-                &background_notice_sink("pre-query compaction"),
-            )
-            .await?;
+            let notices = background_notice_sink("pre-query compaction");
+            self.apply_pre_query_compaction(&setup, &cfg, &notices)
+                .await?;
         }
 
         // `-u`/`-U` never enter the config, so the turn's choice is resolved
@@ -653,8 +650,7 @@ impl Query {
         // not yet have a summary. A misconfigured summary model logs a warning
         // rather than failing the query.
         if cfg.conversation.turn_summary.generate.auto && ctx.workspace.persists() {
-            let notices = background_notice_sink("turn summary");
-            match TurnSummaryTask::new(cid, &stream, &cfg, notices) {
+            match TurnSummaryTask::new(cid, &stream, &cfg, background_notice_sink("turn summary")) {
                 Ok(Some(task)) => ctx.task_handler.spawn(task),
                 Ok(None) => {}
                 Err(error) => warn!(%error, "Skipping turn summaries."),
