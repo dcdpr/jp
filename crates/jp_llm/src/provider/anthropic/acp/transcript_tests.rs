@@ -1,6 +1,7 @@
-use async_anthropic::types::{MessageContent, MessageRole};
+use async_anthropic::types::MessageRole;
 use camino::Utf8Path;
 use datetime_literal::datetime;
+use jp_attachment::Attachment;
 use jp_config::{AppConfig, PartialAppConfig};
 use jp_conversation::{
     ConversationStream,
@@ -48,7 +49,7 @@ fn query() -> ChatQuery {
 fn thread_prefix_retains_roles_and_tool_pairing() {
     let model = super::super::model_details(&"claude-opus-5".parse().unwrap());
     let prepared = PreparedRequest::new(&model, query()).unwrap();
-    assert_eq!(prepared.prompt, "What is the code?");
+    assert_eq!(prepared.prompt, vec!["What is the code?"]);
     assert_eq!(prepared.system_prompt, "Use the supplied history.");
     assert_eq!(
         serde_json::to_value(&prepared.history).unwrap(),
@@ -117,11 +118,14 @@ fn unsupported_parameters_do_not_block_subscription_requests() {
     query.thread.events.add_config_delta(serde_json::from_value::<PartialAppConfig>(json!({"assistant":{"model":{"parameters":{"temperature":0.4,"top_p":0.8,"top_k":10,"service_tier":"flex","custom_option":true}}}})).unwrap());
     let model = super::super::model_details(&"claude-opus-5".parse().unwrap());
     let prepared = PreparedRequest::new(&model, query).unwrap();
-    assert_eq!(prepared.prompt, "What is the code?");
+    assert_eq!(prepared.prompt, vec!["What is the code?"]);
 }
 
+// Claude Code answers a resumed transcript that ends in a user message by
+// inserting an assistant reply of its own, so unanswered requests go into the
+// prompt together instead of leaving the earlier one in the transcript.
 #[test]
-fn pending_text_is_removed_without_removing_prior_user_blocks() {
+fn consecutive_requests_move_into_the_prompt_together() {
     let mut query = query();
     query.thread.events.extend([ConversationEvent::new(
         ChatRequest::from("One more instruction."),
@@ -129,10 +133,91 @@ fn pending_text_is_removed_without_removing_prior_user_blocks() {
     )]);
     let model = super::super::model_details(&"claude-opus-5".parse().unwrap());
     let prepared = PreparedRequest::new(&model, query).unwrap();
-    assert_eq!(prepared.prompt, "One more instruction.");
-    let last = prepared.history.last().unwrap();
-    assert_eq!(last.role, MessageRole::User);
-    assert_eq!(last.content.0, vec![MessageContent::Text(
-        "What is the code?".into()
+    assert_eq!(prepared.prompt, vec![
+        "What is the code?",
+        "One more instruction."
+    ]);
+    assert_eq!(
+        serde_json::to_value(prepared.history.last().unwrap()).unwrap(),
+        json!({"role":"assistant","content":[{"type":"text","text":"Found it."}]})
+    );
+}
+
+// Tool results have no `session/prompt` form, so they remain at the end of the
+// transcript and the prompt is the continue message.
+#[test]
+fn trailing_tool_results_stay_in_the_transcript() {
+    let timestamp = datetime!(2026-09-11 12:00:00 Z);
+    let mut stream =
+        ConversationStream::new(AppConfig::new_test().into()).with_created_at(timestamp);
+    stream.extend([
+        ConversationEvent::new(ChatRequest::from("Find the code."), timestamp),
+        ConversationEvent::new(
+            ToolCallRequest::new("call_fixed".into(), "lookup".into(), Map::new()),
+            timestamp,
+        ),
+        ConversationEvent::new(
+            ToolCallResponse {
+                id: "call_fixed".into(),
+                result: Ok("DOGWOOD".into()),
+            },
+            timestamp,
+        ),
+    ]);
+    let query: ChatQuery = ThreadBuilder::new()
+        .with_events(stream)
+        .build()
+        .unwrap()
+        .into();
+    let model = super::super::model_details(&"claude-opus-5".parse().unwrap());
+    let prepared = PreparedRequest::new(&model, query).unwrap();
+    assert_eq!(prepared.prompt, vec![
+        "Continue your response exactly from where you left off. Do not repeat content you \
+         already produced."
+    ]);
+    assert_eq!(
+        serde_json::to_value(prepared.history.last().unwrap()).unwrap(),
+        json!({"role":"user","content":[{"type":"tool_result","tool_use_id":"call_fixed","content":"DOGWOOD","is_error":false}]})
+    );
+}
+
+// Document attachments share the first user message with the request text.
+// The documents remain in the transcript as native `document` blocks, keeping
+// their title and context, while the request text moves into the prompt.
+#[test]
+fn attachments_stay_in_the_transcript() {
+    let timestamp = datetime!(2026-09-11 12:00:00 Z);
+    let mut stream =
+        ConversationStream::new(AppConfig::new_test().into()).with_created_at(timestamp);
+    stream.extend([ConversationEvent::new(
+        ChatRequest::from("Summarize the notes."),
+        timestamp,
     )]);
+    let query: ChatQuery = ThreadBuilder::new()
+        .with_attachments(vec![Attachment::text("file:///notes.md", "OAK")])
+        .with_events(stream)
+        .build()
+        .unwrap()
+        .into();
+    let model = super::super::model_details(&"claude-opus-5".parse().unwrap());
+    let prepared = PreparedRequest::new(&model, query).unwrap();
+    assert_eq!(prepared.prompt, vec!["Summarize the notes."]);
+    assert_eq!(prepared.history.len(), 1);
+    let history = serde_json::to_value(&prepared.history[0]).unwrap();
+    assert_eq!(history["role"], "user");
+    assert_eq!(history["content"].as_array().unwrap().len(), 1);
+    assert_eq!(history["content"][0]["type"], "document");
+}
+
+#[test]
+fn an_empty_thread_opens_a_new_session_with_the_continue_message() {
+    let query: ChatQuery = ThreadBuilder::new()
+        .with_events(ConversationStream::new(AppConfig::new_test().into()))
+        .build()
+        .unwrap()
+        .into();
+    let model = super::super::model_details(&"claude-opus-5".parse().unwrap());
+    let prepared = PreparedRequest::new(&model, query).unwrap();
+    assert_eq!(prepared.prompt, vec![CONTINUE_MESSAGE]);
+    assert_eq!(prepared.history, Vec::<Message>::new());
 }

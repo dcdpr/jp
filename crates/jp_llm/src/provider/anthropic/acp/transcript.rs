@@ -33,7 +33,8 @@ use crate::{
 pub(super) struct PreparedRequest {
     pub system_prompt: String,
     pub history: Vec<Message>,
-    pub prompt: String,
+    /// Text blocks of the `session/prompt` request, in order.
+    pub prompt: Vec<String>,
     pub model: Name,
     /// Explicit JP limit.
     /// Absence leaves the runtime's output limit unchanged.
@@ -107,7 +108,7 @@ impl PreparedRequest {
                 .join("\n\n"),
             None => String::new(),
         };
-        let prompt = take_pending_text(&mut request.messages);
+        let prompt = take_pending_prompt(&mut request.messages);
         for message in &mut request.messages {
             for block in &mut message.content.0 {
                 match block {
@@ -196,22 +197,46 @@ pub(super) fn tool_name(name: &str) -> String {
     format!("mcp__jp__{name}")
 }
 
-fn take_pending_text(messages: &mut Vec<Message>) -> String {
-    let Some(last) = messages.last_mut() else {
-        return CONTINUE_MESSAGE.to_owned();
-    };
-    if last.role != MessageRole::User
-        || !matches!(last.content.0.last(), Some(MessageContent::Text(_)))
+/// Extract trailing user text blocks from `messages` for the `session/prompt`
+/// request.
+///
+/// Pops every trailing text block across consecutive user messages, so the
+/// transcript ends on an assistant message whenever the pending user messages
+/// contain only text.
+/// If a transcript ends in a user message, Claude Code inserts an assistant
+/// message reading `"No response requested."` after it on load
+/// (anthropics/claude-code#109781).
+///
+/// Tool results and document attachments stay in `messages`, so a transcript
+/// ending in either still gets that inserted message.
+/// Tool results have no `session/prompt` representation, and attachments stay
+/// in the transcript as native `document` blocks with their title and context
+/// in the cached prefix.
+///
+/// Returns `[CONTINUE_MESSAGE]` when no trailing user text block is present.
+fn take_pending_prompt(messages: &mut Vec<Message>) -> Vec<String> {
+    let mut prompt = Vec::new();
+    while let Some(last) = messages.last_mut()
+        && last.role == MessageRole::User
     {
-        return CONTINUE_MESSAGE.to_owned();
-    }
-    let Some(MessageContent::Text(text)) = last.content.0.pop() else {
-        unreachable!("the last block was checked above")
-    };
-    if last.content.0.is_empty() {
+        while let Some(block) = last.content.0.pop() {
+            let MessageContent::Text(text) = block else {
+                last.content.0.push(block);
+                break;
+            };
+            prompt.push(text.text);
+        }
+        if !last.content.0.is_empty() {
+            break;
+        }
         messages.pop();
     }
-    text.text
+    prompt.reverse();
+
+    if prompt.is_empty() {
+        prompt.push(CONTINUE_MESSAGE.to_owned());
+    }
+    prompt
 }
 
 /// A record in the qualified Claude Code JSONL format.

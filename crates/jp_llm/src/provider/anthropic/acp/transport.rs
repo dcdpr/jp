@@ -478,10 +478,14 @@ pub(super) async fn drive(
                 state.session = Some(session.clone());
                 state.live = true;
             }
-            let request: PromptRequest = serde_json::from_value(
-                json!({"sessionId":session,"prompt":[{"type":"text","text":prepared.prompt}]}),
-            )
-            .map_err(RpcError::into_internal_error)?;
+            let prompt = prepared
+                .prompt
+                .iter()
+                .map(|text| json!({"type":"text","text":text}))
+                .collect::<Vec<_>>();
+            let request: PromptRequest =
+                serde_json::from_value(json!({"sessionId":session,"prompt":prompt}))
+                    .map_err(RpcError::into_internal_error)?;
             peer.request(request).await?;
             let events = {
                 let mut state = foreground_state
