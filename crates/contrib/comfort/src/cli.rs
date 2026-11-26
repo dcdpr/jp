@@ -60,10 +60,6 @@ pub enum Format {
     Markdown,
 }
 
-#[cfg(test)]
-#[path = "cli_tests.rs"]
-mod tests;
-
 /// How the binary was invoked.
 /// Determines whether the empty-args default is stdin (direct) or `--workspace`
 /// (cargo subcommand).
@@ -206,3 +202,7 @@ impl Cli {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "cli_tests.rs"]
+mod tests;

@@ -14,8 +14,6 @@
 //! Rust- and `rust-analyzer`-specific details live in [`rust_analyzer`]; the
 //! rest of the module uses standard LSP requests.
 
-#[cfg(test)]
-mod fixture;
 mod lsp;
 mod outline;
 mod protocol;
@@ -1911,16 +1909,6 @@ fn statement_end(chain: &[Range], line: u32) -> u32 {
         .unwrap_or(line)
 }
 
-#[cfg(test)]
-fn apply_edits(
-    text: &str,
-    edits: &[TextEdit],
-    encoding: PositionEncoding,
-    old: &str,
-) -> Result<String, String> {
-    Ok(splice(text, &edit_spans(text, edits, encoding, old)?))
-}
-
 /// Convert `edits` into sorted byte-offset spans `(start, end, new_text)` in
 /// `text` using `encoding`.
 ///
@@ -2120,5 +2108,4 @@ fn to_usize(value: u32) -> usize {
 }
 
 #[cfg(test)]
-#[path = "code_tests.rs"]
 mod tests;

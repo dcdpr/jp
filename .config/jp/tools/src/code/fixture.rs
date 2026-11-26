@@ -3,7 +3,7 @@
 
 use serde_json::json;
 
-use super::protocol::DocumentSymbol;
+use crate::code::protocol::DocumentSymbol;
 
 pub const STREAM: &str = "\
 use crate::Render;

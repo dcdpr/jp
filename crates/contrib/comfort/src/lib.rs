@@ -29,10 +29,6 @@ pub mod sentence;
 #[cfg(feature = "cli")]
 pub mod walk;
 
-#[cfg(test)]
-#[path = "lib_tests.rs"]
-mod tests;
-
 use std::path::PathBuf;
 #[cfg(feature = "cli")]
 use std::{ffi::OsString, path::Path, process::ExitCode};
@@ -150,3 +146,7 @@ pub enum Error {
     #[error("{0} file(s) would be reformatted")]
     CheckFailed(usize),
 }
+
+#[cfg(test)]
+#[path = "lib_tests.rs"]
+mod tests;

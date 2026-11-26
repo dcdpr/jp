@@ -1,5 +1,5 @@
 use super::{
-    super::{fixture, protocol::Position},
+    super::{protocol::Position, tests::fixture},
     *,
 };
 

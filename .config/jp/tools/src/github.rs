@@ -30,10 +30,6 @@ use pulls::github_pulls;
 use repo::{github_code_search, github_list_files, github_read_file};
 use review::{github_pr_review_add_comment, github_pr_review_add_reply};
 
-#[cfg(test)]
-#[path = "github_tests.rs"]
-mod tests;
-
 const ORG: &str = "dcdpr";
 const REPO: &str = "jp";
 
@@ -280,3 +276,7 @@ fn handle_404(error: jp_github::Error, msg: impl Into<String>) -> Error {
         _ => Box::new(error) as Error,
     }
 }
+
+#[cfg(test)]
+#[path = "github_tests.rs"]
+mod tests;

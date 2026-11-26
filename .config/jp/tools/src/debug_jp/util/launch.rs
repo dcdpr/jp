@@ -325,33 +325,6 @@ impl Launcher for RealLauncher {
     }
 }
 
-/// A [`Launcher`] for tests: returns a canned [`LaunchResult`] without touching
-/// any real process.
-#[cfg(all(test, unix))]
-pub(crate) struct MockLauncher {
-    result: LaunchResult,
-}
-
-#[cfg(all(test, unix))]
-impl MockLauncher {
-    pub(crate) fn returning(result: LaunchResult) -> Self {
-        Self { result }
-    }
-}
-
-#[cfg(all(test, unix))]
-impl Launcher for MockLauncher {
-    fn run(
-        &self,
-        _spec: &LaunchSpec,
-        _timeouts: Timeouts,
-        on_spawn: &mut dyn FnMut(u32),
-    ) -> Result<LaunchResult, Error> {
-        on_spawn(0);
-        Ok(self.result.clone())
-    }
-}
-
 /// Send a `CTRL_BREAK_EVENT` to jp's process group.
 /// Best-effort: a failure means the process already exited. jp leads its own
 /// group (see [`spawn`]), so the event reaches jp plus any children still in
@@ -458,10 +431,6 @@ fn signal_group(pid: u32, sig: libc::c_int) {
     }
 }
 
-#[cfg(all(test, unix))]
-#[path = "launch_tests.rs"]
-mod tests;
-
 /// Drain a captured pipe to completion on its own thread.
 fn spawn_reader<R: Read + Send + 'static>(
     reader: Option<R>,
@@ -483,3 +452,6 @@ fn join_reader(handle: Option<thread::JoinHandle<Vec<u8>>>) -> String {
         .and_then(|h| h.join().ok())
         .map_or_default(|bytes| String::from_utf8_lossy(&bytes).into_owned())
 }
+
+#[cfg(all(test, unix))]
+pub(crate) mod tests;

@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use super::*;
-use crate::debug_jp::util::launch::{LaunchResult, MockLauncher, Termination};
+use crate::debug_jp::util::launch::{LaunchResult, Termination, tests::mock::MockLauncher};
 
 fn launched(stderr: impl Into<String>, termination: Termination) -> LaunchResult {
     LaunchResult {

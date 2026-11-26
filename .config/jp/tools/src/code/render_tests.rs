@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use pretty_assertions::assert_eq;
 
-use super::{super::fixture, *};
+use super::{super::tests::fixture, *};
 
 fn stream_source() -> Rc<[String]> {
     fixture::stream_lines().into()

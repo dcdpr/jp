@@ -3,7 +3,10 @@ use std::path::Path;
 use pretty_assertions::assert_eq;
 use serde_json::json;
 
-use super::{fixture, *};
+use super::*;
+
+#[path = "fixture.rs"]
+pub(super) mod fixture;
 
 fn items() -> Vec<Item> {
     outline::flatten(&fixture::stream_symbols())
@@ -435,4 +438,13 @@ fn a_windows_file_is_relative_to_its_verbatim_root() {
         relative_to(Utf8Path::new(r"c:\Users\runner\other\src\lib.rs"), root),
         None
     );
+}
+
+fn apply_edits(
+    text: &str,
+    edits: &[TextEdit],
+    encoding: PositionEncoding,
+    old: &str,
+) -> Result<String, String> {
+    Ok(splice(text, &edit_spans(text, edits, encoding, old)?))
 }
