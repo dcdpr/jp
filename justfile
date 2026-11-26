@@ -141,7 +141,7 @@ serve-web-watch *ARGS:
         exit 1
     fi
 
-    jp="$(cargo metadata --format-version 1 | jq -r .build_directory)/debug/jp"
+    jp="$(cargo metadata --format-version 1 | jq -r .target_directory)/debug/jp"
 
     # A tree that does not compile is not a reason to refuse to start. The loop
     # below waits for the watcher to report a build that does, which is the state
@@ -3034,11 +3034,11 @@ _install-registry-plugin PLUGIN PROFILE="dev":
 
     dir="$data/plugins/command"
     mkdir -p "$dir"
-    build=$(cargo metadata --format-version 1 | jq -r .build_directory)
+    target=$(cargo metadata --format-version 1 | jq -r .target_directory)
 
     # Copy beside the target and rename, so replacing the binary of a server
     # that's still running can't fail on a busy file.
-    cp "$build/$out/$bin" "$dir/.$bin.new"
+    cp "$target/$out/$bin" "$dir/.$bin.new"
     chmod 755 "$dir/.$bin.new"
     mv -f "$dir/.$bin.new" "$dir/$bin"
     echo "Installed $bin to $dir" >&2
