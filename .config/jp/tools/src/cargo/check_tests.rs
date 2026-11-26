@@ -450,8 +450,9 @@ fn clippy_gets_no_profile_flag_unless_configured() {
     );
 }
 
-/// Content-based freshness has to reach cargo: the unstable flag, and the
-/// `build.fingerprint` setting it unlocks, which defaults to `mtime`.
+/// Both `CARGO_UNSTABLE_CHECKSUM_FRESHNESS` and `CARGO_BUILD_FINGERPRINT` must
+/// be passed to Cargo: the unstable flag only unlocks `build.fingerprint`,
+/// which defaults to `mtime`.
 ///
 /// Sibling git worktrees share a target directory, and mtime-based freshness
 /// lets one checkout serve the other's stale artifacts; content checksums are

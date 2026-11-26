@@ -400,8 +400,6 @@ fn rm_removes_a_file_attachment_whose_file_is_gone() {
     assert_eq!(*err.lock(), "");
 }
 
-/// File names holding characters a URL reads as delimiters, and the URL each is
-/// stored and reported as.
 #[cfg(not(windows))]
 const DELIMITER_NAMES: [(&str, &str); 3] = [
     ("reports/Issue #42.md", "file:///reports/Issue%20%2342.md"),
@@ -429,9 +427,10 @@ fn rm_of_a_bare_path_removes_the_file_table_for_it() {
     let (mut ctx, out, err, tmp) = persisted_ctx(id, config);
     let rt = ctx.handle().clone();
 
-    // `parse_unchecked` resolves a relative path against the process directory,
-    // so the paths are given absolute, under the workspace root. They are built
-    // as paths directly: `from_str` reads a Windows drive letter as a URL scheme.
+    // `parse_unchecked` resolves relative paths against the process working
+    // directory, so pass absolute paths under the workspace root. Construct
+    // `AttachmentUrlOrPath::Path` directly because `from_str` parses a Windows
+    // drive letter (`C:\...`) as a URL scheme.
     let handle = ctx.workspace.acquire_conversation(&id).unwrap();
     let rm = rm::Rm {
         attachments: DELIMITER_NAMES

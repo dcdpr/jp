@@ -29,14 +29,14 @@ use install_tools::cargo_install_tools;
 use test::cargo_test;
 use update::cargo_update;
 
-/// Environment that makes cargo decide freshness by file contents rather than
-/// mtimes, so sibling checkouts (git worktrees) sharing a target dir cannot
-/// serve each other's stale artifacts.
+/// Environment variables that configure Cargo to determine artifact freshness
+/// from file content checksums rather than mtimes, preventing sibling git
+/// worktrees that share a target directory from serving stale artifacts.
 /// Matches CI.
 ///
-/// Requires nightly cargo.
+/// Requires nightly Cargo.
 /// `-Zchecksum-freshness` only unlocks the setting; `build.fingerprint =
-/// "content"` turns it on, and defaults to `mtime`.
+/// "content"` enables it (the default remains `mtime`).
 /// See rust-lang/cargo#14136.
 const CHECKSUM_FRESHNESS_ENV: [(&str, &str); 2] = [
     ("CARGO_UNSTABLE_CHECKSUM_FRESHNESS", "true"),
