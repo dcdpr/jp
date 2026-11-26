@@ -20,8 +20,8 @@ function token(type, fields = {}) {
     return Object.assign(new Token(type, fields.tag ?? '', fields.nesting ?? 0), fields)
 }
 
-// A stand-in for markdown-it's inline parser: a run of text, and each `<...>`
-// as an `html_inline` token.
+// Mock markdown-it's inline parser: split input into text tokens and
+// `html_inline` tokens for `<...>`.
 function parseInline(content) {
     return content
         .split(/(<[^>]*>)/)
@@ -37,7 +37,8 @@ function paragraph(content, map) {
     ]
 }
 
-// Each token as `type: content`, children indented under their inline token.
+// Format each token as `type: content`, with child tokens indented under their
+// parent `inline` token.
 function shape(tokens) {
     return tokens.flatMap(t => [
         t.type === 'inline' ? `inline: ${t.content}` : t.type,
@@ -60,8 +61,8 @@ test('a placeholder inside a paragraph is text', () => {
     ])
 })
 
-// The failure that broke the build: a wrapped line starting with `<id>` ends
-// the paragraph and becomes an HTML block of its own.
+// A wrapped line starting with `<id>` terminates the preceding paragraph and is
+// parsed as an `html_block`.
 test('a placeholder starting a line rejoins the paragraph it interrupted', () => {
     const tokens = [
         ...paragraph('only the text views print a sentence (now "No attachments in', [0, 1]),
@@ -124,8 +125,8 @@ test('a comment and a self-closing component stay markup', () => {
     ])
 })
 
-// A type name written outside a code span reads as a component, but it is
-// never self-closing, so it is text too.
+// A capitalized type parameter outside a code span looks like a Vue component
+// tag, but it is not self-closing and is treated as plain text.
 test('a capitalized placeholder is text', () => {
     const tokens = paragraph('Returns Vec<String> on success.', [0, 1])
 
