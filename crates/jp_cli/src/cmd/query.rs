@@ -59,6 +59,7 @@ mod mcp_startup;
 mod mounts;
 mod quote;
 mod stream;
+mod thread;
 pub(crate) mod tool;
 mod turn;
 mod turn_loop;

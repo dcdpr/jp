@@ -1,7 +1,10 @@
+use camino::Utf8Path;
+use jp_config::AppConfig;
 use jp_conversation::event::TurnStart;
+use jp_printer::Printer;
 
 use super::*;
-use crate::cmd::query::PendingStreamTrim;
+use crate::cmd::query::Query;
 
 /// Append a turn whose structured response is `data`.
 fn add_structured_turn(stream: &mut ConversationStream, data: Value) {
@@ -84,11 +87,22 @@ fn turn_structured_data_takes_a_replayed_turns_answer() {
     let mut stream = stream_with_structured(serde_json::json!({"turn": 1}));
     let before = last_request_id(&stream);
 
-    PendingStreamTrim {
-        replay_turn: true,
-        pop_request: false,
+    let built = Query {
+        replay: true,
+        ..Default::default()
     }
-    .apply(&mut stream);
+    .build_conversation(
+        "",
+        None,
+        &stream,
+        true,
+        &AppConfig::new_test(),
+        Utf8Path::new("/tmp"),
+        &Printer::sink(),
+    )
+    .unwrap();
+    built.pending_trim.apply(&mut stream);
+    assert_eq!(stream.turn_count(), 0, "--replay removes the turn it replays");
     add_structured_turn(&mut stream, serde_json::json!({"turn": 2}));
 
     assert_eq!(

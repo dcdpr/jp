@@ -56,6 +56,7 @@ use super::{
         ResponseBoundary, StreamErrorOutcome, StreamRetryState, agent_restart_is_safe,
         commit_partial_response, handle_stream_error,
     },
+    thread::{build_sections, build_thread},
     tool::{
         Host, PendingTools, ToolCallState, ToolCoordinator, ToolEvent, ToolPrompter, ToolRenderer,
         build_execution_plan,
@@ -64,7 +65,6 @@ use super::{
         unresponded_requests,
     },
     turn::{Action, CommittedEvent, TurnCoordinator, TurnEnding, TurnPhase, TurnState},
-    turn_start::{build_sections, build_thread},
 };
 use crate::{
     cmd::{

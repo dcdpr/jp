@@ -328,10 +328,10 @@ pub(super) struct BuiltConversation {
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct PendingStreamTrim {
     /// Remove the conversation's last turn (`--replay`).
-    pub(super) replay_turn: bool,
+    replay_turn: bool,
     /// Remove the trailing [`ChatRequest`] event (bare `--no-edit` replaying
     /// the last request).
-    pub(super) pop_request: bool,
+    pop_request: bool,
 }
 
 impl PendingStreamTrim {
