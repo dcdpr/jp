@@ -10,19 +10,19 @@
       "binaries": {
         "aarch64-apple-darwin": {
           "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-gui-aarch64-apple-darwin",
-          "sha256": "8cda2b5bec3130c2b9c54c5ea843895eae8de8e5d38671651981bd0a75e943af"
+          "sha256": "302da6695cab98d80b746ab2e97caf016afeddfcc36220cbf7447f442be833b6"
         },
         "x86_64-apple-darwin": {
           "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-gui-x86_64-apple-darwin",
-          "sha256": "36a25a7bc133ac700467423529ea69a1bbdda7a17184c0c4f8339fb2ca45600a"
+          "sha256": "34d4828f6751c4ed06f0fe0024bdb39863d5699cf948601432c9bc82c45f2e80"
         },
         "x86_64-pc-windows-msvc": {
           "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-gui-x86_64-pc-windows-msvc",
-          "sha256": "f440eb606992c21f537644abbc157f0436c2d8ced9c2ba1c5f27b430364ea7a4"
+          "sha256": "1304188d7955e1d5a68b78bdb4b876da5e716ee63cceaee422d1593c15a0877e"
         },
         "x86_64-unknown-linux-gnu": {
           "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-gui-x86_64-unknown-linux-gnu",
-          "sha256": "e9ffbf8830b2b6d7345d0417c47519bd73ef81f7e623ec55e0c4a7acb02da692"
+          "sha256": "70d92b52c6e76d72110e927f0b4ec4ee427449d9521339d2886b1b775d1ed470"
         }
       }
     },
@@ -35,19 +35,19 @@
       "binaries": {
         "aarch64-apple-darwin": {
           "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-path-aarch64-apple-darwin",
-          "sha256": "f936434d5d13f9aa00eb9737b407061fec41d3862b1bff72bdc600db270caeca"
+          "sha256": "57f5b42d34d474a4a925bd5a25a782d83177082c84a47db03cbe32e9d7376dca"
         },
         "x86_64-apple-darwin": {
           "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-path-x86_64-apple-darwin",
-          "sha256": "5e2cb002922441cee08e22b38b457cbc49b4d4c8cc76a238c3fc8e8a8e197f86"
+          "sha256": "9825a068fb270b5702f21162bb38029a76cde077d4bd35bdfef8ee5cf4b6dcc4"
         },
         "x86_64-pc-windows-msvc": {
           "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-path-x86_64-pc-windows-msvc",
-          "sha256": "c6f308a6379f1d7db7af3ec2a15baf8e24fab5917ae02e278a50506ce4888f14"
+          "sha256": "5fd7b12716e30ab5afeb25207ad66f119c20f05a39a2370dc2b8937d40061e35"
         },
         "x86_64-unknown-linux-gnu": {
           "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-path-x86_64-unknown-linux-gnu",
-          "sha256": "761f3a9d856bd8e72e3826b855e2599c0c07b63c59284559ca6b2970a6eaa571"
+          "sha256": "5f705f3845c24c43ade17d4683eb6467452770a32cd8e9df73a9fe7145ae7b3e"
         }
       }
     },
@@ -72,19 +72,19 @@
       "binaries": {
         "aarch64-apple-darwin": {
           "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-serve-web-aarch64-apple-darwin",
-          "sha256": "71a285ad3434d590d445761852e231c563dea18b59df36ae50f2c9d29e5f6564"
+          "sha256": "db00ef84bd372d78a56f1c57b26de68850f8cd0d13c892f783a4122a902fa879"
         },
         "x86_64-apple-darwin": {
           "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-serve-web-x86_64-apple-darwin",
-          "sha256": "0190a255e64d8712c8dde41eebe2c102dcbe609f163c72dbf2c1ff4eaeec53b5"
+          "sha256": "b5cd4fd081d83cfc76954a1a1166d74cbc6732fccd798689ecd7f8ee7028773a"
         },
         "x86_64-pc-windows-msvc": {
           "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-serve-web-x86_64-pc-windows-msvc",
-          "sha256": "f6f2ea5dc6bc690aac691792403543c08acb3b9564c694d13b609fd42e058a36"
+          "sha256": "4d52afe3a7e143f3f52a0426756ab84a03c733b9e69adf860727a1eac3fc3372"
         },
         "x86_64-unknown-linux-gnu": {
           "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-serve-web-x86_64-unknown-linux-gnu",
-          "sha256": "2db0db234d98085458fc763d8c24fcdad2873c1ddc552a1ff270227b8124ff45"
+          "sha256": "d69f899903963d4b5e05899b258322dcbdffa526e1a35d168b29c083a2122c9f"
         }
       }
     }
