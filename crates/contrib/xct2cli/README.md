@@ -46,6 +46,8 @@ than fixed, so a diff against a fresh checkout stays readable.
   `xctrace` produces, at the single point in `xctrace::Xctrace` where its output
   is returned.
   See "A recorded trace is a secret" below.
+- **Module layout.** Upstream's `foo/mod.rs` files are `foo.rs`, and tests sit in
+  `*_tests.rs` files, as the rest of the workspace lays them out (W-0e0vd74).
 - **Removed:** the `xct2cli` binary and its `cli` feature; `render`, which
   formatted reports for a terminal; `analysis::annotate`, which annotated
   disassembly; `analysis::{pmi, counters}`, which read hardware performance

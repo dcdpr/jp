@@ -52,7 +52,7 @@ pinned, when `qual` reports it.
 
 - [x] Audit existing `#[cfg(test)]` sites across the workspace.
 - [x] Write the check, red against the current tree.
-- [ ] Convert the `mod.rs` files.
+- [x] Convert the `mod.rs` files.
 - [ ] Move trailing test modules into one declaration, and inline test modules
       into test files.
 - [ ] Move or remove the test-only items, crate by crate.

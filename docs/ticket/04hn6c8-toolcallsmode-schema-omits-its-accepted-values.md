@@ -25,7 +25,7 @@ whose whole vocabulary is four fixed strings.
 It is the only `string_default()` in `jp_config`.
 Its sibling on the same rule, `ReasoningMode`, derives `ConfigEnum`, which
 generates `schema.enumerable(EnumType::from_fields(...))`
-(`crates/contrib/schematic_macros/src/config_enum/mod.rs:270-280`) and does
+(`crates/contrib/schematic_macros/src/config_enum.rs:270-280`) and does
 carry its variants.
 The two keys sit next to each other in `CompactionRuleConfig` and describe their
 values to a schema consumer differently.
