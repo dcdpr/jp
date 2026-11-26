@@ -1,70 +1,66 @@
-# Enforce `#[cfg(test)]` on a trailing tests module only
+# Keep all test code in test files behind one declaration
 
-- **Status**: Todo
+- **Status**: In Progress
 - **Authors**: jp
 - **Date**: 2026-11-11
 - **Label**: domain=tooling
 - **Label**: type=task
 
-By convention, a module's unit tests live in `<module>_tests.rs`, and the only
-`#[cfg(test)]` attribute in `<module>.rs` is on the trailing `mod tests;`
-declaration at the end of the file:
+Bring the workspace onto the test layout in W-0e0vd74: test code lives in test
+files, and a production file reaches them through one declaration, its last
+item.
 
-```rust
-#[cfg(test)]
-#[path = "<module>_tests.rs"]
-mod tests;
-```
+An early `#[cfg(test)]` breaks rustqual's file-length check, which stops
+counting production lines at the first line starting with `#[cfg(test)]`
+(T-0yh5j3r items 1 and 9): `anthropic.rs` once counted as 22 lines.
+It also sets a precedent the next contributor copies.
+Clippy covers neither: `items_after_test_module` ignores out-of-line `mod
+tests;` declarations, and `tests_outside_test_module` only checks `#[test]`
+functions.
 
-This convention is not yet enforced by CI.
-Several production files place `#[cfg(test)]` items earlier in the file:
-`crates/jp_llm/src/provider/openai.rs` has 18 `#[cfg(test)]` attributes,
-`anthropic.rs` has 13, `google.rs` has 4, and
-`crates/jp_cli/src/cmd/conversation_id.rs` has 3.
-Those items fall into three categories:
+The audit in comment #3 lists where the workspace stood; `cargo run --package
+test-layout` lists where it stands.
 
-- test-only constructors and `impl` blocks on production types
-  (`Openai::with_credential`, `#[cfg(test)] impl Google`);
-- test-support statics and types used by other modules' tests (`TEST_SUPPORT`,
-  `API_ROUTE`);
-- additional test modules declared near the top of the file (`openai.rs`
-  declares six `#[path = "openai/…_tests.rs"]` modules).
+## Dependency injection
 
-Beyond style consistency, early `#[cfg(test)]` attributes break `rustqual`'s
-file-length check: `rustqual` stops counting production lines at the first
-`#[cfg(test)]` in a file, causing `anthropic.rs` (~3,700 lines) to count as 22
-production lines and pass the 800-line `SRP-002` limit (T-0yh5j3r item 9).
+Code that has no test-only form to move is rewritten:
 
-## The rule
+- **Clock.** One clock abstraction for the workspace, replacing
+  `Ctx::stubbed_now`, its `set_now`, and the twin `now()` functions, and
+  `serve-chat`'s `Box<dyn Fn() -> NaiveDate>`.
+  Production uses the system clock; tests install a fixed one.
+  Direct `Utc::now()` and `Local::now()` calls in code under test move onto it.
+- **Provider.** `Ctx` and `TurnInputs` carry a provider factory instead of
+  `stubbed_provider`; production builds providers with `provider::get_provider`.
+  `run_locked`'s `provider::preflight` keeps reading the config directly.
+- **`grizzly`.** `BearDb` takes a connection opener instead of the
+  `DbPath::Memory` variant, and `open` and `in_memory` share one
+  schema-discovering constructor.
 
-- Every `#[cfg(test)]` attribute in a production file must be on a trailing
-  module declaration (`#[path = "…_tests.rs"] mod tests;` or `mod
-  test_support;`).
-- No non-test items may follow the first `#[cfg(test)]` module declaration.
-- No inline `#[cfg(test)] mod tests { … }` blocks.
+## The check
 
-Clippy does not cover this: `items_after_test_module` ignores out-of-line
-`#[path = "..."] mod tests;` declarations, and `tests_outside_test_module` only
-checks `#[test]` functions.
+`crates/internal/test-layout` is the check, and stays one: the rule is syntax
+and the module tree, which `syn` covers, so the dylint library proposed in
+T-1dhk8ac would add a pinned nightly and an extra type-check for nothing.
+`just lint-ci` runs it, and `cargo_check` reports its findings, so an assistant
+sees a breach as soon as it writes one.
 
-## Decide
-
-- Where to place each of the three categories of test-only items.
-  Test-only constructors need access to private fields on the parent type, so
-  they cannot move into an unrelated module's test file.
-- Whether a module may declare multiple test files, and whether all of them must
-  appear at the end of the file.
-- How to enforce the rule: a text check in `just lint-ci` alongside the existing
-  checks, or a custom lint in the `dylint` library (T-1dhk8ac, which already
-  tracks inline test modules).
-- Whether `cfg(any(test, …))` and `cfg_attr(test, …)` are in scope.
+A file that ends up over 800 production lines once counted in full is split, or
+pinned, when `qual` reports it.
 
 ## Then
 
 - [x] Audit existing `#[cfg(test)]` sites across the workspace.
-- [ ] Move them to trailing module declarations, or exempt any that must stay.
-- [ ] Add the enforcement check to CI.
-- [ ] Document the rule in the `rust-development` skill.
+- [x] Write the check, red against the current tree.
+- [ ] Convert the `mod.rs` files.
+- [ ] Move trailing test modules into one declaration, and inline test modules
+      into test files.
+- [ ] Move or remove the test-only items, crate by crate.
+- [ ] Inject the clock, the provider factory, and `grizzly`'s connection opener.
+- [ ] Settle the `SRP-002` findings the full counts produce.
+- [ ] Run the check in `just lint-ci` and report it from `cargo_check`.
+- [ ] Point the `rust-development` skill and the Rust project conventions at
+      W-0e0vd74.
 
 ## Comments
 

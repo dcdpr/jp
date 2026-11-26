@@ -1,0 +1,37 @@
+[package]
+description = "Check that a workspace keeps its test code in test files."
+name = "test-layout"
+
+authors.workspace = true
+documentation.workspace = true
+edition.workspace = true
+license-file.workspace = true
+publish.workspace = true
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+camino = { workspace = true }
+cargo_metadata = { workspace = true }
+# Needed for `Span::start()` line numbers outside a proc macro.
+proc-macro2 = { workspace = true, features = ["span-locations"] }
+syn = { workspace = true, features = ["full", "parsing", "visit"] }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+indoc = { workspace = true }
+pretty_assertions = { workspace = true, features = ["std"] }
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false
+
+# No tests of its own: keeps cargo from building and listing an empty test
+# binary.
+[[bin]]
+name = "test-layout"
+path = "src/main.rs"
+test = false
