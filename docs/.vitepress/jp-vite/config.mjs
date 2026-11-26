@@ -1,6 +1,7 @@
 import { posix } from 'node:path'
 
 import { embedSections, lineRange } from './embed.mjs'
+import { escapeHtml } from './escape-html.mjs'
 import { joinInlineCode } from './join-inline-code.mjs'
 import { metadataHeader } from './meta-header.mjs'
 import { devServer } from './middleware.mjs'
@@ -53,6 +54,9 @@ export function withJpVite(config = {}) {
             }, markdown.preConfig),
             config: chain((md) => {
                 escapeInlineCodeInterpolation(md)
+                // First, so the HTML the rules below add is left alone. See
+                // `./escape-html.mjs`.
+                escapeDocumentHtml(md)
                 // Before the links are rewritten, so the links an embed adds
                 // are rewritten like any other. See `./embed.mjs`.
                 embedSections(md)
@@ -213,6 +217,24 @@ function compactMetadata(md) {
         if (!kind) return
 
         metadataHeader(state.tokens, state.Token, { kind })
+    })
+}
+
+// Show raw HTML in an RFD, ticket, or wiki page as text, so a placeholder such
+// as `<id>` written outside a code span can't fail the site build. See
+// `./escape-html.mjs`.
+//
+// An embedded section is parsed as its own page, so this runs there too.
+function escapeDocumentHtml(md) {
+    md.core.ruler.push('jp_vite_escape_html', (state) => {
+        const page = state.env?.relativePath
+        if (!page || !isDocumentPage(page, readSettings())) return
+
+        escapeHtml(state.tokens, state.Token, (content) => {
+            const children = []
+            state.md.inline.parse(content, state.md, state.env, children)
+            return children
+        })
     })
 }
 

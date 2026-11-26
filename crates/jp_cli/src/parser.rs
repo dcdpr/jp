@@ -46,7 +46,25 @@ pub(crate) enum AttachmentUrlOrPath {
 }
 
 impl AttachmentUrlOrPath {
+    /// Convert this argument into an attachment URL, requiring any file path to
+    /// exist on disk.
+    ///
+    /// When `root` is provided, file paths must reside within the workspace and
+    /// are made relative to `root`.
     pub fn parse(&self, root: Option<&Utf8Path>) -> Result<Url> {
+        self.to_url(root, true)
+    }
+
+    /// Convert this argument into an attachment URL without checking whether a
+    /// file path exists on disk.
+    ///
+    /// Path resolution matches [`Self::parse`], producing the same URL that was
+    /// stored when the file was attached.
+    pub fn parse_unchecked(&self, root: Option<&Utf8Path>) -> Result<Url> {
+        self.to_url(root, false)
+    }
+
+    fn to_url(&self, root: Option<&Utf8Path>, require_exists: bool) -> Result<Url> {
         let path = match &self {
             AttachmentUrlOrPath::Url(url) => return Ok(url.clone()),
             AttachmentUrlOrPath::Path(path) => path,
@@ -77,7 +95,7 @@ impl AttachmentUrlOrPath {
                 })?;
             }
 
-            if !path.exists() {
+            if require_exists && !path.exists() {
                 return Err(Error::Attachment(format!(
                     "Attachment path does not exist: {path}",
                 )));
@@ -96,7 +114,7 @@ impl AttachmentUrlOrPath {
             };
 
             path = p.to_path_buf();
-        } else if !path.exists() {
+        } else if require_exists && !path.exists() {
             return Err(Error::Attachment(format!(
                 "Attachment path does not exist: {path}",
             )));

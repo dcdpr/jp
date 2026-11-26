@@ -1373,6 +1373,32 @@ fn test_tool_use_forces_a_disabled_tool_for_one_turn() {
     );
 }
 
+/// `jp q -a` refuses a retired MCP resource URI the same way `jp attachment
+/// add` does, rather than storing one that fails every later query.
+#[test]
+fn query_attachment_flag_refuses_a_retired_mcp_attachment() {
+    let uri = "mcp+github-mcp-server+repo://owner/name";
+    let query = Query {
+        attachments: vec![AttachmentUrlOrPath::Url(Url::parse(uri).unwrap())],
+        ..Default::default()
+    };
+
+    let error =
+        IntoPartialAppConfig::apply_cli_config(&query, None, PartialAppConfig::default(), None)
+            .expect_err("a retired attachment is refused");
+
+    assert_eq!(error.to_string(), format!("Attachment error for {uri}"));
+    assert_eq!(
+        std::error::Error::source(error.as_ref())
+            .map(ToString::to_string)
+            .as_deref(),
+        Some(
+            "MCP resource attachments are retired and can no longer be added: \
+             `mcp+github-mcp-server+repo://owner/name`"
+        )
+    );
+}
+
 #[test]
 fn test_tool_use_accepts_an_if_named_tool() {
     // `explicit_tool` is off with `allow_toggle = if_named`. A named force is

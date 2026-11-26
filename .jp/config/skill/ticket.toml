@@ -74,6 +74,11 @@ The `plan` tool tracks your own steps through this conversation and is gone \
 with it; a ticket's checklist records the work and outlasts it, so check an \
 item when its work lands, not when a step of your plan finishes.
 
+A ticket's status lives in its file, so it travels with the branch like the \
+code does. Close a ticket in the branch that finishes its work, as soon as the \
+work is done, rather than leaving it In Progress until the change is committed \
+or merged: the closure reaches `main` in the same commit as the fix.
+
 Find tickets mentioning something with `ticket_list`'s `query`, and use \
 `fs_grep_files` over `docs/ticket/` for a pattern; the id in a ticket's \
 filename is the one the tools accept.

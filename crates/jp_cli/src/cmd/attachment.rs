@@ -13,14 +13,19 @@ use jp_attachment_internal::{
 };
 use jp_attachment_mcp_resources as _;
 use jp_config::{Config as _, PartialAppConfig, conversation::attachment::AttachmentConfig};
-use jp_workspace::Workspace;
+use jp_conversation::stream::ApplyDelta;
+use jp_workspace::{ConversationHandle, ConversationLock};
 use tracing::{debug, trace, warn};
 use url::Url;
 
-use super::Output;
+use super::{
+    ConversationLoadRequest, Output,
+    lock::{LockOutcome, LockRequest, acquire_lock},
+    target::TargetGrammar,
+};
 use crate::{
-    IntoPartialAppConfig,
     cli::{CommandArgs, subcommand_of, unread_subcommand},
+    config_pipeline::override_to_record,
     ctx::Ctx,
     error::{Error, Result},
 };
@@ -42,17 +47,17 @@ impl CommandArgs for Attachment {
             .arg_required_else_help(true)
             .subcommand(
                 add::Add::augment(Command::new("add"))
-                    .about("Add attachment to context")
+                    .about("Add attachments to a conversation")
                     .alias("a"),
             )
             .subcommand(
                 rm::Rm::augment(Command::new("rm"))
-                    .about("Remove attachment from context")
+                    .about("Remove attachments from a conversation")
                     .alias("r"),
             )
             .subcommand(
                 ls::Ls::augment(Command::new("ls"))
-                    .about("List attachments in context")
+                    .about("List a conversation's attachments")
                     .alias("l"),
             )
             .subcommand(
@@ -76,27 +81,21 @@ impl CommandArgs for Attachment {
 }
 
 impl Attachment {
-    pub(crate) async fn run(self, ctx: &mut Ctx) -> Output {
+    pub(crate) async fn run(self, ctx: &mut Ctx, handles: Vec<ConversationHandle>) -> Output {
         match self.command {
-            Commands::Add(args) => args.run(ctx),
-            Commands::Remove(args) => args.run(ctx),
-            Commands::List(args) => args.run(ctx),
+            Commands::Add(args) => args.run(ctx, handles).await,
+            Commands::Remove(args) => args.run(ctx, handles).await,
+            Commands::List(args) => args.run(ctx, &handles),
             Commands::Print(args) => args.run(ctx).await,
         }
     }
-}
 
-impl IntoPartialAppConfig for Attachment {
-    fn apply_cli_config(
-        &self,
-        workspace: Option<&Workspace>,
-        partial: PartialAppConfig,
-        merged_config: Option<&PartialAppConfig>,
-    ) -> std::result::Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
+    pub(crate) fn conversation_load_request(&self) -> ConversationLoadRequest {
         match &self.command {
-            Commands::Add(args) => args.apply_cli_config(workspace, partial, merged_config),
-            Commands::Remove(args) => args.apply_cli_config(workspace, partial, merged_config),
-            Commands::List(_) | Commands::Print(_) => Ok(partial),
+            Commands::Add(args) => args.conversation_load_request(),
+            Commands::Remove(args) => args.conversation_load_request(),
+            Commands::List(args) => args.conversation_load_request(),
+            Commands::Print(_) => ConversationLoadRequest::none(),
         }
     }
 }
@@ -107,6 +106,47 @@ enum Commands {
     Remove(rm::Rm),
     List(ls::Ls),
     Print(print::Print),
+}
+
+/// Lock the conversation `handles` resolved to.
+///
+/// Returns the target error for `grammar` when no conversation was resolved.
+async fn lock_target(
+    ctx: &Ctx,
+    handles: Vec<ConversationHandle>,
+    grammar: TargetGrammar,
+) -> Result<ConversationLock> {
+    let Some(handle) = handles.into_iter().next() else {
+        return Err(Error::from(grammar));
+    };
+
+    let id = handle.id();
+    match acquire_lock(LockRequest::from_ctx(handle, ctx)).await? {
+        LockOutcome::Acquired(lock) => Ok(lock),
+        // The request offers neither choice, so the lock was not acquired.
+        LockOutcome::NewConversation | LockOutcome::ForkConversation(_) => {
+            Err(Error::LockTimeout(id))
+        }
+    }
+}
+
+/// Record `overrides` as a config delta on the conversation behind `lock`, if
+/// they change its configuration.
+fn record_overrides(ctx: &Ctx, lock: ConversationLock, overrides: PartialAppConfig) -> Result<()> {
+    let current = lock
+        .events()
+        .config_partial()
+        .map_err(jp_conversation::Error::from)?;
+
+    let Some((delta, unsets)) = override_to_record(&current, overrides)? else {
+        return Ok(());
+    };
+
+    let apply = ApplyDelta::with_unsets(ctx.now(), delta, unsets);
+    lock.into_mut()
+        .update_events_and_flush(|events| events.add_config_delta(apply))?;
+
+    Ok(())
 }
 
 fn attachment_scheme(uri: &Url) -> &str {
