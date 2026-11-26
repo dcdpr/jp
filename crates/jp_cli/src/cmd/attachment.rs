@@ -155,6 +155,34 @@ fn attachment_scheme(uri: &Url) -> &str {
         .map_or(uri.scheme(), |(scheme, _)| scheme)
 }
 
+/// Build the [`Url`] for an [`AttachmentConfig`].
+///
+/// For a table attachment, delegates URL construction to the [`Handler`] for
+/// `type` via [`Handler::table_url`] and appends `params` as query parameters.
+/// Types without a registered [`Handler`] (such as `jp`) fall back to
+/// `<type>://<path>`.
+///
+/// [`Handler::table_url`]: jp_attachment::Handler::table_url
+/// [`Handler`]: jp_attachment::Handler
+pub(crate) fn attachment_url(attachment: &AttachmentConfig) -> Result<Url> {
+    let AttachmentConfig::Object(table) = attachment else {
+        return Ok(attachment.to_url()?);
+    };
+
+    let Some(handler) = jp_attachment::find_handler_by_scheme(&table.kind) else {
+        return Ok(table.to_url()?);
+    };
+
+    let url = handler.table_url(&table.path).map_err(|error| {
+        Error::Attachment(format!(
+            "Invalid `{}` attachment path `{}`: {error}",
+            table.kind, table.path
+        ))
+    })?;
+
+    Ok(table.with_params(url)?)
+}
+
 /// Validate and canonicalize `uri` via its scheme's attachment handler.
 ///
 /// Two attachments with the same canonical URL resolve to the same content.
@@ -217,10 +245,7 @@ pub(crate) fn attach_urls(
     let mut attached: Vec<Url> = attachments
         .iter()
         .filter_map(|attachment| {
-            AttachmentConfig::from_partial(attachment.clone(), vec![])
-                .ok()?
-                .to_url()
-                .ok()
+            attachment_url(&AttachmentConfig::from_partial(attachment.clone(), vec![]).ok()?).ok()
         })
         .map(|url| attachment_identity(&url))
         .collect();

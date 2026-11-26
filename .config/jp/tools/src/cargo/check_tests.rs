@@ -450,7 +450,9 @@ fn clippy_gets_no_profile_flag_unless_configured() {
     );
 }
 
-/// `CARGO_UNSTABLE_CHECKSUM_FRESHNESS` has to reach cargo.
+/// Both `CARGO_UNSTABLE_CHECKSUM_FRESHNESS` and `CARGO_BUILD_FINGERPRINT` must
+/// be passed to Cargo: the unstable flag only unlocks `build.fingerprint`,
+/// which defaults to `mtime`.
 ///
 /// Sibling git worktrees share a target directory, and mtime-based freshness
 /// lets one checkout serve the other's stale artifacts; content checksums are
@@ -480,13 +482,14 @@ fn checksum_freshness_reaches_cargo() {
 
     let call = call_with_arg(&runner, "clippy").expect("the clippy pass must have run");
 
-    assert_eq!(
+    let value = |name: &str| {
         call.env
             .iter()
-            .find(|(key, _)| key == "CARGO_UNSTABLE_CHECKSUM_FRESHNESS")
-            .map(|(_, value)| value.as_str()),
-        Some("true"),
-    );
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| value.as_str())
+    };
+    assert_eq!(value("CARGO_UNSTABLE_CHECKSUM_FRESHNESS"), Some("true"));
+    assert_eq!(value("CARGO_BUILD_FINGERPRINT"), Some("content"));
 }
 
 /// Off unless opted into, so the tools also work on stable cargo.
@@ -516,7 +519,8 @@ fn checksum_freshness_is_absent_unless_opted_into() {
         !call
             .env
             .iter()
-            .any(|(key, _)| key == "CARGO_UNSTABLE_CHECKSUM_FRESHNESS"),
+            .any(|(key, _)| key == "CARGO_UNSTABLE_CHECKSUM_FRESHNESS"
+                || key == "CARGO_BUILD_FINGERPRINT"),
         "the clippy pass must not require nightly cargo unless asked to",
     );
 }

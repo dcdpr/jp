@@ -3,7 +3,9 @@ use jp_config::PartialAppConfig;
 use jp_workspace::ConversationHandle;
 use url::Url;
 
-use super::{attachment_identity, canonical_attachment, lock_target, record_overrides};
+use super::{
+    attachment_identity, attachment_url, canonical_attachment, lock_target, record_overrides,
+};
 use crate::{
     cli::{CommandArgs, many},
     cmd::{ConversationLoadRequest, Output, conversation_id::FlagIds, target::TargetGrammar},
@@ -76,7 +78,7 @@ impl Add {
             .conversation
             .attachments
             .iter()
-            .map(|attachment| attachment.to_url().map(|url| attachment_identity(&url)))
+            .map(|attachment| attachment_url(attachment).map(|url| attachment_identity(&url)))
             .collect::<Result<Vec<_>, _>>()?;
 
         let mut added: Vec<Url> = vec![];

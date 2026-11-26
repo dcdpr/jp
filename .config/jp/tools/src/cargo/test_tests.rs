@@ -947,9 +947,9 @@ fn test_checksum_freshness_disabled_by_default() {
     .unwrap();
 
     assert!(
-        !captured_env(&runner)
-            .iter()
-            .any(|(k, _)| k == "CARGO_UNSTABLE_CHECKSUM_FRESHNESS"),
+        !captured_env(&runner).iter().any(
+            |(k, _)| k == "CARGO_UNSTABLE_CHECKSUM_FRESHNESS" || k == "CARGO_BUILD_FINGERPRINT"
+        ),
         "checksum freshness must be off unless opted into, so the tools work on stable cargo",
     );
 }
@@ -980,13 +980,11 @@ fn test_checksum_freshness_enabled() {
     )
     .unwrap();
 
-    assert_eq!(
-        captured_env(&runner)
-            .iter()
-            .find(|(k, _)| k == "CARGO_UNSTABLE_CHECKSUM_FRESHNESS")
-            .map(|(_, v)| v.as_str()),
-        Some("true"),
-    );
+    let env = captured_env(&runner);
+    let value = |name: &str| env.iter().find(|(k, _)| k == name).map(|(_, v)| v.as_str());
+    assert_eq!(value("CARGO_UNSTABLE_CHECKSUM_FRESHNESS"), Some("true"));
+    // `-Zchecksum-freshness` only unlocks the setting, which defaults to `mtime`.
+    assert_eq!(value("CARGO_BUILD_FINGERPRINT"), Some("content"));
 }
 
 #[test]
