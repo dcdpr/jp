@@ -47,12 +47,19 @@ export function withJpVite(config = {}) {
             // The anchors `jp wiki check` computes, whatever VitePress's
             // default becomes. See `./slugify.mjs`.
             anchor: { slugify, ...markdown.anchor },
-            preConfig: chain((md) => {
+            // VitePress initializes its markdown-it singleton from two
+            // concurrent `configResolved` hooks (for page rendering and local
+            // search), so `preConfig` and `config` can run twice on the same
+            // renderer. Registering the rules twice would run a second
+            // `escapeDocumentHtml` pass after `compactMetadata` has already
+            // emitted the metadata header HTML, escaping the header into raw
+            // text.
+            preConfig: chain(oncePerRenderer((md) => {
                 // Collapse newlines inside inline backtick spans before any
                 // block parsing runs. See `./join-inline-code.mjs` for why.
                 md.core.ruler.after('normalize', 'join_multiline_inline_code', joinInlineCode)
-            }, markdown.preConfig),
-            config: chain((md) => {
+            }), markdown.preConfig),
+            config: chain(oncePerRenderer((md) => {
                 escapeInlineCodeInterpolation(md)
                 // First, so the HTML the rules below add is left alone. See
                 // `./escape-html.mjs`.
@@ -69,7 +76,7 @@ export function withJpVite(config = {}) {
                 })
                 // Last, so the header keeps the links the rules above made.
                 compactMetadata(md)
-            }, markdown.config),
+            }), markdown.config),
         },
         // RFDs and tickets aren't in the sidebar, so VitePress's prev/next links
         // would point at whatever page happens to sit next to them in the
@@ -137,6 +144,18 @@ function chain(first, second) {
             return result.then(() => second.apply(this, args))
         }
         return second.apply(this, args)
+    }
+}
+
+// Wrap a markdown-it configuration hook so it runs at most once per renderer
+// instance.
+export function oncePerRenderer(configure) {
+    const configured = new WeakSet()
+
+    return (md) => {
+        if (configured.has(md)) return
+        configured.add(md)
+        return configure(md)
     }
 }
 
