@@ -424,6 +424,7 @@ fn what_identifies_the_recorder_never_reaches_the_file() {
         &json!({"method": "session/new", "params": {"_meta": {"claudeCode": {"options": {"env": {
             "CLAUDE_CONFIG_DIR": "/home/someone/.local/share/jp/claude/work",
             "CLAUDE_SECURESTORAGE_CONFIG_DIR": "/home/someone/.local/share/jp/claude/work",
+            "CLAUDE_CODE_SHELL": "/home/someone/.nix-profile/bin/zsh",
             "DISABLE_TELEMETRY": "1",
         }}}}}}),
     );
@@ -456,6 +457,7 @@ fn what_identifies_the_recorder_never_reaches_the_file() {
         json!({
             "CLAUDE_CONFIG_DIR": "[redacted]",
             "CLAUDE_SECURESTORAGE_CONFIG_DIR": "[redacted]",
+            "CLAUDE_CODE_SHELL": "[redacted]",
             // The rest of the environment is JP's own settings, the same on
             // every machine.
             "DISABLE_TELEMETRY": "1",

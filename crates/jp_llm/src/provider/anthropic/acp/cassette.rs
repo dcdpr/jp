@@ -121,6 +121,14 @@ const SENSITIVE: &[&[&str]] = &[
         "env",
         "CLAUDE_SECURESTORAGE_CONFIG_DIR",
     ],
+    &[
+        "params",
+        "_meta",
+        "claudeCode",
+        "options",
+        "env",
+        "CLAUDE_CODE_SHELL",
+    ],
 ];
 
 /// Replace the value at `path`, if the message has one there.
