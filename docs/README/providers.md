@@ -169,6 +169,23 @@ Logout does not delete configuration directories or conversation history.
 Concurrent login/logout operations are rejected; listing and queries do not wait
 for an interactive login to complete.
 
+#### Account email
+
+Claude Code reads the account's email address from `.claude.json` in its
+configuration directory and adds it to the context of every request it sends.
+Before each request on a named subscription, JP clears that address
+(`oauthAccount.emailAddress`) in the login's `.claude.json`, so the model never
+receives it.
+This covers logins registered with `jp provider llm auth login`, including those
+registered with `--config-dir`, and `acp_config_dirs` mappings.
+Sign-in, plan detection, and `auth list` work without it.
+Claude Code writes the address back when it refreshes the account profile,
+which is why JP clears it on every request rather than once.
+
+The inherited login of an unnamed `subscription` belongs to your own Claude
+Code, so JP never edits its files, and those requests still carry the address.
+Use a named subscription to keep it out.
+
 Manual `providers.llm.anthropic.acp_config_dirs` mappings remain supported for
 unregistered directories.
 Their values must be absolute paths, without `~` or `$HOME` expansion, and each
@@ -230,6 +247,18 @@ cache-policy behavior.
 JP removes inherited cache environment overrides from the launched process.
 Claude Code's own defaults and managed policy decide retention when caching is
 not disabled.
+
+Each request starts a new Claude Code session from a transcript JP derives from
+the conversation.
+JP writes that transcript the way Claude Code recorded the earlier requests,
+including the context Claude Code adds to a session's first prompt, so a
+follow-up turn reads the earlier turns from the prompt cache.
+That context is written for Fable 5.2, 5.1 and 5, Opus 5.5, Sonnet 5.5, and
+Haiku 5.5; on other models each turn writes the history to the cache again.
+When the first turn makes no tool call, the second turn reads only the system
+prompt and tools from the cache, once; later turns read the full history.
+Editing, compacting, or forking a conversation changes its history, so the next
+turn writes it to the cache again.
 
 Debug tracing reports uncached input, cache writes, cache reads, and output
 separately.

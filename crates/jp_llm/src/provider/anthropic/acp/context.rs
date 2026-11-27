@@ -310,9 +310,10 @@ pub(super) fn profile_account(contents: &str) -> (Option<String>, Option<String>
 /// later days.
 /// Without it, today's date is used.
 ///
-/// A login JP manages (`login_directory`) has its email blanked first.
-/// The default login belongs to the user's own Claude Code, so it is read as
-/// is.
+/// A named login (`login_directory`, registered or mapped) has its email
+/// blanked first.
+/// The inherited login of an unnamed subscription belongs to the user's own
+/// Claude Code, so it is read as is.
 ///
 /// Returns `None` when any value cannot be determined, so no context records
 /// are written and Claude Code appends its own.
@@ -330,7 +331,7 @@ pub(super) fn gather(
     )?;
     if login_directory.is_some() {
         match blank_email(&profile) {
-            Ok(true) => debug!(%profile, "Blanked the account email of a JP-managed login"),
+            Ok(true) => debug!(%profile, "Blanked the account email of a named login"),
             Ok(false) => {}
             Err(error) => warn!(%error, %profile, "Could not blank the login's account email"),
         }
