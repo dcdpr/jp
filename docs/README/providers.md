@@ -179,8 +179,8 @@ receives it.
 This covers logins registered with `jp provider llm auth login`, including those
 registered with `--config-dir`, and `acp_config_dirs` mappings.
 Sign-in, plan detection, and `auth list` work without it.
-Claude Code writes the address back when it refreshes the account profile,
-which is why JP clears it on every request rather than once.
+Claude Code writes the address back when it refreshes the account profile, which
+is why JP clears it on every request rather than once.
 
 The inherited login of an unnamed `subscription` belongs to your own Claude
 Code, so JP never edits its files, and those requests still carry the address.
