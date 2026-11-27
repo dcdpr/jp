@@ -119,7 +119,9 @@ impl PreparedRequest {
                     }
                     MessageContent::ToolResult(result) => result.cache_control = None,
                     MessageContent::Document(document) => document.cache_control = None,
-                    MessageContent::Thinking(_) | MessageContent::RedactedThinking { .. } => {}
+                    MessageContent::Thinking(_)
+                    | MessageContent::RedactedThinking { .. }
+                    | MessageContent::Fallback(_) => {}
                 }
             }
         }

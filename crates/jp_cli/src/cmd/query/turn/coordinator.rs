@@ -898,9 +898,10 @@ fn finish_notice(reason: &FinishReason, dropped_tools: &[String]) -> Option<Stri
                 .map_or_else(String::new, |c| format!(" ({c})"));
             let explanation = explanation
                 .as_deref()
-                .map_or_else(|| ".".to_string(), |e| format!(": {e}"));
+                .map_or_else(String::new, |e| format!(": {}", e.trim_end_matches('.')));
             Some(format!(
-                "The model declined this request{category}{explanation}"
+                "The model declined this request{category}{explanation}. Reword the request, or \
+                 retry it on another model with `--model`."
             ))
         }
         FinishReason::Other(value) => {

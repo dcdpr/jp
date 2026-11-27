@@ -358,6 +358,62 @@ fn final_usage_delta_wins_over_an_earlier_assistant_snapshot() {
     );
 }
 
+/// A `fallback` block means the requested model declined and the response is
+/// being handed to a model the user did not choose.
+/// The request ends as a refusal, and nothing the other model writes is read.
+#[test]
+fn refusal_fallback_ends_the_request_as_a_refusal() {
+    let mut state = state();
+    let fallback = json!({"type":"fallback","from":{"model":"claude-fable-5-2"},"to":{"model":"claude-opus-4-8"},"trigger":{"type":"refusal","category":"cyber"}});
+    state.sdk(notification(json!({"type":"stream_event","event":{"type":"message_start","message":{"id":"msg-fallback","model":"claude-opus-4-8","role":"assistant","content":[]}}}))).unwrap();
+
+    let start = state.sdk(notification(json!({"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":fallback}}))).unwrap();
+    assert_eq!(start, vec![Event::Finished(FinishReason::Refused {
+        category: Some("cyber".into()),
+        explanation: Some("the provider suggested claude-opus-4-8 instead".into()),
+    })]);
+    assert!(state.stopped);
+
+    let answer = state.sdk(notification(json!({"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"text","text":"Restart bztransmit."}}}))).unwrap();
+    assert_eq!(answer, vec![]);
+    state.sdk(notification(json!({"type":"assistant","message":{"id":"msg-fallback","model":"claude-opus-4-8","content":[fallback,{"type":"text","text":"Restart bztransmit."}],"usage":{"input_tokens":2,"output_tokens":3}}}))).unwrap();
+    state
+        .sdk(notification(
+            json!({"type":"result","subtype":"success","is_error":false}),
+        ))
+        .unwrap();
+    assert_eq!(state.final_events, None);
+}
+
+/// A refusal outside the named categories has a `null` category.
+#[test]
+fn refusal_fallback_without_a_category_has_none() {
+    let mut state = state();
+    let start = state.sdk(notification(json!({"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"fallback","from":{"model":"claude-fable-5-2"},"to":{"model":"claude-opus-4-8"},"trigger":{"type":"refusal","category":null}}}}))).unwrap();
+    assert_eq!(start, vec![Event::Finished(FinishReason::Refused {
+        category: None,
+        explanation: Some("the provider suggested claude-opus-4-8 instead".into()),
+    })]);
+}
+
+/// A decline partway through the response retracts the declined model's
+/// unfinished tool call before the refusal ends the request.
+#[test]
+fn refusal_fallback_retracts_a_pending_tool_call() {
+    let mut state = state();
+    state.sdk(notification(json!({"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"declined-call","name":"mcp__jp__lookup","input":{}}}}))).unwrap();
+    let start = state.sdk(notification(json!({"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"fallback","from":{"model":"claude-fable-5-2"},"to":{"model":"claude-opus-4-8"},"trigger":{"type":"refusal","category":"cyber"}}}}))).unwrap();
+    assert_eq!(start, vec![
+        Event::ToolCallPendingEnd {
+            id: "declined-call".into()
+        },
+        Event::Finished(FinishReason::Refused {
+            category: Some("cyber".into()),
+            explanation: Some("the provider suggested claude-opus-4-8 instead".into()),
+        }),
+    ]);
+}
+
 #[test]
 fn usage_does_not_delay_content_or_enter_event_metadata() {
     let mut state = state();

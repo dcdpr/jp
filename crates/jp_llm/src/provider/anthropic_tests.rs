@@ -2121,6 +2121,27 @@ fn test_map_message_delta_refusal_uncategorized() {
     ));
 }
 
+/// A `fallback` block ends the response as a refusal of the requested model,
+/// naming the model the provider would have continued with.
+#[test]
+fn test_map_content_start_fallback_is_a_refusal() {
+    let block: types::MessageContent = serde_json::from_value(serde_json::json!({
+        "type": "fallback",
+        "from": {"model": "claude-fable-5-2"},
+        "to": {"model": "claude-opus-4-8"},
+        "trigger": {"type": "refusal", "category": "cyber"},
+    }))
+    .unwrap();
+
+    assert_eq!(
+        map_content_start(block, 0, false),
+        Some(Event::Finished(FinishReason::Refused {
+            category: Some("cyber".to_owned()),
+            explanation: Some("the provider suggested claude-opus-4-8 instead".to_owned()),
+        }))
+    );
+}
+
 /// Fable 5 always runs with adaptive thinking.
 /// Even when reasoning is disabled, the request must not send `thinking:
 /// disabled`, which the API rejects with a 400 error.

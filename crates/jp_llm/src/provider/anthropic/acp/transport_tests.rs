@@ -504,6 +504,16 @@ fn jp_tool_permissions_always_return_to_the_host() {
 }
 
 #[test]
+fn a_flagged_request_does_not_switch_models() {
+    let prepared = prepared();
+    let metadata = options::metadata(&prepared, &BTreeMap::new()).unwrap();
+    assert_eq!(
+        metadata["claudeCode"]["options"]["settings"]["switchModelsOnFlag"],
+        json!(false)
+    );
+}
+
+#[test]
 fn a_followup_error_does_not_replace_the_original_failure() {
     let state = Mutex::new(State::new("haiku".parse().unwrap(), iter::empty(), false));
     record_failure(&state, StreamError::other("Model unavailable."));
@@ -581,6 +591,94 @@ async fn quota_notification_survives_the_protocol_error_boundary() {
     assert_eq!(error.quota_scope.as_deref(), Some("five_hour"));
     assert_eq!(error.quota_reset.unwrap().timestamp(), 1_783_080_000);
     assert!(receiver.recv().await.is_none());
+}
+
+#[tokio::test]
+async fn a_refusal_fallback_closes_the_connection_with_a_refusal() {
+    // The adapter starts handing the response to the fallback model and never
+    // answers the prompt: only the refusal JP derives from the `fallback` block
+    // can end the attempt.
+    let agent = scripted(|method, params, notifier| async move {
+        match method.as_str() {
+            m if m == agent_method::INITIALIZE => Ok(json!({"protocolVersion": 1})),
+            m if m == agent_method::SESSION_NEW => {
+                notifier.auth("Claude Max");
+                Ok(json!({"sessionId": "11111111-1111-4111-8111-111111111111"}))
+            }
+            m if m == agent_method::SESSION_SET_CONFIG_OPTION => Ok(json!({
+                "configOptions": [{
+                    "id": params["configId"],
+                    "name": "Setting",
+                    "type": "select",
+                    "currentValue": params["value"],
+                    "options": [],
+                }],
+            })),
+            m if m == agent_method::SESSION_PROMPT => {
+                notifier.sdk(json!({"type": "stream_event", "event": {
+                    "type": "content_block_start",
+                    "index": 0,
+                    "content_block": {
+                        "type": "fallback",
+                        "from": {"model": "claude-opus-5"},
+                        "to": {"model": "claude-opus-4-8"},
+                        "trigger": {"type": "refusal", "category": "cyber"},
+                    },
+                }}));
+                notifier.sdk(json!({"type": "stream_event", "event": {
+                    "type": "content_block_start",
+                    "index": 1,
+                    "content_block": {"type": "text", "text": "FALLBACK ANSWER"},
+                }}));
+                future::pending::<()>().await;
+                unreachable!("the prompt never answers")
+            }
+            other => panic!("unexpected request: {other}"),
+        }
+    });
+    let prepared = prepared();
+    let environment = options::environment(&prepared, CachePolicy::Short);
+    let (sender, mut receiver) = mpsc::channel(16);
+    timeout(
+        Duration::from_secs(5),
+        drive(
+            prepared,
+            QueryContext {
+                root: "/work/project".into(),
+                mcp_endpoint: None,
+                invocation: None,
+            },
+            vec![],
+            environment,
+            NativeArtifact {
+                session: None,
+                path: None,
+            },
+            agent,
+            sender,
+        ),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    // The channel closes only once nothing from the connection holds a sender.
+    let events = timeout(Duration::from_secs(5), async {
+        let mut events = vec![];
+        while let Some(event) = receiver.recv().await {
+            let event = event.unwrap();
+            if event != Event::KeepAlive {
+                events.push(event);
+            }
+        }
+        events
+    })
+    .await
+    .expect("the event channel outlived the connection");
+    assert_eq!(events, vec![Event::Finished(FinishReason::Refused {
+        category: Some("cyber".into()),
+        explanation: Some("the provider suggested claude-opus-4-8 instead".into()),
+    })]);
 }
 
 /// Drive a request against a scripted adapter that optionally emits `report`
