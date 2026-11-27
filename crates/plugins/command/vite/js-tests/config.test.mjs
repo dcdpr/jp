@@ -38,8 +38,6 @@ test('a site without a search gets the local one', () => {
     )
 })
 
-// VitePress can call `markdown.config` twice on one renderer. A second set of
-// rules would escape the HTML the first set's metadata header added.
 test('a renderer hook runs once for each renderer', () => {
     const calls = []
     const configure = oncePerRenderer(md => calls.push(md.name))

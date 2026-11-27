@@ -47,13 +47,13 @@ export function withJpVite(config = {}) {
             // The anchors `jp wiki check` computes, whatever VitePress's
             // default becomes. See `./slugify.mjs`.
             anchor: { slugify, ...markdown.anchor },
-            // VitePress builds its markdown renderer from two `configResolved`
-            // hooks, the pages' and the local search's, which Vite runs
-            // concurrently. The renderer is a singleton both can end up
-            // configuring, so these hooks can be called twice on one
-            // instance. A second set of the rules below would run after the
-            // first, and its HTML escape would escape the metadata header the
-            // first set added.
+            // VitePress initializes its markdown-it singleton from two
+            // concurrent `configResolved` hooks (for page rendering and local
+            // search), so `preConfig` and `config` can run twice on the same
+            // renderer. Registering the rules twice would run a second
+            // `escapeDocumentHtml` pass after `compactMetadata` has already
+            // emitted the metadata header HTML, escaping the header into raw
+            // text.
             preConfig: chain(oncePerRenderer((md) => {
                 // Collapse newlines inside inline backtick spans before any
                 // block parsing runs. See `./join-inline-code.mjs` for why.
@@ -147,8 +147,8 @@ function chain(first, second) {
     }
 }
 
-// `configure`, a hook taking a markdown-it instance, made to run once for each
-// instance it is called with; later calls with the same instance do nothing.
+// Wrap a markdown-it configuration hook so it runs at most once per renderer
+// instance.
 export function oncePerRenderer(configure) {
     const configured = new WeakSet()
 
