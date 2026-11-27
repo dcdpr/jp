@@ -18,7 +18,7 @@
         },
         "x86_64-pc-windows-msvc": {
           "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-gui-x86_64-pc-windows-msvc",
-          "sha256": "1304188d7955e1d5a68b78bdb4b876da5e716ee63cceaee422d1593c15a0877e"
+          "sha256": "99d3f8d3ded29f4005a678af543663fec6edd9a7795bb25e65d104c95b355fce"
         },
         "x86_64-unknown-linux-gnu": {
           "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-gui-x86_64-unknown-linux-gnu",
@@ -43,7 +43,7 @@
         },
         "x86_64-pc-windows-msvc": {
           "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-path-x86_64-pc-windows-msvc",
-          "sha256": "5fd7b12716e30ab5afeb25207ad66f119c20f05a39a2370dc2b8937d40061e35"
+          "sha256": "cd296d6425fb93d6e313e8b50042af14c136b5f3d907c322cf77feac082f847c"
         },
         "x86_64-unknown-linux-gnu": {
           "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-path-x86_64-unknown-linux-gnu",
@@ -80,7 +80,7 @@
         },
         "x86_64-pc-windows-msvc": {
           "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-serve-web-x86_64-pc-windows-msvc",
-          "sha256": "4d52afe3a7e143f3f52a0426756ab84a03c733b9e69adf860727a1eac3fc3372"
+          "sha256": "a8b9f9aeab83258c15b79b113eeca8a6b87d3d3d54530217585b3910aa1fe7a0"
         },
         "x86_64-unknown-linux-gnu": {
           "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-serve-web-x86_64-unknown-linux-gnu",
