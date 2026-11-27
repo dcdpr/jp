@@ -162,3 +162,22 @@ call.
 JP cannot move the breakpoint or that message.
 Report upstream once the recorded multi-turn test from T-1ngnv8p reproduces it
 deterministically.
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-27T15:16:00Z
+
+Narrows the single-request first-turn miss: within one connection, a second
+request reuses the cache entry that ends on the `# Environment` system message
+(acp4 turn 1: request 2 read 8,008 = 6,910 + 1,098).
+Across connections the same entry is never reused.
+So the breakpoint position alone is not the cause; something about that message
+differs between the connection that wrote it and the next one.
+The array-versus-string rendering of the message (text block with
+`cache_control` in turn 1, plain string when reloaded) fits that.
+
+JP now prints a notice when a request within one connection reads less from the
+cache than the previous request read and wrote (`2531f2549`).
+It does not cover the cross-turn case, since edits, compaction, and forks
+legitimately change the history between connections.
