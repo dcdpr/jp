@@ -4,7 +4,10 @@
 //! Runtime totals include work outside the main request stream and are retained
 //! separately, never added to those entries.
 
-use std::collections::BTreeMap;
+use std::{
+    collections::BTreeMap,
+    time::{Duration, Instant},
+};
 
 use async_anthropic::types::{CreateMessagesResponse, Usage};
 use serde::{Deserialize, Serialize};
@@ -54,15 +57,20 @@ pub(super) struct ModelUsage {
 }
 
 impl UsageLedger {
-    pub(super) fn observe(&mut self, message: &CreateMessagesResponse) {
+    /// Record `message`'s usage; returns whether it is the first seen for its
+    /// request.
+    pub(super) fn observe(&mut self, message: &CreateMessagesResponse) -> bool {
         let (Some(id), Some(model), Some(usage)) = (&message.id, &message.model, &message.usage)
         else {
-            return;
+            return false;
         };
-        self.observe_usage(id, model, usage);
+        self.observe_usage(id, model, usage)
     }
 
-    pub(super) fn observe_usage(&mut self, id: &str, model: &str, usage: &Usage) {
+    /// Record a request's usage; returns whether it is the first seen for the
+    /// request.
+    pub(super) fn observe_usage(&mut self, id: &str, model: &str, usage: &Usage) -> bool {
+        let new = !self.requests.contains_key(id);
         let entry = self
             .requests
             .entry(id.to_owned())
@@ -83,6 +91,7 @@ impl UsageLedger {
         if let Some(creation) = &usage.cache_creation {
             entry.usage.cache_creation = Some(creation.clone());
         }
+        new
     }
 
     pub(super) fn set_runtime(&mut self, runtime: RuntimeUsage) {
@@ -102,6 +111,64 @@ impl UsageLedger {
             value["runtime"] = json!(runtime);
         }
         value
+    }
+}
+
+/// The shortest cache lifetime Claude Code requests.
+///
+/// A request further than this from the one before it may find that request's
+/// cache entry expired, so a smaller read is no evidence of a bug.
+const SHORTEST_CACHE_LIFETIME: Duration = Duration::from_mins(5);
+
+/// Checks that each main request in a connection reads from the prompt cache at
+/// least what the request before it read and wrote.
+///
+/// Within one connection the conversation only grows: the history is fixed when
+/// the connection opens, and compaction, edits, and forks happen between
+/// connections.
+/// So a request reading less than its predecessor cached means a changed
+/// prefix, unless the model changed or the entry may have expired.
+#[derive(Debug, Default)]
+pub(super) struct CacheContinuity {
+    previous: Option<CachedRequest>,
+}
+
+#[derive(Debug)]
+struct CachedRequest {
+    model: String,
+    /// What the request read from the cache plus what it wrote to it.
+    cached: u64,
+    at: Instant,
+}
+
+impl CacheContinuity {
+    /// Record a new main request, sent at `at`, and describe the miss when it
+    /// read less than the previous request cached.
+    ///
+    /// A request without cache counts is skipped, and leaves the previous
+    /// request as the one the next is compared with.
+    pub(super) fn check(&mut self, model: &str, usage: &Usage, at: Instant) -> Option<String> {
+        let (Some(read), Some(written)) = (
+            usage.cache_read_input_tokens,
+            usage.cache_creation_input_tokens,
+        ) else {
+            return None;
+        };
+        let current = CachedRequest {
+            model: model.to_owned(),
+            cached: read + written,
+            at,
+        };
+        let previous = self.previous.replace(current)?;
+        let comparable = previous.model == model
+            && at.saturating_duration_since(previous.at) < SHORTEST_CACHE_LIFETIME;
+        (comparable && read < previous.cached).then(|| {
+            format!(
+                "prompt cache not reused within the turn: read {read} cached tokens, the previous \
+                 request cached {}; please report this to JP",
+                previous.cached
+            )
+        })
     }
 }
 
