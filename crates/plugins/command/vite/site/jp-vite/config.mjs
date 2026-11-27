@@ -47,12 +47,19 @@ export function withJpVite(config = {}) {
             // The anchors `jp wiki check` computes, whatever VitePress's
             // default becomes. See `./slugify.mjs`.
             anchor: { slugify, ...markdown.anchor },
-            preConfig: chain((md) => {
+            // VitePress builds its markdown renderer from two `configResolved`
+            // hooks, the pages' and the local search's, which Vite runs
+            // concurrently. The renderer is a singleton both can end up
+            // configuring, so these hooks can be called twice on one
+            // instance. A second set of the rules below would run after the
+            // first, and its HTML escape would escape the metadata header the
+            // first set added.
+            preConfig: chain(oncePerRenderer((md) => {
                 // Collapse newlines inside inline backtick spans before any
                 // block parsing runs. See `./join-inline-code.mjs` for why.
                 md.core.ruler.after('normalize', 'join_multiline_inline_code', joinInlineCode)
-            }, markdown.preConfig),
-            config: chain((md) => {
+            }), markdown.preConfig),
+            config: chain(oncePerRenderer((md) => {
                 escapeInlineCodeInterpolation(md)
                 // First, so the HTML the rules below add is left alone. See
                 // `./escape-html.mjs`.
@@ -69,7 +76,7 @@ export function withJpVite(config = {}) {
                 })
                 // Last, so the header keeps the links the rules above made.
                 compactMetadata(md)
-            }, markdown.config),
+            }), markdown.config),
         },
         // RFDs and tickets aren't in the sidebar, so VitePress's prev/next links
         // would point at whatever page happens to sit next to them in the
@@ -137,6 +144,18 @@ function chain(first, second) {
             return result.then(() => second.apply(this, args))
         }
         return second.apply(this, args)
+    }
+}
+
+// `configure`, a hook taking a markdown-it instance, made to run once for each
+// instance it is called with; later calls with the same instance do nothing.
+export function oncePerRenderer(configure) {
+    const configured = new WeakSet()
+
+    return (md) => {
+        if (configured.has(md)) return
+        configured.add(md)
+        return configure(md)
     }
 }
 

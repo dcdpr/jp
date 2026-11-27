@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { repositoryLinkFor, withSearch } from '../site/jp-vite/config.mjs'
+import { oncePerRenderer, repositoryLinkFor, withSearch } from '../site/jp-vite/config.mjs'
 
 // A site in `docs`, linking repository files on GitHub.
 const SETTINGS = { site: 'docs', repository: 'https://github.com/dcdpr/jp' }
@@ -36,6 +36,21 @@ test('a site without a search gets the local one', () => {
         withSearch({ outline: { level: [2, 3] } }),
         { outline: { level: [2, 3] }, search: { provider: 'local' } },
     )
+})
+
+// VitePress can call `markdown.config` twice on one renderer. A second set of
+// rules would escape the HTML the first set's metadata header added.
+test('a renderer hook runs once for each renderer', () => {
+    const calls = []
+    const configure = oncePerRenderer(md => calls.push(md.name))
+    const first = { name: 'first' }
+    const second = { name: 'second' }
+
+    configure(first)
+    configure(first)
+    configure(second)
+
+    assert.deepEqual(calls, ['first', 'second'])
 })
 
 test('a search the project configures is kept', () => {
