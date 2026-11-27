@@ -83,6 +83,24 @@ fn known_models_have_claude_codes_identity() {
             knowledge_cutoff: "January 2026",
         })
     );
+    // Claude Code 2.1.321's records for the two models whose ID has no minor
+    // version.
+    assert_eq!(
+        model_identity("claude-opus-5"),
+        Some(ModelIdentity {
+            model_id: "claude-opus-5".into(),
+            marketing_name: "Opus 5".into(),
+            knowledge_cutoff: "May 2026",
+        })
+    );
+    assert_eq!(
+        model_identity("claude-sonnet-5"),
+        Some(ModelIdentity {
+            model_id: "claude-sonnet-5".into(),
+            marketing_name: "Sonnet 5".into(),
+            knowledge_cutoff: "January 2026",
+        })
+    );
     let names = [
         "claude-fable-5-2",
         "claude-fable-5-1",

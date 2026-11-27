@@ -133,7 +133,9 @@ const KNOWLEDGE_CUTOFFS: &[(&str, &str)] = &[
     ("claude-fable-5-1", "June 2026"),
     ("claude-fable-5", "January 2026"),
     ("claude-opus-5-5", "June 2026"),
+    ("claude-opus-5", "May 2026"),
     ("claude-sonnet-5-5", "June 2026"),
+    ("claude-sonnet-5", "January 2026"),
     ("claude-haiku-5-5", "June 2026"),
 ];
 

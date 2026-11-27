@@ -253,8 +253,9 @@ the conversation.
 JP writes that transcript the way Claude Code recorded the earlier requests,
 including the context Claude Code adds to a session's first prompt, so a
 follow-up turn reads the earlier turns from the prompt cache.
-That context is written for Fable 5.2, 5.1 and 5, Opus 5.5, Sonnet 5.5, and
-Haiku 5.5; on other models each turn writes the history to the cache again.
+That context is written for Fable 5.2, 5.1 and 5, Opus 5.5 and 5, Sonnet 5.5
+and 5, and Haiku 5.5; on other models each turn writes the history to the cache
+again.
 When the first turn makes no tool call, the second turn reads only the system
 prompt and tools from the cache, once; later turns read the full history.
 Editing, compacting, or forking a conversation changes its history, so the next
