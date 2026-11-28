@@ -341,6 +341,35 @@ async fn nothing_the_handler_captured_outlives_the_connection() {
 }
 
 #[tokio::test]
+async fn nothing_the_handler_captured_outlives_a_dropped_connection() {
+    // A caller that stops reading a connection drops it mid-request. The agent
+    // stays connected and never answers, so only aborting the reader can let
+    // the handler go.
+    let (events, mut watching) = mpsc::channel::<()>(1);
+    let (mut agent, driver) = connect(
+        Box::new(move |_| {
+            let _events = events.clone();
+            Box::pin(async { Ok(Value::Null) })
+        }),
+        boxed(|peer: Peer| async move {
+            peer.request(Echo {
+                value: "never answered".into(),
+            })
+            .await?;
+            Ok(())
+        }),
+    );
+    agent.read().await;
+    driver.abort();
+    assert!(
+        timeout(Duration::from_secs(5), watching.recv())
+            .await
+            .expect("the event channel outlived the dropped connection")
+            .is_none()
+    );
+}
+
+#[tokio::test]
 async fn a_tap_observes_both_directions_verbatim() {
     // What the adapter sends is what a fixture must replay, so the tap sees
     // each message exactly as framed rather than as JP decoded it.

@@ -3330,7 +3330,27 @@ fn map_content_start(
                 metadata,
             })
         }
+        Fallback(fallback) => Some(Event::Finished(fallback_refusal(&fallback))),
         ToolResult(_) => unreachable!("never triggered by the API"),
+    }
+}
+
+/// Convert a `fallback` block into a refusal finish reason.
+///
+/// JP never switches models mid-request.
+/// When the provider hands a response to a fallback model, the request ends as
+/// a refusal from the requested model and names the suggested fallback model in
+/// the explanation.
+fn fallback_refusal(fallback: &types::Fallback) -> FinishReason {
+    FinishReason::Refused {
+        category: fallback
+            .trigger
+            .as_ref()
+            .and_then(|trigger| trigger.category.clone()),
+        explanation: Some(format!(
+            "the provider suggested {} instead",
+            fallback.to.model
+        )),
     }
 }
 

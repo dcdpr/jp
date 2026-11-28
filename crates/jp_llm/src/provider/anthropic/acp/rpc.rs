@@ -30,6 +30,7 @@ use serde_json::{Value, json};
 use tokio::{
     io::{AsyncBufReadExt as _, AsyncRead, AsyncWrite, AsyncWriteExt as _, BufReader},
     sync::{mpsc, oneshot},
+    task::JoinHandle,
 };
 use tracing::debug;
 
@@ -234,7 +235,7 @@ where
     };
 
     let writer_tap = tap.clone();
-    let mut writer = tokio::spawn(async move {
+    let mut writer = AbortOnDrop(tokio::spawn(async move {
         let mut input = input;
         while let Some(message) = queued.recv().await {
             writer_tap.observe(Side::Jp, &message);
@@ -247,10 +248,10 @@ where
             input.flush().await.map_err(RpcError::into_internal_error)?;
         }
         Ok::<(), RpcError>(())
-    });
+    }));
 
     let reader_outgoing = outgoing.clone();
-    let mut reader = tokio::spawn(async move {
+    let mut reader = AbortOnDrop(tokio::spawn(async move {
         let mut lines = BufReader::new(output).lines();
         while let Some(line) = lines
             .next_line()
@@ -281,24 +282,29 @@ where
             )));
         }
         Ok::<(), RpcError>(())
-    });
+    }));
 
-    let outcome = tokio::select! {
+    // Returning or dropping this future aborts both tasks. Any messages still
+    // queued for the agent are dropped with the writer task.
+    tokio::select! {
         biased;
-        reader = &mut reader => join(reader),
-        writer = &mut writer => join(writer),
+        reader = &mut reader.0 => join(reader),
+        writer = &mut writer.0 => join(writer),
         result = foreground(peer) => result,
-    };
-    // Both tasks outlive the connection otherwise: the reader parks on the
-    // agent's output and holds the handler, and through it whatever the handler
-    // captured. A caller waiting for its own channel to close would wait on a
-    // sender kept alive by a connection that has already finished.
-    //
-    // Anything still queued for the agent is dropped with the writer, which is
-    // what a finished connection wants: the sequence is over either way.
-    reader.abort();
-    writer.abort();
-    outcome
+    }
+}
+
+/// Abort a spawned task when its handle is dropped.
+///
+/// Without this guard, the reader task parks on the agent's stdout and keeps
+/// the notification handler (and any channel senders it captured) alive after
+/// the connection finishes or is dropped.
+struct AbortOnDrop<T>(JoinHandle<T>);
+
+impl<T> Drop for AbortOnDrop<T> {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
 }
 
 fn join(result: Result<Result<(), RpcError>, tokio::task::JoinError>) -> Result<(), RpcError> {

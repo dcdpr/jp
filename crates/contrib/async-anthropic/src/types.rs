@@ -699,6 +699,41 @@ pub enum MessageContent {
     RedactedThinking {
         data: String,
     },
+
+    /// Marks where a declined request was handed to a fallback model.
+    ///
+    /// See:
+    /// <https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback>
+    Fallback(Fallback),
+}
+
+/// The boundary between one model's output and the next in a response that fell
+/// back after a safety classifier declined the request.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Fallback {
+    /// The model that declined.
+    pub from: FallbackModel,
+    /// The model that continues the response.
+    pub to: FallbackModel,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trigger: Option<FallbackTrigger>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FallbackModel {
+    pub model: String,
+}
+
+/// Why the `from` model declined.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FallbackTrigger {
+    /// `refusal` for a classifier decline.
+    #[serde(rename = "type")]
+    pub type_: String,
+    /// The refusal's `stop_details.category`, `null` when the refusal maps to
+    /// no named category.
+    #[serde(default)]
+    pub category: Option<String>,
 }
 
 impl MessageContent {

@@ -290,18 +290,19 @@ async fn run(
 ///
 /// An error here ends the connection, which is how a revoked subscription stops
 /// a prompt that is already streaming.
-/// A failure reported inside an SDK message also wakes `failure`: the adapter
-/// can keep the prompt request open after one, so the caller has to stop the
-/// attempt itself rather than wait for the prompt to answer.
+/// A failure reported inside an SDK message, or a response that ends before the
+/// prompt does, also wakes `stop`: the adapter can keep the prompt request open
+/// after either, so the caller has to stop the attempt itself rather than wait
+/// for the prompt to answer.
 fn inbound(
     state: Arc<Mutex<State>>,
     sender: mpsc::Sender<Result<Event, StreamError>>,
-    failure: Arc<Notify>,
+    stop: Arc<Notify>,
 ) -> Handler {
     Box::new(move |message| {
         let state = state.clone();
         let sender = sender.clone();
-        let failure = failure.clone();
+        let stop = stop.clone();
         Box::pin(async move {
             let (Inbound::Notification { method, params } | Inbound::Request { method, params }) =
                 message;
@@ -318,15 +319,16 @@ fn inbound(
 
             if method == SdkNotification::METHOD {
                 let notification: SdkNotification = decode(params)?;
-                let (active, result) = {
+                let (active, result, stopped) = {
                     let mut locked = state.lock().unwrap_or_else(PoisonError::into_inner);
                     let active =
                         locked.live && locked.session.as_ref() == Some(&notification.session_id);
-                    (active, locked.sdk(notification))
+                    let result = locked.sdk(notification);
+                    (active, result, locked.stopped)
                 };
                 let mut events = result.map_err(|error| {
                     let response = record_failure(&state, error);
-                    failure.notify_one();
+                    stop.notify_one();
                     response
                 })?;
                 // Non-rendered SDK updates still prove the connection is active.
@@ -334,6 +336,11 @@ fn inbound(
                     events.push(Event::KeepAlive);
                 }
                 emit(&sender, events).await?;
+                // Wake the driver only once the final events are queued, so
+                // closing the connection cannot drop them.
+                if stopped {
+                    stop.notify_one();
+                }
                 return Ok(Value::Null);
             }
 
@@ -389,8 +396,8 @@ pub(super) async fn drive(
         tools.iter().cloned(),
         prepared.schema.is_some(),
     )));
-    let failure = Arc::new(Notify::new());
-    let handler = inbound(state.clone(), sender.clone(), failure.clone());
+    let stop = Arc::new(Notify::new());
+    let handler = inbound(state.clone(), sender.clone(), stop.clone());
     let foreground_state = state.clone();
     let heartbeat = sender.clone();
     let foreground: Foreground = Box::new(move |peer| {
@@ -504,14 +511,23 @@ pub(super) async fn drive(
     let mut tick = tokio::time::interval(Duration::from_secs(5));
     loop {
         tokio::select! {
-            () = failure.notified() => {
-                // Notification handler errors do not terminate the peer's prompt.
-                // Dropping the connection here also stops its process group.
+            // The handler notifies `stop` before the prompt's answer is read,
+            // so a request that ended early is seen first even when the answer
+            // is already in.
+            biased;
+            () = stop.notified() => {
+                // Neither a notification handler error nor a response that
+                // ended early terminates the peer's prompt. Dropping the
+                // connection here also stops its process group.
                 let mut state = state.lock().unwrap_or_else(PoisonError::into_inner);
                 debug!(usage = %state.usage_snapshot(), "Claude ACP usage snapshot");
                 state.live = false;
-                let error = state.failure.take().expect("failure is recorded before notifying");
-                return Err(Error::Stream(Box::new(error)));
+                // Without a recorded failure, the request ended on its own
+                // terms, and its final events are already queued.
+                return match state.failure.take() {
+                    Some(error) => Err(Error::Stream(Box::new(error))),
+                    None => Ok(()),
+                };
             }
             result = &mut result => {
                 let mut state = state.lock().unwrap_or_else(PoisonError::into_inner);

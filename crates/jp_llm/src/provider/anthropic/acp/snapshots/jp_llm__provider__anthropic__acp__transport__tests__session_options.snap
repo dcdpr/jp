@@ -19,6 +19,7 @@ expression: "params[\"_meta\"]"
       "settings": {
         "disableAllHooks": true,
         "autoMemoryEnabled": false,
+        "switchModelsOnFlag": false,
         "permissions": {
           "ask": [
             "mcp__jp__*"

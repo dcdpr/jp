@@ -111,6 +111,7 @@ impl From<&ExtendedThinking> for Thinking {
 struct Settings {
     disable_all_hooks: bool,
     auto_memory_enabled: bool,
+    switch_models_on_flag: bool,
     permissions: Permissions,
 }
 
@@ -146,6 +147,9 @@ pub(super) fn metadata(
                 settings: Settings {
                     disable_all_hooks: true,
                     auto_memory_enabled: false,
+                    // End safety-flagged requests as refusals (matching the
+                    // HTTP route) rather than switching to a fallback model.
+                    switch_models_on_flag: false,
                     // Even unattended JP tools need the adapter callback for
                     // correlation; the JP MCP Host decides whether to prompt.
                     permissions: Permissions {

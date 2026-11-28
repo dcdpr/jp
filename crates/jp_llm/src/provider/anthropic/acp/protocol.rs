@@ -21,7 +21,7 @@ use super::{
 use crate::{
     error::{StreamError, StreamErrorKind, looks_like_context_window_error},
     event::{Event, EventPart, FinishReason, ToolCallPart},
-    provider::anthropic::{map_event, resolve::reset_at},
+    provider::anthropic::{fallback_refusal, map_event, resolve::reset_at},
 };
 
 /// The adapter's effective authentication, independent of JP's token store.
@@ -238,6 +238,11 @@ pub(super) struct State {
     index_base: usize,
     next_index: usize,
     pub final_events: Option<Vec<Event>>,
+    /// Whether the request ended before Claude Code finished the prompt.
+    ///
+    /// The adapter keeps working on a prompt JP has stopped reading, so the
+    /// connection has to be closed.
+    pub stopped: bool,
     /// Preserve notification failures across the JSON-RPC error boundary.
     pub failure: Option<StreamError>,
     usage: UsageLedger,
@@ -280,6 +285,7 @@ impl State {
             index_base: 0,
             next_index: 0,
             final_events: None,
+            stopped: false,
             failure: None,
             usage: UsageLedger::default(),
             current_message: None,
@@ -691,6 +697,16 @@ impl State {
                 content_block,
             } => {
                 self.next_index = self.next_index.max(self.index_base + index + 1);
+                // The requested model declined and Claude Code is handing the
+                // response to a fallback model. End the request as a refusal
+                // and ignore any output from the fallback model.
+                if let MessageContent::Fallback(fallback) = content_block {
+                    events.extend(self.retire_previews());
+                    events.push(Event::Finished(fallback_refusal(fallback)));
+                    self.live = false;
+                    self.stopped = true;
+                    return Ok(events);
+                }
                 if let MessageContent::ToolUse(call) = content_block {
                     self.open_tool_blocks.insert(*index);
                     trace!(index, tool_call_id = %call.id, "Receiving ACP tool arguments");

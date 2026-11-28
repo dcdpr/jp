@@ -553,7 +553,8 @@ fn finish_notice_refused_renders_category_and_explanation() {
     let msg = finish_notice(&reason, &[]).expect("notice");
     assert_eq!(
         msg,
-        "The model declined this request (cyber): declined for safety"
+        "The model declined this request (cyber): declined for safety. Reword the request, or \
+         retry it on another model with `--model`."
     );
 }
 
@@ -564,7 +565,27 @@ fn finish_notice_refused_uncategorized() {
         explanation: None,
     };
     let msg = finish_notice(&reason, &[]).expect("notice");
-    assert_eq!(msg, "The model declined this request.");
+    assert_eq!(
+        msg,
+        "The model declined this request. Reword the request, or retry it on another model with \
+         `--model`."
+    );
+}
+
+/// The provider's explanation is a complete sentence; the notice does not
+/// duplicate its trailing period.
+#[test]
+fn finish_notice_refused_explanation_with_a_full_stop() {
+    let reason = FinishReason::Refused {
+        category: Some("cyber".to_string()),
+        explanation: Some("This request was declined.".to_string()),
+    };
+    let msg = finish_notice(&reason, &[]).expect("notice");
+    assert_eq!(
+        msg,
+        "The model declined this request (cyber): This request was declined. Reword the request, \
+         or retry it on another model with `--model`."
+    );
 }
 
 /// A refusal after buffered (unflushed) partial text discards it: the
