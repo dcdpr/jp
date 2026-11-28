@@ -1,6 +1,7 @@
 [conversation.tools.fs_modify_file]
 enable = false
 source = "local"
+format = "allow"
 command = "just serve-tools {{context}} {{tool}}"
 summary = "Modify multiple files in the project's local filesystem."
 

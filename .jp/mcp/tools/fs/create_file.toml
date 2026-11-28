@@ -1,6 +1,7 @@
 [conversation.tools.fs_create_file]
 enable = false
 source = "local"
+format = "allow"
 command = "just serve-tools {{context}} {{tool}}"
 
 # Writes run one at a time, in the order written. Each file is independent, so
