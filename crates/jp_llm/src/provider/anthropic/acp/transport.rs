@@ -511,6 +511,10 @@ pub(super) async fn drive(
     let mut tick = tokio::time::interval(Duration::from_secs(5));
     loop {
         tokio::select! {
+            // The handler notifies `stop` before the prompt's answer is read,
+            // so a request that ended early is seen first even when the answer
+            // is already in.
+            biased;
             () = stop.notified() => {
                 // Neither a notification handler error nor a response that
                 // ended early terminates the peer's prompt. Dropping the

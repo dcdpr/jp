@@ -598,7 +598,35 @@ async fn a_refusal_fallback_closes_the_connection_with_a_refusal() {
     // The adapter starts handing the response to the fallback model and never
     // answers the prompt: only the refusal JP derives from the `fallback` block
     // can end the attempt.
-    let agent = scripted(|method, params, notifier| async move {
+    let (result, events) = refusal_fallback(false).await;
+    result.unwrap();
+    assert_eq!(events, vec![Event::Finished(FinishReason::Refused {
+        category: Some("cyber".into()),
+        explanation: Some("the provider suggested claude-opus-4-8 instead".into()),
+    })]);
+}
+
+#[tokio::test]
+async fn a_refusal_fallback_wins_over_a_prompt_answered_right_after_it() {
+    // A short fallback response can finish, and the prompt be answered, before
+    // the driver wakes for the refusal. The prompt's answer carries no SDK
+    // result for this request, so it must not turn the refusal into an error.
+    let (result, events) = refusal_fallback(true).await;
+    result.unwrap();
+    assert_eq!(events, vec![Event::Finished(FinishReason::Refused {
+        category: Some("cyber".into()),
+        explanation: Some("the provider suggested claude-opus-4-8 instead".into()),
+    })]);
+}
+
+/// Drive a request whose response Claude Code hands to a fallback model.
+///
+/// With `answered`, the fallback response finishes and the prompt is answered
+/// right after the `fallback` block; otherwise the prompt never answers.
+/// Returns what `drive` returned and the events it emitted, without
+/// keep-alives.
+async fn refusal_fallback(answered: bool) -> (Result<(), Error>, Vec<Event>) {
+    let agent = scripted(move |method, params, notifier| async move {
         match method.as_str() {
             m if m == agent_method::INITIALIZE => Ok(json!({"protocolVersion": 1})),
             m if m == agent_method::SESSION_NEW => {
@@ -630,6 +658,11 @@ async fn a_refusal_fallback_closes_the_connection_with_a_refusal() {
                     "index": 1,
                     "content_block": {"type": "text", "text": "FALLBACK ANSWER"},
                 }}));
+                if answered {
+                    notifier
+                        .sdk(json!({"type": "result", "subtype": "success", "is_error": false}));
+                    return Ok(json!({"stopReason": "end_turn"}));
+                }
                 future::pending::<()>().await;
                 unreachable!("the prompt never answers")
             }
@@ -639,7 +672,7 @@ async fn a_refusal_fallback_closes_the_connection_with_a_refusal() {
     let prepared = prepared();
     let environment = options::environment(&prepared, CachePolicy::Short);
     let (sender, mut receiver) = mpsc::channel(16);
-    timeout(
+    let result = timeout(
         Duration::from_secs(5),
         drive(
             prepared,
@@ -659,7 +692,6 @@ async fn a_refusal_fallback_closes_the_connection_with_a_refusal() {
         ),
     )
     .await
-    .unwrap()
     .unwrap();
 
     // The channel closes only once nothing from the connection holds a sender.
@@ -675,10 +707,7 @@ async fn a_refusal_fallback_closes_the_connection_with_a_refusal() {
     })
     .await
     .expect("the event channel outlived the connection");
-    assert_eq!(events, vec![Event::Finished(FinishReason::Refused {
-        category: Some("cyber".into()),
-        explanation: Some("the provider suggested claude-opus-4-8 instead".into()),
-    })]);
+    (result, events)
 }
 
 /// Drive a request against a scripted adapter that optionally emits `report`
