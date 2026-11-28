@@ -3335,11 +3335,12 @@ fn map_content_start(
     }
 }
 
-/// The refusal behind a `fallback` block.
+/// Convert a `fallback` block into a refusal finish reason.
 ///
-/// JP answers with the model the user chose or not at all, so a response the
-/// provider hands to another model ends where the requested model declined.
-/// The model it was handed to is named, for the user to pick by hand.
+/// JP never switches models mid-request.
+/// When the provider hands a response to a fallback model, the request ends as
+/// a refusal from the requested model and names the suggested fallback model in
+/// the explanation.
 fn fallback_refusal(fallback: &types::Fallback) -> FinishReason {
     FinishReason::Refused {
         category: fallback

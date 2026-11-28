@@ -284,10 +284,8 @@ where
         Ok::<(), RpcError>(())
     }));
 
-    // Returning, or being dropped before the foreground finishes, aborts both
-    // tasks. Anything still queued for the agent is dropped with the writer,
-    // which is what a finished connection wants: the sequence is over either
-    // way.
+    // Returning or dropping this future aborts both tasks. Any messages still
+    // queued for the agent are dropped with the writer task.
     tokio::select! {
         biased;
         reader = &mut reader.0 => join(reader),
@@ -296,13 +294,11 @@ where
     }
 }
 
-/// A spawned task that is aborted when its handle is dropped.
+/// Abort a spawned task when its handle is dropped.
 ///
-/// The connection's tasks would otherwise outlive it: the reader parks on the
-/// agent's output and holds the handler, and through it whatever the handler
-/// captured.
-/// A caller waiting for its own channel to close would wait on a sender kept
-/// alive by a connection that has already finished.
+/// Without this guard, the reader task parks on the agent's stdout and keeps
+/// the notification handler (and any channel senders it captured) alive after
+/// the connection finishes or is dropped.
 struct AbortOnDrop<T>(JoinHandle<T>);
 
 impl<T> Drop for AbortOnDrop<T> {

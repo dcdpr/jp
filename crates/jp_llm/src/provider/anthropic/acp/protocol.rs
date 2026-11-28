@@ -698,8 +698,8 @@ impl State {
             } => {
                 self.next_index = self.next_index.max(self.index_base + index + 1);
                 // The requested model declined and Claude Code is handing the
-                // response to another one. End the request as the refusal, and
-                // read nothing the other model writes.
+                // response to a fallback model. End the request as a refusal
+                // and ignore any output from the fallback model.
                 if let MessageContent::Fallback(fallback) = content_block {
                     events.extend(self.retire_previews());
                     events.push(Event::Finished(fallback_refusal(fallback)));

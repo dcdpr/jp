@@ -359,8 +359,9 @@ fn final_usage_delta_wins_over_an_earlier_assistant_snapshot() {
 }
 
 /// A `fallback` block means the requested model declined and the response is
-/// being handed to a model the user did not choose.
-/// The request ends as a refusal, and nothing the other model writes is read.
+/// being handed to a fallback model.
+/// The request ends as a refusal and ignores any output from the fallback
+/// model.
 #[test]
 fn refusal_fallback_ends_the_request_as_a_refusal() {
     let mut state = state();

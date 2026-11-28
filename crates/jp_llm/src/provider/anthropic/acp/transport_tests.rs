@@ -619,12 +619,12 @@ async fn a_refusal_fallback_wins_over_a_prompt_answered_right_after_it() {
     })]);
 }
 
-/// Drive a request whose response Claude Code hands to a fallback model.
+/// Drive a request that Claude Code hands to a fallback model.
 ///
-/// With `answered`, the fallback response finishes and the prompt is answered
-/// right after the `fallback` block; otherwise the prompt never answers.
-/// Returns what `drive` returned and the events it emitted, without
-/// keep-alives.
+/// When `answered` is true, the fallback response finishes and answers the
+/// prompt right after the `fallback` block; otherwise the prompt remains
+/// pending.
+/// Returns the `drive` result and the emitted non-keep-alive events.
 async fn refusal_fallback(answered: bool) -> (Result<(), Error>, Vec<Event>) {
     let agent = scripted(move |method, params, notifier| async move {
         match method.as_str() {

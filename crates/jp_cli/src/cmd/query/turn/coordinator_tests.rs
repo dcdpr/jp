@@ -572,8 +572,8 @@ fn finish_notice_refused_uncategorized() {
     );
 }
 
-/// The provider's explanation is a sentence of its own; the notice does not
-/// double its full stop.
+/// The provider's explanation is a complete sentence; the notice does not
+/// duplicate its trailing period.
 #[test]
 fn finish_notice_refused_explanation_with_a_full_stop() {
     let reason = FinishReason::Refused {
