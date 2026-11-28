@@ -846,10 +846,7 @@ async fn driven(scenario: &Scenario) -> Vec<Event> {
         },
         vec![LOOKUP.to_owned(), STORE.to_owned()],
         environment,
-        NativeArtifact {
-            session: None,
-            path: None,
-        },
+        NativeArtifact::resume(None),
         Box::new(Recorded(only_connection(scenario.fixture))),
         sender,
     );

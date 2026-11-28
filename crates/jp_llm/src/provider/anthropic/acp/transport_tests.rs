@@ -280,6 +280,7 @@ fn the_transcript_is_removed_after_the_request() {
         directory.path(),
         "jp-c123-otvo8",
         false,
+        None,
     )
     .unwrap();
     let path = transcript_path(directory.path(), artifact.session.unwrap());
@@ -301,6 +302,7 @@ fn the_transcript_names_its_session() {
         directory.path(),
         "jp-c123-otvo8",
         false,
+        None,
     )
     .unwrap();
     let session = artifact.session.unwrap();
@@ -323,6 +325,7 @@ fn a_kept_transcript_outlives_the_request() {
         directory.path(),
         "jp-c123-otvo8",
         true,
+        None,
     )
     .unwrap();
     let path = transcript_path(directory.path(), artifact.session.unwrap());
@@ -563,10 +566,7 @@ async fn quota_notification_survives_the_protocol_error_boundary() {
             },
             vec![],
             environment,
-            NativeArtifact {
-                session: None,
-                path: None,
-            },
+            NativeArtifact::resume(None),
             agent,
             sender,
         ),
@@ -628,10 +628,7 @@ async fn prompt_failed_after(report: Option<Value>) -> (Error, Vec<Event>) {
             },
             vec![],
             environment,
-            NativeArtifact {
-                session: None,
-                path: None,
-            },
+            NativeArtifact::resume(None),
             agent,
             sender,
         ),
@@ -715,10 +712,9 @@ async fn runtime_model_rejection_preserves_its_classification() {
             },
             vec![],
             environment,
-            NativeArtifact {
-                session: Some(Uuid::parse_str("11111111-1111-4111-8111-111111111111").unwrap()),
-                path: None,
-            },
+            NativeArtifact::resume(Some(
+                Uuid::parse_str("11111111-1111-4111-8111-111111111111").unwrap(),
+            )),
             agent,
             sender,
         ),
@@ -779,10 +775,9 @@ async fn a_rate_limited_model_selection_exhausts_the_subscription_for_that_famil
             },
             vec![],
             environment,
-            NativeArtifact {
-                session: Some(Uuid::parse_str("11111111-1111-4111-8111-111111111111").unwrap()),
-                path: None,
-            },
+            NativeArtifact::resume(Some(
+                Uuid::parse_str("11111111-1111-4111-8111-111111111111").unwrap(),
+            )),
             agent,
             sender,
         ),
@@ -995,10 +990,7 @@ fn liveness_fixture(arguments: bool) -> LivenessFixture {
         },
         vec!["lookup".into()],
         environment,
-        NativeArtifact {
-            session: None,
-            path: None,
-        },
+        NativeArtifact::resume(None),
         agent,
         sender,
     ));
@@ -1067,10 +1059,9 @@ async fn real_protocol_driver_loads_history_and_emits_only_live_output() {
     let prepared = prepared();
     let environment = options::environment(&prepared, CachePolicy::Short);
     let (sender, mut receiver) = mpsc::channel(16);
-    let artifact = NativeArtifact {
-        session: Some(Uuid::parse_str("11111111-1111-4111-8111-111111111111").unwrap()),
-        path: None,
-    };
+    let artifact = NativeArtifact::resume(Some(
+        Uuid::parse_str("11111111-1111-4111-8111-111111111111").unwrap(),
+    ));
     let capture = UsageCapture::default();
     let subscriber = registry().with(capture.clone());
     timeout(

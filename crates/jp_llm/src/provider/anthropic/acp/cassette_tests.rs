@@ -13,6 +13,7 @@ use tokio::time::timeout;
 
 use super::*;
 use crate::provider::anthropic::acp::{
+    ADAPTER_VERSION, CLAUDE_VERSION,
     rpc::{Handler, Inbound, Request, RpcError, drive},
     transport::{Foreground, Transport as _},
 };
@@ -423,6 +424,7 @@ fn what_identifies_the_recorder_never_reaches_the_file() {
         &json!({"method": "session/new", "params": {"_meta": {"claudeCode": {"options": {"env": {
             "CLAUDE_CONFIG_DIR": "/home/someone/.local/share/jp/claude/work",
             "CLAUDE_SECURESTORAGE_CONFIG_DIR": "/home/someone/.local/share/jp/claude/work",
+            "CLAUDE_CODE_SHELL": "/home/someone/.nix-profile/bin/zsh",
             "DISABLE_TELEMETRY": "1",
         }}}}}}),
     );
@@ -455,6 +457,7 @@ fn what_identifies_the_recorder_never_reaches_the_file() {
         json!({
             "CLAUDE_CONFIG_DIR": "[redacted]",
             "CLAUDE_SECURESTORAGE_CONFIG_DIR": "[redacted]",
+            "CLAUDE_CODE_SHELL": "[redacted]",
             // The rest of the environment is JP's own settings, the same on
             // every machine.
             "DISABLE_TELEMETRY": "1",
@@ -487,6 +490,70 @@ fn a_malformed_line_is_reported_by_number() {
     assert!(
         error.starts_with("line 3: not a framed message: "),
         "{error}"
+    );
+}
+
+fn initialized(adapter: &str) -> Framed {
+    agent(json!({"jsonrpc": "2.0", "id": 1, "result": {"agentInfo": {"version": adapter}}}))
+}
+
+fn system_init(claude: &str) -> Framed {
+    agent(json!({
+        "jsonrpc": "2.0",
+        "method": "_claude/sdkMessage",
+        "params": {"message": {"type": "system", "subtype": "init", "claude_code_version": claude}}
+    }))
+}
+
+// The expected messages name the pinned versions, so they are built from the
+// constants: a version bump must not fail these tests, only stale recordings.
+
+#[test]
+fn a_recording_of_the_pinned_releases_is_accepted() {
+    let script = [initialized(ADAPTER_VERSION), system_init(CLAUDE_VERSION)];
+
+    assert_eq!(check_versions(&script), Ok(()));
+}
+
+#[test]
+fn a_recording_of_another_adapter_is_rejected() {
+    let script = [initialized("0.81.0")];
+
+    assert_eq!(
+        check_versions(&script),
+        Err(format!(
+            "recorded with claude-agent-acp 0.81.0, but JP pins {ADAPTER_VERSION}; record it \
+             again with `RECORD=1`"
+        ))
+    );
+}
+
+#[test]
+fn a_recording_of_another_claude_code_is_rejected() {
+    let script = [initialized(ADAPTER_VERSION), system_init("2.1.257")];
+
+    assert_eq!(
+        check_versions(&script),
+        Err(format!(
+            "recorded with Claude Code 2.1.257, but JP pins {CLAUDE_VERSION}; record it again \
+             with `RECORD=1`"
+        ))
+    );
+}
+
+// A version reported by JP's own messages proves nothing about the agent.
+#[test]
+fn a_recording_without_an_adapter_version_is_rejected() {
+    let script = [
+        jp(
+            json!({"jsonrpc": "2.0", "id": 1, "result": {"agentInfo": {"version": ADAPTER_VERSION}}}),
+        ),
+        system_init(CLAUDE_VERSION),
+    ];
+
+    assert_eq!(
+        check_versions(&script),
+        Err("no `initialize` answer reports the adapter version".to_owned())
     );
 }
 

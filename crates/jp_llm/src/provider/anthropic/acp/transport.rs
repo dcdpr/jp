@@ -24,7 +24,9 @@ use tracing::{debug, info, instrument::WithSubscriber as _, warn};
 use uuid::Uuid;
 
 use super::{
-    Error, cassette, family_of, options, process,
+    Error, cassette,
+    context::{self, SessionContext},
+    family_of, options, process,
     protocol::{AuthUpdate, SdkNotification, State},
     rpc::{Handler, Inbound, Peer, Request, RpcError, Tap},
     schema::{
@@ -233,12 +235,25 @@ pub(super) fn launch(
 ) -> Result<Launch, Error> {
     let directory = native_directory(login_directory)?;
     let project = project_name(context);
+    let shell = env::var("SHELL").ok().and_then(|login| {
+        context::claude_shell(&login, |name| {
+            context::find_shell(name, env::var_os("PATH").as_deref())
+        })
+    });
+    let session_context = context::gather(
+        &context.root,
+        login_directory,
+        prepared.model.as_ref(),
+        prepared.started,
+        shell.as_deref(),
+    );
     let artifact = NativeArtifact::write(
         prepared,
         &context.root,
         &directory,
         &project,
         keep_transcript(),
+        session_context.as_ref(),
     )?;
     let mut environment = options::environment(prepared, cache);
     configure_storage_environment(
@@ -247,6 +262,9 @@ pub(super) fn launch(
         &project,
         login_directory,
     );
+    if let Some(shell) = &shell {
+        environment.insert("CLAUDE_CODE_SHELL".into(), shell.to_string());
+    }
     let mut command = process::command(login_directory);
     command.envs(&environment);
 
@@ -784,18 +802,19 @@ impl NativeArtifact {
     /// its path is logged at `info`; otherwise the path is logged at `debug`
     /// and the file is removed on drop.
     /// A write that fails partway removes the file either way.
+    ///
+    /// With a `context`, the first prompt in the transcript carries the context
+    /// records Claude Code would have added after it.
     fn write(
         prepared: &PreparedRequest,
         root: &Utf8Path,
         directory: &Utf8Path,
         project: &str,
         keep: bool,
+        context: Option<&SessionContext>,
     ) -> Result<Self, Error> {
         if prepared.history.is_empty() {
-            return Ok(Self {
-                session: None,
-                path: None,
-            });
+            return Ok(Self::resume(None));
         }
         if !root.is_absolute() {
             return Err(Error::NativeDirectory);
@@ -804,22 +823,19 @@ impl NativeArtifact {
         fs::create_dir_all(&directory).map_err(Error::NativeIo)?;
         let session = Uuid::new_v4();
         let path = directory.join(format!("{session}.jsonl"));
-        let mut options = fs::OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt as _;
-            options.mode(0o600);
-        }
-        let mut file = options.open(&path).map_err(Error::NativeIo)?;
+        let mut file = open_private(&path, fs::OpenOptions::new().write(true).create_new(true))
+            .map_err(Error::NativeIo)?;
         // Cleanup stays armed until the write succeeds, so a failure never
         // leaves a truncated transcript behind, even under `keep`.
         let mut artifact = Self {
             session: Some(session),
             path: Some(path.clone()),
         };
-        for record in prepared.records(session, root, Utc::now()) {
-            serde_json::to_writer(&mut file, &record).map_err(Error::NativeJson)?;
+        let records = prepared
+            .records(session, root, Utc::now(), context)
+            .map_err(Error::NativeJson)?;
+        for record in &records {
+            serde_json::to_writer(&mut file, record).map_err(Error::NativeJson)?;
             file.write_all(b"\n").map_err(Error::NativeIo)?;
         }
         // Append a `custom-title` record at the end of the transcript (where
@@ -836,6 +852,31 @@ impl NativeArtifact {
         }
         Ok(artifact)
     }
+}
+
+impl NativeArtifact {
+    /// A connection with no transcript written for it, resuming `session` if
+    /// there is one.
+    pub(super) const fn resume(session: Option<Uuid>) -> Self {
+        Self {
+            session,
+            path: None,
+        }
+    }
+}
+
+/// Owner read and write only: a transcript holds the conversation.
+#[cfg(unix)]
+const PRIVATE_FILE_MODE: u32 = 0o600;
+
+/// Open `path` with `options`, creating it readable by its owner alone.
+fn open_private(path: &Utf8Path, options: &mut fs::OpenOptions) -> io::Result<fs::File> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.mode(PRIVATE_FILE_MODE);
+    }
+    options.open(path)
 }
 
 impl Drop for NativeArtifact {

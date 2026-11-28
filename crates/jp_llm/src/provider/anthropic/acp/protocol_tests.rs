@@ -346,6 +346,71 @@ fn truncation_retracts_an_unfinished_tool_preview() {
     assert!(!state.has_tool_activity());
 }
 
+fn message_start(id: &str, read: u64, write: u64) -> SdkNotification {
+    notification(
+        json!({"type":"stream_event","event":{"type":"message_start","message":{"id":id,"model":"claude-opus-5","role":"assistant","content":[],"usage":{"input_tokens":2,"output_tokens":1,"cache_read_input_tokens":read,"cache_creation_input_tokens":write}}}}),
+    )
+}
+
+fn assistant(id: &str, read: u64, write: u64) -> SdkNotification {
+    notification(
+        json!({"type":"assistant","message":{"id":id,"model":"claude-opus-5","content":[],"usage":{"input_tokens":2,"output_tokens":1,"cache_read_input_tokens":read,"cache_creation_input_tokens":write}}}),
+    )
+}
+
+fn notices(events: &[Event]) -> Vec<&str> {
+    events
+        .iter()
+        .filter_map(|event| match event {
+            Event::Notice(notice) => Some(notice.as_str()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_request_that_misses_the_previous_requests_cache_emits_a_notice() {
+    let mut state = state();
+    state.sdk(message_start("msg-first", 8_002, 1_293)).unwrap();
+    // The full message repeats the request's usage; it is not a second request.
+    let repeated = state.sdk(assistant("msg-first", 8_002, 1_293)).unwrap();
+
+    let events = state
+        .sdk(message_start("msg-second", 7_131, 2_164))
+        .unwrap();
+
+    assert_eq!(notices(&repeated), Vec::<&str>::new());
+    assert_eq!(notices(&events), vec![
+        "prompt cache not reused within the turn: read 7131 cached tokens, the previous request \
+         cached 9295; please report this to JP"
+    ]);
+}
+
+// Without partial messages, the full assistant message is the first a request
+// is seen.
+#[test]
+fn a_miss_seen_only_in_the_full_message_emits_a_notice() {
+    let mut state = state();
+    state.sdk(assistant("msg-first", 8_002, 1_293)).unwrap();
+
+    let events = state.sdk(assistant("msg-second", 100, 0)).unwrap();
+
+    assert_eq!(notices(&events), vec![
+        "prompt cache not reused within the turn: read 100 cached tokens, the previous request \
+         cached 9295; please report this to JP"
+    ]);
+}
+
+#[test]
+fn a_request_that_reuses_the_previous_requests_cache_emits_no_notice() {
+    let mut state = state();
+    state.sdk(message_start("msg-first", 8_002, 1_293)).unwrap();
+
+    let events = state.sdk(message_start("msg-second", 9_295, 62)).unwrap();
+
+    assert_eq!(notices(&events), Vec::<&str>::new());
+}
+
 #[test]
 fn final_usage_delta_wins_over_an_earlier_assistant_snapshot() {
     let mut state = state();

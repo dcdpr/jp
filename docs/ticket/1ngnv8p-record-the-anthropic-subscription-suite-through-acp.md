@@ -55,3 +55,16 @@ depend on.
       `tests/fixtures/anthropic_subscription/`.
 - [ ] Record the subscription route against a 5.x model (keeping it on
       `claude-haiku-4-5` until then so existing cassettes continue to replay).
+- [ ] Add multi-turn cases that run more than one turn: attachments on turn 1, a
+      tool round, and a follow-up turn.
+      Assert that the follow-up's first request reads the earlier turns from
+      cache (T-1s7kt7k), not only the system prompt and tools.
+- [ ] Record what Claude Code sends to Anthropic, beside the JP-to-adapter
+      traffic: the model request decides caching and carries Claude Code's
+      additions (the synthetic "No response requested." reply, the `userEmail`
+      reminder from T-1njzkjd).
+      Claude Code writes each request into its session JSONL as
+      `api-request-blob` records, which JP deletes unless `JP_DEBUG` is set;
+      `OTEL_LOG_RAW_API_BODIES=file:<dir>` is the documented alternative but
+      needs telemetry, which JP turns off.
+      Replace the account email with a placeholder before committing.

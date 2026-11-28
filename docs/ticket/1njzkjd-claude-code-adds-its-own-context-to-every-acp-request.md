@@ -42,3 +42,38 @@ include them.
       if the addition comes from `claude-agent-acp` or Claude Code.
 - [ ] Re-record the ACP cassette and verify that the request no longer carries
       the removed content.
+
+## Comments
+
+-----
+
+- **From**: jp
+- **Date**: 2026-11-26T13:22:03Z
+
+Upstream status of the `userEmail` reminder, to watch for a fix:
+
+- anthropics/claude-code#81138 (open): Claude Code reads
+  `oauthAccount.emailAddress` from `~/.claude.json` and adds `# userEmail` to
+  every session.
+  There is no setting or environment variable for it.
+  It is skipped only when there is no OAuth account (API key, Bedrock, Vertex)
+  or when `ANTHROPIC_UNIX_SOCKET` is set, which selects a different transport.
+  Since 2.1.246 the text carries an instruction not to send the address to other
+  services; the address is still in context.
+- Earlier reports, closed as stale or duplicates without a fix:
+  anthropics/claude-code#53231, anthropics/claude-code#50702,
+  anthropics/claude-code#55743, anthropics/claude-code#58081,
+  anthropics/claude-code#67605.
+- anthropics/claude-code#78838 (open): the injected address can be stale.
+
+So the first checklist item has its answer for `userEmail`: Claude Code 2.1.321
+has no supported off switch.
+The `# Environment` block is still uninvestigated.
+
+The reminder also breaks prompt caching across turns, because JP's transcript
+never carries it (T-1s7kt7k).
+If it can't be turned off, the ACP transcript encoder can add it to each earlier
+prompt when it writes the transcript, never storing it in the conversation
+(non-local conversations are committed).
+The recorded tests then pin its exact text with a placeholder address, and a
+Claude Code bump that changes the wording fails them.

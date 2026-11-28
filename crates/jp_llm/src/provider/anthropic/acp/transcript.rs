@@ -16,9 +16,11 @@ use jp_config::{
     model::{id::Name, parameters::ServiceTier},
 };
 use serde::Serialize;
+use serde_json::{Value, json};
 use tracing::warn;
 use uuid::Uuid;
 
+use super::context::SessionContext;
 use crate::{
     error::Result,
     model::ModelDetails,
@@ -35,6 +37,8 @@ pub(super) struct PreparedRequest {
     pub history: Vec<Message>,
     /// Text blocks of the `session/prompt` request, in order.
     pub prompt: Vec<String>,
+    /// When the conversation's first request was made, if it has one.
+    pub started: Option<DateTime<Utc>>,
     pub model: Name,
     /// Explicit JP limit.
     /// Absence leaves the runtime's output limit unchanged.
@@ -46,6 +50,11 @@ pub(super) struct PreparedRequest {
 
 impl PreparedRequest {
     pub(super) fn new(model: &ModelDetails, mut query: ChatQuery) -> Result<Self> {
+        let started = query
+            .thread
+            .events
+            .iter()
+            .find_map(|event| event.is_chat_request().then_some(event.timestamp));
         let config = query.thread.events.config()?;
         let parameters = &config.assistant.model.parameters;
         let max_tokens = parameters.max_tokens;
@@ -108,7 +117,6 @@ impl PreparedRequest {
                 .join("\n\n"),
             None => String::new(),
         };
-        let prompt = take_pending_prompt(&mut request.messages);
         for message in &mut request.messages {
             for block in &mut message.content.0 {
                 match block {
@@ -123,6 +131,12 @@ impl PreparedRequest {
                 }
             }
         }
+        let pending = split_trailing_text(&mut request.messages);
+        let prompt = if pending.is_empty() {
+            vec![CONTINUE_MESSAGE.to_owned()]
+        } else {
+            pending
+        };
         let (effort, schema) = request
             .output_config
             .map_or((None, None), |output| (output.effort, output.format));
@@ -130,6 +144,7 @@ impl PreparedRequest {
             system_prompt,
             history: request.messages,
             prompt,
+            started,
             model: model.id.name.clone(),
             max_tokens,
             thinking: request.thinking,
@@ -138,57 +153,197 @@ impl PreparedRequest {
         })
     }
 
-    pub(super) fn records<'a>(
-        &'a self,
+    /// The transcript records for `history`, shaped as Claude Code shaped the
+    /// requests that sent it.
+    ///
+    /// Claude Code received each run of user messages ending in text as a
+    /// prompt.
+    /// When the run held more than text (attachments on the first turn, tool
+    /// results before a new turn), the transcript it resumed ended in a user
+    /// message, so it inserted an assistant message reading "No response
+    /// requested." before the prompt (anthropics/claude-code#109781).
+    /// Such a run is written the same way: its other blocks, that reply, then
+    /// the prompt as a message of its own.
+    /// With a `context`, the first prompt is followed by the context records
+    /// Claude Code adds after a session's first prompt (see
+    /// [`super::context`]).
+    ///
+    /// Claude Code then builds the request it built when it sent each prompt,
+    /// so the history is read from the prompt cache.
+    pub(super) fn records(
+        &self,
         session: Uuid,
-        cwd: &'a Utf8Path,
+        cwd: &Utf8Path,
         timestamp: DateTime<Utc>,
-    ) -> Vec<NativeRecord<'a>> {
-        let mut parent = None;
-        self.history
-            .iter()
-            .enumerate()
-            .map(|(index, message)| {
-                let uuid = Uuid::new_v5(&session, &index.to_le_bytes());
-                let record = NativeRecord {
-                    type_: message.role.clone(),
-                    uuid,
-                    parent_uuid: parent,
-                    session_id: session,
-                    cwd,
-                    is_sidechain: false,
-                    timestamp,
-                    message: match message.role {
-                        MessageRole::User => NativeMessage::User {
-                            content: &message.content,
-                        },
-                        MessageRole::Assistant => NativeMessage::Assistant {
-                            content: &message.content,
-                            id: format!("msg_jp_{}", uuid.simple()),
-                            type_: MessageType::Message,
-                            model: &self.model,
-                            stop_reason: if message
-                                .content
-                                .0
-                                .iter()
-                                .any(|block| matches!(block, MessageContent::ToolUse(_)))
-                            {
-                                StopReason::ToolUse
-                            } else {
-                                StopReason::EndTurn
-                            },
-                            stop_sequence: None,
-                            usage: NativeUsage {
-                                input_tokens: 0,
-                                output_tokens: 0,
-                            },
-                        },
+        context: Option<&SessionContext>,
+    ) -> JsonResult<Vec<Value>> {
+        let mut writer = RecordWriter {
+            session,
+            cwd,
+            timestamp,
+            model: &self.model,
+            records: vec![],
+            parent: None,
+            count: 0,
+        };
+        let mut first_prompt = true;
+        let mut rest = self.history.as_slice();
+        while let Some(first) = rest.first() {
+            if first.role != MessageRole::User {
+                writer.native(first)?;
+                rest = &rest[1..];
+                continue;
+            }
+            let count = rest
+                .iter()
+                .take_while(|message| message.role == MessageRole::User)
+                .count();
+            let (run, tail) = rest.split_at(count);
+            rest = tail;
+
+            let mut remainder = run.to_vec();
+            let prompt = split_trailing_text(&mut remainder);
+            for message in &remainder {
+                writer.native(message)?;
+            }
+            if prompt.is_empty() {
+                continue;
+            }
+            if !remainder.is_empty() {
+                writer.synthetic_reply();
+            }
+            writer.native(&Message {
+                role: MessageRole::User,
+                content: MessageContentList(
+                    prompt
+                        .iter()
+                        .map(|text| MessageContent::Text(text.as_str().into()))
+                        .collect(),
+                ),
+            })?;
+            if first_prompt && let Some(context) = context {
+                for attachment in context.attachments() {
+                    writer.attachment(&attachment);
+                }
+            }
+            first_prompt = false;
+        }
+        Ok(writer.records)
+    }
+}
+
+/// The text of the assistant message Claude Code inserts after a resumed
+/// transcript that ends in a user message.
+const SYNTHETIC_REPLY: &str = "No response requested.";
+
+/// The outcome of serializing transcript content.
+type JsonResult<T> = std::result::Result<T, serde_json::Error>;
+
+/// Builds transcript records in chain order, each the parent of the next.
+struct RecordWriter<'a> {
+    session: Uuid,
+    cwd: &'a Utf8Path,
+    timestamp: DateTime<Utc>,
+    model: &'a Name,
+    records: Vec<Value>,
+    parent: Option<Uuid>,
+    /// How many records were written, which seeds their UUIDs.
+    count: u64,
+}
+
+impl RecordWriter<'_> {
+    fn next_uuid(&mut self) -> Uuid {
+        let uuid = Uuid::new_v5(&self.session, &self.count.to_le_bytes());
+        self.count += 1;
+        uuid
+    }
+
+    fn push(&mut self, uuid: Uuid, record: Value) {
+        self.records.push(record);
+        self.parent = Some(uuid);
+    }
+
+    fn native(&mut self, message: &Message) -> JsonResult<()> {
+        let uuid = self.next_uuid();
+        let record = NativeRecord {
+            type_: message.role.clone(),
+            uuid,
+            parent_uuid: self.parent,
+            session_id: self.session,
+            cwd: self.cwd,
+            is_sidechain: false,
+            timestamp: self.timestamp,
+            message: match message.role {
+                MessageRole::User => NativeMessage::User {
+                    content: &message.content,
+                },
+                MessageRole::Assistant => NativeMessage::Assistant {
+                    content: &message.content,
+                    id: format!("msg_jp_{}", uuid.simple()),
+                    type_: MessageType::Message,
+                    model: self.model,
+                    stop_reason: if message
+                        .content
+                        .0
+                        .iter()
+                        .any(|block| matches!(block, MessageContent::ToolUse(_)))
+                    {
+                        StopReason::ToolUse
+                    } else {
+                        StopReason::EndTurn
                     },
-                };
-                parent = Some(uuid);
-                record
-            })
-            .collect()
+                    stop_sequence: None,
+                    usage: NativeUsage {
+                        input_tokens: 0,
+                        output_tokens: 0,
+                    },
+                },
+            },
+        };
+        let record = serde_json::to_value(record)?;
+        self.push(uuid, record);
+        Ok(())
+    }
+
+    /// The assistant message Claude Code inserts, as Claude Code records it.
+    fn synthetic_reply(&mut self) {
+        let uuid = self.next_uuid();
+        let record = json!({
+            "type": "assistant",
+            "uuid": uuid,
+            "parentUuid": self.parent,
+            "sessionId": self.session,
+            "cwd": self.cwd,
+            "isSidechain": false,
+            "isApiErrorMessage": false,
+            "timestamp": self.timestamp,
+            "message": {
+                "id": format!("msg_jp_{}", uuid.simple()),
+                "type": "message",
+                "role": "assistant",
+                "model": "<synthetic>",
+                "content": [{"type": "text", "text": SYNTHETIC_REPLY}],
+                "stop_reason": "stop_sequence",
+                "stop_sequence": "",
+                "usage": {"input_tokens": 0, "output_tokens": 0},
+            },
+        });
+        self.push(uuid, record);
+    }
+
+    fn attachment(&mut self, attachment: &Value) {
+        let uuid = self.next_uuid();
+        let record = json!({
+            "type": "attachment",
+            "uuid": uuid,
+            "parentUuid": self.parent,
+            "sessionId": self.session,
+            "cwd": self.cwd,
+            "isSidechain": false,
+            "timestamp": self.timestamp,
+            "attachment": attachment,
+        });
+        self.push(uuid, record);
     }
 }
 
@@ -197,8 +352,8 @@ pub(super) fn tool_name(name: &str) -> String {
     format!("mcp__jp__{name}")
 }
 
-/// Extract trailing user text blocks from `messages` for the `session/prompt`
-/// request.
+/// Remove the trailing user text blocks from `messages` and return them, for
+/// the `session/prompt` request.
 ///
 /// Pops every trailing text block across consecutive user messages, so the
 /// transcript ends on an assistant message whenever the pending user messages
@@ -213,8 +368,8 @@ pub(super) fn tool_name(name: &str) -> String {
 /// in the transcript as native `document` blocks with their title and context
 /// in the cached prefix.
 ///
-/// Returns `[CONTINUE_MESSAGE]` when no trailing user text block is present.
-fn take_pending_prompt(messages: &mut Vec<Message>) -> Vec<String> {
+/// Returns an empty list when no trailing user text block is present.
+fn split_trailing_text(messages: &mut Vec<Message>) -> Vec<String> {
     let mut prompt = Vec::new();
     while let Some(last) = messages.last_mut()
         && last.role == MessageRole::User
@@ -232,10 +387,6 @@ fn take_pending_prompt(messages: &mut Vec<Message>) -> Vec<String> {
         messages.pop();
     }
     prompt.reverse();
-
-    if prompt.is_empty() {
-        prompt.push(CONTINUE_MESSAGE.to_owned());
-    }
     prompt
 }
 

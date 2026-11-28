@@ -1,6 +1,9 @@
 //! Typed Claude adapter notifications and response translation.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::{
+    collections::{BTreeMap, HashMap, HashSet},
+    time::Instant,
+};
 
 use async_anthropic::types::{CreateMessagesResponse, MessageContent, MessagesStreamEvent, Usage};
 use indexmap::IndexSet;
@@ -16,7 +19,7 @@ use super::{
         RequestPermissionResponse, SessionId, SessionNotification, SessionUpdate, ToolCallStatus,
     },
     transcript::tool_name,
-    usage::{ModelUsage, RuntimeUsage, UsageLedger},
+    usage::{CacheContinuity, ModelUsage, RuntimeUsage, UsageLedger},
 };
 use crate::{
     error::{StreamError, StreamErrorKind, looks_like_context_window_error},
@@ -241,6 +244,7 @@ pub(super) struct State {
     /// Preserve notification failures across the JSON-RPC error boundary.
     pub failure: Option<StreamError>,
     usage: UsageLedger,
+    cache: CacheContinuity,
     current_message: Option<MessageIdentity>,
     open_tool_blocks: HashSet<usize>,
     pending_previews: IndexSet<String>,
@@ -282,6 +286,7 @@ impl State {
             final_events: None,
             failure: None,
             usage: UsageLedger::default(),
+            cache: CacheContinuity::default(),
             current_message: None,
             open_tool_blocks: HashSet::new(),
             pending_previews: IndexSet::new(),
@@ -558,8 +563,11 @@ impl State {
                 }
                 self.rate_limit_error = None;
                 self.server_error = None;
-                self.usage.observe(&message);
-                Ok(vec![])
+                let new = self.usage.observe(&message);
+                Ok(match (new, &message.model, &message.usage) {
+                    (true, Some(model), Some(usage)) => self.check_cache(model, usage),
+                    _ => vec![],
+                })
             }
             SdkMessage::StreamEvent {
                 event,
@@ -650,6 +658,16 @@ impl State {
         }
     }
 
+    /// A notice when a request's cache read shows the previous request's cache
+    /// was not reused (see [`CacheContinuity`]).
+    fn check_cache(&mut self, model: &str, usage: &Usage) -> Vec<Event> {
+        self.cache
+            .check(model, usage, Instant::now())
+            .map(Event::Notice)
+            .into_iter()
+            .collect()
+    }
+
     fn stream_event(&mut self, event: MessagesStreamEvent) -> Result<Vec<Event>, StreamError> {
         let mut events = Vec::new();
         if let MessagesStreamEvent::ContentBlockStop { index } = &event
@@ -667,8 +685,10 @@ impl State {
                     id: message.id.clone(),
                     model: message.model.clone(),
                 });
-                if let Some(usage) = message.usage.as_ref().or(usage.as_ref()) {
-                    self.usage.observe_usage(&message.id, &message.model, usage);
+                if let Some(usage) = message.usage.as_ref().or(usage.as_ref())
+                    && self.usage.observe_usage(&message.id, &message.model, usage)
+                {
+                    events.extend(self.check_cache(&message.model, usage));
                 }
             }
             MessagesStreamEvent::MessageDelta { delta, usage } => {
